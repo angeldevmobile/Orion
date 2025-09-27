@@ -1,0 +1,17 @@
+-- Programa de prueba en Orion
+fn main() {
+  x = 10
+  y = 3.14
+  activo = true
+  mensaje = "Hola Orion!"
+
+  if (x >= 10 && activo) {
+    print(mensaje)
+  } else {
+    return
+  }
+
+  x = x + 5
+  y = y * 2
+}
+

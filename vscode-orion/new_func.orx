@@ -1,0 +1,8 @@
+-- This is a comment in Orion script
+
+name = "Gabriel"
+msg = "Hola ${name}, bienvenido a Orion!"
+print(msg)
+
+user = null
+print(user?.email)  

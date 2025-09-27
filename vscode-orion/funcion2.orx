@@ -1,0 +1,9 @@
+fn factorial(n) {
+  var resultado = 1
+  for i in 1..n {
+    resultado = resultado * i
+  }
+  return resultado
+}
+
+print(factorial(5))

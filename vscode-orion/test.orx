@@ -1,0 +1,8 @@
+fn main() {
+  let x = 42
+  if x > 60 {
+    print("Mayor que 50")
+  } else {
+    print("Menor o igual a 10")
+  }
+}

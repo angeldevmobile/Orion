@@ -1,0 +1,5 @@
+fn saludar(nombre) {
+  return "Hola " + nombre
+}
+
+print(saludar("Orion"))
