@@ -1,0 +1,6 @@
+prueba3.orx
+
+x = 2
+y = 3
+
+show x.futuristic_power(y)

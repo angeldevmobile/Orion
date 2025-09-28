@@ -1,0 +1,7 @@
+-- Prueba 2 con nuevos cambios
+-- Author: Gabriel
+
+if user.age > 18 -> show "Adulto"
+else if user.age > 12 -> show "Adolescente"
+else -> show "Niño"
+

@@ -1,4 +1,5 @@
 import re
+from core.errors import OrionSyntaxError
 
 def lex(code):
     tokens = []
@@ -6,7 +7,7 @@ def lex(code):
         ("INVALID_COMMENT", r"(//.*|---.*)"),  # marca como error // y ---
         ("COMMENT",  r"--[^-].*"),             # solo acepta doble guion, no triple
         ("NUMBER",   r"\d+(\.\d+)?"),
-        ("PRINT",    r"print"),
+        ("PRINT",    r"show"),         
         ("RETURN",   r"return"),
         ("FN",       r"fn"),
         ("MATCH",    r"match"),
@@ -37,7 +38,8 @@ def lex(code):
         ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),  
         ("NEWLINE",  r"\n"),
         ("SKIP",     r"[ \t]+"),
-        ("MISMATCH", r"."),                  # cualquier otro char
+        ("DOT",      r"\."),                  
+        ("MISMATCH", r"."),                   # cualquier otro char
     ]
 
     tok_regex = "|".join("(?P<%s>%s)" % pair for pair in token_specification)
@@ -47,7 +49,7 @@ def lex(code):
         value = mo.group()
 
         if kind == "INVALID_COMMENT":
-            raise RuntimeError(f"Comentario inválido: {value}")
+            raise OrionSyntaxError(f"Comentario inválido: {value}")
         elif kind == "NUMBER":
             tokens.append((kind, float(value)) if '.' in value else (kind, int(value)))
         elif kind == "STRING":
@@ -57,13 +59,13 @@ def lex(code):
             "RANGE", "RANGE_EX", "COMPARE", "LBRACE", "RBRACE",
             "LPAREN", "RPAREN", "FN", "RETURN", "TYPE",
             "TRUE", "FALSE", "AND", "OR", "NOT", "MATCH", "ARROW", "IN",
-            "NULL_SAFE", "COLON", "COMMA"   
+            "NULL_SAFE", "COLON", "COMMA", "DOT"  
         ):
             tokens.append((kind, value))
         elif kind in ("SKIP", "NEWLINE", "COMMENT"):
             continue
         elif kind == "MISMATCH":
-            raise RuntimeError(f"Token inesperado: {value}")
+            raise OrionSyntaxError(f"Token inesperado: {value}")
 
     return tokens
 

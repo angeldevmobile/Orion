@@ -1,47 +1,81 @@
+from core.errors import OrionSyntaxError
+
+
 def parse_primary(tokens, i):
     while i < len(tokens) and tokens[i][0] in ("OP", "COMMA"):
-        # Ignora operadores y comas fuera de contexto
         i += 1
     if i >= len(tokens):
-        raise SyntaxError("Expresión inesperadamente vacía.")
+        raise OrionSyntaxError("Expresión inesperadamente vacía.")
+
     kind, value = tokens[i]
+
     if kind == "LPAREN":
         expr, i = parse_expression(tokens, i+1)
         if i >= len(tokens) or tokens[i][0] != "RPAREN":
-            raise SyntaxError("Falta ')'")
+            raise OrionSyntaxError("Falta ')'")
         return expr, i+1
+
     elif kind == "NUMBER":
         return (float(value) if "." in str(value) else int(value)), i+1
+
     elif kind == "STRING":
         return value, i+1
+
     elif kind in ("TRUE", "FALSE"):
         return (kind == "TRUE"), i+1
+
     elif kind == "IDENT":
         name = value
-        # Detectar si es llamada de función
-        if i+1 < len(tokens) and tokens[i+1][0] == "LPAREN":
-            args = []
-            i += 2  # saltamos nombre y '('
-            while i < len(tokens) and tokens[i][0] != "RPAREN":
-                arg, i = parse_expression(tokens, i)
-                args.append(arg)
-                # Permitir comas (si decides soportarlas en el lexer)
-                if i < len(tokens) and tokens[i][0] == "OP" and tokens[i][1] == ",":
-                    i += 1
-            if i >= len(tokens) or tokens[i][0] != "RPAREN":
-                raise SyntaxError("Falta ')' en llamada de función")
-            return ("CALL", name, args), i+1
+        i_next = i + 1
+        expr = name
+
         # Null-safe: user?.email
-        if i+1 < len(tokens) and tokens[i+1][0] == "NULL_SAFE":
-            attr = tokens[i+2][1]
-            return ("NULL_SAFE", name, attr), i+3
-        return name, i+1
+        if i_next < len(tokens) and tokens[i_next][0] == "NULL_SAFE":
+            attr = tokens[i_next + 1][1]
+            return ("NULL_SAFE", name, attr), i_next + 2
+
+        # Soporte para acceso con punto y llamada a método
+        while i_next < len(tokens) and tokens[i_next][0] == "DOT":
+            attr_name = tokens[i_next + 1][1]
+            # Llamada a método: x.futuristic_power(...)
+            if i_next + 2 < len(tokens) and tokens[i_next + 2][0] == "LPAREN":
+                args = []
+                j = i_next + 3
+                while j < len(tokens) and tokens[j][0] != "RPAREN":
+                    arg, j = parse_expression(tokens, j)
+                    args.append(arg)
+                    if j < len(tokens) and tokens[j][0] == "COMMA":
+                        j += 1
+                if j >= len(tokens) or tokens[j][0] != "RPAREN":
+                    raise OrionSyntaxError("Falta ')' en llamada de método")
+                expr = ("CALL", attr_name, [expr] + args)
+                i_next = j + 1
+            else:
+                expr = ("ATTR_ACCESS", expr, attr_name)
+                i_next += 2
+
+        # Llamada a función normal (solo si expr es un nombre simple)
+        if isinstance(expr, str) and i_next < len(tokens) and tokens[i_next][0] == "LPAREN":
+            args = []
+            j = i_next + 1
+            while j < len(tokens) and tokens[j][0] != "RPAREN":
+                arg, j = parse_expression(tokens, j)
+                args.append(arg)
+                if j < len(tokens) and tokens[j][0] == "COMMA":
+                    j += 1
+            if j >= len(tokens) or tokens[j][0] != "RPAREN":
+                raise OrionSyntaxError("Falta ')' en llamada de función")
+            expr = ("CALL", expr, args)
+            i_next = j + 1
+
+        return expr, i_next
+
     elif kind == "NOT":
         expr, j = parse_primary(tokens, i+1)
         return ("UNARY_OP", "!", expr), j
-    else:
-        raise SyntaxError(f"Token inesperado: {kind}")
 
+    else:
+        raise OrionSyntaxError(f"Token inesperado: {kind}")
 
 def parse_unary(tokens, i):
     if i < len(tokens) and tokens[i][0] == "NOT":
@@ -102,7 +136,7 @@ def parse_expression(tokens, i):
 def parse_block(tokens, i):
     stmts = []
     if i >= len(tokens) or tokens[i][0] != "LBRACE":
-        raise SyntaxError("Se esperaba '{'")
+        raise OrionSyntaxError("Se esperaba '{'")
 
     i += 1
 
@@ -164,17 +198,17 @@ def parse_block(tokens, i):
         elif kind == "FOR":
             # for i in 1..n { ... }
             if tokens[i+1][0] != "IDENT":
-                raise SyntaxError("Se esperaba un identificador después de 'for'")
+                raise OrionSyntaxError("Se esperaba un identificador después de 'for'")
             var_name = tokens[i+1][1]
 
             if tokens[i+2][0] != "IN":
-                raise SyntaxError("Se esperaba 'in' en el bucle for")
+                raise OrionSyntaxError("Se esperaba 'in' en el bucle for")
 
             # expresión inicial
             start, j = parse_expression(tokens, i+3)
 
             if j >= len(tokens) or tokens[j][0] not in ("RANGE", "RANGE_EX"):
-                raise SyntaxError("Se esperaba '..' o '..<' en el bucle for")
+                raise OrionSyntaxError("Se esperaba '..' o '..<' en el bucle for")
             range_type = tokens[j][0]
             j += 1
 
@@ -192,7 +226,7 @@ def parse_block(tokens, i):
         elif kind == "MATCH":
             expr, j = parse_expression(tokens, i+1)
             if j >= len(tokens) or tokens[j][0] != "LBRACE":
-                raise SyntaxError("Se esperaba '{' después de match")
+                raise OrionSyntaxError("Se esperaba '{' después de match")
             j += 1
             cases = []
             while j < len(tokens) and tokens[j][0] != "RBRACE":
@@ -200,9 +234,9 @@ def parse_block(tokens, i):
                 # else case
                 if case_kind == "ELSE":
                     if j+1 >= len(tokens) or tokens[j+1][0] != "COLON":
-                        raise SyntaxError("Se esperaba ':' después de else en match")
+                        raise OrionSyntaxError("Se esperaba ':' después de else en match")
                     if j+2 >= len(tokens) or tokens[j+2][0] != "LBRACE":
-                        raise SyntaxError("Se esperaba '{' en else de match")
+                        raise OrionSyntaxError("Se esperaba '{' en else de match")
                     body, j2 = parse_block(tokens, j+2)
                     cases.append(("else", body))
                     j = j2
@@ -210,14 +244,14 @@ def parse_block(tokens, i):
                     # pattern: { ... }
                     pattern = tokens[j][1]
                     if j+1 >= len(tokens) or tokens[j+1][0] != "COLON":
-                        raise SyntaxError("Se esperaba ':' después del patrón en match")
+                        raise OrionSyntaxError("Se esperaba ':' después del patrón en match")
                     if j+2 >= len(tokens) or tokens[j+2][0] != "LBRACE":
-                        raise SyntaxError("Se esperaba '{' en el patrón de match")
+                        raise OrionSyntaxError("Se esperaba '{' en el patrón de match")
                     body, j2 = parse_block(tokens, j+2)
                     cases.append((pattern, body))
                     j = j2
             if j >= len(tokens) or tokens[j][0] != "RBRACE":
-                raise SyntaxError("Se esperaba '}' al final de match")
+                raise OrionSyntaxError("Se esperaba '}' al final de match")
             stmts.append(("MATCH", expr, cases))
             i = j + 1
 
@@ -225,7 +259,7 @@ def parse_block(tokens, i):
             i += 1
 
     if i >= len(tokens):
-        raise SyntaxError("Se esperaba '}' pero se alcanzó el final del archivo.")
+        raise OrionSyntaxError("Se esperaba '}' pero se alcanzó el final del archivo.")
 
     return stmts, i + 1
 
@@ -249,12 +283,12 @@ def parse(tokens):
                         params.append(tokens[i][1])
                     i += 1
                 if i >= len(tokens) or tokens[i][0] != "RPAREN":
-                    raise SyntaxError("Se esperaba ')' en la declaración de función.")
+                    raise OrionSyntaxError("Se esperaba ')' en la declaración de función.")
                 i += 1 
 
             # Esperamos el cuerpo
             if i >= len(tokens) or tokens[i][0] != "LBRACE":
-                raise SyntaxError("Se esperaba '{' después de la declaración de función.")
+                raise OrionSyntaxError("Se esperaba '{' después de la declaración de función.")
             body, i = parse_block(tokens, i)
             ast.append(("FN", fn_name, params, body))
 
@@ -304,17 +338,17 @@ def parse(tokens):
         elif kind == "FOR":
             # for i in 1..n { ... }
             if tokens[i+1][0] != "IDENT":
-                raise SyntaxError("Se esperaba un identificador después de 'for'")
+                raise OrionSyntaxError("Se esperaba un identificador después de 'for'")
             var_name = tokens[i+1][1]
 
             if tokens[i+2][0] != "IN":
-                raise SyntaxError("Se esperaba 'in' en el bucle for")
+                raise OrionSyntaxError("Se esperaba 'in' en el bucle for")
 
             # expresión inicial
             start, j = parse_expression(tokens, i+3)
 
             if j >= len(tokens) or tokens[j][0] not in ("RANGE", "RANGE_EX"):
-                raise SyntaxError("Se esperaba '..' o '..<' en el bucle for")
+                raise OrionSyntaxError("Se esperaba '..' o '..<' en el bucle for")
             range_type = tokens[j][0]
             j += 1
 

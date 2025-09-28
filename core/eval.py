@@ -1,27 +1,43 @@
 from core.control import eval_match
-from core.functions import register_function, get_function
+from core.functions import register_function, get_function, register_native_function
 from core.types import OrionString, null_safe
+from core.errors import (
+    OrionRuntimeError,
+    OrionTypeError,
+    OrionNameError,
+    OrionFunctionError,
+)
 
+from lib import collections
+from lib import io
+from lib import math as orion_math
+from lib import strings
 
 def lookup_variable(name, variables):
     """Busca una variable en el scope actual."""
     if name in variables:
         return variables[name]
-    # Si no está, lanza error (no devuelve el string)
-    raise NameError(f"Variable no definida: {name}")
+    # Usa el error personalizado de Orion
+    raise OrionNameError(name)
 
+def _register_builtin_functions(functions):
+    import types
+    builtin_modules = [collections, io, orion_math, strings]
+    for mod in builtin_modules:
+        for k in dir(mod):
+            if not k.startswith("_"):
+                v = getattr(mod, k)
+                if isinstance(v, types.FunctionType):
+                    register_native_function(functions, k, v)
 
-def eval_expr(expr, variables):
-    """Evalúa una expresión del AST."""
-
+def eval_expr(expr, variables, functions):
     if isinstance(expr, tuple):
         tag = expr[0]
 
-        # Operadores binarios
         if tag == "BINARY_OP":
             _, op, left, right = expr
-            left_val = eval_expr(left, variables)
-            right_val = eval_expr(right, variables)
+            left_val = eval_expr(left, variables, functions)
+            right_val = eval_expr(right, variables, functions)
 
             if op == "+":
                 if isinstance(left_val, str) or isinstance(right_val, str):
@@ -50,51 +66,76 @@ def eval_expr(expr, variables):
             elif op == "||":
                 return bool(left_val) or bool(right_val)
             else:
-                raise ValueError(f"Operador binario desconocido: {op}")
+                # Error personalizado para operador desconocido
+                raise OrionRuntimeError(f"Operador binario desconocido: {op}")
 
-        # Operadores unarios
         elif tag == "UNARY_OP":
             _, op, operand = expr
             if op == "!":
-                return not eval_expr(operand, variables)
+                return not eval_expr(operand, variables, functions)
             else:
-                raise ValueError(f"Operador unario desconocido: {op}")
+                raise OrionRuntimeError(f"Operador unario desconocido: {op}")
 
-        # Llamadas a funciones
         elif tag == "CALL":
             _, fn_name, args = expr
-            fn_def = get_function(variables, fn_name)
+            fn_def = get_function(functions, fn_name)
             if not fn_def:
-                raise NameError(f"Función no definida: {fn_name}")
+                raise OrionFunctionError(f"Función no definida: {fn_name}")
 
             _, params, body = fn_def
             if len(args) != len(params):
-                raise TypeError(f"Argumentos esperados: {len(params)}, recibidos: {len(args)}")
+                raise OrionFunctionError(f"Argumentos esperados: {len(params)}, recibidos: {len(args)}")
 
-            # Nuevo scope local: copia TODO el scope actual
             local_vars = variables.copy()
             for p, a in zip(params, args):
-                local_vars[p] = eval_expr(a, local_vars)  # evalúa en el scope local actualizado
+                local_vars[p] = eval_expr(a, local_vars, functions)
 
-            return evaluate(body, local_vars, inside_fn=True)
+            if callable(body):
+                arg_vals = [local_vars[p] for p in params]
+                return body(*arg_vals)
+            else:
+                return evaluate(body, local_vars, functions, inside_fn=True)
 
-        # Return explícito dentro de una función
         elif tag == "RETURN":
             _, value = expr
-            return eval_expr(value, variables) if value is not None else None
+            return eval_expr(value, variables, functions) if value is not None else None
 
         elif tag == "MATCH":
             _, expr_val, cases = expr
-            val = eval_expr(expr_val, variables)
+            val = eval_expr(expr_val, variables, functions)
             result = eval_match(val, cases, evaluate, variables)
             return result
 
         elif tag == "NULL_SAFE":
             _, obj, attr = expr
-            obj_val = eval_expr(obj, variables)
+            obj_val = eval_expr(obj, variables, functions)
             return null_safe(obj_val, attr)
 
-    # Tipos primitivos
+        elif tag == "ATTR_ACCESS":
+            _, obj_expr, attr_name = expr
+            obj_val = eval_expr(obj_expr, variables, functions)
+            # Acceso a atributo simple
+            if hasattr(obj_val, attr_name):
+                return getattr(obj_val, attr_name)
+            elif isinstance(obj_val, dict) and attr_name in obj_val:
+                return obj_val[attr_name]
+            else:
+                raise OrionRuntimeError(f"Atributo '{attr_name}' no encontrado en objeto.")
+
+        elif tag == "CALL_METHOD":
+            _, method_name, obj_expr, args = expr
+            obj_val = eval_expr(obj_expr, variables, functions)
+            arg_vals = [eval_expr(a, variables, functions) for a in args]
+            # Si el método existe en lib.math, lo llama como math.method(obj, *args)
+            if hasattr(orion_math, method_name):
+                fn = getattr(orion_math, method_name)
+                return fn(obj_val, *arg_vals)
+            # Si el método existe en el objeto, lo llama como obj.method(*args)
+            method = getattr(obj_val, method_name, None)
+            if callable(method):
+                return method(*arg_vals)
+            raise OrionFunctionError(f"Método '{method_name}' no definido en lib.math ni en el objeto.")
+
     if isinstance(expr, bool):
         return expr
 
@@ -116,31 +157,30 @@ def eval_expr(expr, variables):
 
     return expr
 
-
-def evaluate(ast, variables=None, inside_fn=False):
-    """Ejecuta el AST completo."""
+def evaluate(ast, variables=None, functions=None, inside_fn=False):
     if variables is None:
         variables = {}
+    if functions is None:
+        functions = {}
 
-    # 1. Registrar funciones primero
+    _register_builtin_functions(functions)
+
     for node in ast:
         if node[0] == "FN":
             _, fn_name, params, body = node
-            register_function(variables, fn_name, params, body)
+            register_function(functions, fn_name, params, body)
 
-    # 2. Ejecutar el resto
     i = 0
     while i < len(ast):
         node = ast[i]
         tag = node[0]
 
         if tag == "FN":
-            pass  # ya registrado
+            pass
 
         elif tag == "ASSIGN":
             _, name, value = node
-            val = eval_expr(value, variables)
-            # Si es string plano, conviértelo a OrionString
+            val = eval_expr(value, variables, functions)
             if isinstance(val, str) and not isinstance(val, OrionString):
                 val = OrionString(val)
             variables[name] = val
@@ -148,14 +188,12 @@ def evaluate(ast, variables=None, inside_fn=False):
         elif tag == "DECLARE":
             _, type_name, var_name, expr_value = node
             if expr_value is not None:
-                value = eval_expr(expr_value, variables)
-                # Si es inferido (type_name == "auto" o None)
+                value = eval_expr(expr_value, variables, functions)
                 if type_name in ("auto", None):
                     variables[var_name] = value
                 else:
                     variables[var_name] = value
             else:
-                # inicialización por defecto según tipo
                 if type_name == "int":
                     variables[var_name] = 0
                 elif type_name == "float":
@@ -169,7 +207,7 @@ def evaluate(ast, variables=None, inside_fn=False):
 
         elif tag == "PRINT":
             _, value = node
-            val = eval_expr(value, variables)
+            val = eval_expr(value, variables, functions)
             if isinstance(val, OrionString):
                 val = val.interpolate(variables)
             print(val)
@@ -177,62 +215,59 @@ def evaluate(ast, variables=None, inside_fn=False):
         elif tag == "FOR":
             _, var_name, start, end, body, range_type = node
 
-            # Evalúa los límites usando el scope actual
-            start_val = eval_expr(start, variables)
-            end_val = eval_expr(end, variables)
+            start_val = eval_expr(start, variables, functions)
+            end_val = eval_expr(end, variables, functions)
 
             if not isinstance(start_val, (int, float)):
-                raise TypeError(f"El rango debe ser numérico, se recibió start={start_val}")
+                raise OrionTypeError(f"El rango debe ser numérico, se recibió start={start_val}")
             if not isinstance(end_val, (int, float)):
-                raise TypeError(f"El rango debe ser numérico, se recibió end={end_val}")
+                raise OrionTypeError(f"El rango debe ser numérico, se recibió end={end_val}")
 
             if range_type == "RANGE":
                 rng = range(start_val, end_val + 1)
             elif range_type == "RANGE_EX":
                 rng = range(start_val, end_val)
             else:
-                raise ValueError(f"Tipo de rango no soportado: {range_type}")
+                raise OrionRuntimeError(f"Tipo de rango no soportado: {range_type}")
 
             for j in rng:
-                # asignamos directamente sobre el scope actual
                 variables[var_name] = j
-                result = evaluate(body, variables, inside_fn=True)
+                result = evaluate(body, variables, functions, inside_fn=True)
                 if inside_fn and result is not None:
                     return result
 
         elif tag == "IF":
             _, condition, body_true, body_false = node
-            if eval_expr(condition, variables):
-                result = evaluate(body_true, variables, inside_fn=True)
+            if eval_expr(condition, variables, functions):
+                result = evaluate(body_true, variables, functions, inside_fn=True)
             else:
-                result = evaluate(body_false, variables, inside_fn=True)
+                result = evaluate(body_false, variables, functions, inside_fn=True)
             if inside_fn and result is not None:
                 return result
 
         elif tag == "CALL":
-            result = eval_expr(node, variables)
+            result = eval_expr(node, variables, functions)
             if inside_fn:
                 return result
 
         elif tag == "RETURN":
             _, value = node
-            return eval_expr(value, variables) if value is not None else None
+            return eval_expr(value, variables, functions) if value is not None else None
 
         elif tag == "MATCH":
-            result = eval_expr(node, variables)
+            result = eval_expr(node, variables, functions)
             if inside_fn and result is not None:
                 return result
 
         else:
-            raise ValueError(f"Nodo desconocido en AST: {tag}")
+            raise OrionRuntimeError(f"Nodo desconocido en AST: {tag}")
 
         i += 1
 
     # 3. Si estamos en nivel superior
     if not inside_fn:
-        if "main" in variables:
-            _, params, body = variables["main"]
-            return evaluate(body, variables, inside_fn=True)
+        if "main" in functions:
+            _, params, body = functions["main"]
+            return evaluate(body, variables, functions, inside_fn=True)
         # Si no hay main, simplemente terminamos
         return None
-

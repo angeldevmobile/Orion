@@ -8,6 +8,7 @@ sys.path.insert(0, project_root)
 from core.eval import evaluate
 from core.lexer import lex
 from core.parser import parse
+from core.builtins import load_builtins
 
 def run_orion(filename):
     with open(filename, "r", encoding="utf-8") as f:
@@ -25,7 +26,10 @@ def run_orion(filename):
     print("=== AST ===")
     print(ast)
     print("=== EJECUCIÓN ===")
-    evaluate(ast)
+    variables = {}
+    functions = {}
+    load_builtins(functions)  # Carga funciones nativas en el entorno de funciones
+    evaluate(ast, variables, functions)  # Pasa ambos entornos
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
