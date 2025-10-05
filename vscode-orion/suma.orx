@@ -2,4 +2,4 @@ x = 20
 y = 22
 
 suma = x + y
-print("La suma es: " + suma)
+show("La suma es: " + suma)

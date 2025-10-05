@@ -6,9 +6,19 @@ La consola y los archivos como streams de datos.
 import sys
 import json
 
-def show(*args, sep=" ", end="\n"):
-    """Imprime en consola estilo Orion."""
-    sys.stdout.write(sep.join(str(a) for a in args) + end)
+from core.types import OrionString
+
+def show(*args, sep=" ", end="\n", env=None):
+    """Imprime en consola estilo Orion con interpolación."""
+    def orion_str(a):
+        # Interpola si es OrionString y hay entorno
+        if env is not None:
+            if isinstance(a, OrionString):
+                return str(a.interpolate(env))
+        if isinstance(a, bool):
+            return "yes" if a else "no"
+        return str(a)
+    sys.stdout.write(sep.join(orion_str(a) for a in args) + end)
 
 def ask(prompt="> "):
     """Lee input del usuario."""

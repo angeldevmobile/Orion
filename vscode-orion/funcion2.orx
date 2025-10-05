@@ -6,4 +6,4 @@ fn factorial(n) {
   return resultado
 }
 
-print(factorial(5))
+show(factorial(5))

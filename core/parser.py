@@ -1,6 +1,26 @@
 from core.errors import OrionSyntaxError
 
 
+def parse_call_args(tokens, i):
+    # tokens[i] debe ser LPAREN
+    if tokens[i][0] != "LPAREN":
+        raise OrionSyntaxError("Se esperaba '(' en llamada")
+    i += 1
+    args = []
+    first = True
+    while i < len(tokens) and tokens[i][0] != "RPAREN":
+        if not first:
+            if tokens[i][0] == "COMMA":
+                i += 1
+            else:
+                raise OrionSyntaxError("Se esperaba ',' entre argumentos")
+        arg, i = parse_expression(tokens, i)
+        args.append(arg)
+        first = False
+    if i >= len(tokens) or tokens[i][0] != "RPAREN":
+        raise OrionSyntaxError("Falta ')' en llamada")
+    return args, i + 1
+
 def parse_primary(tokens, i):
     while i < len(tokens) and tokens[i][0] in ("OP", "COMMA"):
         i += 1
@@ -9,69 +29,80 @@ def parse_primary(tokens, i):
 
     kind, value = tokens[i]
 
+    # --- Listas literales ---
+    if kind == "LBRACKET":
+        items = []
+        i += 1
+        while i < len(tokens) and tokens[i][0] != "RBRACKET":
+            item, i = parse_expression(tokens, i)
+            items.append(item)
+            if i < len(tokens) and tokens[i][0] == "COMMA":
+                i += 1
+        if i >= len(tokens) or tokens[i][0] != "RBRACKET":
+            raise OrionSyntaxError("Falta ']' en lista")
+        return ("LIST", items), i + 1
+
+    # --- Expresiones entre paréntesis ---
     if kind == "LPAREN":
-        expr, i = parse_expression(tokens, i+1)
+        expr, i = parse_expression(tokens, i + 1)
         if i >= len(tokens) or tokens[i][0] != "RPAREN":
             raise OrionSyntaxError("Falta ')'")
-        return expr, i+1
+        return expr, i + 1
 
+    # --- Números ---
     elif kind == "NUMBER":
-        return (float(value) if "." in str(value) else int(value)), i+1
+        return (float(value) if "." in str(value) else int(value)), i + 1
 
+    # --- Cadenas ---
     elif kind == "STRING":
-        return value, i+1
+        return value, i + 1
 
+    # --- Booleanos ---
     elif kind in ("TRUE", "FALSE"):
-        return (kind == "TRUE"), i+1
+        return (kind == "TRUE"), i + 1
 
+    # --- Identificadores, llamadas, atributos, índices ---
     elif kind == "IDENT":
-        name = value
-        i_next = i + 1
-        expr = name
+        name = ("IDENT", value)  # ✅ AST correcto para variables
+        i += 1
 
         # Null-safe: user?.email
-        if i_next < len(tokens) and tokens[i_next][0] == "NULL_SAFE":
-            attr = tokens[i_next + 1][1]
-            return ("NULL_SAFE", name, attr), i_next + 2
+        if i < len(tokens) and tokens[i][0] == "NULL_SAFE":
+            attr = tokens[i + 1][1]
+            return ("NULL_SAFE", name, attr), i + 2
 
-        # Soporte para acceso con punto y llamada a método
-        while i_next < len(tokens) and tokens[i_next][0] == "DOT":
-            attr_name = tokens[i_next + 1][1]
-            # Llamada a método: x.futuristic_power(...)
-            if i_next + 2 < len(tokens) and tokens[i_next + 2][0] == "LPAREN":
-                args = []
-                j = i_next + 3
-                while j < len(tokens) and tokens[j][0] != "RPAREN":
-                    arg, j = parse_expression(tokens, j)
-                    args.append(arg)
-                    if j < len(tokens) and tokens[j][0] == "COMMA":
-                        j += 1
-                if j >= len(tokens) or tokens[j][0] != "RPAREN":
-                    raise OrionSyntaxError("Falta ')' en llamada de método")
-                expr = ("CALL", attr_name, [expr] + args)
-                i_next = j + 1
+        # Llamada de función normal
+        if i < len(tokens) and tokens[i][0] == "LPAREN":
+            args, i = parse_call_args(tokens, i)
+            name = ("CALL", value, args)
+
+        # Acceso a propiedades, métodos o índices
+        while i < len(tokens):
+            if tokens[i][0] == "DOT":
+                i += 1
+                attr_name = tokens[i][1]
+                i += 1
+                # Llamada de método: obj.metodo(...)
+                if i < len(tokens) and tokens[i][0] == "LPAREN":
+                    args, i = parse_call_args(tokens, i)
+                    name = ("CALL_METHOD", attr_name, name, args)
+                else:
+                    name = ("ATTR_ACCESS", name, attr_name)
+            elif tokens[i][0] == "LBRACKET":
+                i += 1
+                index_expr, i = parse_expression(tokens, i)
+                if i >= len(tokens) or tokens[i][0] != "RBRACKET":
+                    raise OrionSyntaxError("Falta ']' en acceso por índice")
+                i += 1
+                name = ("INDEX", name, index_expr)
             else:
-                expr = ("ATTR_ACCESS", expr, attr_name)
-                i_next += 2
+                break
 
-        # Llamada a función normal (solo si expr es un nombre simple)
-        if isinstance(expr, str) and i_next < len(tokens) and tokens[i_next][0] == "LPAREN":
-            args = []
-            j = i_next + 1
-            while j < len(tokens) and tokens[j][0] != "RPAREN":
-                arg, j = parse_expression(tokens, j)
-                args.append(arg)
-                if j < len(tokens) and tokens[j][0] == "COMMA":
-                    j += 1
-            if j >= len(tokens) or tokens[j][0] != "RPAREN":
-                raise OrionSyntaxError("Falta ')' en llamada de función")
-            expr = ("CALL", expr, args)
-            i_next = j + 1
+        return name, i
 
-        return expr, i_next
-
+    # --- Operador unario ---
     elif kind == "NOT":
-        expr, j = parse_primary(tokens, i+1)
+        expr, j = parse_primary(tokens, i + 1)
         return ("UNARY_OP", "!", expr), j
 
     else:
@@ -144,8 +175,11 @@ def parse_block(tokens, i):
         kind = tokens[i][0]
 
         if kind == "PRINT":
-            expr_value, i = parse_expression(tokens, i+1)
-            stmts.append(("PRINT", expr_value))
+            if i+1 >= len(tokens) or tokens[i+1][0] != "LPAREN":
+                raise OrionSyntaxError("Se esperaba '(' después de show")
+
+            args, i = parse_call_args(tokens, i+1)
+            stmts.append(("CALL", "show", args))
 
         elif kind == "TYPE":
             type_name = tokens[i][1]
@@ -324,8 +358,11 @@ def parse(tokens):
                 i += 1
 
         elif kind == "PRINT":
-            expr_value, i = parse_expression(tokens, i+1)
-            ast.append(("PRINT", expr_value))
+            if i+1 >= len(tokens) or tokens[i+1][0] != "LPAREN":
+                raise OrionSyntaxError("Se esperaba '(' después de show")
+
+            args, i = parse_call_args(tokens, i+1)
+            ast.append(("CALL", "show", args))
 
         elif kind == "IF":
             condition, i = parse_expression(tokens, i+1)

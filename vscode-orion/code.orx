@@ -2,11 +2,11 @@
 fn main() {
   x = 10
   y = 3.14
-  activo = true
+  activo = no
   mensaje = "Hola Orion!"
 
   if (x >= 10 && activo) {
-    print(mensaje)
+    show(activo)
   } else {
     return
   }
@@ -14,4 +14,3 @@ fn main() {
   x = x + 5
   y = y * 2
 }
-

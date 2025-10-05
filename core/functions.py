@@ -41,11 +41,17 @@ def get_function(env: dict, name: str, arg_count=None):
     """
     Obtiene una función según su nombre.
     Si hay sobrecarga, selecciona por número de argumentos.
+    Incluye funciones nativas.
     """
     if name not in env:
         return None
 
+    # Buscar funciones definidas por el usuario
     candidates = [fn for fn in env[name] if fn["type"] == "FN_DEF"]
+
+    # Si no hay, buscar funciones nativas
+    if not candidates:
+        candidates = [fn for fn in env[name] if fn["type"] == "NATIVE_FN"]
 
     if not candidates:
         return None
@@ -53,12 +59,12 @@ def get_function(env: dict, name: str, arg_count=None):
     if arg_count is None:
         return candidates[0]  # primera definición
 
-    # buscar por número de argumentos
+    # buscar por número de argumentos (solo aplica a FN_DEF)
     for fn in candidates:
-        if len(fn["params"]) == arg_count:
+        if fn["type"] == "FN_DEF" and len(fn["params"]) == arg_count:
             return fn
 
-    return None
+    return candidates[0]  # si es nativa, no valida número de argumentos
 
 
 # --- Funciones anónimas ---

@@ -2,4 +2,4 @@ fn saludar(nombre) {
   return "Hola " + nombre
 }
 
-print(saludar("Orion"))
+show(saludar("Orion"))

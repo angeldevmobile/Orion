@@ -1,0 +1,23 @@
+fn es_mayor_de_edad(edad) {
+    return edad >= 18
+}
+
+fn procesar_usuario(nombre, edad) {
+    if es_mayor_de_edad(edad) {
+        show("Usuario ${nombre} es mayor de edad (${edad})")
+    } else {
+        show("Usuario ${nombre} es menor de edad (${edad})")
+    }
+}
+
+usuarios = ["Ana", "Luis", "Sofía"]
+edades = [22, 15, 30]
+
+for i in 0..2 {
+    procesar_usuario(usuarios[i], edades[i])
+}
+
+texto = " backend orion "
+show("Trim:", strip(texto))
+show("Upper:", upper(texto))
+show("Orbit:", orbit(texto, 3))

@@ -2,7 +2,7 @@
 
 name = "Gabriel"
 msg = "Hola ${name}, bienvenido a Orion!"
-print(msg)
+show(msg)
 
 user = null
-print(user?.email)  
+show(user?.email)  
