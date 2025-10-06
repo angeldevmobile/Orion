@@ -28,7 +28,7 @@ def transmit(url, data=None, json_data=None, headers=None):
     resp = requests.post(url, data=data, json=json_data, headers=headers)
     return _pack_response(resp)
 
-def stream(url, headers=None, chunk_size=1024):
+def stream(url, headers=None, chunk_size=1024): 
     """Streams data from a URL (cosmic flow)."""
     with requests.get(url, headers=headers, stream=True) as r:
         for chunk in r.iter_content(chunk_size=chunk_size):

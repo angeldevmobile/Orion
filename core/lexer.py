@@ -2,25 +2,39 @@ import re
 from core.errors import OrionSyntaxError
 from core.types import OrionBool
 
+
 def lex(code):
     tokens = []
+
     token_specification = [
+        # --- Comentarios ---
         ("INVALID_COMMENT", r"(//.*|---.*)"),
         ("COMMENT",  r"--[^-].*"),
+
+        # --- Números y cadenas ---
         ("NUMBER",   r"\d+(\.\d+)?"),
-        ("PRINT",    r"show"),         
-        ("RETURN",   r"return"),
-        ("FN",       r"fn"),
-        ("MATCH",    r"match"),
+        ("STRING",   r'"[^"]*"'),
+
+        # --- Identificadores (antes de las palabras clave para funciones como forge, fuse, etc.) ---
+        ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),
+
+        # --- Palabras clave ---
+        ("PRINT",    r"\bshow\b"),
+        ("RETURN",   r"\breturn\b"),
+        ("FN",       r"\bfn\b"),
+        ("MATCH",    r"\bmatch\b"),
+        ("USE",      r"\buse\b"),
+        ("FOR",      r"\bfor\b"),
+        ("IN",       r"\bin\b"),
+        ("IF",       r"\bif\b"),
+        ("ELSE",     r"\belse\b"),
         ("TRUE",     r"\btrue\b"),
         ("FALSE",    r"\bfalse\b"),
-        ("YES",      r"\byes\b"),        
-        ("NO",       r"\bno\b"),        
-        ("TYPE",     r"(int|float|bool|string)"),
-        ("FOR",      r"for"),
-        ("IN",       r"in"),
-        ("IF",       r"if"),
-        ("ELSE",     r"else"),
+        ("YES",      r"\byes\b"),
+        ("NO",       r"\bno\b"),
+        ("TYPE",     r"\b(int|float|bool|string)\b"),
+
+        # --- Operadores y símbolos ---
         ("RANGE_EX", r"\.\.<"),
         ("RANGE",    r"\.\."),
         ("NULL_SAFE", r"\?\."),
@@ -38,13 +52,13 @@ def lex(code):
         ("COMPARE",  r"(==|!=|<=|>=|<|>)"),
         ("ASSIGN",   r"="),
         ("OP",       r"[+\-*/]"),
-        ("STRING",   r'"[^"]*"'),
-        ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),  
-        ("NEWLINE",  r"\n"),
-        ("SKIP",     r"[ \t]+"),
-        ("DOT",      r"\."),                  
+        ("DOT",      r"\."),
         ("LBRACKET", r"\["),
         ("RBRACKET", r"\]"),
+
+        # --- Espacios y errores ---
+        ("NEWLINE",  r"\n"),
+        ("SKIP",     r"[ \t]+"),
         ("MISMATCH", r"."),
     ]
 
@@ -56,30 +70,32 @@ def lex(code):
 
         if kind == "INVALID_COMMENT":
             raise OrionSyntaxError(f"Comentario inválido: {value}")
+
         elif kind == "NUMBER":
             tokens.append((kind, float(value)) if '.' in value else (kind, int(value)))
+
         elif kind == "STRING":
             tokens.append((kind, value))
-        elif kind == "YES":
+
+        elif kind in ("YES", "TRUE"):
             tokens.append(("BOOL", OrionBool(True)))
-        elif kind == "NO":
+        elif kind in ("NO", "FALSE"):
             tokens.append(("BOOL", OrionBool(False)))
-        elif kind == "TRUE":
-            tokens.append(("BOOL", OrionBool(True)))
-        elif kind == "FALSE":
-            tokens.append(("BOOL", OrionBool(False)))
+
         elif kind in (
             "IDENT", "OP", "PRINT", "FOR", "IF", "ELSE", "ASSIGN",
             "RANGE", "RANGE_EX", "COMPARE", "LBRACE", "RBRACE",
             "LPAREN", "RPAREN", "FN", "RETURN", "TYPE",
-            "AND", "OR", "NOT", "MATCH", 
-            "ARROW", "THIN_ARROW", "IN", "NULL_SAFE", 
+            "AND", "OR", "NOT", "MATCH", "USE",
+            "ARROW", "THIN_ARROW", "IN", "NULL_SAFE",
             "COLON", "COMMA", "DOT",
             "LBRACKET", "RBRACKET"
         ):
             tokens.append((kind, value))
+
         elif kind in ("SKIP", "NEWLINE", "COMMENT"):
             continue
+
         elif kind == "MISMATCH":
             raise OrionSyntaxError(f"Token inesperado: {value}")
 

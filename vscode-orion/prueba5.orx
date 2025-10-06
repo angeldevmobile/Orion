@@ -1,0 +1,50 @@
+use log
+use fs
+use json
+
+trace_start("GESTIÓN DE TAREAS")
+
+-- Lista de tareas
+tareas = [
+    {"nombre": "Revisar correo", "completada": no},
+    {"nombre": "Subir reporte", "completada": no},
+    {"nombre": "Reunión equipo", "completada": no}
+]
+
+-- Función para mostrar tareas
+fn mostrar_tareas(lista) {
+    show("Lista de Tareas:")
+    for i in 0..(len(lista)-1) {
+        estado = if lista[i].completada { "✅" } else { "❌" }
+        show("${i+1}. ${lista[i].nombre} ${estado}")
+    }
+}
+
+-- Función para completar tareas
+fn completar_tarea(lista, indice) {
+    lista[indice].completada = yes
+    show("Tarea completada: ${lista[indice].nombre}")
+}
+
+-- Mostrar tareas iniciales
+mostrar_tareas(tareas)
+
+-- Completar la primera tarea
+completar_tarea(tareas, 0)
+
+-- Mostrar progreso estilo log
+for p in 0..100 {
+    progress("tasks", "Actualizando tareas", p)
+}
+
+-- Guardar tareas en archivo JSON usando Orion y fs
+json_str = json.forge(tareas, yes)
+fs.write("tareas.json", json_str)
+show("Tareas guardadas en tareas.json")
+
+-- Leer archivo y mostrar usando Orion y fs
+json_leido = fs.read("tareas.json")
+datos = json.parse(json_leido)
+show("Tareas desde archivo:", datos)
+
+trace_end("GESTIÓN DE TAREAS")

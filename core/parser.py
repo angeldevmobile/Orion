@@ -29,6 +29,27 @@ def parse_primary(tokens, i):
 
     kind, value = tokens[i]
 
+    # --- If como expresión (if cond { expr1 } else { expr2 }) ---
+    if kind == "IF":
+        condition, i = parse_expression(tokens, i + 1)
+
+        # bloque o expresión verdadera
+        if i < len(tokens) and tokens[i][0] == "LBRACE":
+            then_branch, i = parse_block(tokens, i)
+        else:
+            then_branch, i = parse_expression(tokens, i)
+
+        # bloque o expresión falsa (opcional)
+        else_branch = None
+        if i < len(tokens) and tokens[i][0] == "ELSE":
+            i += 1
+            if i < len(tokens) and tokens[i][0] == "LBRACE":
+                else_branch, i = parse_block(tokens, i)
+            else:
+                else_branch, i = parse_expression(tokens, i)
+
+        return ("IF_EXPR", condition, then_branch, else_branch), i
+
     # --- Listas literales ---
     if kind == "LBRACKET":
         items = []
@@ -41,6 +62,26 @@ def parse_primary(tokens, i):
         if i >= len(tokens) or tokens[i][0] != "RBRACKET":
             raise OrionSyntaxError("Falta ']' en lista")
         return ("LIST", items), i + 1
+
+    # --- Diccionarios literales ---
+    if kind == "LBRACE":
+        items = []
+        i += 1
+        while i < len(tokens) and tokens[i][0] != "RBRACE":
+            if tokens[i][0] not in ("STRING", "IDENT"):
+                raise OrionSyntaxError("Se esperaba una clave STRING o IDENT en el diccionario")
+            key = tokens[i][1]
+            i += 1
+            if i >= len(tokens) or tokens[i][0] != "COLON":
+                raise OrionSyntaxError("Se esperaba ':' en el diccionario")
+            i += 1
+            val, i = parse_expression(tokens, i)
+            items.append((key, val))
+            if i < len(tokens) and tokens[i][0] == "COMMA":
+                i += 1
+        if i >= len(tokens) or tokens[i][0] != "RBRACE":
+            raise OrionSyntaxError("Falta '}' en el diccionario")
+        return ("DICT", items), i + 1
 
     # --- Expresiones entre paréntesis ---
     if kind == "LPAREN":
@@ -57,13 +98,13 @@ def parse_primary(tokens, i):
     elif kind == "STRING":
         return value, i + 1
 
-    # --- Booleanos ---
-    elif kind in ("TRUE", "FALSE"):
-        return (kind == "TRUE"), i + 1
+    # --- Booleanos (yes, no) ---
+    elif kind == "BOOL":
+        return value, i + 1
 
     # --- Identificadores, llamadas, atributos, índices ---
     elif kind == "IDENT":
-        name = ("IDENT", value)  # ✅ AST correcto para variables
+        name = ("IDENT", value)
         i += 1
 
         # Null-safe: user?.email
@@ -82,7 +123,7 @@ def parse_primary(tokens, i):
                 i += 1
                 attr_name = tokens[i][1]
                 i += 1
-                # Llamada de método: obj.metodo(...)
+                # Llamada de método
                 if i < len(tokens) and tokens[i][0] == "LPAREN":
                     args, i = parse_call_args(tokens, i)
                     name = ("CALL_METHOD", attr_name, name, args)
@@ -303,6 +344,15 @@ def parse(tokens):
     i = 0
     while i < len(tokens):
         kind = tokens[i][0]
+
+        # Soporte para 'use'
+        if kind == "USE":
+            if i+1 >= len(tokens) or tokens[i+1][0] not in ("STRING", "IDENT"):
+                raise OrionSyntaxError("Se esperaba una cadena o identificador después de 'use'")
+            module_path = tokens[i+1][1]
+            ast.append(("USE", module_path))
+            i += 2
+            continue
 
         if kind == "FN":
             fn_name = tokens[i+1][1]

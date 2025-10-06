@@ -1,3 +1,7 @@
+import importlib.util
+import sys
+import os
+import types
 from core.control import eval_match
 from core.functions import register_function, get_function, register_native_function
 from core.types import (
@@ -38,6 +42,8 @@ def _register_builtin_functions(functions):
                 v = getattr(mod, k)
                 if isinstance(v, types.FunctionType):
                     register_native_function(functions, k, v)
+    # Registrar funciones nativas de Python necesarias
+    register_native_function(functions, "len", len)
 
 def eval_expr(expr, variables, functions):
     # 1. Caso nulo
@@ -115,6 +121,11 @@ def eval_expr(expr, variables, functions):
         elif tag == "LIST":
             _, elements = expr
             return [eval_expr(e, variables, functions) for e in elements]
+        
+        # --- DICT ---
+        elif tag == "DICT":
+            _, items = expr
+            return {k: eval_expr(v, variables, functions) for k, v in items}
 
         # --- IDENT ---
         elif tag == "IDENT":
@@ -216,13 +227,25 @@ def eval_expr(expr, variables, functions):
         # --- CALL ---
         elif tag == "CALL":
             _, fn_name, args = expr
+
+            # 1. Buscar en functions (funciones de usuario)
             fn_def = get_function(functions, fn_name)
+
+            # 2. Si no está, buscar en variables (funciones importadas)
+            if fn_def is None and fn_name in variables and callable(variables[fn_name]):
+                fn_def = {
+                    "type": "NATIVE_FN",
+                    "impl": variables[fn_name]
+                }
+
             if not fn_def:
                 raise OrionFunctionError(f"Función no definida: {fn_name}")
 
             # Función nativa
             if fn_def["type"] == "NATIVE_FN":
                 arg_vals = [eval_expr(a, variables, functions) for a in args]
+                # Convierte OrionString a str antes de llamar la función nativa
+                arg_vals = [str(a) if isinstance(a, OrionString) else a for a in arg_vals]
                 return fn_def["impl"](*arg_vals)
 
             # Función definida por usuario
@@ -318,7 +341,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         variables = {}
     if functions is None:
         functions = {}
-    
+
     # === Inicializar valores nativos de Orion ===
     if "null" not in variables:
         variables["null"] = None
@@ -328,8 +351,9 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         variables["no"] = OrionBool(False)
 
     _register_builtin_functions(functions)
-    functions["_variables"] = variables  
+    functions["_variables"] = variables
 
+    # Registrar funciones FN antes de ejecutar el resto
     for node in ast:
         if node[0] == "FN":
             _, fn_name, params, body = node
@@ -340,8 +364,70 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         node = ast[i]
         tag = node[0]
 
-        if tag == "FN":
-            pass
+        # --- Soporte para USE con o sin comillas ---
+        if tag == "USE":
+            _, module_path = node
+            if module_path.startswith('"') and module_path.endswith('"'):
+                base_name = module_path[1:-1]
+            else:
+                base_name = module_path
+
+            # 1. Buscar .orion en cwd
+            orion_file = os.path.join(os.getcwd(), base_name + ".orion")
+            # 2. Buscar .py en modules/ (ruta absoluta desde core/)
+            py_file = os.path.join(os.path.dirname(__file__), "..", "modules", base_name + ".py")
+            py_file = os.path.abspath(py_file)
+            
+            print(f"[DEBUG USE] Cargando módulo: {base_name}")
+
+            if os.path.exists(orion_file):
+                with open(orion_file, "r", encoding="utf-8") as f:
+                    code = f.read()
+                from core.lexer import lex
+                from core.parser import parse
+                imported_tokens = lex(code)
+                imported_ast = parse(imported_tokens)
+                evaluate(imported_ast, variables, functions)
+            elif os.path.exists(py_file):
+                module_name = base_name
+                if module_name not in sys.modules:
+                    spec = importlib.util.spec_from_file_location(module_name, py_file)
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = mod
+                    spec.loader.exec_module(mod)
+                mod = sys.modules[module_name]
+                variables[module_name] = mod
+
+                # Registrar todas las funciones públicas del módulo como globales
+                for attr in dir(mod):
+                    if not attr.startswith("_"):
+                        fn = getattr(mod, attr)
+                        if callable(fn):
+                            # Asigna directamente el nombre sin prefijo
+                            variables[attr] = fn
+
+                # Si el módulo es "log", registrar alias cortos y accesos directos globales
+                if module_name == "log":
+                    variables.update({
+                        "trace_start": mod.trace_start,
+                        "trace_end": mod.trace_end,
+                        "divider": mod.divider,
+                        "progress": mod.progress,
+                        "info": mod.info,
+                        "ok": mod.ok,
+                        "warn": mod.warn,
+                        "error": mod.error,
+                        "debug": mod.debug,
+                    })
+            else:
+                raise OrionRuntimeError(f"No se encontró el módulo: {orion_file} ni {py_file}")
+            i += 1
+            continue
+
+        elif tag == "FN":
+            # Ya registradas antes del bucle
+            i += 1
+            continue
 
         elif tag == "ASSIGN":
             _, name, value = node
@@ -458,9 +544,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
     if not inside_fn:
         if "main" in functions:
             main_def = functions["main"][0]  # Toma la primera definición
-            # Accede por claves del dict, no por índices
             params = main_def.get("params", [])
             body = main_def.get("body", [])
             return evaluate(body, variables, functions, inside_fn=True)
-        # Si no hay main, simplemente terminamos
         return None
