@@ -42,6 +42,7 @@ def join(*parts):
 
 def exists(path):
     """¿Existe el archivo o directorio?"""
+    path = _to_str_path(path)
     return Path(path).exists()
 
 def is_file(path):
@@ -57,18 +58,21 @@ def is_dir(path):
 
 def read(path, binary=False):
     """Lee el contenido de un archivo."""
+    path = _to_str_path(path)
     mode = "rb" if binary else "r"
     with open(path, mode, encoding=None if binary else "utf-8") as f:
         return f.read()
 
 def write(path, content, binary=False):
     """Escribe contenido en un archivo (sobrescribe)."""
+    path = _to_str_path(path)
     mode = "wb" if binary else "w"
     with open(path, mode, encoding=None if binary else "utf-8") as f:
         f.write(content)
 
 def append(path, content):
     """Agrega texto al final de un archivo."""
+    path = _to_str_path(path)
     with open(path, "a", encoding="utf-8") as f:
         f.write(content)
 
@@ -287,3 +291,9 @@ def ensure(path, default=""):
     if not exists(path):
         write(path, default)
     return path
+
+def _to_str_path(p):
+    # Convierte OrionString a str nativo si es necesario
+    if hasattr(p, "value"):
+        return str(p.value)
+    return str(p)

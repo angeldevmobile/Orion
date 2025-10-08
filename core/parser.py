@@ -30,7 +30,7 @@ def parse_primary(tokens, i):
     kind, value = tokens[i]
 
     # --- If como expresión (if cond { expr1 } else { expr2 }) ---
-    if kind == "IF":
+    if kind == "IF" or (kind == "IDENT" and value == "if"):
         condition, i = parse_expression(tokens, i + 1)
 
         # bloque o expresión verdadera
@@ -41,7 +41,7 @@ def parse_primary(tokens, i):
 
         # bloque o expresión falsa (opcional)
         else_branch = None
-        if i < len(tokens) and tokens[i][0] == "ELSE":
+        if i < len(tokens) and (tokens[i][0] == "ELSE" or (tokens[i][0] == "IDENT" and tokens[i][1] == "else")):
             i += 1
             if i < len(tokens) and tokens[i][0] == "LBRACE":
                 else_branch, i = parse_block(tokens, i)
@@ -71,6 +71,9 @@ def parse_primary(tokens, i):
             if tokens[i][0] not in ("STRING", "IDENT"):
                 raise OrionSyntaxError("Se esperaba una clave STRING o IDENT en el diccionario")
             key = tokens[i][1]
+            # Limpia las comillas si es STRING
+            if tokens[i][0] == "STRING":
+                key = key[1:-1]  # elimina la primera y última comilla
             i += 1
             if i >= len(tokens) or tokens[i][0] != "COLON":
                 raise OrionSyntaxError("Se esperaba ':' en el diccionario")
@@ -214,31 +217,41 @@ def parse_block(tokens, i):
 
     while i < len(tokens) and tokens[i][0] != "RBRACE":
         kind = tokens[i][0]
+        value = tokens[i][1] if len(tokens[i]) > 1 else None
 
-        if kind == "PRINT":
-            if i+1 >= len(tokens) or tokens[i+1][0] != "LPAREN":
-                raise OrionSyntaxError("Se esperaba '(' después de show")
+        # Soporte para 'use'
+        if kind == "USE":
+            if i+1 >= len(tokens) or tokens[i+1][0] not in ("STRING", "IDENT"):
+                raise OrionSyntaxError("Se esperaba una cadena o identificador después de 'use'")
+            module_path = tokens[i+1][1]
+            stmts.append(("USE", module_path))
+            i += 2
+            continue
 
-            args, i = parse_call_args(tokens, i+1)
-            stmts.append(("CALL", "show", args))
+        # Soporte para FN como palabra clave o como IDENT "fn"
+        elif kind == "FN" or (kind == "IDENT" and value == "fn"):
+            if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
+                raise OrionSyntaxError("Se esperaba un nombre de función después de 'fn'")
+            fn_name = tokens[i+1][1]
 
-        elif kind == "TYPE":
-            type_name = tokens[i][1]
-            if i+1 < len(tokens) and tokens[i+1][0] == "IDENT":
-                var_name = tokens[i+1][1]
-                if i+2 < len(tokens) and tokens[i+2][0] == "ASSIGN":
-                    expr_value, i = parse_expression(tokens, i+3)
-                    stmts.append(("DECLARE", type_name, var_name, expr_value))
-                else:
-                    stmts.append(("DECLARE", type_name, var_name, None))
-                    i += 2
-            else:
-                i += 1
+            # Parámetros
+            if i+2 >= len(tokens) or tokens[i+2][0] != "LPAREN":
+                raise OrionSyntaxError("Se esperaba '(' después del nombre de función")
+            params, j = parse_fn_params(tokens, i+2)
 
-        elif kind == "IDENT":
-            var_name = tokens[i][1]
+            # Cuerpo
+            if j >= len(tokens) or tokens[j][0] != "LBRACE":
+                raise OrionSyntaxError("Se esperaba '{' al inicio del cuerpo de la función")
+            body, j = parse_block(tokens, j)
+
+            stmts.append(("FN", fn_name, params, body))
+            i = j
+            continue
+
+        if kind == "IDENT":
             # Asignación
             if i+1 < len(tokens) and tokens[i+1][0] == "ASSIGN":
+                var_name = tokens[i][1]
                 expr_value, i = parse_expression(tokens, i+2)
                 stmts.append(("ASSIGN", var_name, expr_value))
             # Llamada a función
@@ -296,6 +309,24 @@ def parse_block(tokens, i):
             # En parse_block:
             stmts.append(("FOR", var_name, start, end, body, range_type))
             i = j
+        elif kind == "FN":
+            if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
+                raise OrionSyntaxError("Se esperaba un nombre de función después de 'fn'")
+            fn_name = tokens[i+1][1]
+
+            # Parámetros
+            if i+2 >= len(tokens) or tokens[i+2][0] != "LPAREN":
+                raise OrionSyntaxError("Se esperaba '(' después del nombre de función")
+            params, j = parse_fn_params(tokens, i+2)
+
+            # Cuerpo
+            if j >= len(tokens) or tokens[j][0] != "LBRACE":
+                raise OrionSyntaxError("Se esperaba '{' al inicio del cuerpo de la función")
+            body, j = parse_block(tokens, j)
+
+            stmts.append(("FN", fn_name, params, body))
+            i = j
+
 
         # MATCH
         elif kind == "MATCH":
@@ -344,6 +375,31 @@ def parse(tokens):
     i = 0
     while i < len(tokens):
         kind = tokens[i][0]
+        value = tokens[i][1] if len(tokens[i]) > 1 else None
+        
+        # Soporte para bucles FOR en el nivel superior
+        if kind == "FOR":
+            if tokens[i+1][0] != "IDENT":
+                raise OrionSyntaxError("Se esperaba un identificador después de 'for'")
+            var_name = tokens[i+1][1]
+
+            if tokens[i+2][0] != "IN":
+                raise OrionSyntaxError("Se esperaba 'in' en el bucle for")
+
+            start, j = parse_expression(tokens, i+3)
+
+            if j >= len(tokens) or tokens[j][0] not in ("RANGE", "RANGE_EX"):
+                raise OrionSyntaxError("Se esperaba '..' o '..<' en el bucle for")
+            range_type = tokens[j][0]
+            j += 1
+
+            end, j = parse_expression(tokens, j)
+
+            body, j = parse_block(tokens, j)
+
+            ast.append(("FOR", var_name, start, end, body, range_type))
+            i = j
+            continue
 
         # Soporte para 'use'
         if kind == "USE":
@@ -354,7 +410,8 @@ def parse(tokens):
             i += 2
             continue
 
-        if kind == "FN":
+        # Soporte para FN como palabra clave o como IDENT "fn"
+        if kind == "FN" or (kind == "IDENT" and value == "fn"):
             fn_name = tokens[i+1][1]
             i += 2  # saltamos FN y nombre
             params = []
@@ -375,21 +432,9 @@ def parse(tokens):
                 raise OrionSyntaxError("Se esperaba '{' después de la declaración de función.")
             body, i = parse_block(tokens, i)
             ast.append(("FN", fn_name, params, body))
+            continue
 
-        elif kind == "TYPE":
-            type_name = tokens[i][1]
-            if i+1 < len(tokens) and tokens[i+1][0] == "IDENT":
-                var_name = tokens[i+1][1]
-                if i+2 < len(tokens) and tokens[i+2][0] == "ASSIGN":
-                    expr_value, i = parse_expression(tokens, i+3)
-                    ast.append(("DECLARE", type_name, var_name, expr_value))
-                else:
-                    ast.append(("DECLARE", type_name, var_name, None))
-                    i += 2
-            else:
-                i += 1
-
-        elif kind == "IDENT":
+        if kind == "IDENT":
             # Asignación
             if i+1 < len(tokens) and tokens[i+1][0] == "ASSIGN":
                 var_name = tokens[i][1]
@@ -453,3 +498,17 @@ def parse(tokens):
             i += 1
 
     return ast
+
+def parse_fn_params(tokens, i):
+    """Parsea los parámetros de una función."""
+    if tokens[i][0] != "LPAREN":
+        raise OrionSyntaxError("Se esperaba '(' al inicio de los parámetros")
+    i += 1
+    params = []
+    while i < len(tokens) and tokens[i][0] != "RPAREN":
+        if tokens[i][0] == "IDENT":
+            params.append(tokens[i][1])
+        i += 1
+    if i >= len(tokens) or tokens[i][0] != "RPAREN":
+        raise OrionSyntaxError("Se esperaba ')' al final de los parámetros")
+    return params, i + 1

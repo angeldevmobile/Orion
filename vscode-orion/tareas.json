@@ -1,0 +1,14 @@
+[
+  {
+    "nombre": "Revisar correo",
+    "completada": false
+  },
+  {
+    "nombre": "Subir reporte",
+    "completada": false
+  },
+  {
+    "nombre": "Reunión equipo",
+    "completada": false
+  }
+]

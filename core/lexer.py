@@ -15,11 +15,9 @@ def lex(code):
         ("NUMBER",   r"\d+(\.\d+)?"),
         ("STRING",   r'"[^"]*"'),
 
-        # --- Identificadores (antes de las palabras clave para funciones como forge, fuse, etc.) ---
-        ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),
-
         # --- Palabras clave ---
         ("PRINT",    r"\bshow\b"),
+        # ("CODE",     r"\bcode\b"),
         ("RETURN",   r"\breturn\b"),
         ("FN",       r"\bfn\b"),
         ("MATCH",    r"\bmatch\b"),
@@ -33,6 +31,9 @@ def lex(code):
         ("YES",      r"\byes\b"),
         ("NO",       r"\bno\b"),
         ("TYPE",     r"\b(int|float|bool|string)\b"),
+
+        # --- Identificadores (debe ir después de las palabras clave) ---
+        ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),
 
         # --- Operadores y símbolos ---
         ("RANGE_EX", r"\.\.<"),
@@ -83,7 +84,7 @@ def lex(code):
             tokens.append(("BOOL", OrionBool(False)))
 
         elif kind in (
-            "IDENT", "OP", "PRINT", "FOR", "IF", "ELSE", "ASSIGN",
+            "IDENT", "OP", "PRINT", "CODE", "FOR", "IF", "ELSE", "ASSIGN",
             "RANGE", "RANGE_EX", "COMPARE", "LBRACE", "RBRACE",
             "LPAREN", "RPAREN", "FN", "RETURN", "TYPE",
             "AND", "OR", "NOT", "MATCH", "USE",

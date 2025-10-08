@@ -1,16 +1,17 @@
 """
 Loader de módulos del sistema Orion.
-Permite: use fs, use json, use net, use log
+Permite: use fs, use json, use net, use log, etc.
 """
 
 import importlib
+import inspect
 
 _loaded_modules = {}
 
 def load_module(env: dict, name: str):
     """
     Carga dinámicamente un módulo Orion del directorio modules/
-    y lo registra en el entorno.
+    y registra sus funciones en el entorno global.
     """
     if name in _loaded_modules:
         return _loaded_modules[name]
@@ -21,25 +22,15 @@ def load_module(env: dict, name: str):
         raise RuntimeError(f"Módulo '{name}' no encontrado en Orion")
 
     exports = {}
-    for key, val in mod.__dict__.items():
-        if not key.startswith("_") and callable(val):
+
+    # Registrar funciones públicas
+    for key, val in inspect.getmembers(mod, inspect.isfunction):
+        if not key.startswith("_"):
             exports[key] = val
+            env[key] = val  #  Disponible globalmente (p. ej. progress, trace_start)
 
-    env[name] = exports
-    _loaded_modules[name] = exports
+    env[name] = mod
+    _loaded_modules[name] = mod
 
-    # --- 🚀 registrar funciones globales para "log"
-    if name == "log":
-        env.update({
-            "trace_start": mod.trace_start,
-            "trace_end": mod.trace_end,
-            "divider": mod.divider,
-            "progress": mod.progress,
-            "info": mod.info,
-            "ok": mod.ok,
-            "warn": mod.warn,
-            "error": mod.error,
-            "debug": mod.debug,
-        })
-
+    print(f"[Orion] Módulo '{name}' cargado con {len(exports)} funciones exportadas.")
     return exports

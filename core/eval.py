@@ -2,6 +2,8 @@ import importlib.util
 import sys
 import os
 import types
+
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from core.control import eval_match
 from core.functions import register_function, get_function, register_native_function
 from core.types import (
@@ -19,11 +21,21 @@ from core.errors import (
     OrionFunctionError,
 )
 
+from modules import json as orion_json
 from lib import collections
+from modules import code, show
 from lib import io
 from lib import math as orion_math
 from lib import strings
 
+NATIVE_FUNCTIONS = {
+    "trace_start": code.trace_start,
+    "trace_end": code.trace_end,
+    "progress": code.progress,
+    "divider": code.divider,
+    "frame": code.frame,
+    "show": show.show,
+}
 def lookup_variable(name, variables):
     """Busca una variable en el scope actual."""
     if name in variables:
@@ -232,10 +244,10 @@ def eval_expr(expr, variables, functions):
             fn_def = get_function(functions, fn_name)
 
             # 2. Si no está, buscar en variables (funciones importadas)
-            if fn_def is None and fn_name in variables and callable(variables[fn_name]):
+            if fn_def is None and fn_name in NATIVE_FUNCTIONS:
                 fn_def = {
                     "type": "NATIVE_FN",
-                    "impl": variables[fn_name]
+                    "impl": NATIVE_FUNCTIONS[fn_name]
                 }
 
             if not fn_def:
@@ -364,7 +376,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         node = ast[i]
         tag = node[0]
 
-        # --- Soporte para USE con o sin comillas ---
+                # --- Soporte para USE con o sin comillas ---
         if tag == "USE":
             _, module_path = node
             if module_path.startswith('"') and module_path.endswith('"'):
@@ -372,55 +384,45 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             else:
                 base_name = module_path
 
-            # 1. Buscar .orion en cwd
-            orion_file = os.path.join(os.getcwd(), base_name + ".orion")
-            # 2. Buscar .py en modules/ (ruta absoluta desde core/)
-            py_file = os.path.join(os.path.dirname(__file__), "..", "modules", base_name + ".py")
-            py_file = os.path.abspath(py_file)
-            
             print(f"[DEBUG USE] Cargando módulo: {base_name}")
 
+            # --- Orion stdlib ---
+            if base_name == "json":
+                variables["json"] = orion_json
+                print(f"[DEBUG] Módulo Orion stdlib '{base_name}' importado")
+                i += 1
+                continue
+
+            #  Rutas posibles
+            orion_file = os.path.join(os.getcwd(), base_name + ".orion")
+            py_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "modules", base_name + ".py"))
+
+            #  Si existe un módulo Orion local
             if os.path.exists(orion_file):
-                with open(orion_file, "r", encoding="utf-8") as f:
-                    code = f.read()
                 from core.lexer import lex
                 from core.parser import parse
+                with open(orion_file, "r", encoding="utf-8") as f:
+                    code = f.read()
                 imported_tokens = lex(code)
                 imported_ast = parse(imported_tokens)
                 evaluate(imported_ast, variables, functions)
+                print(f"[DEBUG] Módulo Orion '{base_name}' ejecutado")
+
+            # Si existe un módulo Python en /modules/
             elif os.path.exists(py_file):
-                module_name = base_name
-                if module_name not in sys.modules:
-                    spec = importlib.util.spec_from_file_location(module_name, py_file)
-                    mod = importlib.util.module_from_spec(spec)
-                    sys.modules[module_name] = mod
-                    spec.loader.exec_module(mod)
-                mod = sys.modules[module_name]
-                variables[module_name] = mod
+                import sys
+                sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+                from modules import load_module
+                mod_exports = load_module(variables, base_name)
+                print(f"[DEBUG] Módulo Python '{base_name}' cargado con {len(mod_exports)} funciones")
 
-                # Registrar todas las funciones públicas del módulo como globales
-                for attr in dir(mod):
-                    if not attr.startswith("_"):
-                        fn = getattr(mod, attr)
-                        if callable(fn):
-                            # Asigna directamente el nombre sin prefijo
-                            variables[attr] = fn
+                for fname, fref in mod_exports.items():
+                    if callable(fref):
+                        register_native_function(functions, fname, fref)
 
-                # Si el módulo es "log", registrar alias cortos y accesos directos globales
-                if module_name == "log":
-                    variables.update({
-                        "trace_start": mod.trace_start,
-                        "trace_end": mod.trace_end,
-                        "divider": mod.divider,
-                        "progress": mod.progress,
-                        "info": mod.info,
-                        "ok": mod.ok,
-                        "warn": mod.warn,
-                        "error": mod.error,
-                        "debug": mod.debug,
-                    })
             else:
                 raise OrionRuntimeError(f"No se encontró el módulo: {orion_file} ni {py_file}")
+
             i += 1
             continue
 
@@ -487,8 +489,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         elif tag == "PRINT":
             _, value = node
             val = eval_expr(value, variables, functions)
-            from lib.io import show
-            show(val, env=variables)
+            show.show(val)
 
         elif tag == "FOR":
             _, var_name, start, end, body, range_type = node
@@ -502,17 +503,31 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 raise OrionTypeError(f"El rango debe ser numérico, se recibió end={end_val}")
 
             if range_type == "RANGE":
-                rng = range(start_val, end_val + 1)
+                rng = range(int(start_val), int(end_val) + 1)
             elif range_type == "RANGE_EX":
-                rng = range(start_val, end_val)
+                rng = range(int(start_val), int(end_val))
             else:
                 raise OrionRuntimeError(f"Tipo de rango no soportado: {range_type}")
 
+            # Guardar valor previo (por si la variable ya existía antes)
+            prev_value = variables.get(var_name)
+
             for j in rng:
+                # Registrar variable del bucle en el mismo scope
                 variables[var_name] = j
+
+                # Ejecutar cuerpo del bucle
                 result = evaluate(body, variables, functions, inside_fn=True)
+
+                # Si el cuerpo devuelve algo (por ejemplo, un return), propágalo
                 if inside_fn and result is not None:
                     return result
+
+            # Limpieza del scope (restaurar o eliminar variable)
+            if prev_value is not None:
+                variables[var_name] = prev_value
+            elif var_name in variables:
+                del variables[var_name]
 
         elif tag == "IF":
             _, condition, body_true, body_false = node

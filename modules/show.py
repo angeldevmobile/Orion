@@ -1,21 +1,18 @@
-# modules/show.py
-import log
+import modules.code as code
+import lib.io as io
 
-def show(*args, level="ok", module="orion"):
-    """
-    Función universal de Orion para mostrar mensajes usando log.py
-    """
+def show(*args, level="ok", module="orion", env=None):
     mensaje = " ".join(str(a) for a in args)
 
     if level == "info":
-        log.info(mensaje, module=module)
+        code.info(mensaje, module=module)
     elif level == "warn":
-        log.warn(mensaje, module=module)
+        code.warn(mensaje, module=module)
     elif level == "error":
-        log.error(mensaje, module=module)
+        code.error(mensaje, module=module)
     elif level == "debug":
-        log.debug(mensaje, module=module)
+        code.debug(mensaje, module=module)
     elif level == "proc":
-        log.progress(module, mensaje, 100)  # Para progreso completo
+        code.progress(module, mensaje, 100)
     else:
-        log.ok(mensaje, module=module)
+        io.show(*args, env=env)  # usa el show futurista de io.py

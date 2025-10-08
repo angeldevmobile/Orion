@@ -284,6 +284,83 @@ class OrionList:
         return self.items[-1] if self.items else None
 
 # ===============================
+# OrionDict
+# ===============================
+class OrionDict:
+    """Diccionario nativo de Orion con semántica futurista."""
+    def __init__(self, value=None):
+        # Acepta tanto un dict como None
+        self.value = dict(value or {})
+
+    def __str__(self):
+        return "{" + ", ".join(f"{k}: {v}" for k, v in self.value.items()) + "}"
+
+    def __repr__(self):
+        return f"OrionDict({self.value})"
+
+    # ===============================
+    #   ACCESO Y MODIFICACIÓN
+    # ===============================
+    def __getitem__(self, key):
+        try:
+            return self.value[key]
+        except KeyError:
+            raise KeyError(f"Clave '{key}' no encontrada en OrionDict")
+
+    def __setitem__(self, key, val):
+        self.value[key] = val
+
+    def __delitem__(self, key):
+        if key in self.value:
+            del self.value[key]
+        else:
+            raise KeyError(f"No se puede eliminar clave inexistente '{key}'")
+
+    def __len__(self):
+        return len(self.value)
+
+    def keys(self):
+        return list(self.value.keys())
+
+    def values(self):
+        return list(self.value.values())
+
+    def items(self):
+        return list(self.value.items())
+
+    def has(self, key):
+        """Verifica si la clave existe."""
+        return OrionBool(key in self.value)
+
+    def merge(self, other):
+        """Fusiona con otro dict o OrionDict."""
+        new = self.value.copy()
+        if isinstance(other, OrionDict):
+            new.update(other.value)
+        else:
+            new.update(other)
+        return OrionDict(new)
+
+    def clone(self):
+        """Copia profunda."""
+        return OrionDict(self.value.copy())
+
+    def remove(self, key):
+        """Elimina una clave si existe."""
+        if key in self.value:
+            del self.value[key]
+        return self
+
+    def clear(self):
+        """Limpia todas las claves."""
+        self.value.clear()
+        return self
+
+    def map(self, fn):
+        """Aplica una función a cada (clave, valor)."""
+        return OrionList([fn(k, v) for k, v in self.value.items()])
+
+# ===============================
 # Operador Null-safe
 # ===============================
 def null_safe(obj, attr):
