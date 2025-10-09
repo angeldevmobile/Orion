@@ -69,8 +69,11 @@ def _write_file(line):
 # ===== Core Line Formatter =====
 def _line(level, module, message, color, bg=None):
     ts = _timestamp()
+    # Nivel con fondo y negrita
     lvl = f"{(bg or color)}{BOLD}[{level:<5}]{RESET}"
-    mod = f"{FG['gray']}[{module.upper()}]{RESET}"
+    # Módulo en magenta y negrita
+    mod = f"{FG['magenta']}{BOLD}[{module.upper()}]{RESET}"
+    # Mensaje en color
     msg = f"{color}{message}{RESET}"
 
     line = f"{ts} {lvl} {mod} → {msg}" if MODE == "extended" else f"{lvl} {mod} {msg}"
@@ -88,26 +91,26 @@ def debug(message, module="system"): print(_line("DEBUG", module, message, FG["g
 # ===== Visual Enhancements =====
 def divider(title=""):
     width = _width()
-    pad = "─" * (width - len(title) - 2)
-    line = f"{FG['white']}{BOLD}{title} {pad}{RESET}"
+    pad = f"{FG['cyan']}{'─' * (width - len(title) - 2)}{RESET}"
+    line = f"{FG['yellow']}{BOLD}{title} {pad}{RESET}"
     _write_file(line)
     print(line)
 
 def frame(title):
     width = _width()
-    pad = "═" * (width - len(title) - 2)
-    print(f"{FG['magenta']}╔ {title} {pad}{RESET}")
-    print(f"{FG['magenta']}╚{'═' * (width - 1)}{RESET}")
+    pad = f"{FG['magenta']}{'═' * (width - len(title) - 2)}{RESET}"
+    print(f"{FG['magenta']}{BOLD}╔ {title} {pad}{RESET}")
+    print(f"{FG['magenta']}{BOLD}╚{FG['magenta']}{'═' * (width - 1)}{RESET}")
 
 def progress(module, step, percent):
     bar_len = 40
     filled = int(bar_len * percent / 100)
-    bar = "█" * filled + "░" * (bar_len - filled)
+    bar = f"{FG['green']}{'█' * filled}{FG['gray']}{'░' * (bar_len - filled)}{RESET}"
     line = _line("PROC", module, f"{step} {bar} {percent}%", FG["cyan"])
     print(line, end="\r" if percent < 100 else "\n")
 
 def trace_start(title="TRACE START"):
-    divider(f"── {title} ──")
+    divider(f"{FG['cyan']}{BOLD}── {title} ──{RESET}")
 
 def trace_end(title="TRACE END"):
-    divider(f"── {title} ──")
+    divider(f"{FG['green']}{BOLD}── {title} ──{RESET}")

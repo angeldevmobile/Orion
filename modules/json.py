@@ -254,3 +254,10 @@ def decrypt(raw, key):
     """Decrypts a JSON object previously encrypted with encrypt()."""
     plain = "".join(chr(ord(c) ^ key) for c in raw)
     return parse(plain)
+
+def stream_emit(path, obj, on_chunk=None):
+    native = _to_native(obj)
+    raw = json.dumps(native, indent=2)
+    for i in range(0, len(raw), 512):
+        chunk = raw[i:i+512]
+        on_chunk(chunk)

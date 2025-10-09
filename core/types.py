@@ -10,7 +10,8 @@ from datetime import datetime
 # ===============================
 class OrionString:
     """String de Orion con interpolación dinámica futurista."""
-    INTERP_RE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+    # Patrón actualizado para manejar acceso a atributos como ${obj.prop}
+    INTERP_RE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
 
     def __init__(self, value: str):
         self.value = str(value)
@@ -22,13 +23,35 @@ class OrionString:
         return OrionString(self.value + str(other))
 
     def interpolate(self, env: dict):
-        """Reemplaza ${var} por su valor en el entorno."""
+        """Reemplaza ${var} o ${obj.prop} por su valor en el entorno."""
         def repl(m):
-            name = m.group(1)
-            if name in env:
-                val = env[name]
-                return str(val)
-            return ""  # si no existe, se reemplaza por vacío
+            expr = m.group(1)
+            
+            # Si contiene punto, es acceso a propiedad
+            if '.' in expr:
+                parts = expr.split('.')
+                obj_name = parts[0]
+                
+                if obj_name in env:
+                    obj = env[obj_name]
+                    # Navegar por las propiedades
+                    for prop in parts[1:]:
+                        if hasattr(obj, prop):
+                            obj = getattr(obj, prop)
+                        elif isinstance(obj, dict) and prop in obj:
+                            obj = obj[prop]
+                        else:
+                            return f"${{{expr}}}"  # Retorna original si no se encuentra
+                    return str(obj)
+                else:
+                    return f"${{{expr}}}"  # Retorna original si no se encuentra
+            else:
+                # Variable simple
+                if expr in env:
+                    val = env[expr]
+                    return str(val)
+                return f"${{{expr}}}"  # Retorna original si no se encuentra
+                
         return OrionString(self.INTERP_RE.sub(repl, self.value))
 
     # --- Métodos adicionales ---

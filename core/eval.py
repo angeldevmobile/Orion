@@ -57,6 +57,18 @@ def _register_builtin_functions(functions):
     # Registrar funciones nativas de Python necesarias
     register_native_function(functions, "len", len)
 
+def eval_call_args(args, variables, functions):
+    pos_args = []
+    kw_args = {}
+    for arg in args:
+        if isinstance(arg, tuple) and arg[0] == "NAMED_ARG":
+            name = arg[1]
+            value = eval_expr(arg[2], variables, functions)
+            kw_args[name] = to_native(value)
+        else:
+            pos_args.append(to_native(eval_expr(arg, variables, functions)))
+    return pos_args, kw_args
+
 def eval_expr(expr, variables, functions):
     # 1. Caso nulo
     if expr is None:
@@ -240,86 +252,101 @@ def eval_expr(expr, variables, functions):
         elif tag == "CALL":
             _, fn_name, args = expr
 
-            # 1. Buscar en functions (funciones de usuario)
             fn_def = get_function(functions, fn_name)
-
-            # 2. Si no está, buscar en variables (funciones importadas)
             if fn_def is None and fn_name in NATIVE_FUNCTIONS:
                 fn_def = {
                     "type": "NATIVE_FN",
                     "impl": NATIVE_FUNCTIONS[fn_name]
                 }
-
             if not fn_def:
                 raise OrionFunctionError(f"Función no definida: {fn_name}")
 
+            pos_args, kw_args = eval_call_args(args, variables, functions)
+
             # Función nativa
             if fn_def["type"] == "NATIVE_FN":
-                arg_vals = [eval_expr(a, variables, functions) for a in args]
-                # Convierte OrionString a str antes de llamar la función nativa
-                arg_vals = [str(a) if isinstance(a, OrionString) else a for a in arg_vals]
-                return fn_def["impl"](*arg_vals)
+                # Procesar argumentos especialmente para show
+                if fn_name == "show":
+                    processed_args = []
+                    for i, arg in enumerate(args):
+                        if isinstance(arg, str) and arg.startswith('"') and arg.endswith('"'):
+                            raw = arg[1:-1]  # Quitar comillas
+                            orion_str = OrionString(raw)
+                            interpolated = orion_str.interpolate(variables)
+                            processed_args.append(str(interpolated))
+                        else:
+                            processed_args.append(pos_args[i])
+                    return fn_def["impl"](*processed_args, **kw_args)
+                else:
+                    pos_args = [str(a) if isinstance(a, OrionString) else a for a in pos_args]
+                    return fn_def["impl"](*pos_args, **kw_args)
 
             # Función definida por usuario
             params = fn_def.get("params", [])
             body = fn_def.get("body", [])
-            if len(args) != len(params):
+            if len(pos_args) != len(params):
                 raise OrionFunctionError(
-                    f"Argumentos esperados: {len(params)}, recibidos: {len(args)}"
+                    f"Argumentos esperados: {len(params)}, recibidos: {len(pos_args)}"
                 )
-
             local_vars = variables.copy()
-            for p, a in zip(params, args):
-                local_vars[p] = eval_expr(a, local_vars, functions)
-
+            for p, a in zip(params, pos_args):
+                local_vars[p] = a
+            local_vars.update(kw_args)
             if callable(body):
                 arg_vals = [local_vars[p] for p in params]
                 return body(*arg_vals)
             else:
                 return evaluate(body, local_vars, functions, inside_fn=True)
 
-        # --- RETURN ---
-        elif tag == "RETURN":
-            _, value = expr
-            return eval_expr(value, variables, functions) if value is not None else None
-
-        # --- MATCH ---
-        elif tag == "MATCH":
-            _, expr_val, cases = expr
-            val = eval_expr(expr_val, variables, functions)
-            return eval_match(val, cases, evaluate, variables)
-
-        # --- NULL_SAFE ---
-        elif tag == "NULL_SAFE":
-            _, obj, attr = expr
-            obj_val = eval_expr(obj, variables, functions)
-            return null_safe(obj_val, attr)
+        # --- CALL_METHOD ---
+        elif tag == "CALL_METHOD":
+            _, method_name, obj_expr, args = expr
+            obj_val = eval_expr(obj_expr, variables, functions)
+            pos_args, kw_args = eval_call_args(args, variables, functions)
+            if hasattr(orion_math, method_name):
+                fn = getattr(orion_math, method_name)
+                return fn(obj_val, *pos_args, **kw_args)
+            method = getattr(obj_val, method_name, None)
+            if callable(method):
+                return method(*pos_args, **kw_args)
+            raise OrionFunctionError(
+                f"Método '{method_name}' no definido en lib.math ni en el objeto."
+            )
 
         # --- ATTR_ACCESS ---
         elif tag == "ATTR_ACCESS":
             _, obj_expr, attr_name = expr
             obj_val = eval_expr(obj_expr, variables, functions)
+            # Si es una instancia de clase, accede al atributo directamente
             if hasattr(obj_val, attr_name):
-                return getattr(obj_val, attr_name)
+                val = getattr(obj_val, attr_name)
+                # Si el valor es una propiedad o método, evalúalo si es necesario
+                if callable(val):
+                    return val()
+                return val
+            # Si es un diccionario
             elif isinstance(obj_val, dict) and attr_name in obj_val:
                 return obj_val[attr_name]
             else:
                 raise OrionRuntimeError(f"Atributo '{attr_name}' no encontrado en objeto.")
 
-        # --- CALL_METHOD ---
-        elif tag == "CALL_METHOD":
-            _, method_name, obj_expr, args = expr
-            obj_val = eval_expr(obj_expr, variables, functions)
-            arg_vals = [eval_expr(a, variables, functions) for a in args]
-            if hasattr(orion_math, method_name):
-                fn = getattr(orion_math, method_name)
-                return fn(obj_val, *arg_vals)
-            method = getattr(obj_val, method_name, None)
-            if callable(method):
-                return method(*arg_vals)
-            raise OrionFunctionError(
-                f"Método '{method_name}' no definido en lib.math ni en el objeto."
-            )
+        # --- NULL_SAFE ---
+        elif tag == "NULL_SAFE":
+            # NULL_SAFE: ('NULL_SAFE', object_expr, attr_name)
+            _, object_expr, attr_name = expr
+            obj = eval_expr(object_expr, variables, functions)
+            
+            # Si el objeto es null/None, devolver null
+            if obj is None:
+                return None
+            
+            # Si el objeto tiene el atributo, devolverlo
+            if hasattr(obj, attr_name):
+                return getattr(obj, attr_name)
+            elif isinstance(obj, dict) and attr_name in obj:
+                return obj[attr_name]
+            else:
+                return None
 
     # 5. Tipos básicos
     if isinstance(expr, bool):
@@ -329,6 +356,21 @@ def eval_expr(expr, variables, functions):
         return expr
 
     if isinstance(expr, str):
+        if expr.startswith('"') and expr.endswith('"'):
+            content = expr[1:-1]  # Quitar comillas
+            # Interpolación de variables ${variable}
+            import re
+            def replace_var(match):
+                var_name = match.group(1)
+                if var_name in variables:
+                    val = variables[var_name]
+                    if hasattr(val, 'value'):
+                        return str(val.value)
+                    return str(val)
+                return match.group(0)  # Si no existe la variable, dejar como está
+            
+            interpolated = re.sub(r'\$\{(\w+)\}', replace_var, content)
+            return interpolated
         if expr in ("true", "yes"):
             return True
         if expr in ("false", "no"):
@@ -339,8 +381,10 @@ def eval_expr(expr, variables, functions):
             return float(expr)
         if expr.startswith('"') and expr.endswith('"'):
             raw = expr.strip('"')
-            interpolated = OrionString(raw).interpolate(variables)
-            return interpolated
+            # Crear OrionString, interpolar y retornar el valor interpolado
+            orion_str = OrionString(raw)
+            interpolated = orion_str.interpolate(variables)
+            return str(interpolated)  # Convertir a string nativo
         if expr in variables:
             return lookup_variable(expr, variables)
         return expr
@@ -529,6 +573,66 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             elif var_name in variables:
                 del variables[var_name]
 
+        elif tag == "FOR_IN":
+            # FOR_IN: ('FOR_IN', var_name, collection_expr, body)
+            var_name, collection_expr, body = node[1], node[2], node[3]
+            collection = eval_expr(collection_expr, variables, functions)
+            # Convierte OrionList a lista nativa si es necesario
+            if hasattr(collection, "items"):
+                collection = collection.items
+            elif hasattr(collection, "value") and isinstance(collection.value, list):
+                collection = collection.value
+            prev_value = variables.get(var_name)
+            for item in collection:
+                variables[var_name] = item
+                result = evaluate(body, variables, functions, inside_fn=True)
+                if inside_fn and result is not None:
+                    return result
+            # Limpieza del scope
+            if prev_value is not None:
+                variables[var_name] = prev_value
+            elif var_name in variables:
+                del variables[var_name]
+        
+        elif tag == "FOR_RANGE":
+            # FOR_RANGE: ('FOR_RANGE', var_name, start, end, body, range_type)
+            _, var_name, start, end, body, range_type = node
+
+            start_val = eval_expr(start, variables, functions)
+            end_val = eval_expr(end, variables, functions)
+
+            if not isinstance(start_val, (int, float)):
+                raise OrionTypeError(f"El rango debe ser numérico, se recibió start={start_val}")
+            if not isinstance(end_val, (int, float)):
+                raise OrionTypeError(f"El rango debe ser numérico, se recibió end={end_val}")
+
+            if range_type == "RANGE":
+                rng = range(int(start_val), int(end_val) + 1)
+            elif range_type == "RANGE_EX":
+                rng = range(int(start_val), int(end_val))
+            else:
+                raise OrionRuntimeError(f"Tipo de rango no soportado: {range_type}")
+
+            # Guardar valor previo (por si la variable ya existía antes)
+            prev_value = variables.get(var_name)
+
+            for j in rng:
+                # Registrar variable del bucle en el mismo scope
+                variables[var_name] = j
+
+                # Ejecutar cuerpo del bucle
+                result = evaluate(body, variables, functions, inside_fn=True)
+
+                # Si el cuerpo devuelve algo (por ejemplo, un return), propágalo
+                if inside_fn and result is not None:
+                    return result
+
+            # Limpieza del scope (restaurar o eliminar variable)
+            if prev_value is not None:
+                variables[var_name] = prev_value
+            elif var_name in variables:
+                del variables[var_name]
+
         elif tag == "IF":
             _, condition, body_true, body_false = node
             if eval_expr(condition, variables, functions):
@@ -563,3 +667,23 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             body = main_def.get("body", [])
             return evaluate(body, variables, functions, inside_fn=True)
         return None
+    
+def to_native(val):
+    from core.types import OrionList, OrionString, OrionNumber, OrionBool, OrionDate, OrionDict
+    if isinstance(val, OrionList):
+        return [to_native(v) for v in val.items]
+    if isinstance(val, OrionDict):
+        return {k: to_native(v) for k, v in val.value.items()}
+    if isinstance(val, OrionString):
+        return str(val.value)
+    if isinstance(val, OrionNumber):
+        return val.value
+    if isinstance(val, OrionBool):
+        return bool(val.value)
+    if isinstance(val, OrionDate):
+        return str(val)
+    if isinstance(val, list):
+        return [to_native(v) for v in val]
+    if isinstance(val, dict):
+        return {k: to_native(v) for k, v in val.items()}
+    return val

@@ -14,8 +14,15 @@ def parse_call_args(tokens, i):
                 i += 1
             else:
                 raise OrionSyntaxError("Se esperaba ',' entre argumentos")
-        arg, i = parse_expression(tokens, i)
-        args.append(arg)
+        # Soporte para argumentos nombrados: nombre=valor
+        if (i+1 < len(tokens)) and tokens[i][0] == "IDENT" and tokens[i+1][0] == "ASSIGN":
+            arg_name = tokens[i][1]
+            i += 2
+            arg_value, i = parse_expression(tokens, i)
+            args.append(("NAMED_ARG", arg_name, arg_value))
+        else:
+            arg, i = parse_expression(tokens, i)
+            args.append(arg)
         first = False
     if i >= len(tokens) or tokens[i][0] != "RPAREN":
         raise OrionSyntaxError("Falta ')' en llamada")
@@ -205,7 +212,11 @@ def parse_or(tokens, i):
 
 
 def parse_expression(tokens, i):
-    return parse_or(tokens, i)
+    expr, j = parse_or(tokens, i)
+    if j < len(tokens) and tokens[j][0] == "LBRACE":
+        return expr, j
+
+    return expr, j
 
 
 def parse_block(tokens, i):
@@ -228,6 +239,19 @@ def parse_block(tokens, i):
             i += 2
             continue
 
+        # Agregar soporte para PRINT dentro de bloques
+        elif kind == "PRINT":
+            # Permitir show con o sin paréntesis
+            if i+1 < len(tokens) and tokens[i+1][0] == "LPAREN":
+                # Sintaxis tradicional: show(expr)
+                args, i = parse_call_args(tokens, i+1)
+                stmts.append(("CALL", "show", args))
+            else:
+                # Sintaxis sin paréntesis: show expr
+                expr, i = parse_expression(tokens, i+1)
+                stmts.append(("CALL", "show", [expr]))
+            continue
+
         # Soporte para FN como palabra clave o como IDENT "fn"
         elif kind == "FN" or (kind == "IDENT" and value == "fn"):
             if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
@@ -248,7 +272,7 @@ def parse_block(tokens, i):
             i = j
             continue
 
-        if kind == "IDENT":
+        elif kind == "IDENT":
             # Asignación
             if i+1 < len(tokens) and tokens[i+1][0] == "ASSIGN":
                 var_name = tokens[i][1]
@@ -276,15 +300,28 @@ def parse_block(tokens, i):
                 i += 1
 
         elif kind == "IF":
-            condition, i = parse_expression(tokens, i+1)
+            # Parsear la condición
+            condition, i = parse_expression(tokens, i + 1)
+
+            # Esperar el bloque { ... } después del if
+            if i >= len(tokens) or tokens[i][0] != "LBRACE":
+                raise OrionSyntaxError("Se esperaba '{' después de la condición del if")
             body_true, i = parse_block(tokens, i)
+
+            #Verificar si existe un else
             body_false = []
             if i < len(tokens) and tokens[i][0] == "ELSE":
-                body_false, i = parse_block(tokens, i+1)
+                i += 1  # muy importante, avanza después de 'else'
+                if i < len(tokens) and tokens[i][0] == "LBRACE":
+                    body_false, i = parse_block(tokens, i)
+                else:
+                    raise OrionSyntaxError("Se esperaba '{' después de 'else'")
+
+            # Agregar el nodo al AST
             stmts.append(("IF", condition, body_true, body_false))
 
         elif kind == "FOR":
-            # for i in 1..n { ... }
+            # for i in 1..n { ... } o for h in host { ... }
             if tokens[i+1][0] != "IDENT":
                 raise OrionSyntaxError("Se esperaba un identificador después de 'for'")
             var_name = tokens[i+1][1]
@@ -292,23 +329,21 @@ def parse_block(tokens, i):
             if tokens[i+2][0] != "IN":
                 raise OrionSyntaxError("Se esperaba 'in' en el bucle for")
 
-            # expresión inicial
-            start, j = parse_expression(tokens, i+3)
+            expr, j = parse_expression(tokens, i+3)
 
-            if j >= len(tokens) or tokens[j][0] not in ("RANGE", "RANGE_EX"):
-                raise OrionSyntaxError("Se esperaba '..' o '..<' en el bucle for")
-            range_type = tokens[j][0]
-            j += 1
-
-            # expresión final
-            end, j = parse_expression(tokens, j)
-
-            # cuerpo del for
-            body, j = parse_block(tokens, j)
-
-            # En parse_block:
-            stmts.append(("FOR", var_name, start, end, body, range_type))
-            i = j
+            # Si es rango, espera RANGE/RANGE_EX
+            if j < len(tokens) and tokens[j][0] in ("RANGE", "RANGE_EX"):
+                range_type = tokens[j][0]
+                j += 1
+                end, j = parse_expression(tokens, j)
+                body, j = parse_block(tokens, j)
+                stmts.append(("FOR_RANGE", var_name, expr, end, body, range_type))
+                i = j
+            else:
+                # Si no hay RANGE, es colección
+                body, j = parse_block(tokens, j)
+                stmts.append(("FOR_IN", var_name, expr, body))
+                i = j
         elif kind == "FN":
             if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
                 raise OrionSyntaxError("Se esperaba un nombre de función después de 'fn'")
@@ -366,7 +401,7 @@ def parse_block(tokens, i):
 
     if i >= len(tokens):
         raise OrionSyntaxError("Se esperaba '}' pero se alcanzó el final del archivo.")
-
+    print("parse_block stmts:", stmts)
     return stmts, i + 1
 
 
@@ -376,7 +411,7 @@ def parse(tokens):
     while i < len(tokens):
         kind = tokens[i][0]
         value = tokens[i][1] if len(tokens[i]) > 1 else None
-        
+
         # Soporte para bucles FOR en el nivel superior
         if kind == "FOR":
             if tokens[i+1][0] != "IDENT":
@@ -386,20 +421,23 @@ def parse(tokens):
             if tokens[i+2][0] != "IN":
                 raise OrionSyntaxError("Se esperaba 'in' en el bucle for")
 
-            start, j = parse_expression(tokens, i+3)
+            expr, j = parse_expression(tokens, i+3)
 
-            if j >= len(tokens) or tokens[j][0] not in ("RANGE", "RANGE_EX"):
-                raise OrionSyntaxError("Se esperaba '..' o '..<' en el bucle for")
-            range_type = tokens[j][0]
-            j += 1
-
-            end, j = parse_expression(tokens, j)
-
-            body, j = parse_block(tokens, j)
-
-            ast.append(("FOR", var_name, start, end, body, range_type))
-            i = j
-            continue
+            # Si es rango, espera RANGE/RANGE_EX
+            if j < len(tokens) and tokens[j][0] in ("RANGE", "RANGE_EX"):
+                range_type = tokens[j][0]
+                j += 1
+                end, j = parse_expression(tokens, j)
+                body, j = parse_block(tokens, j)
+                ast.append(("FOR_RANGE", var_name, expr, end, body, range_type))
+                i = j
+                continue
+            else:
+                # Si no hay RANGE, es colección
+                body, j = parse_block(tokens, j)
+                ast.append(("FOR_IN", var_name, expr, body))
+                i = j
+                continue
 
         # Soporte para 'use'
         if kind == "USE":
@@ -453,11 +491,15 @@ def parse(tokens):
                 i += 1
 
         elif kind == "PRINT":
-            if i+1 >= len(tokens) or tokens[i+1][0] != "LPAREN":
-                raise OrionSyntaxError("Se esperaba '(' después de show")
-
-            args, i = parse_call_args(tokens, i+1)
-            ast.append(("CALL", "show", args))
+            # Permitir show con o sin paréntesis
+            if i+1 < len(tokens) and tokens[i+1][0] == "LPAREN":
+                # Sintaxis tradicional: show(expr)
+                args, i = parse_call_args(tokens, i+1)
+                ast.append(("CALL", "show", args))
+            else:
+                # Sintaxis sin paréntesis: show expr
+                expr, i = parse_expression(tokens, i+1)
+                ast.append(("CALL", "show", [expr]))
 
         elif kind == "IF":
             condition, i = parse_expression(tokens, i+1)
@@ -468,7 +510,7 @@ def parse(tokens):
             ast.append(("IF", condition, body_true, body_false))
 
         elif kind == "FOR":
-            # for i in 1..n { ... }
+            # for i in 1..n { ... } o for h in host { ... }
             if tokens[i+1][0] != "IDENT":
                 raise OrionSyntaxError("Se esperaba un identificador después de 'for'")
             var_name = tokens[i+1][1]
@@ -477,22 +519,27 @@ def parse(tokens):
                 raise OrionSyntaxError("Se esperaba 'in' en el bucle for")
 
             # expresión inicial
-            start, j = parse_expression(tokens, i+3)
+            expr, j = parse_expression(tokens, i+3)
 
-            if j >= len(tokens) or tokens[j][0] not in ("RANGE", "RANGE_EX"):
-                raise OrionSyntaxError("Se esperaba '..' o '..<' en el bucle for")
-            range_type = tokens[j][0]
-            j += 1
+            # Si es rango, espera RANGE/RANGE_EX
+            if j < len(tokens) and tokens[j][0] in ("RANGE", "RANGE_EX"):
+                range_type = tokens[j][0]
+                j += 1
 
-            # expresión final
-            end, j = parse_expression(tokens, j)
+                # expresión final
+                end, j = parse_expression(tokens, j)
 
-            # cuerpo del for
-            body, j = parse_block(tokens, j)
+                # cuerpo del for
+                body, j = parse_block(tokens, j)
 
-            # En parse:
-            ast.append(("FOR", var_name, start, end, body, range_type))
-            i = j
+                # En parse:
+                ast.append(("FOR_RANGE", var_name, expr, end, body, range_type))
+                i = j
+            else:
+                # Si no hay RANGE, es colección
+                body, j = parse_block(tokens, j)
+                ast.append(("FOR_IN", var_name, expr, body))
+                i = j
 
         else:
             i += 1
@@ -512,3 +559,4 @@ def parse_fn_params(tokens, i):
     if i >= len(tokens) or tokens[i][0] != "RPAREN":
         raise OrionSyntaxError("Se esperaba ')' al final de los parámetros")
     return params, i + 1
+

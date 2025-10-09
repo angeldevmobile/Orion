@@ -1,0 +1,23 @@
+use code
+use fs
+use json
+use net
+
+trace_start("GESTIÓN DE TAREAS CON API")
+
+-- Cargar tareas locales
+local = json.parse(fs.read("tareas.json"))
+
+-- Mostrar tareas antes de sincronizar
+show("Tareas locales antes de sincronizar:", local)
+
+-- Enviar tareas al servidor (API pública de prueba)
+res = net.transmit("https://jsonplaceholder.typicode.com/posts", json_data=local)
+show("Código de estado recibido:", res.status)
+if res.status == 201 {
+  show("Servidor respondió OK:", res.json)
+} else {
+  show("Error al sincronizar con el servidor:", res.status)
+}
+
+trace_end("SYNC DE TAREAS CON API")
