@@ -282,21 +282,21 @@ def eval_expr(expr, variables, functions):
                     return fn_def["impl"](*pos_args, **kw_args)
 
             # Función definida por usuario
-            params = fn_def.get("params", [])
-            body = fn_def.get("body", [])
-            if len(pos_args) != len(params):
-                raise OrionFunctionError(
-                    f"Argumentos esperados: {len(params)}, recibidos: {len(pos_args)}"
-                )
-            local_vars = variables.copy()
-            for p, a in zip(params, pos_args):
-                local_vars[p] = a
-            local_vars.update(kw_args)
-            if callable(body):
-                arg_vals = [local_vars[p] for p in params]
-                return body(*arg_vals)
-            else:
+            elif fn_def["type"] == "FN_DEF":
+                params = fn_def.get("params", [])
+                body = fn_def.get("body", [])
+                if len(pos_args) != len(params):
+                    raise OrionFunctionError(
+                        f"Argumentos esperados: {len(params)}, recibidos: {len(pos_args)}"
+                    )
+                local_vars = variables.copy()
+                for p, a in zip(params, pos_args):
+                    local_vars[p] = a
+                local_vars.update(kw_args)
                 return evaluate(body, local_vars, functions, inside_fn=True)
+            
+            else:
+                raise OrionFunctionError(f"Tipo de función desconocido: {fn_def.get('type', 'UNKNOWN')}")
 
         # --- CALL_METHOD ---
         elif tag == "CALL_METHOD":
@@ -662,9 +662,20 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
     # 3. Si estamos en nivel superior
     if not inside_fn:
         if "main" in functions:
-            main_def = functions["main"][0]  # Toma la primera definición
-            params = main_def.get("params", [])
-            body = main_def.get("body", [])
+            main_functions = functions["main"]
+            
+            # functions["main"] es una lista de definiciones de función
+            if isinstance(main_functions, list) and len(main_functions) > 0:
+                main_def = main_functions[0]  # Tomar la primera definición
+                
+                if isinstance(main_def, dict):
+                    params = main_def.get("params", [])
+                    body = main_def.get("body", [])
+                else:
+                    raise OrionRuntimeError(f"Formato de función inválido para 'main': {type(main_def)}")
+            else:
+                raise OrionRuntimeError("Función 'main' no encontrada o mal formateada")
+            
             return evaluate(body, variables, functions, inside_fn=True)
         return None
     

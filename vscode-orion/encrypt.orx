@@ -1,0 +1,21 @@
+use code
+use fs
+use json
+
+trace_start("SEGURIDAD")
+
+datos = [
+  {"usuario": "admin", "clave": "orion2025"}
+]
+
+-- Cifrar
+raw = json.encrypt(datos, 42)
+fs.write("seguro.dat", raw)
+show("Datos cifrados guardados")
+
+-- Leer y descifrar
+leido = fs.read("seguro.dat")
+original = json.decrypt(leido, 42)
+show("Datos originales:", original)
+
+trace_end("SEGURIDAD")

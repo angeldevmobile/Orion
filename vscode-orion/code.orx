@@ -8,6 +8,7 @@ fn main() {
   if (x >= 10 && activo) {
     show(activo)
   } else {
+    show("Condición falsa, terminando...")
     return
   }
 

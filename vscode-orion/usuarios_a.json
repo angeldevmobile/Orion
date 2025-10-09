@@ -1,0 +1,10 @@
+{
+  "nombre": "Gabriel Torres",
+  "edad": 29,
+  "pais": "Perú",
+  "profesion": "Ingeniero de Software",
+  "email": "gabriel.torres@example.com",
+  "telefono": "+51 987654321",
+  "habilidades": ["Python", "JavaScript", "IA", "Google Cloud"],
+  "activo": true
+}

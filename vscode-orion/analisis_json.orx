@@ -1,0 +1,25 @@
+use code 
+use fs
+use json
+
+trace_start("ANÁLISIS DE USUARIOS")
+
+-- Leer dos fuentes de datos
+
+a = json.parse(fs.read("usuarios_a.json"))
+b = json.parse(fs.read("usuarios_b.json"))
+
+-- Fusionar listas de usuarios
+fusion = json.fuse(a, b)
+
+-- Extraer datos relevantes
+
+resumen = json.extract(fusion, ["nombre", "edad", "pais"])
+show("Resumen: ", resumen)
+
+-- validar estructura
+
+es_valido = json.validate(fusion[0], {"nombre": str, "edad": int})
+show("Estructura válida: ", es_valido)
+
+trace_end("ANÁLISIS DE USUARIOS")

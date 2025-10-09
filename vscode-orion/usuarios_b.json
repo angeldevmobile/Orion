@@ -1,0 +1,10 @@
+{
+  "nombre": "María Fernández",
+  "edad": 33,
+  "pais": "México",
+  "profesion": "Analista de Datos",
+  "email": "maria.fernandez@example.com",
+  "telefono": "+52 5551234567",
+  "habilidades": ["SQL", "Power BI", "Excel", "Machine Learning"],
+  "activo": false
+}
