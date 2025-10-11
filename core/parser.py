@@ -112,6 +112,10 @@ def parse_primary(tokens, i):
     elif kind == "BOOL":
         return value, i + 1
 
+    # --- Tipos (int, str, bool, etc.) ---
+    elif kind == "TYPE":
+        return ("TYPE", value), i + 1
+
     # --- Identificadores, llamadas, atributos, índices ---
     elif kind == "IDENT":
         name = ("IDENT", value)

@@ -77,6 +77,9 @@ def eval_expr(expr, variables, functions):
     # 2. Caso: referencia a variable ('IDENT', 'nombre_variable')
     if isinstance(expr, tuple) and len(expr) == 2 and expr[0] == "IDENT":
         _, name = expr
+        # Agregar soporte para tipos básicos como identificadores
+        if name in ("str", "int", "bool", "float"):
+            return name  # Retorna el nombre del tipo como string
         if name in variables:
             val = variables[name]
             if hasattr(val, "value"):
@@ -154,6 +157,9 @@ def eval_expr(expr, variables, functions):
         # --- IDENT ---
         elif tag == "IDENT":
             _, name = expr
+            # Agregar soporte para tipos básicos
+            if name in ("str", "int", "bool", "float"):
+                return name
             if name in variables:
                 val = variables[name]
                 if hasattr(val, "value"):
@@ -161,6 +167,11 @@ def eval_expr(expr, variables, functions):
                 return val
             else:
                 raise OrionRuntimeError(f"Variable '{name}' no definida")
+
+        # --- TYPE ---
+        elif tag == "TYPE":
+            _, type_name = expr
+            return type_name  # Retorna el nombre del tipo como string
 
         # --- BINARY_OP ---
         elif tag == "BINARY_OP":

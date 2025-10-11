@@ -101,6 +101,14 @@ def forge(obj, beauty=False):
 
 def fuse(*objs):
     """Fuses multiple JSON objects into one unified entity."""
+    # Si tenemos múltiples objetos diferentes, crear una lista
+    if len(objs) > 1:
+        native_objs = [_to_native(obj) for obj in objs]
+        # Verificar si son objetos diferentes (no el mismo contenido)
+        if len(set(str(obj) for obj in native_objs)) > 1:
+            return OrionList(native_objs)
+    
+    # Comportamiento original para merge de objetos similares
     result = {}
     for o in objs:
         result.update(_to_native(o))
@@ -220,12 +228,98 @@ def patch(obj, changes):
 # =========================================================
 
 def validate(obj, schema):
-    """Minimalistic schema validator."""
+    """
+    Valida si un objeto cumple con un esquema de tipos.
+    
+    Args:
+        obj: El objeto a validar (puede ser un objeto individual o una lista)
+        schema: Un diccionario con el esquema de tipos {campo: tipo}
+    
+    Returns:
+        bool: True si el objeto es válido, False en caso contrario
+    """
+    # Convertir a nativo primero
     obj = _to_native(obj)
-    for k, t in schema.items():
-        if k not in obj or not isinstance(obj[k], t):
+    schema = _to_native(schema)
+    
+    print(f"[DEBUG] validate: obj = {obj}")
+    print(f"[DEBUG] validate: schema = {schema}")
+    
+    # Verificar que obj no sea None
+    if obj is None:
+        print(f"[DEBUG] validate: obj es None")
+        return False
+    
+    # Si obj es una lista, validar todos los elementos
+    if isinstance(obj, list):
+        if len(obj) == 0:
+            print(f"[DEBUG] validate: lista vacía")
             return False
-    return True
+        
+        print(f"[DEBUG] validate: validando lista con {len(obj)} elementos")
+        for i, item in enumerate(obj):
+            print(f"[DEBUG] validate: validando elemento {i}: {item}")
+            if not _validate_single_object(item, schema):
+                print(f"[DEBUG] validate: elemento {i} falló la validación")
+                return False
+        
+        print(f"[DEBUG] validate: todos los elementos de la lista son válidos")
+        return True
+    
+    # Si es un objeto único, validar directamente
+    return _validate_single_object(obj, schema)
+
+def _validate_single_object(obj, schema):
+    """Valida un objeto único contra un schema."""
+    print(f"[DEBUG] _validate_single_object: obj = {obj}")
+    print(f"[DEBUG] _validate_single_object: schema = {schema}")
+    
+    # Verificar que obj sea un diccionario
+    if not isinstance(obj, dict):
+        print(f"[DEBUG] _validate_single_object: obj no es un diccionario, es {type(obj)}")
+        return False
+    
+    # Mapeo de tipos de string a tipos de Python
+    type_map = {
+        'str': str,
+        'int': int,
+        'bool': bool,
+        'float': float
+    }
+    
+    try:
+        for k, expected_type in schema.items():
+            print(f"[DEBUG] _validate_single_object: verificando campo '{k}' con tipo esperado {expected_type}")
+            
+            # Convertir string de tipo a tipo de Python si es necesario
+            if isinstance(expected_type, str) and expected_type in type_map:
+                expected_type = type_map[expected_type]
+                print(f"[DEBUG] _validate_single_object: tipo convertido a {expected_type}")
+            
+            # Verificar que la clave existe
+            if k not in obj:
+                print(f"[DEBUG] _validate_single_object: clave '{k}' no encontrada en obj")
+                return False
+            
+            # Obtener el valor actual
+            actual_value = obj[k]
+            actual_type = type(actual_value)
+            
+            print(f"[DEBUG] _validate_single_object: campo '{k}' = {actual_value} (tipo: {actual_type})")
+            
+            # Verificar el tipo
+            if not isinstance(actual_value, expected_type):
+                print(f"[DEBUG] _validate_single_object: '{k}' esperaba {expected_type}, encontró {actual_type}")
+                return False
+            
+            print(f"[DEBUG] _validate_single_object: campo '{k}' es válido")
+        
+        print(f"[DEBUG] _validate_single_object: validación exitosa")
+        return True
+    
+    except Exception as e:
+        print(f"[DEBUG] _validate_single_object: error durante validación: {e}")
+        return False
 
 
 def stream_absorb(path):
