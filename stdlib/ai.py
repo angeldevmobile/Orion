@@ -1,21 +1,20 @@
 """
-Orion AI Helpers
+Orion Cognitive Engine
 ────────────────────────────────────────────
-Módulo de inteligencia artificial ligero para Orion.
-Diseñado para ser moderno, rápido y fácil de usar.
+Sistema cognitivo híbrido para Orion.
+Fusiona heurística, vectorización y aprendizaje ligero.
 
 Principios:
-- Usa numpy si está disponible, pero funciona sin él.
-- Brinda primitivas ML-lite (regresión, similitud, clustering, embeddings, métricas).
-- Tiene un modo “think” inteligente que adapta la operación según el tipo de dato.
-- Pensado para desarrolladores que quieren resultados rápidos sin escribir mucho.
+- Usa numpy si está disponible, pero no depende de él.
+- Embeddings cuánticos deterministas.
+- Red neural-lite integrada (sin frameworks).
+- Modo “think” adaptativo con razonamiento contextual.
+- Memoria cognitiva para inferir patrones entre llamadas.
 """
 
-from collections import Counter
-import math
-import random
-from typing import List, Tuple, Optional, Callable
-from functools import lru_cache
+import math, random, time
+from collections import deque, Counter
+from typing import List, Tuple, Optional, Any
 
 # ------------------------------------------
 # Backend opcional (aceleración con numpy)
@@ -27,155 +26,125 @@ except Exception:
 
 
 # ------------------------------------------
+# Núcleo de memoria y contexto Orion
+# ------------------------------------------
+_MEMORY = deque(maxlen=32)  # Últimas 32 operaciones
+
+def recall() -> List[dict]:
+    """Retorna el contexto cognitivo actual."""
+    return list(_MEMORY)
+
+def _remember(action: str, data: Any):
+    _MEMORY.append({"t": round(time.time(), 2), "action": action, "data": data})
+
+
+# ------------------------------------------
+# Embeddings cuánticos Orion
+# ------------------------------------------
+def quantum_embed(text: str, dim: int = 64, seed: Optional[int] = None) -> List[float]:
+    """Embedding pseudo-cuántico determinista basado en ruido armónico."""
+    if seed is not None:
+        random.seed(seed)
+    vec = [0.0] * dim
+    for i, ch in enumerate(text):
+        h = math.sin((ord(ch) * 0.137 + i) * 3.1415)
+        for j in range(dim):
+            vec[j] += math.sin(h * (j + 1) * 0.0317)
+    norm = math.sqrt(sum(v*v for v in vec)) or 1
+    res = [v / norm for v in vec]
+    _remember("quantum_embed", {"len": len(text), "dim": dim})
+    return res
+
+
+# ------------------------------------------
 # Utilidades matemáticas básicas
 # ------------------------------------------
-def _as_numpy(arr):
-    if _np:
-        return _np.asarray(arr, dtype=float)
-    return None
-
-
 def euclidean_distance(a: List[float], b: List[float]) -> float:
-    """Distancia euclidiana entre dos vectores."""
     if _np:
         return float(_np.linalg.norm(_np.asarray(a) - _np.asarray(b)))
-    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+    return math.sqrt(sum((x - y)**2 for x, y in zip(a, b)))
 
 
 def cosine_similarity(a: List[float], b: List[float]) -> float:
-    """Similitud coseno entre dos vectores (en [-1,1])."""
     if _np:
-        a_n = _np.asarray(a, dtype=float)
-        b_n = _np.asarray(b, dtype=float)
-        na = _np.linalg.norm(a_n)
-        nb = _np.linalg.norm(b_n)
+        a_n, b_n = _np.asarray(a), _np.asarray(b)
+        na, nb = _np.linalg.norm(a_n), _np.linalg.norm(b_n)
         if na == 0 or nb == 0:
             return 0.0
-        return float((_np.dot(a_n, b_n) / (na * nb)))
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (na * nb)
+        return float(_np.dot(a_n, b_n) / (na * nb))
+    dot = sum(x*y for x, y in zip(a, b))
+    na = math.sqrt(sum(x*x for x in a))
+    nb = math.sqrt(sum(y*y for y in b))
+    return 0.0 if na == 0 or nb == 0 else dot / (na * nb)
 
 
 def normalize(vec: List[float]) -> List[float]:
-    """Normaliza un vector a norma 1."""
-    if _np:
-        arr = _np.asarray(vec, dtype=float)
-        norm = _np.linalg.norm(arr)
-        if norm == 0:
-            return arr.tolist()
-        return (arr / norm).tolist()
-    s = math.sqrt(sum(x * x for x in vec))
-    if s == 0:
-        return list(vec)
-    return [x / s for x in vec]
+    s = math.sqrt(sum(x*x for x in vec)) or 1
+    return [x/s for x in vec]
 
 
 def top_k_frequent(items: List, k: int = 5) -> List:
-    """Retorna los k elementos más frecuentes de una lista."""
     c = Counter(items)
     return [item for item, _ in c.most_common(k)]
 
 
 # ------------------------------------------
-# Regresión lineal (OLS y SGD)
+# Neural-lite (red neuronal simple)
 # ------------------------------------------
-def linear_regression_fit(X: List[List[float]], y: List[float]) -> Tuple[List[float], float]:
-    """Ajuste OLS sencillo: retorna (weights, bias)."""
+def neural_lite_fit(X: List[List[float]], y: List[float],
+                    hidden: int = 8, lr: float = 0.01, epochs: int = 200):
+    """Entrena una red neuronal ligera de 1 capa oculta."""
     if not X:
-        return [], 0.0
-    if _np:
-        Xmat = _np.asarray(X, dtype=float)
-        yvec = _np.asarray(y, dtype=float)
-        ones = _np.ones((Xmat.shape[0], 1))
-        A = _np.hstack([Xmat, ones])
-        w, *_ = _np.linalg.lstsq(A, yvec, rcond=None)
-        return w[:-1].tolist(), float(w[-1])
-    # fallback sin numpy
-    n = len(X)
-    m = len(X[0])
-    XtX = [[0.0] * (m + 1) for _ in range(m + 1)]
-    Xty = [0.0] * (m + 1)
-    for i in range(n):
-        xi = list(X[i]) + [1.0]
-        yi = y[i]
-        for a in range(m + 1):
-            Xty[a] += xi[a] * yi
-            for b in range(m + 1):
-                XtX[a][b] += xi[a] * xi[b]
-    M = [row[:] + [Xty[i]] for i, row in enumerate(XtX)]
-    size = m + 1
-    for i in range(size):
-        pivot = M[i][i]
-        if abs(pivot) < 1e-12:
-            for r in range(i + 1, size):
-                if abs(M[r][i]) > 1e-12:
-                    M[i], M[r] = M[r], M[i]
-                    pivot = M[i][i]
-                    break
-        if abs(pivot) < 1e-12:
-            continue
-        for j in range(i, size + 1):
-            M[i][j] /= pivot
-        for k in range(size):
-            if k == i:
-                continue
-            factor = M[k][i]
-            for j in range(i, size + 1):
-                M[k][j] -= factor * M[i][j]
-    w = [M[i][-1] for i in range(size)]
-    return w[:-1], float(w[-1])
+        return None
+    n, m = len(X), len(X[0])
+    W1 = [[random.uniform(-0.1, 0.1) for _ in range(m)] for _ in range(hidden)]
+    b1 = [0.0] * hidden
+    W2 = [random.uniform(-0.1, 0.1) for _ in range(hidden)]
+    b2 = 0.0
+
+    def relu(x): return max(0.0, x)
+    def d_relu(x): return 1.0 if x > 0 else 0.0
+
+    for _ in range(epochs):
+        for xi, yi in zip(X, y):
+            h = [relu(sum(w*x for w, x in zip(wr, xi)) + b) for wr, b in zip(W1, b1)]
+            y_pred = sum(w*h_i for w, h_i in zip(W2, h)) + b2
+            err = y_pred - yi
+
+            grad_W2 = [err * h_i for h_i in h]
+            grad_b2 = err
+            grad_W1, grad_b1 = [], []
+            for j in range(hidden):
+                dh = err * W2[j] * d_relu(h[j])
+                grad_W1.append([dh * x for x in xi])
+                grad_b1.append(dh)
+
+            for j in range(hidden):
+                for k in range(m):
+                    W1[j][k] -= lr * grad_W1[j][k]
+                b1[j] -= lr * grad_b1[j]
+                W2[j] -= lr * grad_W2[j]
+            b2 -= lr * grad_b2
+
+    _remember("neural_fit", {"samples": n, "hidden": hidden})
+    return {"W1": W1, "b1": b1, "W2": W2, "b2": b2}
 
 
-def linear_regression_predict(X: List[List[float]], weights: List[float], bias: float) -> List[float]:
-    """Predice valores con pesos y bias dados."""
-    if _np:
-        return (_np.dot(_np.asarray(X, dtype=float), _np.asarray(weights, dtype=float)) + bias).tolist()
-    return [sum(w * x for w, x in zip(weights, row)) + bias for row in X]
-
-
-def sgd_linear_regression_fit(X: List[List[float]], y: List[float],
-                              lr: float = 0.01, epochs: int = 100,
-                              batch_size: int = 32, seed: Optional[int] = None) -> Tuple[List[float], float]:
-    """Regresión lineal con SGD (mini-batch)."""
-    if seed is not None:
-        random.seed(seed)
-    n = len(X)
-    if n == 0:
-        return [], 0.0
-    m = len(X[0])
-    weights = [random.uniform(-0.1, 0.1) for _ in range(m)]
-    bias = 0.0
-    for _e in range(epochs):
-        idxs = list(range(n))
-        random.shuffle(idxs)
-        for start in range(0, n, batch_size):
-            batch_idxs = idxs[start:start + batch_size]
-            grad_w = [0.0] * m
-            grad_b = 0.0
-            for i in batch_idxs:
-                xi = X[i]
-                yi = y[i]
-                pred = sum(w * x for w, x in zip(weights, xi)) + bias
-                err = pred - yi
-                for j in range(m):
-                    grad_w[j] += err * xi[j]
-                grad_b += err
-            bs = len(batch_idxs) or 1
-            for j in range(m):
-                weights[j] -= lr * (grad_w[j] / bs)
-            bias -= lr * (grad_b / bs)
-    return weights, bias
+def neural_lite_predict(X: List[List[float]], model):
+    """Predice con una red neural-lite entrenada."""
+    def relu(x): return max(0.0, x)
+    W1, b1, W2, b2 = model["W1"], model["b1"], model["W2"], model["b2"]
+    preds = []
+    for xi in X:
+        h = [relu(sum(w*x for w, x in zip(wr, xi)) + b) for wr, b in zip(W1, b1)]
+        preds.append(sum(w*h_i for w, h_i in zip(W2, h)) + b2)
+    return preds
 
 
 # ------------------------------------------
-# Clustering (K-means)
+# Clustering (K-means Orion)
 # ------------------------------------------
 def kmeans(points: List[List[float]], k: int = 2, iterations: int = 20, seed: Optional[int] = None):
-    """K-means simple: retorna (centers, labels)."""
     if not points:
         return [], []
     if seed is not None:
@@ -192,18 +161,19 @@ def kmeans(points: List[List[float]], k: int = 2, iterations: int = 20, seed: Op
         for j in range(len(centers)):
             cluster = [p for i, p in enumerate(points) if labels[i] == j]
             if cluster:
-                centers[j] = [sum(col) / len(cluster) for col in zip(*cluster)]
+                centers[j] = [sum(col)/len(cluster) for col in zip(*cluster)]
         if not changed:
             break
+    _remember("cluster", {"k": k, "iters": iterations})
     return centers, labels
 
 
 # ------------------------------------------
-# Métricas
+# Métricas Orion
 # ------------------------------------------
 def mean_squared_error(y_true: List[float], y_pred: List[float]) -> float:
     n = len(y_true)
-    return 0.0 if n == 0 else sum((a - b) ** 2 for a, b in zip(y_true, y_pred)) / n
+    return 0.0 if n == 0 else sum((a - b)**2 for a, b in zip(y_true, y_pred)) / n
 
 
 def accuracy(y_true: List, y_pred: List) -> float:
@@ -211,48 +181,33 @@ def accuracy(y_true: List, y_pred: List) -> float:
 
 
 # ------------------------------------------
-# Embeddings
-# ------------------------------------------
-def embed_text_tokens(tokens: List[str], dim: int = 64, seed: Optional[int] = None) -> List[float]:
-    """Genera embeddings deterministas simples (sin modelos externos)."""
-    if seed is not None:
-        random.seed(seed)
-    vec = [0.0] * dim
-    for t in tokens:
-        h = sum(ord(c) for c in t)
-        for i in range(dim):
-            vec[i] += math.sin((h + i) * 0.0137)
-    return normalize(vec)
-
-
-# ------------------------------------------
-# THINK — modo automático Orion
+# THINK — modo de intuición Orion
 # ------------------------------------------
 def think(data, mode: str = "auto"):
-    """Interfaz principal de IA en Orion."""
+    """Modo cognitivo Orion: adapta el razonamiento al tipo de entrada."""
     if isinstance(data, str):
-        return embed_text_tokens(data.split())
+        return {"type": "text", "embedding": quantum_embed(data)}
     elif isinstance(data, list) and all(isinstance(x, (int, float)) for x in data):
-        X = [[i] for i in range(len(data))]
-        w, b = linear_regression_fit(X, data)
-        return {"weights": w, "bias": b}
+        trend = "up" if data[-1] > sum(data)/len(data) else "down"
+        return {"type": "series", "trend": trend}
     elif isinstance(data, list) and all(isinstance(x, list) for x in data):
         centers, labels = kmeans(data)
-        return {"centers": centers, "labels": labels}
-    else:
-        return None
+        return {"type": "matrix", "centers": centers, "labels": labels}
+    _remember("think", {"input_type": str(type(data))})
+    return {"type": "unknown"}
 
 
 # ------------------------------------------
 # Alias Orion (comandos cortos)
 # ------------------------------------------
 ALIASES = {
-    "fit": linear_regression_fit,
-    "predict": linear_regression_predict,
+    "fit": neural_lite_fit,
+    "predict": neural_lite_predict,
     "sim": cosine_similarity,
     "dist": euclidean_distance,
     "cluster": kmeans,
-    "embed": embed_text_tokens,
+    "embed": quantum_embed,
+    "recall": recall
 }
 
 

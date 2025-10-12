@@ -77,14 +77,15 @@ def load(path_or_bytes):
         return path_or_bytes
     return Image.open(path_or_bytes).convert("RGBA")
 
-def save(img, path, fmt=None, optimize=True):
-    """Guarda imagen. img puede ser PIL/numpy/bytes/path."""
+def save(img, path=None, fmt="PNG", optimize=True, to_bytes=False):
+    """Guarda imagen o retorna bytes si to_bytes=True."""
     pil = _ensure_pil(img)
-    d = {}
-    if fmt:
-        d["format"] = fmt
-    pil.save(path, optimize=optimize, **d)
-    return path
+    if to_bytes:
+        return _to_bytes(pil, fmt=fmt)
+    if path:
+        pil.save(path, format=fmt, optimize=optimize)
+        return path
+    raise ValueError("Debe especificar path o to_bytes=True")
 
 # -------------------------
 # Transformaciones básicas
@@ -413,3 +414,7 @@ def orion_export():
     exports = {"vision": ALIASES}
     exports.update(ALIASES)
     return exports
+
+def register(runtime):
+    """Integración directa con el núcleo de Orion"""
+    runtime.register_module("vision", orion_export())

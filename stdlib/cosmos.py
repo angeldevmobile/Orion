@@ -1,41 +1,54 @@
 # stdlib/cosmos.py
 """
-Orion Cosmos — módulo de simulación espacial y física universal.
+Orion Cosmos — simulación universal extendida.
 Filosofía: "El universo en una línea de código."
+
+Características:
+- Cuerpos dinámicos con masa, energía y momentum.
+- Simulación de gravedad y órbitas en tiempo real.
+- Soporte para “universos persistentes” y seeds deterministas.
+- Operaciones declarativas tipo lenguaje:
+    cosmos create 10 stars
+    cosmos orbit sun earth for 100 steps
+    cosmos run universe speed=2
 """
 
 import math
 import random
 import time
+from typing import List, Optional, Dict
 
 # ------------------------------------------------------------
-# Clases básicas
+# Núcleo de cuerpos celestes
 # ------------------------------------------------------------
 
 class Body:
-    """Representa un cuerpo celeste simple."""
+    """Representa un cuerpo celeste: estrella, planeta, satélite, etc."""
     def __init__(self, name="unknown", mass=1.0, pos=(0, 0, 0), vel=(0, 0, 0)):
         self.name = name
-        self.mass = mass
-        self.pos = list(pos)
-        self.vel = list(vel)
+        self.mass = float(mass)
+        self.pos = list(map(float, pos))
+        self.vel = list(map(float, vel))
+        self.energy = 0.0
 
     def move(self, dt=1.0):
-        """Actualiza la posición del cuerpo."""
+        """Actualiza la posición según su velocidad."""
         self.pos = [p + v * dt for p, v in zip(self.pos, self.vel)]
 
-    def distance_to(self, other):
-        """Distancia euclidiana entre dos cuerpos."""
+    def distance_to(self, other: "Body") -> float:
         return math.sqrt(sum((a - b) ** 2 for a, b in zip(self.pos, other.pos)))
 
+    def kinetic_energy(self) -> float:
+        return 0.5 * self.mass * sum(v * v for v in self.vel)
+
     def __repr__(self):
-        return f"<Body {self.name}: pos={self.pos}, vel={self.vel}>"
+        return f"<{self.name}: pos={tuple(round(x,2) for x in self.pos)}, vel={tuple(round(v,2) for v in self.vel)}>"
 
 # ------------------------------------------------------------
-# Simulación básica
+# Física cósmica
 # ------------------------------------------------------------
 
-def gravity(b1, b2, G=6.674e-11):
+def gravity(b1: Body, b2: Body, G=6.674e-11):
     """Calcula la fuerza gravitacional entre dos cuerpos."""
     dist = b1.distance_to(b2)
     if dist == 0:
@@ -44,11 +57,68 @@ def gravity(b1, b2, G=6.674e-11):
     direction = [(b2.pos[i] - b1.pos[i]) / dist for i in range(3)]
     return [F * d for d in direction]
 
-def step_system(bodies, dt=1.0):
-    """Simula un paso de movimiento simple."""
+
+def apply_gravity(bodies: List[Body], G=6.674e-11, dt=1.0):
+    """Aplica fuerzas gravitacionales entre todos los cuerpos."""
+    forces = {b: [0, 0, 0] for b in bodies}
+    for i, b1 in enumerate(bodies):
+        for j, b2 in enumerate(bodies):
+            if i >= j:
+                continue
+            F = gravity(b1, b2, G)
+            for k in range(3):
+                forces[b1][k] += F[k]
+                forces[b2][k] -= F[k]
     for b in bodies:
+        acc = [f / b.mass for f in forces[b]]
+        b.vel = [v + a * dt for v, a in zip(b.vel, acc)]
         b.move(dt)
     return bodies
+
+
+def total_energy(bodies: List[Body], G=6.674e-11):
+    """Calcula la energía total del sistema."""
+    kinetic = sum(b.kinetic_energy() for b in bodies)
+    potential = 0.0
+    for i, b1 in enumerate(bodies):
+        for j, b2 in enumerate(bodies):
+            if i < j:
+                r = b1.distance_to(b2)
+                potential -= G * b1.mass * b2.mass / r if r != 0 else 0
+    return {"kinetic": kinetic, "potential": potential, "total": kinetic + potential}
+
+# ------------------------------------------------------------
+# Universo
+# ------------------------------------------------------------
+
+class Universe:
+    """Representa un universo Orion persistente."""
+    def __init__(self, n=5, seed: Optional[int] = None):
+        self.seed = seed or int(time.time())
+        random.seed(self.seed)
+        self.bodies = [random_star() for _ in range(n)]
+        self.time = 0.0
+
+    def step(self, dt=1.0):
+        """Avanza un paso temporal."""
+        apply_gravity(self.bodies, dt=dt)
+        self.time += dt
+        return self
+
+    def summary(self):
+        e = total_energy(self.bodies)
+        return {
+            "time": round(self.time, 2),
+            "bodies": len(self.bodies),
+            "energy": e
+        }
+
+    def __repr__(self):
+        return f"<Universe t={round(self.time,2)} bodies={len(self.bodies)}>"
+
+# ------------------------------------------------------------
+# Generadores
+# ------------------------------------------------------------
 
 def random_star(name=None):
     """Genera una estrella aleatoria."""
@@ -59,69 +129,73 @@ def random_star(name=None):
         vel=[random.uniform(-10, 10) for _ in range(3)]
     )
 
-def universe(n=5):
-    """Crea un universo pequeño con n estrellas."""
-    return [random_star() for _ in range(n)]
-
-# ------------------------------------------------------------
-# Funciones matemáticas espaciales
-# ------------------------------------------------------------
-
-def orbit(center, satellite, G=6.674e-11, dt=1.0):
-    """Simula una órbita simple de un satélite alrededor de un centro."""
-    force = gravity(center, satellite, G)
-    acc = [f / satellite.mass for f in force]
-    satellite.vel = [v + a * dt for v, a in zip(satellite.vel, acc)]
-    satellite.move(dt)
-    return satellite.pos
-
-def cosmic_distance(a, b):
-    """Distancia directa entre dos puntos o cuerpos."""
-    if isinstance(a, Body) and isinstance(b, Body):
-        return a.distance_to(b)
-    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
 
 def stardust(n=100):
-    """Genera una nube de polvo estelar (coordenadas aleatorias)."""
+    """Genera una nube de coordenadas aleatorias (polvo estelar)."""
     return [[random.uniform(-1, 1) for _ in range(3)] for _ in range(n)]
 
 # ------------------------------------------------------------
-# Función de alto nivel Orion
+# Interfaz de lenguaje
 # ------------------------------------------------------------
 
-def cosmos(action="universe", *args):
+_active_universes: Dict[str, Universe] = {}
+
+def cosmos(command="universe", *args, **kwargs):
     """
-    Punto de entrada unificado de Cosmos.
-    Ejemplo:
-        cosmos("universe", 10)
+    Interfaz unificada tipo lenguaje.
+    Ejemplos:
+        cosmos("create", 10)
         cosmos("orbit", sun, planet)
-        cosmos("dust", 500)
+        cosmos("run", "default", steps=100)
     """
-    if action == "universe":
+    cmd = command.lower()
+
+    if cmd in ("universe", "create"):
         n = args[0] if args else 5
-        return universe(n)
-    if action == "dust":
+        name = kwargs.get("name", "default")
+        uni = Universe(n)
+        _active_universes[name] = uni
+        return uni
+
+    if cmd == "run":
+        name = args[0] if args else "default"
+        steps = kwargs.get("steps", 10)
+        dt = kwargs.get("dt", 1.0)
+        uni = _active_universes.get(name)
+        if not uni:
+            return f"Universe '{name}' not found."
+        for _ in range(steps):
+            uni.step(dt)
+        return uni.summary()
+
+    if cmd == "dust":
         n = args[0] if args else 100
         return stardust(n)
-    if action == "orbit":
-        if len(args) >= 2:
-            return orbit(args[0], args[1])
+
+    if cmd == "energy":
+        name = args[0] if args else "default"
+        uni = _active_universes.get(name)
+        return total_energy(uni.bodies) if uni else None
+
     return None
 
 # ------------------------------------------------------------
-# Alias cortos y exportación
+# Alias y exportación
 # ------------------------------------------------------------
 
 ALIASES = {
     "gravity": gravity,
-    "orbit": orbit,
-    "universe": universe,
+    "energy": total_energy,
     "dust": stardust,
-    "dist": cosmic_distance,
-    "star": random_star,
+    "create": cosmos,
+    "run": cosmos,
+    "Body": Body,
+    "Universe": Universe,
 }
 
 def orion_export():
-    exports = {"cosmos": cosmos, "Body": Body}
+    exports = {"cosmos": cosmos}
     exports.update(ALIASES)
     return exports
+
+__all__ = list(orion_export().keys())
