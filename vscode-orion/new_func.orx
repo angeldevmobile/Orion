@@ -5,4 +5,4 @@ msg = "Hola ${name}, bienvenido a Orion!"
 show(msg)
 
 user = null
-show(user?.email)  
+show(user?.email)
