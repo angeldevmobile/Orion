@@ -49,6 +49,18 @@ except ImportError as e:
     COSMOS_ENABLED = False
     COSMOS_FUNCTIONS = {}
     print(f"[DEBUG] Módulo Cosmos no disponible: {e}")
+    
+# =========================================
+try:
+    from stdlib.crypto import orion_export as crypto_export, crypto, hash, encrypt, decrypt, sign, verify
+    CRYPTO_ENABLED = True
+    CRYPTO_FUNCTIONS = crypto_export()
+    print("[DEBUG] Módulo Crypto Orion cargado exitosamente")
+except ImportError as e:
+    CRYPTO_ENABLED = False
+    CRYPTO_FUNCTIONS = {}
+    print(f"[DEBUG] Módulo Crypto no disponible: {e}")
+
 
 NATIVE_FUNCTIONS = {
     "trace_start": code.trace_start,
@@ -86,6 +98,20 @@ if COSMOS_ENABLED:
         "dust": COSMOS_FUNCTIONS.get("dust"),
         "Body": Body,
         "Universe": Universe
+    })
+    
+if CRYPTO_ENABLED:
+    NATIVE_FUNCTIONS.update({
+        "crypto": crypto,
+        "hash": hash,
+        "encrypt": encrypt,
+        "decrypt": decrypt,
+        "sign": sign,
+        "verify": verify,
+        "uuid": CRYPTO_FUNCTIONS.get("uuid"),
+        "token": CRYPTO_FUNCTIONS.get("token"),
+        "entropy": CRYPTO_FUNCTIONS.get("entropy"),
+        "context_token": CRYPTO_FUNCTIONS.get("context_token"),
     })
 
 def lookup_variable(name, variables):
@@ -132,6 +158,15 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "cosmos_run", lambda *args, **kwargs: cosmos("run", *args, **kwargs))
         register_native_function(functions, "cosmos_dust", lambda *args, **kwargs: cosmos("dust", *args, **kwargs))
         print(f"[DEBUG] {len(COSMOS_FUNCTIONS)} funciones Cosmos registradas como built-ins")
+
+    if CRYPTO_ENABLED:
+        for crypto_func_name, crypto_func in CRYPTO_FUNCTIONS.items():
+            if callable(crypto_func) and crypto_func_name != "__meta__":
+                register_native_function(functions, crypto_func_name, crypto_func)
+        register_native_function(functions, "crypto_hash", lambda *args, **kwargs: crypto("hash", *args, **kwargs))
+        register_native_function(functions, "crypto_encrypt", lambda *args, **kwargs: crypto("encrypt", *args, **kwargs))
+        register_native_function(functions, "crypto_decrypt", lambda *args, **kwargs: crypto("decrypt", *args, **kwargs))
+        print(f"[DEBUG] {len([f for f in CRYPTO_FUNCTIONS if callable(CRYPTO_FUNCTIONS[f])])} funciones Crypto registradas como built-ins")
 
 
 def eval_call_args(args, variables, functions):
@@ -374,6 +409,16 @@ def eval_expr(expr, variables, functions):
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Cosmos '{fn_name}': {str(e)}")
                 
+                # === MANEJO ESPECIAL PARA FUNCIONES CRYPTO ===
+                elif CRYPTO_ENABLED and (fn_name in CRYPTO_FUNCTIONS or fn_name.startswith('crypto_')):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        if fn_name in ["crypto", "hash", "encrypt", "decrypt", "sign", "verify"]:
+                            print(f"[DEBUG CRYPTO] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función Crypto '{fn_name}': {str(e)}")
+                
                 # Procesar argumentos especialmente para show
                 elif fn_name == "show":
                     processed_args = []
@@ -533,6 +578,17 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         }
     else:
         variables["COSMOS"] = {"enabled": False}
+        
+    if CRYPTO_ENABLED:
+        variables["CRYPTO"] = {
+            "enabled": True,
+            "functions": list(CRYPTO_FUNCTIONS.keys()),
+            "version": CRYPTO_FUNCTIONS.get("__meta__", {}).get("version", "2.0.0"),
+            "secure_level": CRYPTO_FUNCTIONS.get("__meta__", {}).get("secure_level", "high")
+        }
+    else:
+        variables["CRYPTO"] = {"enabled": False}
+
 
     _register_builtin_functions(functions)
     functions["_variables"] = variables
@@ -572,6 +628,16 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                     variables[cosmos_func_name] = cosmos_fun
                 variables["cosmos_enabled"] = True
                 print(f"[DEBUG] Módulo Cosmos importado con {len(COSMOS_FUNCTIONS)} funciones")
+                i += 1
+                continue
+            
+            elif base_name == "crypto" and CRYPTO_ENABLED:
+                for crypto_func_name, crypto_func in CRYPTO_FUNCTIONS.items():
+                    if crypto_func_name != "__meta__":
+                        variables[crypto_func_name] = crypto_func
+                variables["crypto_enabled"] = True
+                variables["crypto_meta"] = CRYPTO_FUNCTIONS.get("__meta__", {})
+                print(f"[DEBUG] Módulo Crypto importado con {len([f for f in CRYPTO_FUNCTIONS if f != '__meta__'])} funciones")
                 i += 1
                 continue
 
