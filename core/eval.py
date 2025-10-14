@@ -28,6 +28,28 @@ from lib import io
 from lib import math as orion_math
 from lib import strings
 
+# === INTEGRACIÓN DEL MÓDULO AI ===
+try:
+    from stdlib.ai import orion_export, think, quantum_embed, recall
+    AI_ENABLED = True
+    AI_FUNCTIONS = orion_export()
+    print("[DEBUG] Módulo AI Orion cargado exitosamente")
+except ImportError as e:
+    AI_ENABLED = False
+    AI_FUNCTIONS = {}
+    print(f"[DEBUG] Módulo AI no disponible: {e}")
+    
+# ==========================================
+try: 
+    from stdlib.cosmos import orion_export, cosmos, Body, Universe
+    COSMOS_ENABLED = True
+    COSMOS_FUNCTIONS = orion_export()
+    print("[DEBUG] Módulo Cosmos Orion cargado exitosamente")
+except ImportError as e:
+    COSMOS_ENABLED = False
+    COSMOS_FUNCTIONS = {}
+    print(f"[DEBUG] Módulo Cosmos no disponible: {e}")
+
 NATIVE_FUNCTIONS = {
     "trace_start": code.trace_start,
     "trace_end": code.trace_end,
@@ -36,6 +58,36 @@ NATIVE_FUNCTIONS = {
     "frame": code.frame,
     "show": show.show,
 }
+
+# Agregar funciones AI a las funciones nativas si están disponibles
+if AI_ENABLED:
+    NATIVE_FUNCTIONS.update({
+        # Funciones principales AI
+        "think": think,
+        "embed": quantum_embed,
+        "recall": recall,
+        
+        # Aliases cortos del módulo AI
+        "fit": AI_FUNCTIONS.get("fit"),
+        "predict": AI_FUNCTIONS.get("predict"),
+        "sim": AI_FUNCTIONS.get("sim"),
+        "dist": AI_FUNCTIONS.get("dist"),
+        "cluster": AI_FUNCTIONS.get("cluster"),
+        "normalize": AI_FUNCTIONS.get("normalize"),
+        "accuracy": AI_FUNCTIONS.get("accuracy"),
+        "mse": AI_FUNCTIONS.get("mse"),
+    })
+
+if COSMOS_ENABLED:
+    NATIVE_FUNCTIONS.update({
+        "cosmos": cosmos,
+        "gravity": COSMOS_FUNCTIONS.get("gravity"),
+        "energy": COSMOS_FUNCTIONS.get("energy"),
+        "dust": COSMOS_FUNCTIONS.get("dust"),
+        "Body": Body,
+        "Universe": Universe
+    })
+
 def lookup_variable(name, variables):
     """Busca una variable en el scope actual."""
     if name in variables:
@@ -54,8 +106,33 @@ def _register_builtin_functions(functions):
                 v = getattr(mod, k)
                 if isinstance(v, types.FunctionType):
                     register_native_function(functions, k, v)
+    
     # Registrar funciones nativas de Python necesarias
     register_native_function(functions, "len", len)
+    
+    # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
+    if AI_ENABLED:
+        # Registrar todas las funciones AI exportadas
+        for ai_func_name, ai_func in AI_FUNCTIONS.items():
+            if callable(ai_func):
+                register_native_function(functions, ai_func_name, ai_func)
+        
+        # Registrar funciones AI con prefijo para evitar colisiones
+        register_native_function(functions, "ai_think", think)
+        register_native_function(functions, "ai_embed", quantum_embed)
+        register_native_function(functions, "ai_recall", recall)
+        
+        print(f"[DEBUG] {len(AI_FUNCTIONS)} funciones AI registradas como built-ins")
+        
+    if COSMOS_ENABLED:
+        for cosmos_func_name, cosmos_fun in COSMOS_FUNCTIONS.items():
+            if callable(cosmos_fun):
+                register_native_function(functions, cosmos_func_name, cosmos_fun)
+        register_native_function(functions, "cosmos_create", lambda *args, **kwargs: cosmos("create", *args, **kwargs))
+        register_native_function(functions, "cosmos_run", lambda *args, **kwargs: cosmos("run", *args, **kwargs))
+        register_native_function(functions, "cosmos_dust", lambda *args, **kwargs: cosmos("dust", *args, **kwargs))
+        print(f"[DEBUG] {len(COSMOS_FUNCTIONS)} funciones Cosmos registradas como built-ins")
+
 
 def eval_call_args(args, variables, functions):
     pos_args = []
@@ -276,8 +353,29 @@ def eval_expr(expr, variables, functions):
 
             # Función nativa
             if fn_def["type"] == "NATIVE_FN":
+                # === MANEJO ESPECIAL PARA FUNCIONES AI ===
+                if AI_ENABLED and (fn_name in AI_FUNCTIONS or fn_name.startswith('ai_')):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        # Registrar la operación AI en memoria si es think/embed/recall
+                        if fn_name in ["think", "ai_think", "embed", "ai_embed"]:
+                            print(f"[DEBUG AI] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función AI '{fn_name}': {str(e)}")
+                
+                # === MANEJO ESPECIAL PARA FUNCIONES COSMOS ===
+                elif COSMOS_ENABLED and (fn_name in COSMOS_FUNCTIONS or fn_name.startswith('cosmos_')):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        if fn_name in ["cosmos", "cosmos_create", "cosmos_run"]:
+                            print(f"[DEBUG COSMOS] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función Cosmos '{fn_name}': {str(e)}")
+                
                 # Procesar argumentos especialmente para show
-                if fn_name == "show":
+                elif fn_name == "show":
                     processed_args = []
                     for i, arg in enumerate(args):
                         if isinstance(arg, str) and arg.startswith('"') and arg.endswith('"'):
@@ -417,6 +515,25 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
     if "no" not in variables:
         variables["no"] = OrionBool(False)
 
+    # === INICIALIZAR CONTEXTO AI ===
+    if AI_ENABLED:
+        variables["AI"] = {
+            "enabled": True,
+            "functions": list(AI_FUNCTIONS.keys()),
+            "version": "1.0.0"
+        }
+    else:
+        variables["AI"] = {"enabled": False}
+        
+    if COSMOS_ENABLED:
+        variables["COSMOS"] = {
+            "enabled": True,
+            "functions": list(COSMOS_FUNCTIONS.keys()),
+            "version": "1.0.0"
+        }
+    else:
+        variables["COSMOS"] = {"enabled": False}
+
     _register_builtin_functions(functions)
     functions["_variables"] = variables
 
@@ -431,7 +548,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         node = ast[i]
         tag = node[0]
 
-                # --- Soporte para USE con o sin comillas ---
+        # --- Soporte para USE con o sin comillas ---
         if tag == "USE":
             _, module_path = node
             if module_path.startswith('"') and module_path.endswith('"'):
@@ -441,8 +558,25 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
 
             print(f"[DEBUG USE] Cargando módulo: {base_name}")
 
+            # === IMPORTACIÓN ESPECIAL PARA MÓDULO AI ===
+            if base_name == "ai" and AI_ENABLED:
+                # Agregar todas las funciones AI al entorno de variables
+                for ai_func_name, ai_func in AI_FUNCTIONS.items():
+                    variables[ai_func_name] = ai_func
+                variables["ai_enabled"] = True
+                print(f"[DEBUG] Módulo AI importado con {len(AI_FUNCTIONS)} funciones")
+                i += 1
+                continue
+            elif base_name == "cosmos" and COSMOS_ENABLED:
+                for cosmos_func_name, cosmos_fun in COSMOS_FUNCTIONS.items():
+                    variables[cosmos_func_name] = cosmos_fun
+                variables["cosmos_enabled"] = True
+                print(f"[DEBUG] Módulo Cosmos importado con {len(COSMOS_FUNCTIONS)} funciones")
+                i += 1
+                continue
+
             # --- Orion stdlib ---
-            if base_name == "json":
+            elif base_name == "json":
                 variables["json"] = orion_json
                 print(f"[DEBUG] Módulo Orion stdlib '{base_name}' importado")
                 i += 1
