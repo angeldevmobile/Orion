@@ -2,45 +2,56 @@ from core.errors import OrionSyntaxError
 
 
 def parse_call_args(tokens, i):
-    """Parse function call arguments, supporting both positional and named arguments."""
-    # Check if we have a left parenthesis - if not, this isn't a function call
+    """
+    Parser extendido de Orion para llamadas de función futuristas.
+    Soporta:
+      - Argumentos posicionales: f(x, y, z)
+      - Argumentos nombrados: f(lr="auto", epochs=100)
+      - Anidación de llamadas: f(auto(1, precision="high"))
+      - Validación robusta de comas y cierre de paréntesis
+    """
+    # Verificar apertura de paréntesis
     if i >= len(tokens) or tokens[i][0] != "LPAREN":
         raise OrionSyntaxError("Se esperaba '(' en llamada de función")
     
-    i += 1  # Skip '('
+    i += 1  # saltar '('
     args = []
-    
-    if i >= len(tokens):
-        raise OrionSyntaxError("Fin inesperado de entrada en argumentos de función")
-    
-    while i < len(tokens) and tokens[i][0] != "RPAREN":
-        # Check if this is a named argument (name=value)
-        if (i + 2 < len(tokens) and 
-            tokens[i][0] == "IDENT" and 
-            tokens[i + 1][0] == "ASSIGN"):
+    kwargs = {}
+
+    # Detección temprana de cierre vacío: f()
+    if i < len(tokens) and tokens[i][0] == "RPAREN":
+        return args, kwargs, i + 1
+
+    while i < len(tokens):
+        # Argumento nombrado
+        if (i + 1 < len(tokens)
+            and tokens[i][0] == "IDENT"
+            and tokens[i + 1][0] == "ASSIGN"):
             
-            # Named argument
             name = tokens[i][1]
-            i += 2  # Skip name and =
+            i += 2  # saltar IDENT y '='
             value, i = parse_expression(tokens, i)
-            args.append(("NAMED_ARG", name, value))
+            kwargs[name] = value
+
         else:
-            # Positional argument
-            arg, i = parse_expression(tokens, i)
-            args.append(arg)
-        
-        # Handle comma
+            # Argumento posicional o expresión anidada
+            value, i = parse_expression(tokens, i)
+            args.append(value)
+
+        # Si hay coma, continuar con el siguiente argumento
         if i < len(tokens) and tokens[i][0] == "COMMA":
             i += 1
-        elif i < len(tokens) and tokens[i][0] != "RPAREN":
-            raise OrionSyntaxError(f"Se esperaba ',' o ')' en argumentos de función")
-    
-    if i >= len(tokens) or tokens[i][0] != "RPAREN":
-        raise OrionSyntaxError("Se esperaba ')' después de argumentos de función")
-    
-    i += 1  # Skip ')'
-    return args, i
+            continue
+        
+        # Si hay cierre de paréntesis, terminamos
+        if i < len(tokens) and tokens[i][0] == "RPAREN":
+            return args, kwargs, i + 1
 
+        # Si no hay coma ni cierre → error
+        raise OrionSyntaxError("Se esperaba ',' o ')' después de argumento en llamada de función")
+    
+    # Si termina sin cierre correcto
+    raise OrionSyntaxError("Se esperaba ')' al final de la llamada de función")
 
 def parse_primary(tokens, i):
     if i >= len(tokens):
@@ -54,56 +65,52 @@ def parse_primary(tokens, i):
         return value, i + 1
     elif kind == "BOOL":
         return value.value, i + 1
+
     elif kind == "IDENT":
         expr = ("IDENT", value)
         i += 1
         
-        # Handle method calls, attribute access, indexing, and function calls
+        # Procesar llamadas, atributos, índices, etc.
         while i < len(tokens):
-            if tokens[i][0] == "DOT":
+            token_type = tokens[i][0]
+
+            if token_type == "DOT":
                 i += 1
                 if i >= len(tokens) or tokens[i][0] != "IDENT":
                     raise OrionSyntaxError("Se esperaba un identificador después de '.'")
                 attr_name = tokens[i][1]
                 i += 1
                 
-                # Check if it's a method call
+                # ¿Llamada de método?
                 if i < len(tokens) and tokens[i][0] == "LPAREN":
-                    i += 1
-                    args, i = parse_call_args(tokens, i-1)  # Back up to include LPAREN
-                    expr = ("CALL_METHOD", attr_name, expr, args)
+                    args, kwargs, i = parse_call_args(tokens, i)
+                    expr = ("CALL_METHOD", attr_name, expr, args, kwargs)
                 else:
                     expr = ("ATTR_ACCESS", expr, attr_name)
-            
-            elif tokens[i][0] == "LBRACKET":
+
+            elif token_type == "LBRACKET":
                 i += 1
                 
-                # Handle slicing notation
+                # Soporte para slices
                 if i < len(tokens) and tokens[i][0] == "COLON":
-                    # Case: [:end] - slice from beginning
-                    i += 1  # skip ':'
+                    i += 1
                     if i < len(tokens) and tokens[i][0] != "RBRACKET":
                         end_index, i = parse_expression(tokens, i)
-                        slice_expr = ("SLICE", None, end_index, None)  # [start:end:step]
+                        slice_expr = ("SLICE", None, end_index, None)
                     else:
-                        slice_expr = ("SLICE", None, None, None)  # [:]
+                        slice_expr = ("SLICE", None, None, None)
                 elif i < len(tokens) and tokens[i][0] != "RBRACKET":
-                    # Parse first expression (could be index or start of slice)
                     first_expr, i = parse_expression(tokens, i)
-                    
                     if i < len(tokens) and tokens[i][0] == "COLON":
-                        # This is a slice: [start:end] or [start:]
-                        i += 1  # skip ':'
+                        i += 1
                         if i < len(tokens) and tokens[i][0] != "RBRACKET":
                             end_expr, i = parse_expression(tokens, i)
                             slice_expr = ("SLICE", first_expr, end_expr, None)
                         else:
-                            slice_expr = ("SLICE", first_expr, None, None)  # [start:]
+                            slice_expr = ("SLICE", first_expr, None, None)
                     else:
-                        # This is a simple index
                         slice_expr = first_expr
                 else:
-                    # Empty brackets []
                     slice_expr = ("SLICE", None, None, None)
                 
                 if i >= len(tokens) or tokens[i][0] != "RBRACKET":
@@ -114,34 +121,34 @@ def parse_primary(tokens, i):
                     expr = ("SLICE_ACCESS", expr, slice_expr)
                 else:
                     expr = ("INDEX", expr, slice_expr)
-            
-            elif tokens[i][0] == "LPAREN":
-                # Function call - use the existing function call parsing
-                args, i = parse_call_args(tokens, i)
-                expr = ("CALL", value, args)
-            
-            elif tokens[i][0] == "SAFE_ACCESS":
+
+            elif token_type == "LPAREN":
+                # Llamada de función (actualizada)
+                args, kwargs, i = parse_call_args(tokens, i)
+                expr = ("CALL", expr, args, kwargs)
+
+            elif token_type == "SAFE_ACCESS":
                 i += 1
                 if i >= len(tokens) or tokens[i][0] != "IDENT":
                     raise OrionSyntaxError("Se esperaba un identificador después de '?.'")
                 attr_name = tokens[i][1]
                 i += 1
                 expr = ("NULL_SAFE", expr, attr_name)
-            
+
             else:
                 break
-        
+
         return expr, i
-        
+
     elif kind == "LPAREN":
         i += 1
         expr, i = parse_expression(tokens, i)
         if i >= len(tokens) or tokens[i][0] != "RPAREN":
             raise OrionSyntaxError("Se esperaba ')'")
         return expr, i + 1
-    
+
     elif kind == "LBRACKET":
-        # List literal
+        # Lista literal
         i += 1
         elements = []
         while i < len(tokens) and tokens[i][0] != "RBRACKET":
@@ -156,29 +163,23 @@ def parse_primary(tokens, i):
             raise OrionSyntaxError("Se esperaba ']'")
         i += 1
         return ("LIST", elements), i
-    
+
     elif kind == "LBRACE":
-        # Dictionary literal
+        # Diccionario literal
         i += 1
         items = []
         while i < len(tokens) and tokens[i][0] != "RBRACE":
-            # Parse key
             if tokens[i][0] not in ["STRING", "IDENT"]:
                 raise OrionSyntaxError("Se esperaba clave de diccionario")
             key = tokens[i][1]
             if tokens[i][0] == "STRING":
                 key = key.strip('"')
             i += 1
-            
-            # Expect colon
             if i >= len(tokens) or tokens[i][0] != "COLON":
                 raise OrionSyntaxError("Se esperaba ':' después de clave")
             i += 1
-            
-            # Parse value
             value, i = parse_expression(tokens, i)
             items.append((key, value))
-            
             if i < len(tokens) and tokens[i][0] == "COMMA":
                 i += 1
             elif i < len(tokens) and tokens[i][0] != "RBRACE":
@@ -188,10 +189,9 @@ def parse_primary(tokens, i):
             raise OrionSyntaxError("Se esperaba '}'")
         i += 1
         return ("DICT", items), i
-    
+
     else:
         raise OrionSyntaxError(f"Token inesperado: {kind}")
-
 
 def parse_unary(tokens, i):
     if i < len(tokens) and tokens[i][0] == "NOT":
@@ -269,12 +269,35 @@ def parse_statement(tokens, i):
     elif kind == "PRINT":
         if i+1 < len(tokens) and tokens[i+1][0] == "LPAREN":
             # Sintaxis tradicional: show(expr)
-            args, i = parse_call_args(tokens, i+1)
-            return ("CALL", "show", args), i
+            args, kwargs, i = parse_call_args(tokens, i+1)
+            return ("CALL", "show", args, kwargs), i
         else:
-            # Sintaxis sin paréntesis: show expr
-            expr, i = parse_expression(tokens, i+1)
-            return ("CALL", "show", [expr]), i
+            # Sintaxis sin paréntesis: show expr, arg2, ..., kwarg1=val1, ...
+            args = []
+            kwargs = {}
+            i += 1
+            # Primer argumento obligatorio
+            expr, i = parse_expression(tokens, i)
+            args.append(expr)
+            # Procesar argumentos adicionales
+            while i < len(tokens):
+                if tokens[i][0] == "COMMA":
+                    i += 1
+                    # Argumento nombrado
+                    if (i + 1 < len(tokens)
+                        and tokens[i][0] == "IDENT"
+                        and tokens[i+1][0] == "ASSIGN"):
+                        name = tokens[i][1]
+                        i += 2
+                        value, i = parse_expression(tokens, i)
+                        kwargs[name] = value
+                    else:
+                        # Argumento posicional extra
+                        value, i = parse_expression(tokens, i)
+                        args.append(value)
+                else:
+                    break
+            return ("CALL", "show", args, kwargs), i
 
     # --- RETURN statement ---
     elif kind == "RETURN":

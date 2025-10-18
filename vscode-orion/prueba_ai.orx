@@ -7,7 +7,7 @@ use datetime
 use vision   -- para visualización cognitiva
 use quantum  -- para embeddings cuánticos
 
-trace_start("ANÁLISIS COGNITIVO DE TAREAS", pulse=true, depth="full")
+trace_start("ANÁLISIS COGNITIVO DE TAREAS", pulse=yes, depth="full")
 
 -- 1. Cargar dataset local
 local = json.parse(fs.read("tareas.json"))
@@ -31,7 +31,7 @@ for i in range(labels.unique().len()) {
                        style="neuro-symbolic")["summary"]
 
     clusters["Cluster_" + str(i)] = summary
-    show("Clúster", i, "→", summary[:90] + "...", level="proc", pulse=true)
+    show("Clúster", i, "→", summary[:90] + "...", level="proc", pulse=yes)
 }
 
 show("Resumen cognitivo global:", clusters, level="trace")
@@ -44,13 +44,13 @@ model = ai.fit(x, y,
                hidden="auto", 
                lr="adaptive", 
                epochs=auto(200, precision="high"), 
-               monitor=true)
+               monitor=yes)
 
-show("Modelo entrenado (neural-lite adaptativo)", level="ok", pulse=true)
+show("Modelo entrenado (neural-lite adaptativo)", level="ok", pulse=yes)
 
 -- 6. Predicción simbiótica para nueva tarea
 new_task = [3, 7]  -- prioridad alta, complejidad alta
-pred = ai.predict([new_task], model, explain=true)
+pred = ai.predict([new_task], model, explain=yes)
 
 show("Predicción de duración:", pred["value"], "min",
      "\n Explicación:", pred["why"], level="info")
@@ -69,9 +69,9 @@ payload = {
 res = net.transmit("https://jsonplaceholder.typicode.com/posts", json_data=payload)
 
 if res.status == 201 {
-    show("Orion Cloud confirmó la recepción cognitiva", level="ok", pulse=true)
+    show("Orion Cloud confirmó la recepción cognitiva", level="ok", pulse=yes)
 } else {
     show("Falló la sincronización:", res.status, level="error")
 }
 
-trace_end("ANÁLISIS COGNITIVO COMPLETO", elapsed=true)
+trace_end("ANÁLISIS COGNITIVO COMPLETO", elapsed=yes)
