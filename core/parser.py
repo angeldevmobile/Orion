@@ -2,49 +2,44 @@ from core.errors import OrionSyntaxError
 
 
 def parse_call_args(tokens, i):
-    """Parsea los argumentos de una llamada (soporta args normales, nombrados y lambdas)."""
-    if tokens[i][0] != "LPAREN":
+    """Parse function call arguments, supporting both positional and named arguments."""
+    # Check if we have a left parenthesis - if not, this isn't a function call
+    if i >= len(tokens) or tokens[i][0] != "LPAREN":
         raise OrionSyntaxError("Se esperaba '(' en llamada de función")
-    i += 1
+    
+    i += 1  # Skip '('
     args = []
-
+    
+    if i >= len(tokens):
+        raise OrionSyntaxError("Fin inesperado de entrada en argumentos de función")
+    
     while i < len(tokens) and tokens[i][0] != "RPAREN":
-        # Si no es el primer argumento, puede haber una coma opcional
-        if len(args) > 0 and tokens[i][0] == "COMMA":
-            i += 1
-
-        # Si llegamos a un RPAREN (último argumento con coma final)
-        if tokens[i][0] == "RPAREN":
-            break
-
-        # --- Argumento nombrado: nombre = valor ---
-        if (i+1 < len(tokens)) and tokens[i][0] == "IDENT" and tokens[i+1][0] == "ASSIGN":
-            arg_name = tokens[i][1]
-            i += 2
-            arg_value, i = parse_expression(tokens, i)
-            args.append(("NAMED_ARG", arg_name, arg_value))
-
-        # --- Función flecha (lambda): t => expr ---
-        elif (i+1 < len(tokens)) and tokens[i][0] == "IDENT" and tokens[i+1][0] == "ARROW":
-            param = tokens[i][1]
-            i += 2  # saltar param y ARROW
-            body_expr, i = parse_expression(tokens, i)
-            args.append(("LAMBDA", [param], body_expr))
-
-        # --- Expresión normal ---
+        # Check if this is a named argument (name=value)
+        if (i + 2 < len(tokens) and 
+            tokens[i][0] == "IDENT" and 
+            tokens[i + 1][0] == "ASSIGN"):
+            
+            # Named argument
+            name = tokens[i][1]
+            i += 2  # Skip name and =
+            value, i = parse_expression(tokens, i)
+            args.append(("NAMED_ARG", name, value))
         else:
+            # Positional argument
             arg, i = parse_expression(tokens, i)
             args.append(arg)
-
-        # Coma opcional después del argumento
+        
+        # Handle comma
         if i < len(tokens) and tokens[i][0] == "COMMA":
             i += 1
-
-    # Verificar cierre
+        elif i < len(tokens) and tokens[i][0] != "RPAREN":
+            raise OrionSyntaxError(f"Se esperaba ',' o ')' en argumentos de función")
+    
     if i >= len(tokens) or tokens[i][0] != "RPAREN":
-        raise OrionSyntaxError("Falta ')' en llamada de función")
-
-    return args, i + 1
+        raise OrionSyntaxError("Se esperaba ')' después de argumentos de función")
+    
+    i += 1  # Skip ')'
+    return args, i
 
 
 def parse_primary(tokens, i):
@@ -75,10 +70,7 @@ def parse_primary(tokens, i):
                 # Check if it's a method call
                 if i < len(tokens) and tokens[i][0] == "LPAREN":
                     i += 1
-                    args, i = parse_call_args(tokens, i)
-                    if i >= len(tokens) or tokens[i][0] != "RPAREN":
-                        raise OrionSyntaxError("Se esperaba ')' después de argumentos de método")
-                    i += 1
+                    args, i = parse_call_args(tokens, i-1)  # Back up to include LPAREN
                     expr = ("CALL_METHOD", attr_name, expr, args)
                 else:
                     expr = ("ATTR_ACCESS", expr, attr_name)
@@ -124,12 +116,8 @@ def parse_primary(tokens, i):
                     expr = ("INDEX", expr, slice_expr)
             
             elif tokens[i][0] == "LPAREN":
-                # Function call
-                i += 1
+                # Function call - use the existing function call parsing
                 args, i = parse_call_args(tokens, i)
-                if i >= len(tokens) or tokens[i][0] != "RPAREN":
-                    raise OrionSyntaxError("Se esperaba ')' después de argumentos de función")
-                i += 1
                 expr = ("CALL", value, args)
             
             elif tokens[i][0] == "SAFE_ACCESS":
