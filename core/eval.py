@@ -60,6 +60,28 @@ except ImportError as e:
     CRYPTO_ENABLED = False
     CRYPTO_FUNCTIONS = {}
     print(f"[DEBUG] Módulo Crypto no disponible: {e}")
+    
+# ============================================================
+try:
+    from stdlib.insight import orion_export as insight_export, extract_text_blocks, extract_tables, extract_metadata, extract_signatures, summarize
+    INSIGHT_ENABLED = True
+    INSIGHT_FUNCTIONS = insight_export()
+    print("[DEBUG] Módulo Insight Orion cargado exitosamente")
+except ImportError as e:
+    INSIGHT_ENABLED = False
+    INSIGHT_FUNCTIONS = {}
+    print(f"[DEBUG] Módulo Insight no disponible: {e}")
+    
+# ============================================================
+try:
+    from stdlib.matrix import orion_export as matrix_export, matrix, SmartMatrix, add, mul, transpose, det, inverse, neuralify, morph
+    MATRIX_ENABLED = True
+    MATRIX_FUNCTIONS = matrix_export()
+    print("[DEBUG] Módulo Matrix Orion cargado exitosamente")
+except ImportError as e:
+    MATRIX_ENABLED = False
+    MATRIX_FUNCTIONS = {}
+    print(f"[DEBUG] Módulo Matrix no disponible: {e}")   
 
 
 NATIVE_FUNCTIONS = {
@@ -112,6 +134,34 @@ if CRYPTO_ENABLED:
         "token": CRYPTO_FUNCTIONS.get("token"),
         "entropy": CRYPTO_FUNCTIONS.get("entropy"),
         "context_token": CRYPTO_FUNCTIONS.get("context_token"),
+    })
+    
+if INSIGHT_ENABLED:
+    NATIVE_FUNCTIONS.update({
+        "extract_text_blocks": extract_text_blocks,
+        "extract_tables": extract_tables,
+        "extract_metadata": extract_metadata,
+        "extract_signatures": extract_signatures,
+        "summarize": summarize
+    })
+    
+if MATRIX_ENABLED:
+    NATIVE_FUNCTIONS.update({
+        "matrix": matrix,
+        "SmartMatrix": SmartMatrix,
+        "add": add,
+        "mul": mul,
+        "transpose": transpose,
+        "det": det,
+        "inverse": inverse,
+        "trace": MATRIX_FUNCTIONS.get("trace"),
+        "rot2D": MATRIX_FUNCTIONS.get("rot2D"),
+        "rot3D": MATRIX_FUNCTIONS.get("rot3D"),
+        "neuralify": neuralify,
+        "amplify": MATRIX_FUNCTIONS.get("amplify"),
+        "collapse": MATRIX_FUNCTIONS.get("collapse"),
+        "morph": morph,
+        "neuralify": neuralify
     })
 
 def lookup_variable(name, variables):
@@ -167,7 +217,32 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "crypto_encrypt", lambda *args, **kwargs: crypto("encrypt", *args, **kwargs))
         register_native_function(functions, "crypto_decrypt", lambda *args, **kwargs: crypto("decrypt", *args, **kwargs))
         print(f"[DEBUG] {len([f for f in CRYPTO_FUNCTIONS if callable(CRYPTO_FUNCTIONS[f])])} funciones Crypto registradas como built-ins")
+    
+    if INSIGHT_ENABLED:
+        for insight_func_name, insight_func in INSIGHT_FUNCTIONS.items():
+            if callable(insight_func) and insight_func_name != "insight":
+                register_native_function(functions, insight_func_name, insight_func)
+                
+        # Registrar función principal insight
+        if "insight" in INSIGHT_FUNCTIONS:
+            insight_main = INSIGHT_FUNCTIONS["insight"]
+            for func_name, func in insight_main.items():
+                if callable(func):
+                    register_native_function(functions, f"insight_{func_name}", func)
+        
+        print(f"[DEBUG] {len([f for f in INSIGHT_FUNCTIONS if callable(INSIGHT_FUNCTIONS.get(f, {}).get if isinstance(INSIGHT_FUNCTIONS.get(f), dict) else INSIGHT_FUNCTIONS.get(f))])} funciones Insight registradas como built-ins")
 
+    if MATRIX_ENABLED:
+        for matrix_func_name, matrix_func in MATRIX_FUNCTIONS.items():
+            if callable(matrix_func):
+                register_native_function(functions, matrix_func_name, matrix_func)
+        register_native_function(functions, "matrix_add", lambda *args: matrix("add", *args))
+        register_native_function(functions, "matrix_mul", lambda *args: matrix("mul", *args))
+        register_native_function(functions, "matrix_det", lambda *args: matrix("det", *args))
+        register_native_function(functions, "matrix_inv", lambda *args: matrix("inverse", *args))
+        print(f"[DEBUG] {len(MATRIX_FUNCTIONS)} funciones Matrix registradas como built-ins")
+    
+    
 
 def eval_call_args(args, variables, functions):
     pos_args = []
@@ -419,6 +494,26 @@ def eval_expr(expr, variables, functions):
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Crypto '{fn_name}': {str(e)}")
                 
+                # === MANEJO ESPECIAL PARA FUNCIONES INSIGHT ===
+                elif INSIGHT_ENABLED and (fn_name in INSIGHT_FUNCTIONS or fn_name.startswith('insight_')):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        if fn_name in ["extract_text_blocks", "extract_tables", "extract_metadata", "extract_signatures", "summarize"]:
+                            print(f"[DEBUG INSIGHT] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función Insight '{fn_name}': {str(e)}")
+                
+                # === MANEJO ESPECIAL PARA FUNCIONES MATRIX ===
+                elif MATRIX_ENABLED and (fn_name in MATRIX_FUNCTIONS or fn_name.startswith('matrix_')):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        if fn_name in ["matrix_add", "matrix_mul", "matrix_det", "matrix_inv"]:
+                            print(f"[DEBUG MATRIX] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función Matrix '{fn_name}': {str(e)}")
+
                 # Procesar argumentos especialmente para show
                 elif fn_name == "show":
                     processed_args = []
@@ -588,6 +683,26 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         }
     else:
         variables["CRYPTO"] = {"enabled": False}
+        
+    if INSIGHT_ENABLED:
+        variables["INSIGHT"] = {
+            "enabled": True,
+            "functions": list(INSIGHT_FUNCTIONS.keys()),
+            "version": "1.0.0",
+            "features": ["ocr", "table_detection", "signature_detection", "metadata_extraction"]
+        }
+    else:
+        variables["INSIGHT"] = {"enabled": False}
+        
+    if MATRIX_ENABLED:
+        variables["MATRIX"] = {
+            "enabled": True,
+            "functions": list(MATRIX_FUNCTIONS.keys()),
+            "version": "1.0.0",
+            "features": ["smart_matrices", "neural_transforms", "quantum_ops", "3d_rotation"]
+        }
+    else:
+        variables["MATRIX"] = {"enabled": False}
 
 
     _register_builtin_functions(functions)
@@ -638,6 +753,26 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 variables["crypto_enabled"] = True
                 variables["crypto_meta"] = CRYPTO_FUNCTIONS.get("__meta__", {})
                 print(f"[DEBUG] Módulo Crypto importado con {len([f for f in CRYPTO_FUNCTIONS if f != '__meta__'])} funciones")
+                i += 1
+                continue
+            
+            elif base_name == "insight" and INSIGHT_ENABLED:
+                for insight_func_name, insight_func in INSIGHT_FUNCTIONS.items():
+                    if insight_func_name == "insight" and isinstance(insight_func, dict):
+                        for sub_func_name, sub_func in insight_func.items():
+                            variables[sub_func_name] = sub_func
+                    elif callable(insight_func):
+                        variables[insight_func_name] = insight_func
+                variables["insight_enabled"] = True
+                print(f"[DEBUG] Módulo Insight importado con {len(INSIGHT_FUNCTIONS)} funciones")
+                i += 1
+                continue
+            
+            elif base_name == "matrix" and MATRIX_ENABLED:
+                for matrix_func_name, matrix_func in MATRIX_FUNCTIONS.items():
+                    variables[matrix_func_name] = matrix_func
+                variables["matrix_enabled"] = True
+                print(f"[DEBUG] Módulo Matrix importado con {len(MATRIX_FUNCTIONS)} funciones")
                 i += 1
                 continue
 
