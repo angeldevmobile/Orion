@@ -82,7 +82,37 @@ except ImportError as e:
     MATRIX_ENABLED = False
     MATRIX_FUNCTIONS = {}
     print(f"[DEBUG] Módulo Matrix no disponible: {e}")   
+    
+# ============================================================
+try:
+    from stdlib.quantum import orion_export as quantum_export, quantum, qubit, bell_pair, measure, apply_gate, tensor, fidelity
+    QUANTUM_ENABLED = True
+    QUANTUM_FUNCTIONS = quantum_export()
+    print("[DEBUG] Módulo Quantum Orion cargado exitosamente")
+except ImportError as e:
+    QUANTUM_ENABLED = False
+    QUANTUM_FUNCTIONS = {}
+    print(f"[DEBUG] Módulo Quantum no disponible: {e}")
 
+try:
+    from stdlib.timewarp import orion_export as timewarp_export, timewarp, WarpClock, TimeLine, future, warp_speed, wait, measureMtime
+    TIMEWARP_ENABLED = True
+    TIMEWARP_FUNCTIONS = timewarp_export()
+    print("[DEBUG] Módulo TimeWarp Orion cargado exitosamente")
+except ImportError as e:
+    TIMEWARP_ENABLED = False
+    TIMEWARP_FUNCTIONS = {}
+    print(f"[DEBUG] Módulo TimeWarp no disponible: {e}")
+
+try:
+    from stdlib.vision import orion_export as vision_export, load, save, resize, smart_crop, dhash, detect_faces, blur_faces, ImagePipeline
+    VISION_ENABLED = True
+    VISION_FUNCTIONS = vision_export()
+    print("[DEBUG] Módulo Vision Orion cargado exitosamente")
+except ImportError as e:
+    VISION_ENABLED = False
+    VISION_FUNCTIONS = {}
+    print(f"[DEBUG] Módulo Vision no disponible: {e}")
 
 NATIVE_FUNCTIONS = {
     "trace_start": code.trace_start,
@@ -163,6 +193,58 @@ if MATRIX_ENABLED:
         "morph": morph,
         "neuralify": neuralify
     })
+    
+if QUANTUM_ENABLED:
+    NATIVE_FUNCTIONS.update({
+        "quantum": quantum,
+        "qubit": qubit,
+        "bell_pair": bell_pair,
+        "measure": measure,
+        "apply_gate": apply_gate,
+        "tensor": tensor,
+        "fidelity": fidelity,
+        "zero": QUANTUM_FUNCTIONS.get("zero"),
+        "one": QUANTUM_FUNCTIONS.get("one"),
+        "rand": QUANTUM_FUNCTIONS.get("rand"),
+        "bloch": QUANTUM_FUNCTIONS.get("bloch"),
+        "apply_circuit": QUANTUM_FUNCTIONS.get("apply_circuit"),
+        "state_from_bits": QUANTUM_FUNCTIONS.get("state_from_bits"),
+        "expand_gate": QUANTUM_FUNCTIONS.get("expand_gate"),
+        "control_gate": QUANTUM_FUNCTIONS.get("control_gate")
+    })
+    
+if TIMEWARP_ENABLED:
+    NATIVE_FUNCTIONS.update({
+        "timewarp": timewarp,
+        "WarpClock": WarpClock,
+        "TimeLine": TimeLine,
+        "future": future,
+        "warp_speed": warp_speed,
+        "wait": wait,
+        "measureMtime": measureMtime,
+        "block_future": TIMEWARP_FUNCTIONS.get("block_future"),
+        "block_past": TIMEWARP_FUNCTIONS.get("block_past")
+    })
+    
+if VISION_ENABLED:
+    NATIVE_FUNCTIONS.update({
+        "load_image": load,
+        "save_image": save,
+        "resize_image": resize,
+        "smart_crop": smart_crop,
+        "dhash": dhash,
+        "detect_faces": detect_faces,
+        "blur_faces": blur_faces,
+        "ImagePipeline": ImagePipeline,
+        "thumbnail": VISION_FUNCTIONS.get("thumbnail"),
+        "crop": VISION_FUNCTIONS.get("crop"),
+        "hamming": VISION_FUNCTIONS.get("hamming"),
+        "dominant_colors": VISION_FUNCTIONS.get("dominant_colors"),
+        "hist_eq": VISION_FUNCTIONS.get("hist_eq"),
+        "auto_enhance": VISION_FUNCTIONS.get("auto_enhance"),
+        "scan_text": VISION_FUNCTIONS.get("scan_text"),
+        "seam_carve": VISION_FUNCTIONS.get("seam_carve")
+    })
 
 def lookup_variable(name, variables):
     """Busca una variable en el scope actual."""
@@ -241,8 +323,49 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "matrix_det", lambda *args: matrix("det", *args))
         register_native_function(functions, "matrix_inv", lambda *args: matrix("inverse", *args))
         print(f"[DEBUG] {len(MATRIX_FUNCTIONS)} funciones Matrix registradas como built-ins")
-    
-    
+
+    if QUANTUM_ENABLED:
+        for quantum_func_name, quantum_func in QUANTUM_FUNCTIONS.items():
+            if callable(quantum_func):
+                register_native_function(functions, quantum_func_name, quantum_func)
+        register_native_function(functions, "quantum_qubit", lambda *args: quantum("qubit", *args))
+        register_native_function(functions, "quantum_bell", lambda *args: quantum("bell", *args))
+        register_native_function(functions, "quantum_measure", lambda *args, **kwargs: quantum("measure", *args, **kwargs))
+        register_native_function(functions, "quantum_circuit", lambda *args: quantum("apply_circuit", *args))
+        
+        print(f"[DEBUG] {len(QUANTUM_FUNCTIONS)} funciones Quantum registradas como built-ins")
+
+    if TIMEWARP_ENABLED:
+        for timewarp_func_name, timewarp_func in TIMEWARP_FUNCTIONS.items():
+            if callable(timewarp_func):
+                # Evitar conflictos de nombres con otros módulos
+                if timewarp_func_name == "time_measure":
+                    register_native_function(functions, "time_measure", timewarp_func)
+                else:
+                    register_native_function(functions, timewarp_func_name, timewarp_func)
+        
+        # Registrar aliases específicos para operaciones temporales
+        register_native_function(functions, "timewarp_clock", lambda: timewarp("clock"))
+        register_native_function(functions, "timewarp_timeline", lambda name="main": timewarp("timeline", name=name))
+        register_native_function(functions, "timewarp_future", lambda delay, fn: timewarp("future", delay, fn))
+        register_native_function(functions, "timewarp_measure", lambda fn: timewarp("measure", fn))
+        
+        print(f"[DEBUG] {len(TIMEWARP_FUNCTIONS)} funciones TimeWarp registradas como built-ins")
+
+    if VISION_ENABLED:
+        for vision_func_name, vision_func in VISION_FUNCTIONS.items():
+            if callable(vision_func) and vision_func_name != "vision":
+                register_native_function(functions, vision_func_name, vision_func)
+        # Registrar función principal vision si existe
+        if "vision" in VISION_FUNCTIONS:
+            vision_main = VISION_FUNCTIONS["vision"]
+            if isinstance(vision_main, dict):
+                for func_name, func in vision_main.items():
+                    if callable(func):
+                        register_native_function(functions, f"vision_{func_name}", func)
+        
+        print(f"[DEBUG] {len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins")
+
 
 def eval_call_args(args, variables, functions):
     pos_args = []
@@ -514,6 +637,39 @@ def eval_expr(expr, variables, functions):
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Matrix '{fn_name}': {str(e)}")
 
+                # === MANEJO ESPECIAL PARA FUNCIONES QUANTUM ===
+                if QUANTUM_ENABLED and (fn_name in QUANTUM_FUNCTIONS or fn_name.startswith('quantum_') or
+                                        fn_name in ["qubit", "bell_pair", "measure", "apply_gate", "tensor", "fidelity"]):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        if fn_name in ["quantum", "qubit", "bell_pair", "measure", "apply_circuit"]:
+                            print(f"[DEBUG QUANTUM] Ejecutado {fn_name} - operación cuántica completada")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función Quantum '{fn_name}': {str(e)}")
+                
+                # === MANEJO ESPECIAL PARA FUNCIONES TIMEWARP ===
+                if TIMEWARP_ENABLED and (fn_name in TIMEWARP_FUNCTIONS or fn_name.startswith('timewarp_') or 
+                                       fn_name in ["WarpClock", "TimeLine", "future", "warp_speed", "wait", "time_measure"]):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        if fn_name in ["timewarp", "WarpClock", "future", "wait", "time_measure"]:
+                            print(f"[DEBUG TIMEWARP] Ejecutado {fn_name} - operación temporal completada")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función TimeWarp '{fn_name}': {str(e)}")
+
+                # === MANEJO ESPECIAL PARA FUNCIONES VISION ===
+                if VISION_ENABLED and (fn_name in VISION_FUNCTIONS or fn_name.startswith('vision_') or 
+                                     fn_name in ["load", "save", "resize", "smart_crop", "dhash", "detect_faces", "blur_faces", "ImagePipeline"]):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        if fn_name in ["load", "save", "resize", "smart_crop", "detect_faces", "blur_faces"]:
+                            print(f"[DEBUG VISION] Ejecutado {fn_name} - procesamiento de imagen completado")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función Vision '{fn_name}': {str(e)}")
+
                 # Procesar argumentos especialmente para show
                 elif fn_name == "show":
                     processed_args = []
@@ -703,7 +859,36 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         }
     else:
         variables["MATRIX"] = {"enabled": False}
-
+    
+    if QUANTUM_ENABLED:
+        variables["QUANTUM"] = {
+            "enabled": True,
+            "functions": list(QUANTUM_FUNCTIONS.keys()),
+            "version": "1.0.0",
+            "features": ["qubits", "gates", "circuits", "entanglement", "noise_models", "measurements"]
+        }
+    else:
+        variables["QUANTUM"] = {"enabled": False}
+        
+    if TIMEWARP_ENABLED:
+        variables["TIMEWARP"] = {
+            "enabled": True,
+            "functions": list(TIMEWARP_FUNCTIONS.keys()),
+            "version": "1.0.0",
+            "features": ["time_travel", "warp_clock", "timelines", "future_execution", "temporal_decorators", "performance_measurement"]
+        }
+    else:
+        variables["TIMEWARP"] = {"enabled": False}
+        
+    if VISION_ENABLED:
+        variables["VISION"] = {
+            "enabled": True,
+            "functions": list(VISION_FUNCTIONS.keys()),
+            "version": "1.0.0",
+            "features": ["image_processing", "face_detection", "perceptual_hashing", "smart_cropping", "ocr", "seam_carving", "pipelines"]
+        }
+    else:
+        variables["VISION"] = {"enabled": False}
 
     _register_builtin_functions(functions)
     functions["_variables"] = variables
@@ -773,6 +958,51 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                     variables[matrix_func_name] = matrix_func
                 variables["matrix_enabled"] = True
                 print(f"[DEBUG] Módulo Matrix importado con {len(MATRIX_FUNCTIONS)} funciones")
+                i += 1
+                continue
+            
+            elif base_name == "quantum" and QUANTUM_ENABLED:
+                for quantum_func_name, quantum_func in QUANTUM_FUNCTIONS.items():
+                    variables[quantum_func_name] = quantum_func
+                variables["quantum_enabled"] = True
+                
+                # Agregar puertas cuánticas como constantes
+                from stdlib.quantum import H, X, Y, Z, I, S, T, CNOT
+                variables["H"] = H
+                variables["X"] = X
+                variables["Y"] = Y
+                variables["Z"] = Z
+                variables["I"] = I
+                variables["S"] = S
+                variables["T"] = T
+                variables["CNOT"] = CNOT
+                print(f"[DEBUG] Módulo Quantum importado con {len(QUANTUM_FUNCTIONS)} funciones")
+                i += 1
+                continue
+            
+            elif base_name == "timewarp" and TIMEWARP_ENABLED:
+                for timewarp_func_name, timewarp_func in TIMEWARP_FUNCTIONS.items():
+                    # Resolver conflictos de nombres
+                    if timewarp_func_name == "time_measure":
+                        variables["time_measure"] = timewarp_func
+                    else:
+                        variables[timewarp_func_name] = timewarp_func
+                variables["timewarp_enabled"] = True
+                print(f"[DEBUG] Módulo TimeWarp importado con {len(TIMEWARP_FUNCTIONS)} funciones")
+                i += 1
+                continue
+            
+            elif base_name == "vision" and VISION_ENABLED:
+                for vision_func_name, vision_func in VISION_FUNCTIONS.items():
+                    if vision_func_name == "vision" and isinstance(vision_func, dict):
+                        # Si vision contiene un diccionario de funciones
+                        for sub_func_name, sub_func in vision_func.items():
+                            variables[sub_func_name] = sub_func
+                    elif callable(vision_func):
+                        variables[vision_func_name] = vision_func
+                
+                variables["vision_enabled"] = True
+                print(f"[DEBUG] Módulo Vision importado con {len(VISION_FUNCTIONS)} funciones")
                 i += 1
                 continue
 

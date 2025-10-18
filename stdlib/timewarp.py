@@ -96,7 +96,7 @@ def wait(duration):
         else: time.sleep(float(duration))
     else: time.sleep(float(duration))
 
-def measure(fn: Callable, *a, **kw):
+def measureMtime(fn: Callable, *a, **kw):
     start = _ns()
     result = fn(*a, **kw)
     return {"result": result, "ms": (_ns() - start) / 1e6}
@@ -118,13 +118,13 @@ def timewarp(action="clock", *a, **kw):
     Entrada principal para Orion.
       timewarp("clock")
       timewarp("future", 3, fn)
-      timewarp("measure", fn)
+      timewarp("measureMtime", fn)
       timewarp("block_future", delay, fn)
     """
     if action == "clock": return WarpClock()
     if action == "timeline": return TimeLine(kw.get("name", "main"))
     if action == "future": return threading.Timer(a[0], a[1]).start()
-    if action == "measure": return measure(a[0])
+    if action == "measureMtime": return measureMtime(a[0])
     if action == "block_future": return run_future_block(a[0], a[1])
     if action == "block_past": return run_past_block(a[0], a[1])
     return None
@@ -135,7 +135,7 @@ ALIASES = {
     "future": future,
     "warp_speed": warp_speed,
     "wait": wait,
-    "measure": measure,
+    "measureMtime": measureMtime,
     "block_future": run_future_block,
     "block_past": run_past_block,
 }
