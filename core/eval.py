@@ -23,7 +23,8 @@ from core.errors import (
 
 from modules import json as orion_json
 from lib import collections
-from modules import code, show
+# === INTEGRACIÓN DE ORION CODE & SHOW ENGINE ===
+from modules import code, show  # Orion Visual Engine
 from lib import io
 from lib import math as orion_math
 from lib import strings
@@ -33,94 +34,107 @@ try:
     from stdlib.ai import orion_export, think, quantum_embed, recall
     AI_ENABLED = True
     AI_FUNCTIONS = orion_export()
-    print("[DEBUG] Módulo AI Orion cargado exitosamente")
+    code.info("Módulo AI Orion cargado exitosamente", module="ai-core")
 except ImportError as e:
     AI_ENABLED = False
     AI_FUNCTIONS = {}
-    print(f"[DEBUG] Módulo AI no disponible: {e}")
+    code.warn(f"Módulo AI no disponible: {e}", module="ai-core")
     
 # ==========================================
 try: 
     from stdlib.cosmos import orion_export, cosmos, Body, Universe
     COSMOS_ENABLED = True
     COSMOS_FUNCTIONS = orion_export()
-    print("[DEBUG] Módulo Cosmos Orion cargado exitosamente")
+    code.info("Módulo Cosmos Orion cargado exitosamente", module="cosmos-core")
 except ImportError as e:
     COSMOS_ENABLED = False
     COSMOS_FUNCTIONS = {}
-    print(f"[DEBUG] Módulo Cosmos no disponible: {e}")
+    code.warn(f"Módulo Cosmos no disponible: {e}", module="cosmos-core")
     
 # =========================================
 try:
     from stdlib.crypto import orion_export as crypto_export, crypto, hash, encrypt, decrypt, sign, verify
     CRYPTO_ENABLED = True
     CRYPTO_FUNCTIONS = crypto_export()
-    print("[DEBUG] Módulo Crypto Orion cargado exitosamente")
+    code.info("Módulo Crypto Orion cargado exitosamente", module="crypto-core")
 except ImportError as e:
     CRYPTO_ENABLED = False
     CRYPTO_FUNCTIONS = {}
-    print(f"[DEBUG] Módulo Crypto no disponible: {e}")
+    code.warn(f"Módulo Crypto no disponible: {e}", module="crypto-core")
     
 # ============================================================
 try:
     from stdlib.insight import orion_export as insight_export, extract_text_blocks, extract_tables, extract_metadata, extract_signatures, summarize
     INSIGHT_ENABLED = True
     INSIGHT_FUNCTIONS = insight_export()
-    print("[DEBUG] Módulo Insight Orion cargado exitosamente")
+    code.info("Módulo Insight Orion cargado exitosamente", module="insight-core")
 except ImportError as e:
     INSIGHT_ENABLED = False
     INSIGHT_FUNCTIONS = {}
-    print(f"[DEBUG] Módulo Insight no disponible: {e}")
+    code.warn(f"Módulo Insight no disponible: {e}", module="insight-core")
     
 # ============================================================
 try:
     from stdlib.matrix import orion_export as matrix_export, matrix, SmartMatrix, add, mul, transpose, det, inverse, neuralify, morph
     MATRIX_ENABLED = True
     MATRIX_FUNCTIONS = matrix_export()
-    print("[DEBUG] Módulo Matrix Orion cargado exitosamente")
+    code.info("Módulo Matrix Orion cargado exitosamente", module="matrix-core")
 except ImportError as e:
     MATRIX_ENABLED = False
     MATRIX_FUNCTIONS = {}
-    print(f"[DEBUG] Módulo Matrix no disponible: {e}")   
+    code.warn(f"Módulo Matrix no disponible: {e}", module="matrix-core")   
     
 # ============================================================
 try:
     from stdlib.quantum import orion_export as quantum_export, quantum, qubit, bell_pair, measure, apply_gate, tensor, fidelity
     QUANTUM_ENABLED = True
     QUANTUM_FUNCTIONS = quantum_export()
-    print("[DEBUG] Módulo Quantum Orion cargado exitosamente")
+    code.info("Módulo Quantum Orion cargado exitosamente", module="quantum-core")
 except ImportError as e:
     QUANTUM_ENABLED = False
     QUANTUM_FUNCTIONS = {}
-    print(f"[DEBUG] Módulo Quantum no disponible: {e}")
+    code.warn(f"Módulo Quantum no disponible: {e}", module="quantum-core")
 
 try:
     from stdlib.timewarp import orion_export as timewarp_export, timewarp, WarpClock, TimeLine, future, warp_speed, wait, measureMtime
     TIMEWARP_ENABLED = True
     TIMEWARP_FUNCTIONS = timewarp_export()
-    print("[DEBUG] Módulo TimeWarp Orion cargado exitosamente")
+    code.info("Módulo TimeWarp Orion cargado exitosamente", module="timewarp-core")
 except ImportError as e:
     TIMEWARP_ENABLED = False
     TIMEWARP_FUNCTIONS = {}
-    print(f"[DEBUG] Módulo TimeWarp no disponible: {e}")
+    code.warn(f"Módulo TimeWarp no disponible: {e}", module="timewarp-core")
 
 try:
     from stdlib.vision import orion_export as vision_export, load, save, resize, smart_crop, dhash, detect_faces, blur_faces, ImagePipeline
     VISION_ENABLED = True
     VISION_FUNCTIONS = vision_export()
-    print("[DEBUG] Módulo Vision Orion cargado exitosamente")
+    code.info("Módulo Vision Orion cargado exitosamente", module="vision-core")
 except ImportError as e:
     VISION_ENABLED = False
     VISION_FUNCTIONS = {}
-    print(f"[DEBUG] Módulo Vision no disponible: {e}")
+    code.warn(f"Módulo Vision no disponible: {e}", module="vision-core")
 
+# === ORION VISUAL ENGINE FUNCTIONS ===
 NATIVE_FUNCTIONS = {
+    # Orion CODE Engine
     "trace_start": code.trace_start,
     "trace_end": code.trace_end,
     "progress": code.progress,
     "divider": code.divider,
     "frame": code.frame,
+    "pulse": code.pulse,
+    
+    # Orion SHOW Engine
     "show": show.show,
+    
+    # Orion Log Levels
+    "info": code.info,
+    "ok": code.ok,
+    "warn": code.warn,
+    "error": code.error,
+    "debug": code.debug,
+    "trace": code.trace,
 }
 
 # Agregar funciones AI a las funciones nativas si están disponibles
@@ -267,6 +281,10 @@ def _register_builtin_functions(functions):
     
     # Registrar funciones nativas de Python necesarias
     register_native_function(functions, "len", len)
+    register_native_function(functions, "range", range)
+    register_native_function(functions, "str", str)
+    register_native_function(functions, "int", int)
+    register_native_function(functions, "float", float)
     
     # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
     if AI_ENABLED:
@@ -280,7 +298,7 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "ai_embed", quantum_embed)
         register_native_function(functions, "ai_recall", recall)
         
-        print(f"[DEBUG] {len(AI_FUNCTIONS)} funciones AI registradas como built-ins")
+        code.ok(f"{len(AI_FUNCTIONS)} funciones AI registradas como built-ins", module="ai-registry")
         
     if COSMOS_ENABLED:
         for cosmos_func_name, cosmos_fun in COSMOS_FUNCTIONS.items():
@@ -289,7 +307,7 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "cosmos_create", lambda *args, **kwargs: cosmos("create", *args, **kwargs))
         register_native_function(functions, "cosmos_run", lambda *args, **kwargs: cosmos("run", *args, **kwargs))
         register_native_function(functions, "cosmos_dust", lambda *args, **kwargs: cosmos("dust", *args, **kwargs))
-        print(f"[DEBUG] {len(COSMOS_FUNCTIONS)} funciones Cosmos registradas como built-ins")
+        code.ok(f"{len(COSMOS_FUNCTIONS)} funciones Cosmos registradas como built-ins", module="cosmos-registry")
 
     if CRYPTO_ENABLED:
         for crypto_func_name, crypto_func in CRYPTO_FUNCTIONS.items():
@@ -298,7 +316,7 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "crypto_hash", lambda *args, **kwargs: crypto("hash", *args, **kwargs))
         register_native_function(functions, "crypto_encrypt", lambda *args, **kwargs: crypto("encrypt", *args, **kwargs))
         register_native_function(functions, "crypto_decrypt", lambda *args, **kwargs: crypto("decrypt", *args, **kwargs))
-        print(f"[DEBUG] {len([f for f in CRYPTO_FUNCTIONS if callable(CRYPTO_FUNCTIONS[f])])} funciones Crypto registradas como built-ins")
+        code.ok(f"{len([f for f in CRYPTO_FUNCTIONS if callable(CRYPTO_FUNCTIONS[f])])} funciones Crypto registradas como built-ins", module="crypto-registry")
     
     if INSIGHT_ENABLED:
         for insight_func_name, insight_func in INSIGHT_FUNCTIONS.items():
@@ -312,7 +330,7 @@ def _register_builtin_functions(functions):
                 if callable(func):
                     register_native_function(functions, f"insight_{func_name}", func)
         
-        print(f"[DEBUG] {len([f for f in INSIGHT_FUNCTIONS if callable(INSIGHT_FUNCTIONS.get(f, {}).get if isinstance(INSIGHT_FUNCTIONS.get(f), dict) else INSIGHT_FUNCTIONS.get(f))])} funciones Insight registradas como built-ins")
+        code.ok(f"{len([f for f in INSIGHT_FUNCTIONS if callable(INSIGHT_FUNCTIONS.get(f, {}).get if isinstance(INSIGHT_FUNCTIONS.get(f), dict) else INSIGHT_FUNCTIONS.get(f))])} funciones Insight registradas como built-ins", module="insight-registry")
 
     if MATRIX_ENABLED:
         for matrix_func_name, matrix_func in MATRIX_FUNCTIONS.items():
@@ -322,7 +340,7 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "matrix_mul", lambda *args: matrix("mul", *args))
         register_native_function(functions, "matrix_det", lambda *args: matrix("det", *args))
         register_native_function(functions, "matrix_inv", lambda *args: matrix("inverse", *args))
-        print(f"[DEBUG] {len(MATRIX_FUNCTIONS)} funciones Matrix registradas como built-ins")
+        code.ok(f"{len(MATRIX_FUNCTIONS)} funciones Matrix registradas como built-ins", module="matrix-registry")
 
     if QUANTUM_ENABLED:
         for quantum_func_name, quantum_func in QUANTUM_FUNCTIONS.items():
@@ -333,7 +351,7 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "quantum_measure", lambda *args, **kwargs: quantum("measure", *args, **kwargs))
         register_native_function(functions, "quantum_circuit", lambda *args: quantum("apply_circuit", *args))
         
-        print(f"[DEBUG] {len(QUANTUM_FUNCTIONS)} funciones Quantum registradas como built-ins")
+        code.ok(f"{len(QUANTUM_FUNCTIONS)} funciones Quantum registradas como built-ins", module="quantum-registry")
 
     if TIMEWARP_ENABLED:
         for timewarp_func_name, timewarp_func in TIMEWARP_FUNCTIONS.items():
@@ -350,7 +368,7 @@ def _register_builtin_functions(functions):
         register_native_function(functions, "timewarp_future", lambda delay, fn: timewarp("future", delay, fn))
         register_native_function(functions, "timewarp_measure", lambda fn: timewarp("measure", fn))
         
-        print(f"[DEBUG] {len(TIMEWARP_FUNCTIONS)} funciones TimeWarp registradas como built-ins")
+        code.ok(f"{len(TIMEWARP_FUNCTIONS)} funciones TimeWarp registradas como built-ins", module="timewarp-registry")
 
     if VISION_ENABLED:
         for vision_func_name, vision_func in VISION_FUNCTIONS.items():
@@ -364,7 +382,255 @@ def _register_builtin_functions(functions):
                     if callable(func):
                         register_native_function(functions, f"vision_{func_name}", func)
         
-        print(f"[DEBUG] {len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins")
+        code.ok(f"{len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins", module="vision-registry")
+
+def lookup_variable(name, variables):
+    """Busca una variable en el scope actual."""
+    if name in variables:
+        return variables[name]
+    # Usa el error personalizado de Orion
+    raise OrionNameError(name)
+
+def _register_builtin_functions(functions):
+    import types
+    from lib import io 
+    
+    builtin_modules = [collections, io, orion_math, strings]
+    for mod in builtin_modules:
+        for k in dir(mod):
+            if not k.startswith("_"):
+                v = getattr(mod, k)
+                if isinstance(v, types.FunctionType):
+                    register_native_function(functions, k, v)
+    
+    # Registrar funciones nativas de Python necesarias
+    register_native_function(functions, "len", len)
+    register_native_function(functions, "range", range)
+    register_native_function(functions, "str", str)
+    register_native_function(functions, "int", int)
+    register_native_function(functions, "float", float)
+    
+    # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
+    if AI_ENABLED:
+        # Registrar todas las funciones AI exportadas
+        for ai_func_name, ai_func in AI_FUNCTIONS.items():
+            if callable(ai_func):
+                register_native_function(functions, ai_func_name, ai_func)
+        
+        # Registrar funciones AI con prefijo para evitar colisiones
+        register_native_function(functions, "ai_think", think)
+        register_native_function(functions, "ai_embed", quantum_embed)
+        register_native_function(functions, "ai_recall", recall)
+        
+        code.ok(f"{len(AI_FUNCTIONS)} funciones AI registradas como built-ins", module="ai-registry")
+        
+    if COSMOS_ENABLED:
+        for cosmos_func_name, cosmos_fun in COSMOS_FUNCTIONS.items():
+            if callable(cosmos_fun):
+                register_native_function(functions, cosmos_func_name, cosmos_fun)
+        register_native_function(functions, "cosmos_create", lambda *args, **kwargs: cosmos("create", *args, **kwargs))
+        register_native_function(functions, "cosmos_run", lambda *args, **kwargs: cosmos("run", *args, **kwargs))
+        register_native_function(functions, "cosmos_dust", lambda *args, **kwargs: cosmos("dust", *args, **kwargs))
+        code.ok(f"{len(COSMOS_FUNCTIONS)} funciones Cosmos registradas como built-ins", module="cosmos-registry")
+
+    if CRYPTO_ENABLED:
+        for crypto_func_name, crypto_func in CRYPTO_FUNCTIONS.items():
+            if callable(crypto_func) and crypto_func_name != "__meta__":
+                register_native_function(functions, crypto_func_name, crypto_func)
+        register_native_function(functions, "crypto_hash", lambda *args, **kwargs: crypto("hash", *args, **kwargs))
+        register_native_function(functions, "crypto_encrypt", lambda *args, **kwargs: crypto("encrypt", *args, **kwargs))
+        register_native_function(functions, "crypto_decrypt", lambda *args, **kwargs: crypto("decrypt", *args, **kwargs))
+        code.ok(f"{len([f for f in CRYPTO_FUNCTIONS if callable(CRYPTO_FUNCTIONS[f])])} funciones Crypto registradas como built-ins", module="crypto-registry")
+    
+    if INSIGHT_ENABLED:
+        for insight_func_name, insight_func in INSIGHT_FUNCTIONS.items():
+            if callable(insight_func) and insight_func_name != "insight":
+                register_native_function(functions, insight_func_name, insight_func)
+                
+        # Registrar función principal insight
+        if "insight" in INSIGHT_FUNCTIONS:
+            insight_main = INSIGHT_FUNCTIONS["insight"]
+            for func_name, func in insight_main.items():
+                if callable(func):
+                    register_native_function(functions, f"insight_{func_name}", func)
+        
+        code.ok(f"{len([f for f in INSIGHT_FUNCTIONS if callable(INSIGHT_FUNCTIONS.get(f, {}).get if isinstance(INSIGHT_FUNCTIONS.get(f), dict) else INSIGHT_FUNCTIONS.get(f))])} funciones Insight registradas como built-ins", module="insight-registry")
+
+    if MATRIX_ENABLED:
+        for matrix_func_name, matrix_func in MATRIX_FUNCTIONS.items():
+            if callable(matrix_func):
+                register_native_function(functions, matrix_func_name, matrix_func)
+        register_native_function(functions, "matrix_add", lambda *args: matrix("add", *args))
+        register_native_function(functions, "matrix_mul", lambda *args: matrix("mul", *args))
+        register_native_function(functions, "matrix_det", lambda *args: matrix("det", *args))
+        register_native_function(functions, "matrix_inv", lambda *args: matrix("inverse", *args))
+        code.ok(f"{len(MATRIX_FUNCTIONS)} funciones Matrix registradas como built-ins", module="matrix-registry")
+
+    if QUANTUM_ENABLED:
+        for quantum_func_name, quantum_func in QUANTUM_FUNCTIONS.items():
+            if callable(quantum_func):
+                register_native_function(functions, quantum_func_name, quantum_func)
+        register_native_function(functions, "quantum_qubit", lambda *args: quantum("qubit", *args))
+        register_native_function(functions, "quantum_bell", lambda *args: quantum("bell", *args))
+        register_native_function(functions, "quantum_measure", lambda *args, **kwargs: quantum("measure", *args, **kwargs))
+        register_native_function(functions, "quantum_circuit", lambda *args: quantum("apply_circuit", *args))
+        
+        code.ok(f"{len(QUANTUM_FUNCTIONS)} funciones Quantum registradas como built-ins", module="quantum-registry")
+
+    if TIMEWARP_ENABLED:
+        for timewarp_func_name, timewarp_func in TIMEWARP_FUNCTIONS.items():
+            if callable(timewarp_func):
+                # Evitar conflictos de nombres con otros módulos
+                if timewarp_func_name == "time_measure":
+                    register_native_function(functions, "time_measure", timewarp_func)
+                else:
+                    register_native_function(functions, timewarp_func_name, timewarp_func)
+        
+        # Registrar aliases específicos para operaciones temporales
+        register_native_function(functions, "timewarp_clock", lambda: timewarp("clock"))
+        register_native_function(functions, "timewarp_timeline", lambda name="main": timewarp("timeline", name=name))
+        register_native_function(functions, "timewarp_future", lambda delay, fn: timewarp("future", delay, fn))
+        register_native_function(functions, "timewarp_measure", lambda fn: timewarp("measure", fn))
+        
+        code.ok(f"{len(TIMEWARP_FUNCTIONS)} funciones TimeWarp registradas como built-ins", module="timewarp-registry")
+
+    if VISION_ENABLED:
+        for vision_func_name, vision_func in VISION_FUNCTIONS.items():
+            if callable(vision_func) and vision_func_name != "vision":
+                register_native_function(functions, vision_func_name, vision_func)
+        # Registrar función principal vision si existe
+        if "vision" in VISION_FUNCTIONS:
+            vision_main = VISION_FUNCTIONS["vision"]
+            if isinstance(vision_main, dict):
+                for func_name, func in vision_main.items():
+                    if callable(func):
+                        register_native_function(functions, f"vision_{func_name}", func)
+        
+        code.ok(f"{len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins", module="vision-registry")
+
+def lookup_variable(name, variables):
+    """Busca una variable en el scope actual."""
+    if name in variables:
+        return variables[name]
+    # Usa el error personalizado de Orion
+    raise OrionNameError(name)
+
+def _register_builtin_functions(functions):
+    import types
+    from lib import io 
+    
+    builtin_modules = [collections, io, orion_math, strings]
+    for mod in builtin_modules:
+        for k in dir(mod):
+            if not k.startswith("_"):
+                v = getattr(mod, k)
+                if isinstance(v, types.FunctionType):
+                    register_native_function(functions, k, v)
+    
+    # Registrar funciones nativas de Python necesarias
+    register_native_function(functions, "len", len)
+    register_native_function(functions, "range", range)
+    register_native_function(functions, "str", str)
+    register_native_function(functions, "int", int)
+    register_native_function(functions, "float", float)
+    
+    # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
+    if AI_ENABLED:
+        # Registrar todas las funciones AI exportadas
+        for ai_func_name, ai_func in AI_FUNCTIONS.items():
+            if callable(ai_func):
+                register_native_function(functions, ai_func_name, ai_func)
+        
+        # Registrar funciones AI con prefijo para evitar colisiones
+        register_native_function(functions, "ai_think", think)
+        register_native_function(functions, "ai_embed", quantum_embed)
+        register_native_function(functions, "ai_recall", recall)
+        
+        code.ok(f"{len(AI_FUNCTIONS)} funciones AI registradas como built-ins", module="ai-registry")
+        
+    if COSMOS_ENABLED:
+        for cosmos_func_name, cosmos_fun in COSMOS_FUNCTIONS.items():
+            if callable(cosmos_fun):
+                register_native_function(functions, cosmos_func_name, cosmos_fun)
+        register_native_function(functions, "cosmos_create", lambda *args, **kwargs: cosmos("create", *args, **kwargs))
+        register_native_function(functions, "cosmos_run", lambda *args, **kwargs: cosmos("run", *args, **kwargs))
+        register_native_function(functions, "cosmos_dust", lambda *args, **kwargs: cosmos("dust", *args, **kwargs))
+        code.ok(f"{len(COSMOS_FUNCTIONS)} funciones Cosmos registradas como built-ins", module="cosmos-registry")
+
+    if CRYPTO_ENABLED:
+        for crypto_func_name, crypto_func in CRYPTO_FUNCTIONS.items():
+            if callable(crypto_func) and crypto_func_name != "__meta__":
+                register_native_function(functions, crypto_func_name, crypto_func)
+        register_native_function(functions, "crypto_hash", lambda *args, **kwargs: crypto("hash", *args, **kwargs))
+        register_native_function(functions, "crypto_encrypt", lambda *args, **kwargs: crypto("encrypt", *args, **kwargs))
+        register_native_function(functions, "crypto_decrypt", lambda *args, **kwargs: crypto("decrypt", *args, **kwargs))
+        code.ok(f"{len([f for f in CRYPTO_FUNCTIONS if callable(CRYPTO_FUNCTIONS[f])])} funciones Crypto registradas como built-ins", module="crypto-registry")
+    
+    if INSIGHT_ENABLED:
+        for insight_func_name, insight_func in INSIGHT_FUNCTIONS.items():
+            if callable(insight_func) and insight_func_name != "insight":
+                register_native_function(functions, insight_func_name, insight_func)
+                
+        # Registrar función principal insight
+        if "insight" in INSIGHT_FUNCTIONS:
+            insight_main = INSIGHT_FUNCTIONS["insight"]
+            for func_name, func in insight_main.items():
+                if callable(func):
+                    register_native_function(functions, f"insight_{func_name}", func)
+        
+        code.ok(f"{len([f for f in INSIGHT_FUNCTIONS if callable(INSIGHT_FUNCTIONS.get(f, {}).get if isinstance(INSIGHT_FUNCTIONS.get(f), dict) else INSIGHT_FUNCTIONS.get(f))])} funciones Insight registradas como built-ins", module="insight-registry")
+
+    if MATRIX_ENABLED:
+        for matrix_func_name, matrix_func in MATRIX_FUNCTIONS.items():
+            if callable(matrix_func):
+                register_native_function(functions, matrix_func_name, matrix_func)
+        register_native_function(functions, "matrix_add", lambda *args: matrix("add", *args))
+        register_native_function(functions, "matrix_mul", lambda *args: matrix("mul", *args))
+        register_native_function(functions, "matrix_det", lambda *args: matrix("det", *args))
+        register_native_function(functions, "matrix_inv", lambda *args: matrix("inverse", *args))
+        code.ok(f"{len(MATRIX_FUNCTIONS)} funciones Matrix registradas como built-ins", module="matrix-registry")
+
+    if QUANTUM_ENABLED:
+        for quantum_func_name, quantum_func in QUANTUM_FUNCTIONS.items():
+            if callable(quantum_func):
+                register_native_function(functions, quantum_func_name, quantum_func)
+        register_native_function(functions, "quantum_qubit", lambda *args: quantum("qubit", *args))
+        register_native_function(functions, "quantum_bell", lambda *args: quantum("bell", *args))
+        register_native_function(functions, "quantum_measure", lambda *args, **kwargs: quantum("measure", *args, **kwargs))
+        register_native_function(functions, "quantum_circuit", lambda *args: quantum("apply_circuit", *args))
+        
+        code.ok(f"{len(QUANTUM_FUNCTIONS)} funciones Quantum registradas como built-ins", module="quantum-registry")
+
+    if TIMEWARP_ENABLED:
+        for timewarp_func_name, timewarp_func in TIMEWARP_FUNCTIONS.items():
+            if callable(timewarp_func):
+                # Evitar conflictos de nombres con otros módulos
+                if timewarp_func_name == "time_measure":
+                    register_native_function(functions, "time_measure", timewarp_func)
+                else:
+                    register_native_function(functions, timewarp_func_name, timewarp_func)
+        
+        # Registrar aliases específicos para operaciones temporales
+        register_native_function(functions, "timewarp_clock", lambda: timewarp("clock"))
+        register_native_function(functions, "timewarp_timeline", lambda name="main": timewarp("timeline", name=name))
+        register_native_function(functions, "timewarp_future", lambda delay, fn: timewarp("future", delay, fn))
+        register_native_function(functions, "timewarp_measure", lambda fn: timewarp("measure", fn))
+        
+        code.ok(f"{len(TIMEWARP_FUNCTIONS)} funciones TimeWarp registradas como built-ins", module="timewarp-registry")
+
+    if VISION_ENABLED:
+        for vision_func_name, vision_func in VISION_FUNCTIONS.items():
+            if callable(vision_func) and vision_func_name != "vision":
+                register_native_function(functions, vision_func_name, vision_func)
+        # Registrar función principal vision si existe
+        if "vision" in VISION_FUNCTIONS:
+            vision_main = VISION_FUNCTIONS["vision"]
+            if isinstance(vision_main, dict):
+                for func_name, func in vision_main.items():
+                    if callable(func):
+                        register_native_function(functions, f"vision_{func_name}", func)
+        
+        code.ok(f"{len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins", module="vision-registry")
 
 
 def eval_call_args(args, variables, functions):
@@ -459,6 +725,11 @@ def eval_expr(expr, variables, functions):
             _, elements = expr
             return [eval_expr(e, variables, functions) for e in elements]
         
+        # --- LAMBDA ---
+        elif tag == "LAMBDA":
+            # Las lambdas se devuelven como están para ser procesadas por map/filter/etc
+            return expr
+        
         # --- DICT ---
         elif tag == "DICT":
             _, items = expr
@@ -477,6 +748,33 @@ def eval_expr(expr, variables, functions):
                 return val
             else:
                 raise OrionRuntimeError(f"Variable '{name}' no definida")
+        
+        # --- SLICE_ACCESS ---
+        elif tag == "SLICE_ACCESS":
+            _, obj_expr, slice_expr = expr
+            obj_val = eval_expr(obj_expr, variables, functions)
+            
+            # Extract slice parameters
+            _, start, end, step = slice_expr
+            start_val = eval_expr(start, variables, functions) if start is not None else None
+            end_val = eval_expr(end, variables, functions) if end is not None else None
+            step_val = eval_expr(step, variables, functions) if step is not None else None
+            
+            # Get the actual object to slice
+            if isinstance(obj_val, OrionList) or (hasattr(obj_val, "items") and isinstance(getattr(obj_val, "items"), (list, tuple))):
+                container = getattr(obj_val, "items", obj_val)
+            elif hasattr(obj_val, "value") and isinstance(getattr(obj_val, "value"), (list, tuple, str)):
+                container = getattr(obj_val, "value")
+            elif isinstance(obj_val, (list, tuple, str)):
+                container = obj_val
+            else:
+                raise OrionRuntimeError(f"No se puede hacer slice del tipo {type(obj_val).__name__}")
+            
+            # Perform the slicing
+            try:
+                return container[start_val:end_val:step_val]
+            except (TypeError, ValueError) as e:
+                raise OrionRuntimeError(f"Error en slice: {str(e)}")
 
         # --- TYPE ---
         elif tag == "TYPE":
@@ -573,6 +871,54 @@ def eval_expr(expr, variables, functions):
         elif tag == "CALL":
             _, fn_name, args = expr
 
+            # MANEJO ESPECIAL PARA APPEND SIN OBJETO (ERROR DE PARSING)
+            if fn_name == "append":
+                if len(args) == 1:
+                    arg_val = eval_expr(args[0], variables, functions)
+                    
+                    # Estrategia 1: Buscar variable que termine en "_titles" o similar
+                    target_var = None
+                    target_list = None
+                    
+                    for var_name, var_val in variables.items():
+                        if var_name.endswith("_titles") or var_name.endswith("titles"):
+                            if isinstance(var_val, list):
+                                target_var = var_name
+                                target_list = var_val
+                                break
+                            elif hasattr(var_val, 'items') and isinstance(var_val.items, list):
+                                target_var = var_name
+                                target_list = var_val.items
+                                break
+                            elif hasattr(var_val, 'value') and isinstance(var_val.value, list):
+                                target_var = var_name
+                                target_list = var_val.value
+                                break
+                    
+                    # Estrategia 2: Si no se encuentra, usar la lista más reciente
+                    if target_list is None:
+                        for var_name, var_val in reversed(list(variables.items())):
+                            if isinstance(var_val, list):
+                                target_var = var_name
+                                target_list = var_val
+                                break
+                            elif hasattr(var_val, 'items') and isinstance(var_val.items, list):
+                                target_var = var_name
+                                target_list = var_val.items
+                                break
+                            elif hasattr(var_val, 'value') and isinstance(var_val.value, list):
+                                target_var = var_name
+                                target_list = var_val.value
+                                break
+                    
+                    if target_list is not None:
+                        target_list.append(arg_val)
+                        return None  # append no retorna valor
+                    else:
+                        raise OrionFunctionError("append() llamado sin objeto - no se encontró lista válida")
+                else:
+                    raise OrionFunctionError("append() requiere exactamente 1 argumento")
+
             fn_def = get_function(functions, fn_name)
             if fn_def is None and fn_name in NATIVE_FUNCTIONS:
                 fn_def = {
@@ -592,7 +938,7 @@ def eval_expr(expr, variables, functions):
                         result = fn_def["impl"](*pos_args, **kw_args)
                         # Registrar la operación AI en memoria si es think/embed/recall
                         if fn_name in ["think", "ai_think", "embed", "ai_embed"]:
-                            print(f"[DEBUG AI] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                            code.info(f"[DEBUG AI] Ejecutado {fn_name} con {len(pos_args)} argumentos")
                         return result
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función AI '{fn_name}': {str(e)}")
@@ -602,7 +948,7 @@ def eval_expr(expr, variables, functions):
                     try:
                         result = fn_def["impl"](*pos_args, **kw_args)
                         if fn_name in ["cosmos", "cosmos_create", "cosmos_run"]:
-                            print(f"[DEBUG COSMOS] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                            code.info(f"[DEBUG COSMOS] Ejecutado {fn_name} con {len(pos_args)} argumentos")
                         return result
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Cosmos '{fn_name}': {str(e)}")
@@ -612,7 +958,7 @@ def eval_expr(expr, variables, functions):
                     try:
                         result = fn_def["impl"](*pos_args, **kw_args)
                         if fn_name in ["crypto", "hash", "encrypt", "decrypt", "sign", "verify"]:
-                            print(f"[DEBUG CRYPTO] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                            code.info(f"[DEBUG CRYPTO] Ejecutado {fn_name} con {len(pos_args)} argumentos")
                         return result
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Crypto '{fn_name}': {str(e)}")
@@ -622,7 +968,7 @@ def eval_expr(expr, variables, functions):
                     try:
                         result = fn_def["impl"](*pos_args, **kw_args)
                         if fn_name in ["extract_text_blocks", "extract_tables", "extract_metadata", "extract_signatures", "summarize"]:
-                            print(f"[DEBUG INSIGHT] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                            code.info(f"[DEBUG INSIGHT] Ejecutado {fn_name} con {len(pos_args)} argumentos")
                         return result
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Insight '{fn_name}': {str(e)}")
@@ -632,7 +978,7 @@ def eval_expr(expr, variables, functions):
                     try:
                         result = fn_def["impl"](*pos_args, **kw_args)
                         if fn_name in ["matrix_add", "matrix_mul", "matrix_det", "matrix_inv"]:
-                            print(f"[DEBUG MATRIX] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                            code.info(f"[DEBUG MATRIX] Ejecutado {fn_name} con {len(pos_args)} argumentos")
                         return result
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Matrix '{fn_name}': {str(e)}")
@@ -643,7 +989,7 @@ def eval_expr(expr, variables, functions):
                     try:
                         result = fn_def["impl"](*pos_args, **kw_args)
                         if fn_name in ["quantum", "qubit", "bell_pair", "measure", "apply_circuit"]:
-                            print(f"[DEBUG QUANTUM] Ejecutado {fn_name} - operación cuántica completada")
+                            code.info(f"[DEBUG QUANTUM] Ejecutado {fn_name} - operación cuántica completada")
                         return result
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Quantum '{fn_name}': {str(e)}")
@@ -654,7 +1000,7 @@ def eval_expr(expr, variables, functions):
                     try:
                         result = fn_def["impl"](*pos_args, **kw_args)
                         if fn_name in ["timewarp", "WarpClock", "future", "wait", "time_measure"]:
-                            print(f"[DEBUG TIMEWARP] Ejecutado {fn_name} - operación temporal completada")
+                            code.info(f"[DEBUG TIMEWARP] Ejecutado {fn_name} - operación temporal completada")
                         return result
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función TimeWarp '{fn_name}': {str(e)}")
@@ -665,7 +1011,7 @@ def eval_expr(expr, variables, functions):
                     try:
                         result = fn_def["impl"](*pos_args, **kw_args)
                         if fn_name in ["load", "save", "resize", "smart_crop", "detect_faces", "blur_faces"]:
-                            print(f"[DEBUG VISION] Ejecutado {fn_name} - procesamiento de imagen completado")
+                            code.info(f"[DEBUG VISION] Ejecutado {fn_name} - procesamiento de imagen completado")
                         return result
                     except Exception as e:
                         raise OrionRuntimeError(f"Error en función Vision '{fn_name}': {str(e)}")
@@ -681,6 +1027,7 @@ def eval_expr(expr, variables, functions):
                             processed_args.append(str(interpolated))
                         else:
                             processed_args.append(pos_args[i])
+                    # Usar show con capacidades extendidas
                     return fn_def["impl"](*processed_args, **kw_args)
                 else:
                     pos_args = [str(a) if isinstance(a, OrionString) else a for a in pos_args]
@@ -708,15 +1055,158 @@ def eval_expr(expr, variables, functions):
             _, method_name, obj_expr, args = expr
             obj_val = eval_expr(obj_expr, variables, functions)
             pos_args, kw_args = eval_call_args(args, variables, functions)
-            if hasattr(orion_math, method_name):
+            
+            # === MÉTODOS BUILT-IN COMUNES ===
+            if method_name == "len":
+                if hasattr(obj_val, '__len__'):
+                    return len(obj_val)
+                elif isinstance(obj_val, (list, dict, str, tuple)):
+                    return len(obj_val)
+                elif hasattr(obj_val, 'items') and isinstance(obj_val.items, (list, tuple)):
+                    return len(obj_val.items)
+                elif hasattr(obj_val, 'value'):
+                    inner = obj_val.value
+                    if hasattr(inner, '__len__'):
+                        return len(inner)
+                    elif isinstance(inner, (list, dict, str, tuple)):
+                        return len(inner)
+                else:
+                    raise OrionFunctionError(f"Objeto de tipo {type(obj_val)} no tiene longitud calculable")
+            
+            elif method_name == "append":
+                if len(pos_args) == 0:
+                    raise OrionFunctionError("append() requiere al menos 1 argumento")
+                
+                if isinstance(obj_val, list):
+                    for arg in pos_args:
+                        obj_val.append(arg)
+                    return obj_val
+                elif hasattr(obj_val, 'items') and isinstance(obj_val.items, list):
+                    for arg in pos_args:
+                        obj_val.items.append(arg)
+                    return obj_val
+                elif hasattr(obj_val, 'value') and isinstance(obj_val.value, list):
+                    for arg in pos_args:
+                        obj_val.value.append(arg)
+                    return obj_val
+                else:
+                    raise OrionFunctionError(f"Método 'append' no disponible para tipo {type(obj_val)}")
+            
+            elif method_name == "join":
+                if len(pos_args) != 1:
+                    raise OrionFunctionError("join() requiere exactamente 1 argumento")
+                separator = pos_args[0]
+                if isinstance(obj_val, list):
+                    return separator.join(str(item) for item in obj_val)
+                elif hasattr(obj_val, 'items') and isinstance(obj_val.items, list):
+                    return separator.join(str(item) for item in obj_val.items)
+                elif hasattr(obj_val, 'value') and isinstance(obj_val.value, list):
+                    return separator.join(str(item) for item in obj_val.value)
+                else:
+                    raise OrionFunctionError(f"Método 'join' no disponible para tipo {type(obj_val)}")
+            
+            elif method_name == "keys":
+                if isinstance(obj_val, dict):
+                    return list(obj_val.keys())
+                elif hasattr(obj_val, 'value') and isinstance(obj_val.value, dict):
+                    return list(obj_val.value.keys())
+                else:
+                    raise OrionFunctionError(f"Método 'keys' no disponible para tipo {type(obj_val)}")
+            
+            elif method_name == "map":
+                if len(pos_args) != 1:
+                    raise OrionFunctionError("map() requiere exactamente 1 argumento")
+                lambda_expr = args[0]  # Tomar la expresión lambda directamente de args
+                
+                # Determinar la colección a mapear
+                collection = None
+                if isinstance(obj_val, list):
+                    collection = obj_val
+                elif hasattr(obj_val, 'items') and isinstance(obj_val.items, list):
+                    collection = obj_val.items
+                elif hasattr(obj_val, 'value') and isinstance(obj_val.value, list):
+                    collection = obj_val.value
+                else:
+                    raise OrionFunctionError(f"Método 'map' no disponible para tipo {type(obj_val)}")
+                
+                # Verificar si es una expresión lambda con =>
+                if isinstance(lambda_expr, tuple) and lambda_expr[0] == "LAMBDA":
+                    _, params, body = lambda_expr
+                    result = []
+                    for item in collection:
+                        # Crear un scope local para la lambda
+                        local_scope = variables.copy()
+                        if len(params) == 1:
+                            local_scope[params[0]] = item
+                        else:
+                            # Si hay múltiples parámetros, desempaquetar
+                            for i, param in enumerate(params):
+                                if i < len(item) if isinstance(item, (list, tuple)) else 1:
+                                    local_scope[param] = item[i] if isinstance(item, (list, tuple)) else item
+                        
+                        # Evaluar el cuerpo de la lambda
+                        mapped_value = eval_expr(body, local_scope, functions)
+                        result.append(mapped_value)
+                    return result
+                else:
+                    raise OrionFunctionError("map() requiere una función lambda (usando =>)")
+            
+            # === MÉTODOS ESPECÍFICOS DE MÓDULOS AI/OTROS ===
+            elif AI_ENABLED and method_name in ["embed", "think", "fit", "predict", "cluster", "sim", "dist", "normalize", "accuracy", "mse"]:
+                try:
+                    if method_name == "embed":
+                        # Para ai.embed(), obj_val es el objeto ai, pos_args[0] es el texto
+                        if len(pos_args) >= 1: 
+                            text = pos_args[0]
+                            dim = pos_args[1] if len(pos_args) > 1 else 128
+                            return quantum_embed(text, dim)
+                        else:
+                            raise OrionFunctionError("embed() requiere al menos un argumento (texto)")
+                            
+                    elif method_name == "cluster":
+                        # cluster devuelve (centers, labels), mantener como tupla para desempaquetado
+                        ai_func = AI_FUNCTIONS.get("cluster")
+                        if ai_func:
+                            centers, labels = ai_func(*pos_args, **kw_args)
+                            # Devolver como lista para facilitar el desempaquetado
+                            return [centers, labels]
+                        else:
+                            raise OrionFunctionError(f"Método AI 'cluster' no encontrado")
+
+                    elif method_name in ["think", "fit", "predict"]:
+                        # Estos métodos funcionan directamente
+                        ai_func = AI_FUNCTIONS.get(method_name)
+                        if ai_func:
+                            return ai_func(*pos_args, **kw_args)
+                        else:
+                            raise OrionFunctionError(f"Método AI '{method_name}' no encontrado")
+                    else:
+                        # Para otros métodos AI
+                        ai_func = AI_FUNCTIONS.get(method_name)
+                        if ai_func:
+                            return ai_func(*pos_args, **kw_args)
+                        else:
+                            raise OrionFunctionError(f"Método AI '{method_name}' no encontrado")
+                except Exception as e:
+                    raise OrionRuntimeError(f"Error en método AI '{method_name}': {str(e)}")
+
+            # === FALLBACK A lib.math ===
+            elif hasattr(orion_math, method_name):
                 fn = getattr(orion_math, method_name)
                 return fn(obj_val, *pos_args, **kw_args)
-            method = getattr(obj_val, method_name, None)
-            if callable(method):
-                return method(*pos_args, **kw_args)
-            raise OrionFunctionError(
-                f"Método '{method_name}' no definido en lib.math ni en el objeto."
-            )
+            
+            # === MÉTODO NATIVO DEL OBJETO ===
+            elif hasattr(obj_val, method_name):
+                method = getattr(obj_val, method_name)
+                if callable(method):
+                    return method(*pos_args, **kw_args)
+                else:
+                    return method
+            
+            else:
+                raise OrionFunctionError(
+                    f"Método '{method_name}' no definido para objeto de tipo {type(obj_val).__name__}"
+                )
 
         # --- ATTR_ACCESS ---
         elif tag == "ATTR_ACCESS":
@@ -803,6 +1293,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
     if functions is None:
         functions = {}
 
+    # === INICIALIZAR ORION VISUAL ENGINE ===
+    code.frame("ORION LANGUAGE CORE", style="cyan")
+    code.divider("System Initialization")
+
     # === Inicializar valores nativos de Orion ===
     if "null" not in variables:
         variables["null"] = None
@@ -818,8 +1312,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             "functions": list(AI_FUNCTIONS.keys()),
             "version": "1.0.0"
         }
+        code.info("AI Context initialized", module="ai-engine")
     else:
         variables["AI"] = {"enabled": False}
+        code.debug("AI Context disabled", module="ai-engine")
         
     if COSMOS_ENABLED:
         variables["COSMOS"] = {
@@ -827,8 +1323,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             "functions": list(COSMOS_FUNCTIONS.keys()),
             "version": "1.0.0"
         }
+        code.info("Cosmos Context initialized", module="cosmos-engine")
     else:
         variables["COSMOS"] = {"enabled": False}
+        code.debug("Cosmos Context disabled", module="cosmos-engine")
         
     if CRYPTO_ENABLED:
         variables["CRYPTO"] = {
@@ -837,8 +1335,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             "version": CRYPTO_FUNCTIONS.get("__meta__", {}).get("version", "2.0.0"),
             "secure_level": CRYPTO_FUNCTIONS.get("__meta__", {}).get("secure_level", "high")
         }
+        code.info("Crypto Context initialized", module="crypto-engine")
     else:
         variables["CRYPTO"] = {"enabled": False}
+        code.debug("Crypto Context disabled", module="crypto-engine")
         
     if INSIGHT_ENABLED:
         variables["INSIGHT"] = {
@@ -847,8 +1347,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             "version": "1.0.0",
             "features": ["ocr", "table_detection", "signature_detection", "metadata_extraction"]
         }
+        code.info("Insight Context initialized", module="insight-engine")
     else:
         variables["INSIGHT"] = {"enabled": False}
+        code.debug("Insight Context disabled", module="insight-engine")
         
     if MATRIX_ENABLED:
         variables["MATRIX"] = {
@@ -857,8 +1359,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             "version": "1.0.0",
             "features": ["smart_matrices", "neural_transforms", "quantum_ops", "3d_rotation"]
         }
+        code.info("Matrix Context initialized", module="matrix-engine")
     else:
         variables["MATRIX"] = {"enabled": False}
+        code.debug("Matrix Context disabled", module="matrix-engine")
     
     if QUANTUM_ENABLED:
         variables["QUANTUM"] = {
@@ -867,8 +1371,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             "version": "1.0.0",
             "features": ["qubits", "gates", "circuits", "entanglement", "noise_models", "measurements"]
         }
+        code.info("Quantum Context initialized", module="quantum-engine")
     else:
         variables["QUANTUM"] = {"enabled": False}
+        code.debug("Quantum Context disabled", module="quantum-engine")
         
     if TIMEWARP_ENABLED:
         variables["TIMEWARP"] = {
@@ -877,8 +1383,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             "version": "1.0.0",
             "features": ["time_travel", "warp_clock", "timelines", "future_execution", "temporal_decorators", "performance_measurement"]
         }
+        code.info("TimeWarp Context initialized", module="timewarp-engine")
     else:
         variables["TIMEWARP"] = {"enabled": False}
+        code.debug("TimeWarp Context disabled", module="timewarp-engine")
         
     if VISION_ENABLED:
         variables["VISION"] = {
@@ -887,17 +1395,22 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             "version": "1.0.0",
             "features": ["image_processing", "face_detection", "perceptual_hashing", "smart_cropping", "ocr", "seam_carving", "pipelines"]
         }
+        code.info("Vision Context initialized", module="vision-engine")
     else:
         variables["VISION"] = {"enabled": False}
+        code.debug("Vision Context disabled", module="vision-engine")
 
     _register_builtin_functions(functions)
     functions["_variables"] = variables
 
     # Registrar funciones FN antes de ejecutar el resto
+    code.progress("orion-core", "Registering user functions", 25)
     for node in ast:
         if node[0] == "FN":
             _, fn_name, params, body = node
             register_function(functions, fn_name, params, body)
+
+    code.progress("orion-core", "Executing AST nodes", 50)
 
     i = 0
     while i < len(ast):
@@ -912,36 +1425,78 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             else:
                 base_name = module_path
 
-            print(f"[DEBUG USE] Cargando módulo: {base_name}")
+            code.info(f"Loading module: {base_name}", module="module-loader")
 
             # === IMPORTACIÓN ESPECIAL PARA MÓDULO AI ===
             if base_name == "ai" and AI_ENABLED:
-                # Agregar todas las funciones AI al entorno de variables
+                # Crear un objeto ai que contenga todas las funciones
+                class AIModule:
+                    def __init__(self, functions_dict):
+                        for name, func in functions_dict.items():
+                            setattr(self, name, func)
+                
+                # Crear instancia del módulo AI
+                ai_module = AIModule(AI_FUNCTIONS)
+                variables["ai"] = ai_module
+                
+                # También agregar las funciones individualmente por compatibilidad
                 for ai_func_name, ai_func in AI_FUNCTIONS.items():
                     variables[ai_func_name] = ai_func
                 variables["ai_enabled"] = True
-                print(f"[DEBUG] Módulo AI importado con {len(AI_FUNCTIONS)} funciones")
+                code.ok(f"Módulo AI importado con {len(AI_FUNCTIONS)} funciones", module="ai-loader")
                 i += 1
                 continue
             elif base_name == "cosmos" and COSMOS_ENABLED:
+                class CosmosModule:
+                    def __init__(self, functions_dict):
+                        for name, func in functions_dict.items():
+                            setattr(self, name, func)
+                
+                cosmos_module = CosmosModule(COSMOS_FUNCTIONS)
+                variables["cosmos"] = cosmos_module
+                
                 for cosmos_func_name, cosmos_fun in COSMOS_FUNCTIONS.items():
                     variables[cosmos_func_name] = cosmos_fun
                 variables["cosmos_enabled"] = True
-                print(f"[DEBUG] Módulo Cosmos importado con {len(COSMOS_FUNCTIONS)} funciones")
+                code.ok(f"Módulo Cosmos importado con {len(COSMOS_FUNCTIONS)} funciones", module="cosmos-loader")
                 i += 1
                 continue
             
             elif base_name == "crypto" and CRYPTO_ENABLED:
+                class CryptoModule:
+                    def __init__(self, functions_dict):
+                        for name, func in functions_dict.items():
+                            if name != "__meta__":
+                                setattr(self, name, func)
+                
+                crypto_module = CryptoModule(CRYPTO_FUNCTIONS)
+                variables["crypto"] = crypto_module
+                
                 for crypto_func_name, crypto_func in CRYPTO_FUNCTIONS.items():
                     if crypto_func_name != "__meta__":
                         variables[crypto_func_name] = crypto_func
                 variables["crypto_enabled"] = True
                 variables["crypto_meta"] = CRYPTO_FUNCTIONS.get("__meta__", {})
-                print(f"[DEBUG] Módulo Crypto importado con {len([f for f in CRYPTO_FUNCTIONS if f != '__meta__'])} funciones")
+                code.ok(f"Módulo Crypto importado con {len([f for f in CRYPTO_FUNCTIONS if f != '__meta__'])} funciones", module="crypto-loader")
                 i += 1
                 continue
             
             elif base_name == "insight" and INSIGHT_ENABLED:
+                # Crear un objeto insight que contenga todas las funciones
+                class InsightModule:
+                    def __init__(self, functions_dict):
+                        for name, func in functions_dict.items():
+                            if name == "insight" and isinstance(func, dict):
+                                # Si insight contiene un diccionario de funciones
+                                for sub_func_name, sub_func in func.items():
+                                    setattr(self, sub_func_name, sub_func)
+                            elif callable(func):
+                                setattr(self, name, func)
+                
+                insight_module = InsightModule(INSIGHT_FUNCTIONS)
+                variables["insight"] = insight_module
+                
+                # También agregar las funciones individualmente por compatibilidad
                 for insight_func_name, insight_func in INSIGHT_FUNCTIONS.items():
                     if insight_func_name == "insight" and isinstance(insight_func, dict):
                         for sub_func_name, sub_func in insight_func.items():
@@ -949,19 +1504,39 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                     elif callable(insight_func):
                         variables[insight_func_name] = insight_func
                 variables["insight_enabled"] = True
-                print(f"[DEBUG] Módulo Insight importado con {len(INSIGHT_FUNCTIONS)} funciones")
+                code.ok(f"Módulo Insight importado con {len(INSIGHT_FUNCTIONS)} funciones", module="insight-loader")
                 i += 1
                 continue
             
             elif base_name == "matrix" and MATRIX_ENABLED:
+                # Crear un objeto matrix que contenga todas las funciones
+                class MatrixModule:
+                    def __init__(self, functions_dict):
+                        for name, func in functions_dict.items():
+                            setattr(self, name, func)
+                
+                matrix_module = MatrixModule(MATRIX_FUNCTIONS)
+                variables["matrix"] = matrix_module
+                
+                # También agregar las funciones individualmente por compatibilidad
                 for matrix_func_name, matrix_func in MATRIX_FUNCTIONS.items():
                     variables[matrix_func_name] = matrix_func
                 variables["matrix_enabled"] = True
-                print(f"[DEBUG] Módulo Matrix importado con {len(MATRIX_FUNCTIONS)} funciones")
+                code.ok(f"Módulo Matrix importado con {len(MATRIX_FUNCTIONS)} funciones", module="matrix-loader")
                 i += 1
                 continue
             
             elif base_name == "quantum" and QUANTUM_ENABLED:
+                # Crear un objeto quantum que contenga todas las funciones
+                class QuantumModule:
+                    def __init__(self, functions_dict):
+                        for name, func in functions_dict.items():
+                            setattr(self, name, func)
+                
+                quantum_module = QuantumModule(QUANTUM_FUNCTIONS)
+                variables["quantum"] = quantum_module
+                
+                # También agregar las funciones individualmente por compatibilidad
                 for quantum_func_name, quantum_func in QUANTUM_FUNCTIONS.items():
                     variables[quantum_func_name] = quantum_func
                 variables["quantum_enabled"] = True
@@ -976,11 +1551,25 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 variables["S"] = S
                 variables["T"] = T
                 variables["CNOT"] = CNOT
-                print(f"[DEBUG] Módulo Quantum importado con {len(QUANTUM_FUNCTIONS)} funciones")
+                code.ok(f"Módulo Quantum importado con {len(QUANTUM_FUNCTIONS)} funciones", module="quantum-loader")
                 i += 1
                 continue
             
             elif base_name == "timewarp" and TIMEWARP_ENABLED:
+                # Crear un objeto timewarp que contenga todas las funciones
+                class TimeWarpModule:
+                    def __init__(self, functions_dict):
+                        for name, func in functions_dict.items():
+                            # Resolver conflictos de nombres
+                            if name == "time_measure":
+                                setattr(self, "time_measure", func)
+                            else:
+                                setattr(self, name, func)
+                
+                timewarp_module = TimeWarpModule(TIMEWARP_FUNCTIONS)
+                variables["timewarp"] = timewarp_module
+                
+                # También agregar las funciones individualmente por compatibilidad
                 for timewarp_func_name, timewarp_func in TIMEWARP_FUNCTIONS.items():
                     # Resolver conflictos de nombres
                     if timewarp_func_name == "time_measure":
@@ -988,11 +1577,26 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                     else:
                         variables[timewarp_func_name] = timewarp_func
                 variables["timewarp_enabled"] = True
-                print(f"[DEBUG] Módulo TimeWarp importado con {len(TIMEWARP_FUNCTIONS)} funciones")
+                code.ok(f"Módulo TimeWarp importado con {len(TIMEWARP_FUNCTIONS)} funciones", module="timewarp-loader")
                 i += 1
                 continue
             
             elif base_name == "vision" and VISION_ENABLED:
+                # Crear un objeto vision que contenga todas las funciones
+                class VisionModule:
+                    def __init__(self, functions_dict):
+                        for name, func in functions_dict.items():
+                            if name == "vision" and isinstance(func, dict):
+                                # Si vision contiene un diccionario de funciones
+                                for sub_func_name, sub_func in func.items():
+                                    setattr(self, sub_func_name, sub_func)
+                            elif callable(func):
+                                setattr(self, name, func)
+                
+                vision_module = VisionModule(VISION_FUNCTIONS)
+                variables["vision"] = vision_module
+                
+                # También agregar las funciones individualmente por compatibilidad
                 for vision_func_name, vision_func in VISION_FUNCTIONS.items():
                     if vision_func_name == "vision" and isinstance(vision_func, dict):
                         # Si vision contiene un diccionario de funciones
@@ -1002,14 +1606,14 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                         variables[vision_func_name] = vision_func
                 
                 variables["vision_enabled"] = True
-                print(f"[DEBUG] Módulo Vision importado con {len(VISION_FUNCTIONS)} funciones")
+                code.ok(f"Módulo Vision importado con {len(VISION_FUNCTIONS)} funciones", module="vision-loader")
                 i += 1
                 continue
 
             # --- Orion stdlib ---
             elif base_name == "json":
                 variables["json"] = orion_json
-                print(f"[DEBUG] Módulo Orion stdlib '{base_name}' importado")
+                code.info(f"Módulo Orion stdlib '{base_name}' importado", module="stdlib-loader")
                 i += 1
                 continue
 
@@ -1026,7 +1630,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 imported_tokens = lex(code)
                 imported_ast = parse(imported_tokens)
                 evaluate(imported_ast, variables, functions)
-                print(f"[DEBUG] Módulo Orion '{base_name}' ejecutado")
+                code.ok(f"Módulo Orion '{base_name}' ejecutado", module="orion-loader")
 
             # Si existe un módulo Python en /modules/
             elif os.path.exists(py_file):
@@ -1034,7 +1638,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
                 from modules import load_module
                 mod_exports = load_module(variables, base_name)
-                print(f"[DEBUG] Módulo Python '{base_name}' cargado con {len(mod_exports)} funciones")
+                code.ok(f"Módulo Python '{base_name}' cargado con {len(mod_exports)} funciones", module="python-loader")
 
                 for fname, fref in mod_exports.items():
                     if callable(fref):
@@ -1066,6 +1670,68 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             elif isinstance(val, list) and not isinstance(val, OrionList):
                 val = OrionList(val)
             variables[name] = val
+            
+        elif tag == "INDEX_ASSIGN":
+            # Asignación a índice: dict[key] = value
+            _, dict_expr, key_expr, value_expr = node
+            dict_obj = eval_expr(dict_expr, variables, functions)
+            key = eval_expr(key_expr, variables, functions)
+            value = eval_expr(value_expr, variables, functions)
+            
+            # Manejar diferentes tipos de contenedores
+            if isinstance(dict_obj, dict):
+                dict_obj[key] = value
+            elif isinstance(dict_obj, list):
+                try:
+                    dict_obj[int(key)] = value
+                except (ValueError, IndexError):
+                    raise OrionRuntimeError(f"Índice inválido para lista: {key}")
+            elif hasattr(dict_obj, 'items') and isinstance(dict_obj.items, list):
+                try:
+                    dict_obj.items[int(key)] = value
+                except (ValueError, IndexError):
+                    raise OrionRuntimeError(f"Índice inválido para OrionList: {key}")
+            elif hasattr(dict_obj, 'value'):
+                if isinstance(dict_obj.value, dict):
+                    dict_obj.value[key] = value
+                elif isinstance(dict_obj.value, list):
+                    try:
+                        dict_obj.value[int(key)] = value
+                    except (ValueError, IndexError):
+                        raise OrionRuntimeError(f"Índice inválido: {key}")
+                else:
+                    raise OrionRuntimeError(f"No se puede asignar índice al tipo {type(dict_obj.value)}")
+            else:
+                raise OrionRuntimeError(f"No se puede asignar índice al tipo {type(dict_obj)}")
+        
+        elif tag == "MULTI_ASSIGN":
+            # MULTI_ASSIGN: ('MULTI_ASSIGN', ['var1', 'var2', ...], expression)
+            _, var_names, value_expr = node
+            values = eval_expr(value_expr, variables, functions)
+            
+            # Si el resultado es una tupla o lista, desempaquetarla
+            if isinstance(values, (list, tuple)):
+                if len(values) != len(var_names):
+                    raise OrionRuntimeError(
+                        f"No se puede desempaquetar {len(values)} valores en {len(var_names)} variables"
+                    )
+                for var_name, val in zip(var_names, values):
+                    # Envolver valores en tipos Orion si corresponde
+                    if isinstance(val, str) and not isinstance(val, OrionString):
+                        val = OrionString(val)
+                    elif isinstance(val, bool) and not isinstance(val, OrionBool):
+                        val = OrionBool(val)
+                    elif isinstance(val, int) and not isinstance(val, OrionNumber):
+                        val = OrionNumber(val)
+                    elif isinstance(val, float) and not isinstance(val, OrionNumber):
+                        val = OrionNumber(val)
+                    elif isinstance(val, list) and not isinstance(val, OrionList):
+                        val = OrionList(val)
+                    variables[var_name] = val
+            else:
+                raise OrionRuntimeError(
+                    f"No se puede desempaquetar el valor {type(values).__name__} en múltiples variables"
+                )
 
         elif tag == "DECLARE":
             _, type_name, var_name, expr_value = node
@@ -1220,6 +1886,9 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
 
         elif tag == "CALL":
             eval_expr(node, variables, functions)
+            
+        elif tag == "CALL_METHOD":
+            eval_expr(node, variables, functions)
 
         elif tag == "RETURN":
             _, value = node
@@ -1235,9 +1904,11 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
 
         i += 1
 
+    code.progress("orion-core", "Execution completed", 100)
     # 3. Si estamos en nivel superior
     if not inside_fn:
         if "main" in functions:
+            code.trace("Executing main function", module="orion-runtime")
             main_functions = functions["main"]
             
             # functions["main"] es una lista de definiciones de función

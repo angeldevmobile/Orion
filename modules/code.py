@@ -1,27 +1,33 @@
 """
-Orion LOG Engine
+Orion CODE Engine
 ────────────────────────────────────────────
-Structured. Expressive. Cosmic.
+Structured. Expressive. Living.
 
-Logs are not prints — they are pulses of the Orion Core.
-Wide visuals, adaptive color, and a living console aesthetic.
+Logs are not mere prints — they are pulses of the Orion Core.
+Adaptive visuals, contextual awareness, and a console that breathes.
+
+Modes:
+    - compact → fast output, minimal format
+    - extended → full aesthetic + timestamps
+    - cosmic → adds sentiment & AI-driven summaries
 
 Levels:
-    DEBUG, INFO, WARN, ERROR, OK, PROC
+    DEBUG, INFO, WARN, ERROR, OK, PROC, TRACE
 
 Usage:
-    log.info("System online", module="core")
+    code.info("Boot sequence initialized", module="core")
+    code.progress("orion-core", "Initializing modules", 65)
 """
 
-import datetime
-import shutil
-import re
-import os
+import datetime, shutil, os, re, math, random
 
-# ===== Color System =====
+# ============================================================
+# ─── Color & Style Engine ───────────────────────────────────
+# ============================================================
 RESET = "\033[0m"
 BOLD = "\033[1m"
 DIM = "\033[2m"
+BLINK = "\033[5m"
 
 FG = {
     "gray": "\033[90m",
@@ -39,14 +45,19 @@ BG = {
     "yellow": "\033[43m",
     "red": "\033[41m",
     "gray": "\033[100m",
+    "purple": "\033[45m",
 }
 
-# ===== Settings =====
-MODE = os.getenv("ORION_LOG_MODE", "extended")   # "extended" or "compact"
+# ============================================================
+# ─── Config ─────────────────────────────────────────────────
+# ============================================================
+MODE = os.getenv("ORION_LOG_MODE", "cosmic")     # compact | extended | cosmic
 LOG_FILE = os.getenv("ORION_LOG_FILE", "orion.log")
 WIDTH_DEFAULT = 120
 
-# ===== Core Utils =====
+# ============================================================
+# ─── Internals ──────────────────────────────────────────────
+# ============================================================
 def _width():
     try:
         return shutil.get_terminal_size((WIDTH_DEFAULT, 30)).columns
@@ -66,51 +77,98 @@ def _write_file(line):
     except Exception:
         pass
 
-# ===== Core Line Formatter =====
-def _line(level, module, message, color, bg=None):
-    ts = _timestamp()
-    # Nivel con fondo y negrita
-    lvl = f"{(bg or color)}{BOLD}[{level:<5}]{RESET}"
-    # Módulo en magenta y negrita
-    mod = f"{FG['magenta']}{BOLD}[{module.upper()}]{RESET}"
-    # Mensaje en color
-    msg = f"{color}{message}{RESET}"
+# ============================================================
+# ─── Emotion & Sentiment Engine ─────────────────────────────
+# ============================================================
+def _emotion(message):
+    """Clasifica emoción según el tono del mensaje."""
+    msg = message.lower()
+    if any(x in msg for x in ["fail", "error", "fatal", "denied"]): return "red"
+    if any(x in msg for x in ["warn", "delay", "retry"]): return "yellow"
+    if any(x in msg for x in ["ok", "done", "success", "ready"]): return "green"
+    if any(x in msg for x in ["init", "boot", "load", "start"]): return "cyan"
+    return "white"
 
-    line = f"{ts} {lvl} {mod} → {msg}" if MODE == "extended" else f"{lvl} {mod} {msg}"
+def _summary(message):
+    """Modo cosmic: crea una descripción corta tipo IA del log."""
+    verbs = ["syncing", "processing", "resolving", "connecting", "evolving"]
+    tone = random.choice(["stabilized", "detected", "activated", "balanced"])
+    return f"{random.choice(verbs).capitalize()} — {tone}"
+
+# ============================================================
+# ─── Core Line Builder ──────────────────────────────────────
+# ============================================================
+def _line(level, module, message, color=None, bg=None):
+    ts = _timestamp()
     width = _width()
+
+    if not color:
+        color = FG[_emotion(message)]
+
+    lvl = f"{(bg or color)}{BOLD}[{level:<5}]{RESET}"
+    mod = f"{FG['magenta']}{BOLD}[{module.upper()}]{RESET}"
+
+    cosmic_hint = f" {DIM}({ _summary(message) }){RESET}" if MODE == "cosmic" else ""
+    msg = f"{color}{message}{RESET}{cosmic_hint}"
+
+    if MODE == "compact":
+        line = f"{lvl} {mod} {msg}"
+    else:
+        line = f"{ts} {lvl} {mod} → {msg}"
+
     _write_file(line)
     return line[:width]
 
-# ===== Public Log Levels =====
-def info(message, module="system"):  print(_line("INFO", module, message, FG["cyan"], BG["cyan"]))
-def ok(message, module="system"):    print(_line("OK", module, message, FG["green"], BG["green"]))
-def warn(message, module="system"):  print(_line("WARN", module, message, FG["yellow"], BG["yellow"]))
-def error(message, module="system"): print(_line("ERROR", module, message, FG["red"], BG["red"]))
-def debug(message, module="system"): print(_line("DEBUG", module, message, FG["gray"], BG["gray"]))
+# ============================================================
+# ─── Public Log Levels ──────────────────────────────────────
+# ============================================================
+def info(msg, module="system"):  print(_line("INFO", module, msg, FG["cyan"], BG["cyan"]))
+def ok(msg, module="system"):    print(_line("OK", module, msg, FG["green"], BG["green"]))
+def warn(msg, module="system"):  print(_line("WARN", module, msg, FG["yellow"], BG["yellow"]))
+def error(msg, module="system"): print(_line("ERROR", module, msg, FG["red"], BG["red"]))
+def debug(msg, module="system"): print(_line("DEBUG", module, msg, FG["gray"], BG["gray"]))
+def trace(msg, module="system"): print(_line("TRACE", module, msg, FG["magenta"], BG["purple"]))
 
-# ===== Visual Enhancements =====
+# ============================================================
+# ─── Visual Utilities ───────────────────────────────────────
+# ============================================================
 def divider(title=""):
     width = _width()
-    pad = f"{FG['cyan']}{'─' * (width - len(title) - 2)}{RESET}"
-    line = f"{FG['yellow']}{BOLD}{title} {pad}{RESET}"
+    pad = f"{FG['gray']}{'─' * (width - len(title) - 3)}{RESET}"
+    line = f"{FG['cyan']}{BOLD}─ {title} {pad}{RESET}"
     _write_file(line)
     print(line)
-
-def frame(title):
-    width = _width()
-    pad = f"{FG['magenta']}{'═' * (width - len(title) - 2)}{RESET}"
-    print(f"{FG['magenta']}{BOLD}╔ {title} {pad}{RESET}")
-    print(f"{FG['magenta']}{BOLD}╚{FG['magenta']}{'═' * (width - 1)}{RESET}")
 
 def progress(module, step, percent):
     bar_len = 40
     filled = int(bar_len * percent / 100)
     bar = f"{FG['green']}{'█' * filled}{FG['gray']}{'░' * (bar_len - filled)}{RESET}"
-    line = _line("PROC", module, f"{step} {bar} {percent}%", FG["cyan"])
+    line = _line("PROC", module, f"{step} {bar} {percent:>3.0f}%", FG["cyan"])
     print(line, end="\r" if percent < 100 else "\n")
+
+def pulse(level="INFO", text="...", frequency=0.08):
+    """Efecto visual de 'latido' en la consola, tipo vivo."""
+    import time, sys
+    for i in range(3):
+        sys.stdout.write(f"{FG['magenta']}{BOLD}[{level}] {text}{RESET}\r")
+        sys.stdout.flush()
+        time.sleep(frequency)
+        sys.stdout.write(f"{DIM}{FG['magenta']}[{level}] {text}{RESET}\r")
+        sys.stdout.flush()
+        time.sleep(frequency)
+    print()
 
 def trace_start(title="TRACE START"):
     divider(f"{FG['cyan']}{BOLD}── {title} ──{RESET}")
 
 def trace_end(title="TRACE END"):
     divider(f"{FG['green']}{BOLD}── {title} ──{RESET}")
+
+def frame(title: str, style="magenta"):
+    """Muestra un marco decorativo alrededor de un título."""
+    width = _width()
+    border = "═" * (width - len(title) - 4)
+    color = FG.get(style, FG["magenta"])
+    print(f"{color}{BOLD}╔═ {title} {border}{RESET}")
+    print(f"{color}{BOLD}╚{border}{RESET}")
+

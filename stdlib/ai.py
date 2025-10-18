@@ -41,10 +41,15 @@ def _remember(action: str, data: Any):
 # ------------------------------------------
 # Embeddings cuánticos Orion
 # ------------------------------------------
-def quantum_embed(text: str, dim: int = 64, seed: Optional[int] = None) -> List[float]:
-    """Embedding pseudo-cuántico determinista basado en ruido armónico."""
-    if seed is not None:
-        random.seed(seed)
+def quantum_embed(text, dim=128):  # Cambiar None por 128
+    """
+    Genera un embedding cuántico simulado para texto.
+    Convierte texto en un vector de alta dimensión usando técnicas cuánticas simuladas.
+    """
+    # Asegurar que dim es un entero válido
+    if dim is None or not isinstance(dim, int):
+        dim = 128
+    
     vec = [0.0] * dim
     for i, ch in enumerate(text):
         h = math.sin((ord(ch) * 0.137 + i) * 3.1415)
@@ -184,18 +189,35 @@ def accuracy(y_true: List, y_pred: List) -> float:
 # THINK — modo de intuición Orion
 # ------------------------------------------
 def think(data, mode: str = "auto"):
-    """Modo cognitivo Orion: adapta el razonamiento al tipo de entrada."""
+    """Modo cognitivo Orion: genera resumen semántico o analiza patrones."""
+    _remember("think", {"input_type": str(type(data))})
+
+    # --- Caso 1: texto o lista de títulos ---
+    if isinstance(data, list):
+        data = " ".join([str(x) for x in data])
     if isinstance(data, str):
-        return {"type": "text", "embedding": quantum_embed(data)}
+        emb = quantum_embed(data)
+        words = [w for w in data.split() if len(w) > 3]
+        if not words:
+            return {"type": "text", "summary": "(sin contenido)", "embedding": emb}
+
+        from collections import Counter
+        freq = Counter(words)
+        key_terms = [w for w, _ in freq.most_common(5)]
+        summary = f"Resumen cognitivo: este grupo trata sobre {', '.join(key_terms)}."
+        return {"type": "text", "summary": summary, "embedding": emb}
+
+    # --- Caso 2: lista numérica ---
     elif isinstance(data, list) and all(isinstance(x, (int, float)) for x in data):
-        trend = "up" if data[-1] > sum(data)/len(data) else "down"
-        return {"type": "series", "trend": trend}
+        trend = "creciente" if data[-1] > sum(data)/len(data) else "decreciente"
+        return {"type": "series", "trend": trend, "avg": sum(data)/len(data)}
+
+    # --- Caso 3: matriz ---
     elif isinstance(data, list) and all(isinstance(x, list) for x in data):
         centers, labels = kmeans(data)
-        return {"type": "matrix", "centers": centers, "labels": labels}
-    _remember("think", {"input_type": str(type(data))})
-    return {"type": "unknown"}
+        return {"type": "matrix", "clusters": len(centers), "labels": labels}
 
+    return {"type": "unknown", "summary": "(no interpretable)"}
 
 # ------------------------------------------
 # Alias Orion (comandos cortos)

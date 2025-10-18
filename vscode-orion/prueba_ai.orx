@@ -1,0 +1,77 @@
+use code
+use fs
+use json
+use net
+use ai
+use datetime
+use vision   -- para visualización cognitiva
+use quantum  -- para embeddings cuánticos
+
+trace_start("ANÁLISIS COGNITIVO DE TAREAS", pulse=true, depth="full")
+
+-- 1. Cargar dataset local
+local = json.parse(fs.read("tareas.json"))
+show("Tareas cargadas:", local.len(), level="info")
+
+-- 2. Generar embeddings cuánticos con resonancia semántica
+embeds = local.map(t => quantum.embed(t["title"], coherence=0.92))
+show("Embeddings cuánticos generados:", embeds.len(), level="debug")
+
+-- 3. Agrupar tareas por similitud cognitiva adaptativa
+centers, labels = ai.cluster(embeds, k="auto", mode="semantic")
+show("Clústeres cognitivos detectados:", labels.unique(), level="ok")
+
+-- 4. Análisis semántico profundo con razonamiento simbiótico
+clusters = {}
+
+for i in range(labels.unique().len()) {
+    tasks_in = local.filter((t, j) => labels[j] == i)
+    summary = ai.think(tasks_in.map(t => t["title"]).join(" "),
+                       focus="synthesis", 
+                       style="neuro-symbolic")["summary"]
+
+    clusters["Cluster_" + str(i)] = summary
+    show("Clúster", i, "→", summary[:90] + "...", level="proc", pulse=true)
+}
+
+show("Resumen cognitivo global:", clusters, level="trace")
+
+-- 5. Entrenamiento de modelo neural-lite autoajustable
+x = local.map(t => [t["priority"], t["complexity"]])
+y = local.map(t => t["time_spent"])
+
+model = ai.fit(x, y, 
+               hidden="auto", 
+               lr="adaptive", 
+               epochs=auto(200, precision="high"), 
+               monitor=true)
+
+show("Modelo entrenado (neural-lite adaptativo)", level="ok", pulse=true)
+
+-- 6. Predicción simbiótica para nueva tarea
+new_task = [3, 7]  -- prioridad alta, complejidad alta
+pred = ai.predict([new_task], model, explain=true)
+
+show("Predicción de duración:", pred["value"], "min",
+     "\n Explicación:", pred["why"], level="info")
+
+-- 7. Visualización cognitiva instantánea (opcional)
+vision.plot_clusters(embeds, labels, caption="Mapa cognitivo de tareas")
+
+-- 8. Enviar resultados al servidor Orion Cloud
+payload = {
+    "clusters": clusters,
+    "predicted_time": pred["value"],
+    "explanation": pred["why"],
+    "timestamp": datetime.now()
+}
+
+res = net.transmit("https://jsonplaceholder.typicode.com/posts", json_data=payload)
+
+if res.status == 201 {
+    show("Orion Cloud confirmó la recepción cognitiva", level="ok", pulse=true)
+} else {
+    show("Falló la sincronización:", res.status, level="error")
+}
+
+trace_end("ANÁLISIS COGNITIVO COMPLETO", elapsed=true)

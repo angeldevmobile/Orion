@@ -1,14 +1,20 @@
 [
   {
-    "nombre": "Revisar correo",
-    "completada": false
+    "title": "Revisar correo",
+    "priority": 2,
+    "complexity": 3,
+    "time_spent": 10
   },
   {
-    "nombre": "Subir reporte",
-    "completada": false
+    "title": "Subir reporte",
+    "priority": 4,
+    "complexity": 5,
+    "time_spent": 45
   },
   {
-    "nombre": "Reunión equipo",
-    "completada": false
+    "title": "Reunión equipo",
+    "priority": 3,
+    "complexity": 4,
+    "time_spent": 30
   }
 ]

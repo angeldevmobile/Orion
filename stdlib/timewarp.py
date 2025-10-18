@@ -16,6 +16,10 @@ TimeRef = float
 def _now() -> TimeRef: return time.time()
 def _ns() -> int: return time.time_ns()
 
+def now() -> str:
+    """Retorna timestamp ISO actual para Orion."""
+    return datetime.now().isoformat()
+
 # --- WarpClock ------------------------------------------------------------
 class WarpClock:
     """Reloj cuántico con control total del flujo temporal."""
@@ -138,6 +142,7 @@ ALIASES = {
     "measureMtime": measureMtime,
     "block_future": run_future_block,
     "block_past": run_past_block,
+    "now": now,
 }
 
 def orion_export():
