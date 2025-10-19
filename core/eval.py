@@ -286,7 +286,8 @@ def _register_builtin_functions(functions):
     register_native_function(functions, "str", str)
     register_native_function(functions, "int", int)
     register_native_function(functions, "float", float)
-    
+    register_native_function(functions, "auto", lambda *args, **kwargs: args[0] if args else None)
+
     # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
     if AI_ENABLED:
         # Registrar todas las funciones AI exportadas
@@ -1245,7 +1246,10 @@ def eval_expr(expr, variables, functions):
                             raise OrionFunctionError(f"Método AI 'cluster' no encontrado")
 
                     elif method_name in ["think", "fit", "predict", "cluster", "embed"]:
-                        ai_func = get_function(method_name)  # O como obtengas la función
+                        ai_func = get_function(functions, method_name)
+                        # --- FIX: Si ai_func es dict con 'impl', extraer la función ---
+                        if isinstance(ai_func, dict) and "impl" in ai_func:
+                            ai_func = ai_func["impl"]
                         if ai_func:
                             sig = inspect.signature(ai_func)
                             supported = {k: v for k, v in kw_args.items() if k in sig.parameters}
