@@ -79,4 +79,4 @@ def show(*args, level="ok", module="orion", env=None, pulse=False, trace=False, 
         case "frame":
             code.frame(mensaje, style="magenta")
         case _:
-            io.show(*args, env=env)  # fallback futurista
+            io.io_show(*args, env=env)  # fallback futurista

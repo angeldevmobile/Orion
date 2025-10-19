@@ -21,7 +21,7 @@ from core.types import OrionString
 # │ Consola: interacción viva con el entorno      │
 # ╰───────────────────────────────────────────────╯
 
-def show(*args, sep=" ", end="\n", env=None):
+def io_show(*args, sep=" ", end="\n", env=None):
     """Imprime en consola estilo Orion con interpolación y formato amigable."""
     def orion_str(a):
         if env is not None and isinstance(a, OrionString):

@@ -8,6 +8,7 @@ def parse_call_args(tokens, i):
       - Argumentos posicionales: f(x, y, z)
       - Argumentos nombrados: f(lr="auto", epochs=100)
       - Anidación de llamadas: f(auto(1, precision="high"))
+      - Funciones lambda con argumentos nombrados: map(x => func(x, arg=val))
       - Validación robusta de comas y cierre de paréntesis
     """
     # Verificar apertura de paréntesis
@@ -23,20 +24,72 @@ def parse_call_args(tokens, i):
         return args, kwargs, i + 1
 
     while i < len(tokens):
-        # Argumento nombrado
+        # Verificar si es argumento nombrado en el nivel actual
         if (i + 1 < len(tokens)
             and tokens[i][0] == "IDENT"
             and tokens[i + 1][0] == "ASSIGN"):
             
-            name = tokens[i][1]
-            i += 2  # saltar IDENT y '='
-            value, i = parse_expression(tokens, i)
-            kwargs[name] = value
-
+            # Contar profundidad de paréntesis y buscar ARROW
+            # para determinar si estamos en el nivel correcto
+            paren_depth = 0
+            has_arrow_at_this_level = False
+            temp_i = i - 1
+            
+            # Buscar hacia atrás desde la posición actual
+            while temp_i >= 0:
+                if tokens[temp_i][0] == "RPAREN":
+                    paren_depth += 1
+                elif tokens[temp_i][0] == "LPAREN":
+                    if paren_depth == 0:
+                        # Llegamos al inicio de esta llamada
+                        break
+                    paren_depth -= 1
+                elif tokens[temp_i][0] == "ARROW" and paren_depth == 0:
+                    # Hay un ARROW en este mismo nivel
+                    has_arrow_at_this_level = True
+                    break
+                temp_i -= 1
+            
+            # Si no hay ARROW en este nivel, es un argumento nombrado de esta función
+            if not has_arrow_at_this_level:
+                name = tokens[i][1]
+                i += 2  # saltar IDENT y '='
+                value, i = parse_expression(tokens, i)
+                kwargs[name] = value
+            else:
+                # Hay ARROW en este nivel, tratar como parte de expresión lambda
+                value, i = parse_expression(tokens, i)
+                args.append(value)
         else:
-            # Argumento posicional o expresión anidada
-            value, i = parse_expression(tokens, i)
-            args.append(value)
+            # --- MEJORA: Detectar lambda como argumento ---
+            # Si el argumento inicia con LPAREN y luego ARROW, es lambda
+            if (i + 2 < len(tokens)
+                and tokens[i][0] == "LPAREN"
+                and tokens[i+2][0] == "ARROW"):
+                value, i = parse_lambda(tokens, i)
+                args.append(value)
+            else:
+                # --- MEJORA ROBUSTA: Detectar lambda con múltiples parámetros ---
+                if i < len(tokens) and tokens[i][0] == "LPAREN":
+                    # Buscar el cierre de paréntesis y el ARROW
+                    temp = i + 1
+                    paren_count = 1
+                    while temp < len(tokens) and paren_count > 0:
+                        if tokens[temp][0] == "LPAREN":
+                            paren_count += 1
+                        elif tokens[temp][0] == "RPAREN":
+                            paren_count -= 1
+                        temp += 1
+                    # Si después del cierre hay ARROW, es lambda
+                    if temp < len(tokens) and tokens[temp][0] == "ARROW":
+                        value, i = parse_lambda(tokens, i)
+                        args.append(value)
+                    else:
+                        value, i = parse_expression(tokens, i)
+                        args.append(value)
+                else:
+                    value, i = parse_expression(tokens, i)
+                    args.append(value)
 
         # Si hay coma, continuar con el siguiente argumento
         if i < len(tokens) and tokens[i][0] == "COMMA":
@@ -48,10 +101,12 @@ def parse_call_args(tokens, i):
             return args, kwargs, i + 1
 
         # Si no hay coma ni cierre → error
-        raise OrionSyntaxError("Se esperaba ',' o ')' después de argumento en llamada de función")
+        current_token = tokens[i] if i < len(tokens) else ("EOF", "")
+        raise OrionSyntaxError(f"Se esperaba ',' o ')' después de argumento en llamada de función, pero se encontró '{current_token}'")
     
     # Si termina sin cierre correcto
     raise OrionSyntaxError("Se esperaba ')' al final de la llamada de función")
+
 
 def parse_primary(tokens, i):
     if i >= len(tokens):
@@ -69,29 +124,21 @@ def parse_primary(tokens, i):
     elif kind == "IDENT":
         expr = ("IDENT", value)
         i += 1
-        
-        # Procesar llamadas, atributos, índices, etc.
         while i < len(tokens):
             token_type = tokens[i][0]
-
             if token_type == "DOT":
                 i += 1
                 if i >= len(tokens) or tokens[i][0] != "IDENT":
                     raise OrionSyntaxError("Se esperaba un identificador después de '.'")
                 attr_name = tokens[i][1]
                 i += 1
-                
-                # ¿Llamada de método?
                 if i < len(tokens) and tokens[i][0] == "LPAREN":
                     args, kwargs, i = parse_call_args(tokens, i)
                     expr = ("CALL_METHOD", attr_name, expr, args, kwargs)
                 else:
                     expr = ("ATTR_ACCESS", expr, attr_name)
-
             elif token_type == "LBRACKET":
                 i += 1
-                
-                # Soporte para slices
                 if i < len(tokens) and tokens[i][0] == "COLON":
                     i += 1
                     if i < len(tokens) and tokens[i][0] != "RBRACKET":
@@ -112,21 +159,16 @@ def parse_primary(tokens, i):
                         slice_expr = first_expr
                 else:
                     slice_expr = ("SLICE", None, None, None)
-                
                 if i >= len(tokens) or tokens[i][0] != "RBRACKET":
                     raise OrionSyntaxError("Se esperaba ']'")
                 i += 1
-                
                 if isinstance(slice_expr, tuple) and slice_expr[0] == "SLICE":
                     expr = ("SLICE_ACCESS", expr, slice_expr)
                 else:
                     expr = ("INDEX", expr, slice_expr)
-
             elif token_type == "LPAREN":
-                # Llamada de función (actualizada)
                 args, kwargs, i = parse_call_args(tokens, i)
                 expr = ("CALL", expr, args, kwargs)
-
             elif token_type == "SAFE_ACCESS":
                 i += 1
                 if i >= len(tokens) or tokens[i][0] != "IDENT":
@@ -134,10 +176,8 @@ def parse_primary(tokens, i):
                 attr_name = tokens[i][1]
                 i += 1
                 expr = ("NULL_SAFE", expr, attr_name)
-
             else:
                 break
-
         return expr, i
 
     elif kind == "LPAREN":
@@ -148,7 +188,6 @@ def parse_primary(tokens, i):
         return expr, i + 1
 
     elif kind == "LBRACKET":
-        # Lista literal
         i += 1
         elements = []
         while i < len(tokens) and tokens[i][0] != "RBRACKET":
@@ -158,14 +197,12 @@ def parse_primary(tokens, i):
                 i += 1
             elif i < len(tokens) and tokens[i][0] != "RBRACKET":
                 raise OrionSyntaxError("Se esperaba ',' o ']' en lista")
-        
         if i >= len(tokens):
             raise OrionSyntaxError("Se esperaba ']'")
         i += 1
         return ("LIST", elements), i
 
     elif kind == "LBRACE":
-        # Diccionario literal
         i += 1
         items = []
         while i < len(tokens) and tokens[i][0] != "RBRACE":
@@ -184,21 +221,27 @@ def parse_primary(tokens, i):
                 i += 1
             elif i < len(tokens) and tokens[i][0] != "RBRACE":
                 raise OrionSyntaxError("Se esperaba ',' o '}' en diccionario")
-        
         if i >= len(tokens):
             raise OrionSyntaxError("Se esperaba '}'")
         i += 1
         return ("DICT", items), i
 
+    # --- CORRECCIÓN: Manejar tokens no válidos para expresiones primarias ---
     else:
-        raise OrionSyntaxError(f"Token inesperado: {kind}")
+        raise OrionSyntaxError(f"Token inesperado en expresión primaria: '{kind}' ('{value}')")
 
 def parse_unary(tokens, i):
     if i < len(tokens) and tokens[i][0] == "NOT":
         expr, j = parse_unary(tokens, i+1)
         return ("UNARY_OP", "!", expr), j
-    return parse_primary(tokens, i)
-
+    
+    # Verificar que hay tokens disponibles
+    if i >= len(tokens):
+        raise OrionSyntaxError("Fin inesperado de entrada en expresión unaria")
+    
+    # parse_primary ya maneja todos los errores internamente
+    expr, j = parse_primary(tokens, i)
+    return expr, j
 
 def parse_term(tokens, i):
     left, i = parse_unary(tokens, i)
@@ -246,10 +289,39 @@ def parse_or(tokens, i):
 
 
 def parse_expression(tokens, i):
+    # Verificar si es una lambda
+    if i < len(tokens):
+        # Caso 1: IDENT => expr
+        if (i + 1 < len(tokens) and 
+            tokens[i][0] == "IDENT" and 
+            tokens[i + 1][0] == "ARROW"):
+            return parse_lambda(tokens, i)
+        
+        # Caso 2: (param1, param2) => expr
+        elif (tokens[i][0] == "LPAREN"):
+            # Mirar hacia adelante para ver si es lambda
+            temp_i = i + 1
+            paren_count = 1
+            might_be_lambda = False
+            
+            while temp_i < len(tokens) and paren_count > 0:
+                if tokens[temp_i][0] == "LPAREN":
+                    paren_count += 1
+                elif tokens[temp_i][0] == "RPAREN":
+                    paren_count -= 1
+                elif tokens[temp_i][0] == "ARROW" and paren_count == 0:
+                    might_be_lambda = True
+                    break
+                temp_i += 1
+            
+            # Verificar si inmediatamente después del ')' hay '=>'
+            if (paren_count == 0 and temp_i + 1 < len(tokens) and 
+                tokens[temp_i + 1][0] == "ARROW"):
+                return parse_lambda(tokens, i)
+    
+    # No es lambda, usar parsing normal
     expr, j = parse_or(tokens, i)
     return expr, j
-
-
 def parse_statement(tokens, i):
     """Parsea una declaración individual con mejor manejo de errores."""
     if i >= len(tokens):
@@ -283,7 +355,7 @@ def parse_statement(tokens, i):
             while i < len(tokens):
                 if tokens[i][0] == "COMMA":
                     i += 1
-                    # Argumento nombrado
+                    # Argumento nombrado: IDENT ASSIGN expr
                     if (i + 1 < len(tokens)
                         and tokens[i][0] == "IDENT"
                         and tokens[i+1][0] == "ASSIGN"):
@@ -324,7 +396,7 @@ def parse_statement(tokens, i):
 
         return ("IF", condition, body_true, body_false), i
 
-    # --- FOR statement ---
+    # --- FOR statement --- 
     elif kind == "FOR":
         if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
             raise OrionSyntaxError("Se esperaba un identificador después de 'for'")
@@ -333,14 +405,18 @@ def parse_statement(tokens, i):
         if i+2 >= len(tokens) or tokens[i+2][0] != "IN":
             raise OrionSyntaxError("Se esperaba 'in' en el bucle for")
 
+        # Detectar error común: '=' después de 'in'
+        if i+3 < len(tokens) and tokens[i+3][0] == "ASSIGN":
+            raise OrionSyntaxError("No se permite '=' después de 'in' en el bucle for. ¿Quizá querías usar una expresión iterable?")
+
         expr, j = parse_expression(tokens, i+3)
 
-        if j < len(tokens) and tokens[j][0] in ("RANGE", "RANGE_EX"):
-            range_type = tokens[j][0]
-            j += 1
-            end, j = parse_expression(tokens, j)
+        # Detección inteligente de range
+        if (isinstance(expr, tuple) and expr[0] == "CALL" and
+            isinstance(expr[1], tuple) and expr[1][0] == "IDENT" and expr[1][1] == "range"):
+            range_args = expr[2]
             body, j = parse_block(tokens, j)
-            return ("FOR_RANGE", var_name, expr, end, body, range_type), j
+            return ("FOR_RANGE", var_name, range_args, body), j
         else:
             body, j = parse_block(tokens, j)
             return ("FOR_IN", var_name, expr, body), j
@@ -391,64 +467,84 @@ def parse_statement(tokens, i):
             raise OrionSyntaxError("Se esperaba '}' al final de match")
         return ("MATCH", expr, cases), j + 1
 
-    # --- IDENT - Asignación o expresión ---
+    # --- IDENT - Manejar asignaciones múltiples primero ---
     elif kind == "IDENT":
-        # ✅ MEJORADO: Mejor manejo de asignaciones complejas
-        saved_i = i
-        try:
-            # Parsear la expresión del lado izquierdo
-            left_expr, temp_i = parse_primary(tokens, i)
-            
-            # Verificar si hay asignación
-            if temp_i < len(tokens) and tokens[temp_i][0] == "ASSIGN":
-                right_expr, i = parse_expression(tokens, temp_i + 1)
-                
-                # Determinar el tipo de asignación
-                if left_expr[0] == "INDEX":
-                    return ("INDEX_ASSIGN", left_expr[1], left_expr[2], right_expr), i
-                elif left_expr[0] == "ATTR_ACCESS":
-                    return ("ATTR_ASSIGN", left_expr[1], left_expr[2], right_expr), i
-                elif left_expr[0] == "IDENT":
-                    return ("ASSIGN", left_expr[1], right_expr), i
+        # Asignación simple: IDENT ASSIGN expr
+        if i+1 < len(tokens) and tokens[i+1][0] == "ASSIGN":
+            var_name = tokens[i][1]
+            expr_value, j = parse_expression(tokens, i+2)
+            return ("ASSIGN", var_name, expr_value), j
+
+        # Verificar si es una asignación múltiple: IDENT, IDENT, ... = expr
+        if i+1 < len(tokens) and tokens[i+1][0] == "COMMA":
+            # Es una asignación múltiple
+            var_names = [tokens[i][1]]
+            j = i + 1
+            while j < len(tokens) and tokens[j][0] == "COMMA":
+                j += 1
+                if j < len(tokens) and tokens[j][0] == "IDENT":
+                    var_names.append(tokens[j][1])
+                    j += 1
                 else:
-                    return ("COMPLEX_ASSIGN", left_expr, right_expr), i
+                    raise OrionSyntaxError("Se esperaba un identificador después de la coma")
+            
+            if j < len(tokens) and tokens[j][0] == "ASSIGN":
+                j += 1
+                expr_value, j = parse_expression(tokens, j)
+                return ("MULTI_ASSIGN", var_names, expr_value), j
             else:
-                # No es asignación, verificar asignación múltiple
-                i = saved_i
-                if i+1 < len(tokens) and tokens[i+1][0] == "COMMA":
-                    var_names = [tokens[i][1]]
-                    j = i + 1
-                    
-                    while j < len(tokens) and tokens[j][0] == "COMMA":
-                        j += 1
-                        if j < len(tokens) and tokens[j][0] == "IDENT":
-                            var_names.append(tokens[j][1])
-                            j += 1
-                        else:
-                            raise OrionSyntaxError("Se esperaba un identificador después de la coma")
-                    
-                    if j < len(tokens) and tokens[j][0] == "ASSIGN":
-                        j += 1
-                        expr_value, j = parse_expression(tokens, j)
-                        return ("MULTI_ASSIGN", var_names, expr_value), j
-                    else:
-                        raise OrionSyntaxError("Se esperaba '=' en asignación múltiple")
-                
-                # Es una expresión (probablemente una llamada de función)
-                expr, i = parse_primary(tokens, saved_i)
+                # No es asignación múltiple, manejar como expresión
+                expr, i = parse_expression(tokens, i)
                 return expr, i
+        
+        # No es asignación múltiple, verificar si es asignación simple o compleja
+        else:
+            # Intentar parsear la expresión completa del lado izquierdo
+            saved_i = i
+            try:
+                left_expr, temp_i = parse_primary(tokens, i)
                 
-        except OrionSyntaxError:
-            # Fallback: tratarlo como expresión
-            expr, i = parse_expression(tokens, saved_i)
-            return expr, i
-
+                # Buscar el operador de asignación
+                if temp_i < len(tokens) and tokens[temp_i][0] == "ASSIGN":
+                    right_expr, final_i = parse_expression(tokens, temp_i + 1)
+                    
+                    # Detectar tipo de asignación basado en la estructura del lado izquierdo
+                    if isinstance(left_expr, tuple):
+                        if left_expr[0] == "INDEX":
+                            return ("INDEX_ASSIGN", left_expr[1], left_expr[2], right_expr), final_i
+                        elif left_expr[0] == "ATTR_ACCESS":
+                            return ("ATTR_ASSIGN", left_expr[1], left_expr[2], right_expr), final_i
+                        elif left_expr[0] == "IDENT":
+                            return ("ASSIGN", left_expr[1], right_expr), final_i
+                        else:
+                            # Asignación compleja (llamada, acceso seguro, etc.)
+                            return ("COMPLEX_ASSIGN", left_expr, right_expr), final_i
+                    else:
+                        # Asignación simple de variable
+                        return ("ASSIGN", left_expr, right_expr), final_i
+                else:
+                    # No hay asignación, es solo una expresión
+                    return left_expr, temp_i
+                    
+            except OrionSyntaxError:
+                # Si falla el parsing como expresión primaria, intentar como expresión completa
+                try:
+                    expr, i = parse_expression(tokens, saved_i)
+                    return expr, i
+                except OrionSyntaxError:
+                    # Si todo falla, lanzar un error más descriptivo
+                    current_token = tokens[saved_i] if saved_i < len(tokens) else ("EOF", "")
+                    raise OrionSyntaxError(f"No se pudo parsear la declaración que comienza con '{current_token[1]}'")
+    
+    # --- DEFAULT: Manejar como expresión ---
     else:
-        # Tratar como expresión
-        expr, i = parse_expression(tokens, i)
-        return expr, i
-
-
+        try:
+            expr, i = parse_expression(tokens, i)
+            return expr, i
+        except OrionSyntaxError as e:
+            current_token = tokens[i] if i < len(tokens) else ("EOF", "")
+            raise OrionSyntaxError(f"Error parseando expresión que comienza con '{current_token[1]}': {str(e)}")
+        
 def parse_block(tokens, i):
     """Parsea un bloque de código con mejor manejo de declaraciones."""
     stmts = []
@@ -458,7 +554,7 @@ def parse_block(tokens, i):
     i += 1
 
     while i < len(tokens) and tokens[i][0] != "RBRACE":
-        # ✅ MEJORADO: Usar parse_statement para mejor consistencia
+        # MEJORADO: Usar parse_statement para mejor consistencia
         stmt, i = parse_statement(tokens, i)
         stmts.append(stmt)
 
@@ -505,4 +601,39 @@ def parse_fn_params(tokens, i):
     if i >= len(tokens) or tokens[i][0] != "RPAREN":
         raise OrionSyntaxError("Se esperaba ')' al final de los parámetros")
     return params, i + 1
+
+def parse_lambda(tokens, i):
+    """Parsea expresiones lambda: param => expr o (param1, param2) => expr"""
+    params = []
+    
+    # Caso 1: Un solo parámetro sin paréntesis
+    if tokens[i][0] == "IDENT":
+        params.append(tokens[i][1])
+        i += 1
+    # Caso 2: Múltiples parámetros con paréntesis
+    elif tokens[i][0] == "LPAREN":
+        i += 1
+        while i < len(tokens) and tokens[i][0] != "RPAREN":
+            if tokens[i][0] == "IDENT":
+                params.append(tokens[i][1])
+                i += 1
+                if i < len(tokens) and tokens[i][0] == "COMMA":
+                    i += 1
+            else:
+                raise OrionSyntaxError("Se esperaba parámetro en lambda")
+        if i >= len(tokens) or tokens[i][0] != "RPAREN":
+            raise OrionSyntaxError("Se esperaba ')' en parámetros de lambda")
+        i += 1
+    else:
+        raise OrionSyntaxError("Se esperaba parámetro o '(' en lambda")
+    
+    # Verificar ARROW
+    if i >= len(tokens) or tokens[i][0] != "ARROW":
+        raise OrionSyntaxError("Se esperaba '=>' en lambda")
+    i += 1
+    
+    # Parsear cuerpo de la lambda
+    body, i = parse_or(tokens, i)  # Usar parse_or para evitar recursión infinita
+    
+    return ("LAMBDA", params, body), i
 

@@ -149,9 +149,18 @@ def neural_lite_predict(X: List[List[float]], model):
 # ------------------------------------------
 # Clustering (K-means Orion)
 # ------------------------------------------
-def kmeans(points: List[List[float]], k: int = 2, iterations: int = 20, seed: Optional[int] = None):
+def kmeans(points: List[List[float]], k: int = 2, iterations: int = 20, seed: Optional[int] = None, **kwargs):
     if not points:
         return [], []
+    # Soporte para k="auto" o k como string
+    if isinstance(k, str):
+        if k == "auto":
+            k = min(2, len(points))  # O elige otro valor automático
+        else:
+            try:
+                k = int(k)
+            except Exception:
+                k = 2
     if seed is not None:
         random.seed(seed)
     centers = [list(p) for p in random.sample(points, min(k, len(points)))]

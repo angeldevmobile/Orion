@@ -1,4 +1,5 @@
 import importlib.util
+import inspect
 import sys
 import os
 import types
@@ -25,7 +26,7 @@ from modules import json as orion_json
 from lib import collections
 # === INTEGRACIÓN DE ORION CODE & SHOW ENGINE ===
 from modules import code, show  # Orion Visual Engine
-from lib import io
+from lib.io import io_show
 from lib import math as orion_math
 from lib import strings
 
@@ -869,7 +870,29 @@ def eval_expr(expr, variables, functions):
 
         # --- CALL ---
         elif tag == "CALL":
-            _, fn_name, args = expr
+            if len(expr) == 4:
+                _, fn_name, args, kwargs = expr  
+            elif len(expr) == 3:
+                _, fn_name, args = expr
+                kwargs = {}
+            else:
+                raise OrionRuntimeError(f"Formato de llamada de función desconocido: {expr}")
+            
+            if isinstance(fn_name, tuple) and fn_name[0] == "IDENT":
+                fn_name = fn_name[1]
+            
+            # Filtrar kwargs para funciones visuales que no los aceptan
+            if fn_name in ["trace_start", "trace_end", "frame", "divider"]:
+                fn_def = get_function(functions, fn_name)
+                if fn_def is None and fn_name in NATIVE_FUNCTIONS:
+                    fn_def = {
+                        "type": "NATIVE_FN",
+                        "impl": NATIVE_FUNCTIONS[fn_name]
+                    }
+                if not fn_def:
+                    raise OrionFunctionError(f"Función no definida: {fn_name}")
+                pos_args, _ = eval_call_args(args, variables, functions)
+                return fn_def["impl"](*pos_args[:1])
 
             # MANEJO ESPECIAL PARA APPEND SIN OBJETO (ERROR DE PARSING)
             if fn_name == "append":
@@ -929,6 +952,9 @@ def eval_expr(expr, variables, functions):
                 raise OrionFunctionError(f"Función no definida: {fn_name}")
 
             pos_args, kw_args = eval_call_args(args, variables, functions)
+            if kwargs:
+                for k, v in kwargs.items():
+                    kw_args[k] = to_native(eval_expr(v, variables, functions))
 
             # Función nativa
             if fn_def["type"] == "NATIVE_FN":
@@ -1052,9 +1078,20 @@ def eval_expr(expr, variables, functions):
 
         # --- CALL_METHOD ---
         elif tag == "CALL_METHOD":
-            _, method_name, obj_expr, args = expr
+            # Soporta ambos formatos: 4 o 5 elementos
+            if len(expr) == 5:
+                _, method_name, obj_expr, args, kwargs = expr
+            elif len(expr) == 4:
+                _, method_name, obj_expr, args = expr
+                kwargs = {}
+            else:
+                raise OrionRuntimeError(f"Formato de llamada a método desconocido: {expr}")
+
             obj_val = eval_expr(obj_expr, variables, functions)
             pos_args, kw_args = eval_call_args(args, variables, functions)
+            if kwargs:
+                for k, v in kwargs.items():
+                    kw_args[k] = to_native(eval_expr(v, variables, functions))
             
             # === MÉTODOS BUILT-IN COMUNES ===
             if method_name == "len":
@@ -1073,6 +1110,37 @@ def eval_expr(expr, variables, functions):
                 else:
                     raise OrionFunctionError(f"Objeto de tipo {type(obj_val)} no tiene longitud calculable")
             
+            elif method_name == "filter":
+                if len(pos_args) != 1:
+                    raise OrionFunctionError("filter() requiere exactamente 1 argumento")
+                lambda_expr = args[0]
+                # Si es una lambda AST, envolverla en función Python
+                if isinstance(lambda_expr, tuple) and lambda_expr[0] == "LAMBDA":
+                    _, params, body = lambda_expr
+                    def fn(*lambda_args):
+                        local_scope = variables.copy()
+                        for i, param in enumerate(params):
+                            if i < len(lambda_args):
+                                local_scope[param] = lambda_args[i]
+                            else:
+                                local_scope[param] = None
+                        # Si algún parámetro es None y se usa como índice, retorna False
+                        if any(local_scope[p] is None for p in params):
+                            return False
+                        return eval_expr(body, local_scope, functions)
+                else:
+                    fn = lambda_expr 
+
+                # Determinar la colección a filtrar
+                if isinstance(obj_val, list):
+                    return [x for x in obj_val if fn(x)]
+                elif hasattr(obj_val, 'items') and isinstance(obj_val.items, list):
+                    return obj_val.__class__([x for x in obj_val.items if fn(x)])
+                elif hasattr(obj_val, 'value') and isinstance(obj_val.value, list):
+                    return obj_val.__class__([x for x in obj_val.value if fn(x)])
+                else:
+                    raise OrionFunctionError(f"Método 'filter' no disponible para tipo {type(obj_val)}")
+    
             elif method_name == "append":
                 if len(pos_args) == 0:
                     raise OrionFunctionError("append() requiere al menos 1 argumento")
@@ -1116,10 +1184,8 @@ def eval_expr(expr, variables, functions):
             elif method_name == "map":
                 if len(pos_args) != 1:
                     raise OrionFunctionError("map() requiere exactamente 1 argumento")
-                lambda_expr = args[0]  # Tomar la expresión lambda directamente de args
-                
+                lambda_expr = args[0]
                 # Determinar la colección a mapear
-                collection = None
                 if isinstance(obj_val, list):
                     collection = obj_val
                 elif hasattr(obj_val, 'items') and isinstance(obj_val.items, list):
@@ -1128,23 +1194,27 @@ def eval_expr(expr, variables, functions):
                     collection = obj_val.value
                 else:
                     raise OrionFunctionError(f"Método 'map' no disponible para tipo {type(obj_val)}")
-                
-                # Verificar si es una expresión lambda con =>
+                # Si es una lambda AST, envolverla en función Python
                 if isinstance(lambda_expr, tuple) and lambda_expr[0] == "LAMBDA":
                     _, params, body = lambda_expr
                     result = []
                     for item in collection:
-                        # Crear un scope local para la lambda
                         local_scope = variables.copy()
+                        # Si hay varios parámetros, desempaquetar item si es tupla/lista
                         if len(params) == 1:
                             local_scope[params[0]] = item
                         else:
-                            # Si hay múltiples parámetros, desempaquetar
-                            for i, param in enumerate(params):
-                                if i < len(item) if isinstance(item, (list, tuple)) else 1:
-                                    local_scope[param] = item[i] if isinstance(item, (list, tuple)) else item
-                        
-                        # Evaluar el cuerpo de la lambda
+                            # Rellenar con None si faltan elementos
+                            if isinstance(item, (list, tuple)):
+                                for i, param in enumerate(params):
+                                    if i < len(item):
+                                        local_scope[param] = item[i]
+                                    else:
+                                        local_scope[param] = None
+                            else:
+                                for param in params:
+                                    local_scope[param] = item
+                        # Si algún parámetro es None y se usa como índice, puedes retornar None o saltar
                         mapped_value = eval_expr(body, local_scope, functions)
                         result.append(mapped_value)
                     return result
@@ -1164,20 +1234,22 @@ def eval_expr(expr, variables, functions):
                             raise OrionFunctionError("embed() requiere al menos un argumento (texto)")
                             
                     elif method_name == "cluster":
-                        # cluster devuelve (centers, labels), mantener como tupla para desempaquetado
                         ai_func = AI_FUNCTIONS.get("cluster")
                         if ai_func:
-                            centers, labels = ai_func(*pos_args, **kw_args)
-                            # Devolver como lista para facilitar el desempaquetado
+                            # Filtrar kwargs para que solo pasen los soportados por la función
+                            sig = inspect.signature(ai_func)
+                            supported = {k: v for k, v in kw_args.items() if k in sig.parameters}
+                            centers, labels = ai_func(*pos_args, **supported)
                             return [centers, labels]
                         else:
                             raise OrionFunctionError(f"Método AI 'cluster' no encontrado")
 
-                    elif method_name in ["think", "fit", "predict"]:
-                        # Estos métodos funcionan directamente
-                        ai_func = AI_FUNCTIONS.get(method_name)
+                    elif method_name in ["think", "fit", "predict", "cluster", "embed"]:
+                        ai_func = get_function(method_name)  # O como obtengas la función
                         if ai_func:
-                            return ai_func(*pos_args, **kw_args)
+                            sig = inspect.signature(ai_func)
+                            supported = {k: v for k, v in kw_args.items() if k in sig.parameters}
+                            return ai_func(*pos_args, **supported)
                         else:
                             raise OrionFunctionError(f"Método AI '{method_name}' no encontrado")
                     else:
@@ -1626,8 +1698,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 from core.lexer import lex
                 from core.parser import parse
                 with open(orion_file, "r", encoding="utf-8") as f:
-                    code = f.read()
-                imported_tokens = lex(code)
+                    file_code = f.read() 
+                imported_tokens = lex(file_code)
                 imported_ast = parse(imported_tokens)
                 evaluate(imported_ast, variables, functions)
                 code.ok(f"Módulo Orion '{base_name}' ejecutado", module="orion-loader")
@@ -1837,39 +1909,36 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 del variables[var_name]
         
         elif tag == "FOR_RANGE":
-            # FOR_RANGE: ('FOR_RANGE', var_name, start, end, body, range_type)
-            _, var_name, start, end, body, range_type = node
-
-            start_val = eval_expr(start, variables, functions)
-            end_val = eval_expr(end, variables, functions)
-
-            if not isinstance(start_val, (int, float)):
-                raise OrionTypeError(f"El rango debe ser numérico, se recibió start={start_val}")
-            if not isinstance(end_val, (int, float)):
-                raise OrionTypeError(f"El rango debe ser numérico, se recibió end={end_val}")
-
-            if range_type == "RANGE":
-                rng = range(int(start_val), int(end_val) + 1)
-            elif range_type == "RANGE_EX":
-                rng = range(int(start_val), int(end_val))
+            # Soporta ambos formatos:
+            # ('FOR_RANGE', var_name, range_args, body)
+            # ('FOR_RANGE', var_name, start, end, body, range_type)
+            if len(node) == 4:
+                _, var_name, range_args, body = node
+                # range_args debe ser una lista con los argumentos para range()
+                rng = range(*[int(eval_expr(arg, variables, functions)) for arg in range_args])
+            elif len(node) == 6:
+                _, var_name, start, end, body, range_type = node
+                start_val = eval_expr(start, variables, functions)
+                end_val = eval_expr(end, variables, functions)
+                if not isinstance(start_val, (int, float)):
+                    raise OrionTypeError(f"El rango debe ser numérico, se recibió start={start_val}")
+                if not isinstance(end_val, (int, float)):
+                    raise OrionTypeError(f"El rango debe ser numérico, se recibió end={end_val}")
+                if range_type == "RANGE":
+                    rng = range(int(start_val), int(end_val) + 1)
+                elif range_type == "RANGE_EX":
+                    rng = range(int(start_val), int(end_val))
+                else:
+                    raise OrionRuntimeError(f"Tipo de rango no soportado: {range_type}")
             else:
-                raise OrionRuntimeError(f"Tipo de rango no soportado: {range_type}")
+                raise OrionRuntimeError(f"Formato de nodo FOR_RANGE no soportado: {node}")
 
-            # Guardar valor previo (por si la variable ya existía antes)
             prev_value = variables.get(var_name)
-
             for j in rng:
-                # Registrar variable del bucle en el mismo scope
                 variables[var_name] = j
-
-                # Ejecutar cuerpo del bucle
                 result = evaluate(body, variables, functions, inside_fn=True)
-
-                # Si el cuerpo devuelve algo (por ejemplo, un return), propágalo
                 if inside_fn and result is not None:
                     return result
-
-            # Limpieza del scope (restaurar o eliminar variable)
             if prev_value is not None:
                 variables[var_name] = prev_value
             elif var_name in variables:
