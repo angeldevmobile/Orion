@@ -98,10 +98,29 @@ def top_k_frequent(items: List, k: int = 5) -> List:
 # ------------------------------------------
 def neural_lite_fit(X: List[List[float]], y: List[float],
                     hidden: int = 8, lr: float = 0.01, epochs: int = 200):
-    """Entrena una red neuronal ligera de 1 capa oculta."""
+    """Entrena una red neuronal ligera de 1 capa oculta con learning rate adaptativo."""
     if not X:
         return None
     n, m = len(X), len(X[0])
+    if isinstance(hidden, str) and hidden == "auto":
+        hidden = m if m > 0 else 8
+
+    # Lógica adaptativa para lr
+    adaptive_lr = False
+    if isinstance(lr, str):
+        if lr == "adaptive":
+            lr = 0.05  # Valor inicial alto
+            adaptive_lr = True
+        else:
+            try:
+                lr = float(lr)
+            except Exception:
+                lr = 0.01
+
+    for xi in X:
+        if not all(isinstance(x, (int, float)) for x in xi):
+            raise ValueError("Cada elemento de X debe ser una lista de números (no listas anidadas)")
+
     W1 = [[random.uniform(-0.1, 0.1) for _ in range(m)] for _ in range(hidden)]
     b1 = [0.0] * hidden
     W2 = [random.uniform(-0.1, 0.1) for _ in range(hidden)]
@@ -110,11 +129,14 @@ def neural_lite_fit(X: List[List[float]], y: List[float],
     def relu(x): return max(0.0, x)
     def d_relu(x): return 1.0 if x > 0 else 0.0
 
-    for _ in range(epochs):
+    prev_loss = None
+    for epoch in range(epochs):
+        total_loss = 0.0
         for xi, yi in zip(X, y):
             h = [relu(sum(w*x for w, x in zip(wr, xi)) + b) for wr, b in zip(W1, b1)]
             y_pred = sum(w*h_i for w, h_i in zip(W2, h)) + b2
             err = y_pred - yi
+            total_loss += err**2
 
             grad_W2 = [err * h_i for h_i in h]
             grad_b2 = err
@@ -131,20 +153,41 @@ def neural_lite_fit(X: List[List[float]], y: List[float],
                 W2[j] -= lr * grad_W2[j]
             b2 -= lr * grad_b2
 
-    _remember("neural_fit", {"samples": n, "hidden": hidden})
+        # Ajuste adaptativo del learning rate
+        if adaptive_lr:
+            avg_loss = total_loss / n
+            if prev_loss is not None:
+                if avg_loss > prev_loss:
+                    lr *= 0.7  # Reduce si el error sube
+                else:
+                    lr *= 1.05  # Aumenta ligeramente si el error baja
+                lr = max(min(lr, 0.1), 0.0001)  # Limita el rango
+            prev_loss = avg_loss
+
+    _remember("neural_fit", {"samples": n, "hidden": hidden, "lr_final": lr})
     return {"W1": W1, "b1": b1, "W2": W2, "b2": b2}
 
-
-def neural_lite_predict(X: List[List[float]], model):
-    """Predice con una red neural-lite entrenada."""
+def neural_lite_predict(X: List[List[float]], model, explain=False):
+    """Predice con una red neural-lite entrenada. Si explain=True, retorna explicación."""
     def relu(x): return max(0.0, x)
     W1, b1, W2, b2 = model["W1"], model["b1"], model["W2"], model["b2"]
     preds = []
+    explanations = []
     for xi in X:
         h = [relu(sum(w*x for w, x in zip(wr, xi)) + b) for wr, b in zip(W1, b1)]
-        preds.append(sum(w*h_i for w, h_i in zip(W2, h)) + b2)
-    return preds
-
+        pred = sum(w*h_i for w, h_i in zip(W2, h)) + b2
+        preds.append(pred)
+        if explain:
+            # Explicación simple: pesos y entrada
+            explanations.append(
+                f"Entrada: {xi}, activación oculta: {[round(hh,3) for hh in h]}, predicción: {round(pred,3)}"
+            )
+    if explain:
+        return {
+            "value": preds[0] if preds else None,
+            "why": explanations[0] if explanations else "Sin explicación"
+        }
+    return {"value": preds[0] if preds else None}
 
 # ------------------------------------------
 # Clustering (K-means Orion)

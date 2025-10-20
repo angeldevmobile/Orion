@@ -1,5 +1,5 @@
 fn factorial(n) {
-  var resultado = 1
+  resultado = 1
   for i in 1..n {
     resultado = resultado * i
   }

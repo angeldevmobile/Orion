@@ -7,14 +7,7 @@ import types
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from core.control import eval_match
 from core.functions import register_function, get_function, register_native_function
-from core.types import (
-    OrionString,
-    OrionNumber,
-    OrionBool,
-    OrionDate,
-    OrionList,
-    null_safe,
-)
+from core.types import OrionList, OrionString, OrionNumber, OrionBool, OrionDate, null_safe
 from core.errors import (
     OrionRuntimeError,
     OrionTypeError,
@@ -25,11 +18,10 @@ from core.errors import (
 from modules import json as orion_json
 from lib import collections
 # === INTEGRACIÓN DE ORION CODE & SHOW ENGINE ===
-from modules import code, show  # Orion Visual Engine
+from modules import code, show 
 from lib.io import io_show
 from lib import math as orion_math
 from lib import strings
-
 # === INTEGRACIÓN DEL MÓDULO AI ===
 try:
     from stdlib.ai import orion_export, think, quantum_embed, recall
@@ -271,7 +263,7 @@ def lookup_variable(name, variables):
 def _register_builtin_functions(functions):
     import types
     from lib import io 
-    
+
     builtin_modules = [collections, io, orion_math, strings]
     for mod in builtin_modules:
         for k in dir(mod):
@@ -279,7 +271,7 @@ def _register_builtin_functions(functions):
                 v = getattr(mod, k)
                 if isinstance(v, types.FunctionType):
                     register_native_function(functions, k, v)
-    
+
     # Registrar funciones nativas de Python necesarias
     register_native_function(functions, "len", len)
     register_native_function(functions, "range", range)
@@ -287,254 +279,6 @@ def _register_builtin_functions(functions):
     register_native_function(functions, "int", int)
     register_native_function(functions, "float", float)
     register_native_function(functions, "auto", lambda *args, **kwargs: args[0] if args else None)
-
-    # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
-    if AI_ENABLED:
-        # Registrar todas las funciones AI exportadas
-        for ai_func_name, ai_func in AI_FUNCTIONS.items():
-            if callable(ai_func):
-                register_native_function(functions, ai_func_name, ai_func)
-        
-        # Registrar funciones AI con prefijo para evitar colisiones
-        register_native_function(functions, "ai_think", think)
-        register_native_function(functions, "ai_embed", quantum_embed)
-        register_native_function(functions, "ai_recall", recall)
-        
-        code.ok(f"{len(AI_FUNCTIONS)} funciones AI registradas como built-ins", module="ai-registry")
-        
-    if COSMOS_ENABLED:
-        for cosmos_func_name, cosmos_fun in COSMOS_FUNCTIONS.items():
-            if callable(cosmos_fun):
-                register_native_function(functions, cosmos_func_name, cosmos_fun)
-        register_native_function(functions, "cosmos_create", lambda *args, **kwargs: cosmos("create", *args, **kwargs))
-        register_native_function(functions, "cosmos_run", lambda *args, **kwargs: cosmos("run", *args, **kwargs))
-        register_native_function(functions, "cosmos_dust", lambda *args, **kwargs: cosmos("dust", *args, **kwargs))
-        code.ok(f"{len(COSMOS_FUNCTIONS)} funciones Cosmos registradas como built-ins", module="cosmos-registry")
-
-    if CRYPTO_ENABLED:
-        for crypto_func_name, crypto_func in CRYPTO_FUNCTIONS.items():
-            if callable(crypto_func) and crypto_func_name != "__meta__":
-                register_native_function(functions, crypto_func_name, crypto_func)
-        register_native_function(functions, "crypto_hash", lambda *args, **kwargs: crypto("hash", *args, **kwargs))
-        register_native_function(functions, "crypto_encrypt", lambda *args, **kwargs: crypto("encrypt", *args, **kwargs))
-        register_native_function(functions, "crypto_decrypt", lambda *args, **kwargs: crypto("decrypt", *args, **kwargs))
-        code.ok(f"{len([f for f in CRYPTO_FUNCTIONS if callable(CRYPTO_FUNCTIONS[f])])} funciones Crypto registradas como built-ins", module="crypto-registry")
-    
-    if INSIGHT_ENABLED:
-        for insight_func_name, insight_func in INSIGHT_FUNCTIONS.items():
-            if callable(insight_func) and insight_func_name != "insight":
-                register_native_function(functions, insight_func_name, insight_func)
-                
-        # Registrar función principal insight
-        if "insight" in INSIGHT_FUNCTIONS:
-            insight_main = INSIGHT_FUNCTIONS["insight"]
-            for func_name, func in insight_main.items():
-                if callable(func):
-                    register_native_function(functions, f"insight_{func_name}", func)
-        
-        code.ok(f"{len([f for f in INSIGHT_FUNCTIONS if callable(INSIGHT_FUNCTIONS.get(f, {}).get if isinstance(INSIGHT_FUNCTIONS.get(f), dict) else INSIGHT_FUNCTIONS.get(f))])} funciones Insight registradas como built-ins", module="insight-registry")
-
-    if MATRIX_ENABLED:
-        for matrix_func_name, matrix_func in MATRIX_FUNCTIONS.items():
-            if callable(matrix_func):
-                register_native_function(functions, matrix_func_name, matrix_func)
-        register_native_function(functions, "matrix_add", lambda *args: matrix("add", *args))
-        register_native_function(functions, "matrix_mul", lambda *args: matrix("mul", *args))
-        register_native_function(functions, "matrix_det", lambda *args: matrix("det", *args))
-        register_native_function(functions, "matrix_inv", lambda *args: matrix("inverse", *args))
-        code.ok(f"{len(MATRIX_FUNCTIONS)} funciones Matrix registradas como built-ins", module="matrix-registry")
-
-    if QUANTUM_ENABLED:
-        for quantum_func_name, quantum_func in QUANTUM_FUNCTIONS.items():
-            if callable(quantum_func):
-                register_native_function(functions, quantum_func_name, quantum_func)
-        register_native_function(functions, "quantum_qubit", lambda *args: quantum("qubit", *args))
-        register_native_function(functions, "quantum_bell", lambda *args: quantum("bell", *args))
-        register_native_function(functions, "quantum_measure", lambda *args, **kwargs: quantum("measure", *args, **kwargs))
-        register_native_function(functions, "quantum_circuit", lambda *args: quantum("apply_circuit", *args))
-        
-        code.ok(f"{len(QUANTUM_FUNCTIONS)} funciones Quantum registradas como built-ins", module="quantum-registry")
-
-    if TIMEWARP_ENABLED:
-        for timewarp_func_name, timewarp_func in TIMEWARP_FUNCTIONS.items():
-            if callable(timewarp_func):
-                # Evitar conflictos de nombres con otros módulos
-                if timewarp_func_name == "time_measure":
-                    register_native_function(functions, "time_measure", timewarp_func)
-                else:
-                    register_native_function(functions, timewarp_func_name, timewarp_func)
-        
-        # Registrar aliases específicos para operaciones temporales
-        register_native_function(functions, "timewarp_clock", lambda: timewarp("clock"))
-        register_native_function(functions, "timewarp_timeline", lambda name="main": timewarp("timeline", name=name))
-        register_native_function(functions, "timewarp_future", lambda delay, fn: timewarp("future", delay, fn))
-        register_native_function(functions, "timewarp_measure", lambda fn: timewarp("measure", fn))
-        
-        code.ok(f"{len(TIMEWARP_FUNCTIONS)} funciones TimeWarp registradas como built-ins", module="timewarp-registry")
-
-    if VISION_ENABLED:
-        for vision_func_name, vision_func in VISION_FUNCTIONS.items():
-            if callable(vision_func) and vision_func_name != "vision":
-                register_native_function(functions, vision_func_name, vision_func)
-        # Registrar función principal vision si existe
-        if "vision" in VISION_FUNCTIONS:
-            vision_main = VISION_FUNCTIONS["vision"]
-            if isinstance(vision_main, dict):
-                for func_name, func in vision_main.items():
-                    if callable(func):
-                        register_native_function(functions, f"vision_{func_name}", func)
-        
-        code.ok(f"{len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins", module="vision-registry")
-
-def lookup_variable(name, variables):
-    """Busca una variable en el scope actual."""
-    if name in variables:
-        return variables[name]
-    # Usa el error personalizado de Orion
-    raise OrionNameError(name)
-
-def _register_builtin_functions(functions):
-    import types
-    from lib import io 
-    
-    builtin_modules = [collections, io, orion_math, strings]
-    for mod in builtin_modules:
-        for k in dir(mod):
-            if not k.startswith("_"):
-                v = getattr(mod, k)
-                if isinstance(v, types.FunctionType):
-                    register_native_function(functions, k, v)
-    
-    # Registrar funciones nativas de Python necesarias
-    register_native_function(functions, "len", len)
-    register_native_function(functions, "range", range)
-    register_native_function(functions, "str", str)
-    register_native_function(functions, "int", int)
-    register_native_function(functions, "float", float)
-    
-    # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
-    if AI_ENABLED:
-        # Registrar todas las funciones AI exportadas
-        for ai_func_name, ai_func in AI_FUNCTIONS.items():
-            if callable(ai_func):
-                register_native_function(functions, ai_func_name, ai_func)
-        
-        # Registrar funciones AI con prefijo para evitar colisiones
-        register_native_function(functions, "ai_think", think)
-        register_native_function(functions, "ai_embed", quantum_embed)
-        register_native_function(functions, "ai_recall", recall)
-        
-        code.ok(f"{len(AI_FUNCTIONS)} funciones AI registradas como built-ins", module="ai-registry")
-        
-    if COSMOS_ENABLED:
-        for cosmos_func_name, cosmos_fun in COSMOS_FUNCTIONS.items():
-            if callable(cosmos_fun):
-                register_native_function(functions, cosmos_func_name, cosmos_fun)
-        register_native_function(functions, "cosmos_create", lambda *args, **kwargs: cosmos("create", *args, **kwargs))
-        register_native_function(functions, "cosmos_run", lambda *args, **kwargs: cosmos("run", *args, **kwargs))
-        register_native_function(functions, "cosmos_dust", lambda *args, **kwargs: cosmos("dust", *args, **kwargs))
-        code.ok(f"{len(COSMOS_FUNCTIONS)} funciones Cosmos registradas como built-ins", module="cosmos-registry")
-
-    if CRYPTO_ENABLED:
-        for crypto_func_name, crypto_func in CRYPTO_FUNCTIONS.items():
-            if callable(crypto_func) and crypto_func_name != "__meta__":
-                register_native_function(functions, crypto_func_name, crypto_func)
-        register_native_function(functions, "crypto_hash", lambda *args, **kwargs: crypto("hash", *args, **kwargs))
-        register_native_function(functions, "crypto_encrypt", lambda *args, **kwargs: crypto("encrypt", *args, **kwargs))
-        register_native_function(functions, "crypto_decrypt", lambda *args, **kwargs: crypto("decrypt", *args, **kwargs))
-        code.ok(f"{len([f for f in CRYPTO_FUNCTIONS if callable(CRYPTO_FUNCTIONS[f])])} funciones Crypto registradas como built-ins", module="crypto-registry")
-    
-    if INSIGHT_ENABLED:
-        for insight_func_name, insight_func in INSIGHT_FUNCTIONS.items():
-            if callable(insight_func) and insight_func_name != "insight":
-                register_native_function(functions, insight_func_name, insight_func)
-                
-        # Registrar función principal insight
-        if "insight" in INSIGHT_FUNCTIONS:
-            insight_main = INSIGHT_FUNCTIONS["insight"]
-            for func_name, func in insight_main.items():
-                if callable(func):
-                    register_native_function(functions, f"insight_{func_name}", func)
-        
-        code.ok(f"{len([f for f in INSIGHT_FUNCTIONS if callable(INSIGHT_FUNCTIONS.get(f, {}).get if isinstance(INSIGHT_FUNCTIONS.get(f), dict) else INSIGHT_FUNCTIONS.get(f))])} funciones Insight registradas como built-ins", module="insight-registry")
-
-    if MATRIX_ENABLED:
-        for matrix_func_name, matrix_func in MATRIX_FUNCTIONS.items():
-            if callable(matrix_func):
-                register_native_function(functions, matrix_func_name, matrix_func)
-        register_native_function(functions, "matrix_add", lambda *args: matrix("add", *args))
-        register_native_function(functions, "matrix_mul", lambda *args: matrix("mul", *args))
-        register_native_function(functions, "matrix_det", lambda *args: matrix("det", *args))
-        register_native_function(functions, "matrix_inv", lambda *args: matrix("inverse", *args))
-        code.ok(f"{len(MATRIX_FUNCTIONS)} funciones Matrix registradas como built-ins", module="matrix-registry")
-
-    if QUANTUM_ENABLED:
-        for quantum_func_name, quantum_func in QUANTUM_FUNCTIONS.items():
-            if callable(quantum_func):
-                register_native_function(functions, quantum_func_name, quantum_func)
-        register_native_function(functions, "quantum_qubit", lambda *args: quantum("qubit", *args))
-        register_native_function(functions, "quantum_bell", lambda *args: quantum("bell", *args))
-        register_native_function(functions, "quantum_measure", lambda *args, **kwargs: quantum("measure", *args, **kwargs))
-        register_native_function(functions, "quantum_circuit", lambda *args: quantum("apply_circuit", *args))
-        
-        code.ok(f"{len(QUANTUM_FUNCTIONS)} funciones Quantum registradas como built-ins", module="quantum-registry")
-
-    if TIMEWARP_ENABLED:
-        for timewarp_func_name, timewarp_func in TIMEWARP_FUNCTIONS.items():
-            if callable(timewarp_func):
-                # Evitar conflictos de nombres con otros módulos
-                if timewarp_func_name == "time_measure":
-                    register_native_function(functions, "time_measure", timewarp_func)
-                else:
-                    register_native_function(functions, timewarp_func_name, timewarp_func)
-        
-        # Registrar aliases específicos para operaciones temporales
-        register_native_function(functions, "timewarp_clock", lambda: timewarp("clock"))
-        register_native_function(functions, "timewarp_timeline", lambda name="main": timewarp("timeline", name=name))
-        register_native_function(functions, "timewarp_future", lambda delay, fn: timewarp("future", delay, fn))
-        register_native_function(functions, "timewarp_measure", lambda fn: timewarp("measure", fn))
-        
-        code.ok(f"{len(TIMEWARP_FUNCTIONS)} funciones TimeWarp registradas como built-ins", module="timewarp-registry")
-
-    if VISION_ENABLED:
-        for vision_func_name, vision_func in VISION_FUNCTIONS.items():
-            if callable(vision_func) and vision_func_name != "vision":
-                register_native_function(functions, vision_func_name, vision_func)
-        # Registrar función principal vision si existe
-        if "vision" in VISION_FUNCTIONS:
-            vision_main = VISION_FUNCTIONS["vision"]
-            if isinstance(vision_main, dict):
-                for func_name, func in vision_main.items():
-                    if callable(func):
-                        register_native_function(functions, f"vision_{func_name}", func)
-        
-        code.ok(f"{len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins", module="vision-registry")
-
-def lookup_variable(name, variables):
-    """Busca una variable en el scope actual."""
-    if name in variables:
-        return variables[name]
-    # Usa el error personalizado de Orion
-    raise OrionNameError(name)
-
-def _register_builtin_functions(functions):
-    import types
-    from lib import io 
-    
-    builtin_modules = [collections, io, orion_math, strings]
-    for mod in builtin_modules:
-        for k in dir(mod):
-            if not k.startswith("_"):
-                v = getattr(mod, k)
-                if isinstance(v, types.FunctionType):
-                    register_native_function(functions, k, v)
-    
-    # Registrar funciones nativas de Python necesarias
-    register_native_function(functions, "len", len)
-    register_native_function(functions, "range", range)
-    register_native_function(functions, "str", str)
-    register_native_function(functions, "int", int)
-    register_native_function(functions, "float", float)
     
     # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
     if AI_ENABLED:
@@ -1241,6 +985,10 @@ def eval_expr(expr, variables, functions):
                             sig = inspect.signature(ai_func)
                             supported = {k: v for k, v in kw_args.items() if k in sig.parameters}
                             centers, labels = ai_func(*pos_args, **supported)
+                            if isinstance(labels, OrionList):
+                                labels = [int(x) for x in labels.items]
+                            else:
+                                labels = [int(x) for x in labels]
                             return [centers, labels]
                         else:
                             raise OrionFunctionError(f"Método AI 'cluster' no encontrado")
@@ -1369,124 +1117,129 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
     if functions is None:
         functions = {}
 
-    # === INICIALIZAR ORION VISUAL ENGINE ===
-    code.frame("ORION LANGUAGE CORE", style="cyan")
-    code.divider("System Initialization")
+    # Solo inicializar el motor visual si NO estamos dentro de una función Y es la primera llamada
+    if not inside_fn and not hasattr(evaluate, '_initialized'):
+        # === INICIALIZAR ORION VISUAL ENGINE ===
+        code.frame("ORION LANGUAGE CORE", style="cyan")
+        code.divider("System Initialization")
 
-    # === Inicializar valores nativos de Orion ===
-    if "null" not in variables:
-        variables["null"] = None
-    if "yes" not in variables:
-        variables["yes"] = OrionBool(True)
-    if "no" not in variables:
-        variables["no"] = OrionBool(False)
+        # === Inicializar valores nativos de Orion ===
+        if "null" not in variables:
+            variables["null"] = None
+        if "yes" not in variables:
+            variables["yes"] = OrionBool(True)
+        if "no" not in variables:
+            variables["no"] = OrionBool(False)
 
-    # === INICIALIZAR CONTEXTO AI ===
-    if AI_ENABLED:
-        variables["AI"] = {
-            "enabled": True,
-            "functions": list(AI_FUNCTIONS.keys()),
-            "version": "1.0.0"
-        }
-        code.info("AI Context initialized", module="ai-engine")
-    else:
-        variables["AI"] = {"enabled": False}
-        code.debug("AI Context disabled", module="ai-engine")
+        # === INICIALIZAR CONTEXTOS (solo una vez) ===
+        if AI_ENABLED:
+            variables["AI"] = {
+                "enabled": True,
+                "functions": list(AI_FUNCTIONS.keys()),
+                "version": "1.0.0"
+            }
+            code.info("AI Context initialized", module="ai-engine")
+        else:
+            variables["AI"] = {"enabled": False}
+            code.debug("AI Context disabled", module="ai-engine")
+            
+        if COSMOS_ENABLED:
+            variables["COSMOS"] = {
+                "enabled": True,
+                "functions": list(COSMOS_FUNCTIONS.keys()),
+                "version": "1.0.0"
+            }
+            code.info("Cosmos Context initialized", module="cosmos-engine")
+        else:
+            variables["COSMOS"] = {"enabled": False}
+            code.debug("Cosmos Context disabled", module="cosmos-engine")
+            
+        if CRYPTO_ENABLED:
+            variables["CRYPTO"] = {
+                "enabled": True,
+                "functions": list(CRYPTO_FUNCTIONS.keys()),
+                "version": CRYPTO_FUNCTIONS.get("__meta__", {}).get("version", "2.0.0"),
+                "secure_level": CRYPTO_FUNCTIONS.get("__meta__", {}).get("secure_level", "high")
+            }
+            code.info("Crypto Context initialized", module="crypto-engine")
+        else:
+            variables["CRYPTO"] = {"enabled": False}
+            code.debug("Crypto Context disabled", module="crypto-engine")
+            
+        if INSIGHT_ENABLED:
+            variables["INSIGHT"] = {
+                "enabled": True,
+                "functions": list(INSIGHT_FUNCTIONS.keys()),
+                "version": "1.0.0",
+                "features": ["ocr", "table_detection", "signature_detection", "metadata_extraction"]
+            }
+            code.info("Insight Context initialized", module="insight-engine")
+        else:
+            variables["INSIGHT"] = {"enabled": False}
+            code.debug("Insight Context disabled", module="insight-engine")
+            
+        if MATRIX_ENABLED:
+            variables["MATRIX"] = {
+                "enabled": True,
+                "functions": list(MATRIX_FUNCTIONS.keys()),
+                "version": "1.0.0",
+                "features": ["smart_matrices", "neural_transforms", "quantum_ops", "3d_rotation"]
+            }
+            code.info("Matrix Context initialized", module="matrix-engine")
+        else:
+            variables["MATRIX"] = {"enabled": False}
+            code.debug("Matrix Context disabled", module="matrix-engine")
         
-    if COSMOS_ENABLED:
-        variables["COSMOS"] = {
-            "enabled": True,
-            "functions": list(COSMOS_FUNCTIONS.keys()),
-            "version": "1.0.0"
-        }
-        code.info("Cosmos Context initialized", module="cosmos-engine")
-    else:
-        variables["COSMOS"] = {"enabled": False}
-        code.debug("Cosmos Context disabled", module="cosmos-engine")
-        
-    if CRYPTO_ENABLED:
-        variables["CRYPTO"] = {
-            "enabled": True,
-            "functions": list(CRYPTO_FUNCTIONS.keys()),
-            "version": CRYPTO_FUNCTIONS.get("__meta__", {}).get("version", "2.0.0"),
-            "secure_level": CRYPTO_FUNCTIONS.get("__meta__", {}).get("secure_level", "high")
-        }
-        code.info("Crypto Context initialized", module="crypto-engine")
-    else:
-        variables["CRYPTO"] = {"enabled": False}
-        code.debug("Crypto Context disabled", module="crypto-engine")
-        
-    if INSIGHT_ENABLED:
-        variables["INSIGHT"] = {
-            "enabled": True,
-            "functions": list(INSIGHT_FUNCTIONS.keys()),
-            "version": "1.0.0",
-            "features": ["ocr", "table_detection", "signature_detection", "metadata_extraction"]
-        }
-        code.info("Insight Context initialized", module="insight-engine")
-    else:
-        variables["INSIGHT"] = {"enabled": False}
-        code.debug("Insight Context disabled", module="insight-engine")
-        
-    if MATRIX_ENABLED:
-        variables["MATRIX"] = {
-            "enabled": True,
-            "functions": list(MATRIX_FUNCTIONS.keys()),
-            "version": "1.0.0",
-            "features": ["smart_matrices", "neural_transforms", "quantum_ops", "3d_rotation"]
-        }
-        code.info("Matrix Context initialized", module="matrix-engine")
-    else:
-        variables["MATRIX"] = {"enabled": False}
-        code.debug("Matrix Context disabled", module="matrix-engine")
-    
-    if QUANTUM_ENABLED:
-        variables["QUANTUM"] = {
-            "enabled": True,
-            "functions": list(QUANTUM_FUNCTIONS.keys()),
-            "version": "1.0.0",
-            "features": ["qubits", "gates", "circuits", "entanglement", "noise_models", "measurements"]
-        }
-        code.info("Quantum Context initialized", module="quantum-engine")
-    else:
-        variables["QUANTUM"] = {"enabled": False}
-        code.debug("Quantum Context disabled", module="quantum-engine")
-        
-    if TIMEWARP_ENABLED:
-        variables["TIMEWARP"] = {
-            "enabled": True,
-            "functions": list(TIMEWARP_FUNCTIONS.keys()),
-            "version": "1.0.0",
-            "features": ["time_travel", "warp_clock", "timelines", "future_execution", "temporal_decorators", "performance_measurement"]
-        }
-        code.info("TimeWarp Context initialized", module="timewarp-engine")
-    else:
-        variables["TIMEWARP"] = {"enabled": False}
-        code.debug("TimeWarp Context disabled", module="timewarp-engine")
-        
-    if VISION_ENABLED:
-        variables["VISION"] = {
-            "enabled": True,
-            "functions": list(VISION_FUNCTIONS.keys()),
-            "version": "1.0.0",
-            "features": ["image_processing", "face_detection", "perceptual_hashing", "smart_cropping", "ocr", "seam_carving", "pipelines"]
-        }
-        code.info("Vision Context initialized", module="vision-engine")
-    else:
-        variables["VISION"] = {"enabled": False}
-        code.debug("Vision Context disabled", module="vision-engine")
+        if QUANTUM_ENABLED:
+            variables["QUANTUM"] = {
+                "enabled": True,
+                "functions": list(QUANTUM_FUNCTIONS.keys()),
+                "version": "1.0.0",
+                "features": ["qubits", "gates", "circuits", "entanglement", "noise_models", "measurements"]
+            }
+            code.info("Quantum Context initialized", module="quantum-engine")
+        else:
+            variables["QUANTUM"] = {"enabled": False}
+            code.debug("Quantum Context disabled", module="quantum-engine")
+            
+        if TIMEWARP_ENABLED:
+            variables["TIMEWARP"] = {
+                "enabled": True,
+                "functions": list(TIMEWARP_FUNCTIONS.keys()),
+                "version": "1.0.0",
+                "features": ["time_travel", "warp_clock", "timelines", "future_execution", "temporal_decorators", "performance_measurement"]
+            }
+            code.info("TimeWarp Context initialized", module="timewarp-engine")
+        else:
+            variables["TIMEWARP"] = {"enabled": False}
+            code.debug("TimeWarp Context disabled", module="timewarp-engine")
+            
+        if VISION_ENABLED:
+            variables["VISION"] = {
+                "enabled": True,
+                "functions": list(VISION_FUNCTIONS.keys()),
+                "version": "1.0.0",
+                "features": ["image_processing", "face_detection", "perceptual_hashing", "smart_cropping", "ocr", "seam_carving", "pipelines"]
+            }
+            code.info("Vision Context initialized", module="vision-engine")
+        else:
+            variables["VISION"] = {"enabled": False}
+            code.debug("Vision Context disabled", module="vision-engine")
 
-    _register_builtin_functions(functions)
-    functions["_variables"] = variables
+        _register_builtin_functions(functions)
+        functions["_variables"] = variables
 
-    # Registrar funciones FN antes de ejecutar el resto
-    code.progress("orion-core", "Registering user functions", 25)
-    for node in ast:
-        if node[0] == "FN":
-            _, fn_name, params, body = node
-            register_function(functions, fn_name, params, body)
+        # Registrar funciones FN antes de ejecutar el resto
+        code.progress("orion-core", "Registering user functions", 25)
+        for node in ast:
+            if node[0] == "FN":
+                _, fn_name, params, body = node
+                register_function(functions, fn_name, params, body)
 
-    code.progress("orion-core", "Executing AST nodes", 50)
+        code.progress("orion-core", "Executing AST nodes", 50)
+        
+        # Marcar como inicializado
+        evaluate._initialized = True
 
     i = 0
     while i < len(ast):
@@ -1851,7 +1604,60 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         elif tag == "PRINT":
             _, value = node
             val = eval_expr(value, variables, functions)
-            show.show(val)
+            show.show(to_native(val))
+            
+        elif tag == "FOR_RANGE":
+            # Consolidar ambos formatos en un solo bloque
+            if len(node) == 4:
+                _, var_name, range_args, body = node
+                # range_args should be a list with arguments for range()
+                rng = range(*[int(eval_expr(arg, variables, functions)) for arg in range_args])
+            elif len(node) == 5:
+                # Formato: ('FOR_RANGE', var_name, start, end, body)
+                _, var_name, start_expr, end_expr, body = node
+                start_val = eval_expr(start_expr, variables, functions)
+                end_val = eval_expr(end_expr, variables, functions)
+                
+                if not isinstance(start_val, (int, float)):
+                    raise OrionTypeError(f"El rango debe ser numérico, se recibió start={start_val}")
+                if not isinstance(end_val, (int, float)):
+                    raise OrionTypeError(f"El rango debe ser numérico, se recibió end={end_val}")
+                
+                rng = range(int(start_val), int(end_val) + 1)
+            elif len(node) == 6:
+                _, var_name, start, end, body, range_type = node
+                start_val = eval_expr(start, variables, functions)
+                end_val = eval_expr(end, variables, functions)
+                
+                if not isinstance(start_val, (int, float)):
+                    raise OrionTypeError(f"El rango debe ser numérico, se recibió start={start_val}")
+                if not isinstance(end_val, (int, float)):
+                    raise OrionTypeError(f"El rango debe ser numérico, se recibió end={end_val}")
+                
+                if range_type == "RANGE":
+                    rng = range(int(start_val), int(end_val) + 1)
+                elif range_type == "RANGE_EX":
+                    rng = range(int(start_val), int(end_val))
+                else:
+                    raise OrionRuntimeError(f"Tipo de rango no soportado: {range_type}")
+            else:
+                raise OrionRuntimeError(f"Formato de nodo FOR_RANGE no soportado: {node}")
+
+            # Guardar valor previo de la variable del bucle
+            prev_value = variables.get(var_name)
+            
+            for j in rng:
+                variables[var_name] = j
+                # Ejecutar el cuerpo del bucle con el flag inside_fn correcto
+                result = evaluate(body, variables, functions, inside_fn=True)
+                if inside_fn and result is not None:
+                    return result
+            
+            # Limpiar scope
+            if prev_value is not None:
+                variables[var_name] = prev_value
+            elif var_name in variables:
+                del variables[var_name]
 
         elif tag == "FOR":
             _, var_name, start, end, body, range_type = node
@@ -1911,42 +1717,6 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 variables[var_name] = prev_value
             elif var_name in variables:
                 del variables[var_name]
-        
-        elif tag == "FOR_RANGE":
-            # Soporta ambos formatos:
-            # ('FOR_RANGE', var_name, range_args, body)
-            # ('FOR_RANGE', var_name, start, end, body, range_type)
-            if len(node) == 4:
-                _, var_name, range_args, body = node
-                # range_args debe ser una lista con los argumentos para range()
-                rng = range(*[int(eval_expr(arg, variables, functions)) for arg in range_args])
-            elif len(node) == 6:
-                _, var_name, start, end, body, range_type = node
-                start_val = eval_expr(start, variables, functions)
-                end_val = eval_expr(end, variables, functions)
-                if not isinstance(start_val, (int, float)):
-                    raise OrionTypeError(f"El rango debe ser numérico, se recibió start={start_val}")
-                if not isinstance(end_val, (int, float)):
-                    raise OrionTypeError(f"El rango debe ser numérico, se recibió end={end_val}")
-                if range_type == "RANGE":
-                    rng = range(int(start_val), int(end_val) + 1)
-                elif range_type == "RANGE_EX":
-                    rng = range(int(start_val), int(end_val))
-                else:
-                    raise OrionRuntimeError(f"Tipo de rango no soportado: {range_type}")
-            else:
-                raise OrionRuntimeError(f"Formato de nodo FOR_RANGE no soportado: {node}")
-
-            prev_value = variables.get(var_name)
-            for j in rng:
-                variables[var_name] = j
-                result = evaluate(body, variables, functions, inside_fn=True)
-                if inside_fn and result is not None:
-                    return result
-            if prev_value is not None:
-                variables[var_name] = prev_value
-            elif var_name in variables:
-                del variables[var_name]
 
         elif tag == "IF":
             _, condition, body_true, body_false = node
@@ -1976,7 +1746,19 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             raise OrionRuntimeError(f"Nodo desconocido en AST: {tag}")
 
         i += 1
-
+        
+    if "labels" in variables and "local" in variables and "clusters" in variables:
+        labels = to_native(variables["labels"])
+        local = to_native(variables["local"])
+        clusters = variables["clusters"]
+        for cluster_id in sorted(set(labels)):
+            tasks_in = [t for j, t in enumerate(local) if labels[j] == cluster_id]
+            if tasks_in:
+                summary = think([t["title"] for t in tasks_in])["summary"]
+            else:
+                summary = "(sin contenido)"
+            clusters[f"Cluster_{cluster_id}"] = summary
+            
     code.progress("orion-core", "Execution completed", 100)
     # 3. Si estamos en nivel superior
     if not inside_fn:

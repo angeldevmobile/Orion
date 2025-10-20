@@ -16,6 +16,9 @@ import os
 import time
 import random
 from typing import Tuple, List, Callable, Optional
+import matplotlib.pyplot as plt
+import plotly.express as px
+from sklearn.decomposition import PCA
 
 # Optional accelerated libs
 try:
@@ -418,3 +421,33 @@ def orion_export():
 def register(runtime):
     """Integración directa con el núcleo de Orion"""
     runtime.register_module("vision", orion_export())
+
+def plot_clusters(embeds, labels, caption="Mapa cognitivo de tareas"):
+    """
+    Visualiza los clusters de embeddings en 2D usando PCA si hay más de 2 dimensiones.
+    """
+    if not embeds or not labels:
+        print("No hay datos para graficar.")
+        return
+    # Reduce a 2D si es necesario
+    if len(embeds[0]) > 2:
+        pca = PCA(n_components=2)
+        reduced = pca.fit_transform(embeds)
+        x = reduced[:, 0]
+        y = reduced[:, 1]
+    else:
+        x = [vec[0] for vec in embeds]
+        y = [vec[1] for vec in embeds]
+    fig = px.scatter(
+        x=x,
+        y=y,
+        color=labels,
+        title=caption,
+        labels={"color": "Cluster", "x": "Dim 1", "y": "Dim 2"},
+        width=700,
+        height=500
+    )
+    fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
+    fig.show(renderer="browser")  
+
+ALIASES["plot_clusters"] = plot_clusters

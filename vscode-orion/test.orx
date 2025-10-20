@@ -1,5 +1,5 @@
 fn main() {
-  let x = 42
+  x = 42
   if x > 60 {
     show("Mayor que 50")
   } else {

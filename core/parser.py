@@ -120,6 +120,8 @@ def parse_primary(tokens, i):
         return value, i + 1
     elif kind == "BOOL":
         return value.value, i + 1
+    elif kind == "TYPE":
+        return ("TYPE", value), i + 1
 
     elif kind == "IDENT":
         expr = ("IDENT", value)
@@ -169,7 +171,7 @@ def parse_primary(tokens, i):
             elif token_type == "LPAREN":
                 args, kwargs, i = parse_call_args(tokens, i)
                 expr = ("CALL", expr, args, kwargs)
-            elif token_type == "SAFE_ACCESS":
+            elif token_type == "SAFE_ACCESS" or token_type == "NULL_SAFE":
                 i += 1
                 if i >= len(tokens) or tokens[i][0] != "IDENT":
                     raise OrionSyntaxError("Se esperaba un identificador después de '?.'")
@@ -329,9 +331,19 @@ def parse_statement(tokens, i):
         
     kind = tokens[i][0]
     value = tokens[i][1] if len(tokens[i]) > 1 else None
+    
+    # --- VAR statement ---
+    if kind == "IDENT" and value == "var":
+        if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de variable después de 'var'")
+        var_name = tokens[i+1][1]
+        if i+2 >= len(tokens) or tokens[i+2][0] != "ASSIGN":
+            raise OrionSyntaxError("Se esperaba '=' después del nombre de variable")
+        expr_value, j = parse_expression(tokens, i+3)
+        return ("VAR", var_name, expr_value), j
 
     # --- USE statement ---
-    if kind == "USE":
+    elif kind == "USE":
         if i+1 >= len(tokens) or tokens[i+1][0] not in ("STRING", "IDENT"):
             raise OrionSyntaxError("Se esperaba una cadena o identificador después de 'use'")
         module_path = tokens[i+1][1]
@@ -396,29 +408,56 @@ def parse_statement(tokens, i):
 
         return ("IF", condition, body_true, body_false), i
 
-    # --- FOR statement --- 
+        # --- FOR statement ---
     elif kind == "FOR":
-        if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
-            raise OrionSyntaxError("Se esperaba un identificador después de 'for'")
-        var_name = tokens[i+1][1]
+        i += 1
 
-        if i+2 >= len(tokens) or tokens[i+2][0] != "IN":
+        # Permitir opcionalmente paréntesis después de for
+        has_paren = False
+        if i < len(tokens) and tokens[i][0] == "LPAREN":
+            has_paren = True
+            i += 1
+
+        # Variable del bucle
+        if i >= len(tokens) or tokens[i][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un identificador después de for")
+        var_name = tokens[i][1]
+        i += 1
+
+        # Palabra clave 'in'
+        if i >= len(tokens) or tokens[i][0] != "IN":
             raise OrionSyntaxError("Se esperaba 'in' en el bucle for")
+        i += 1
 
-        # Detectar error común: '=' después de 'in'
-        if i+3 < len(tokens) and tokens[i+3][0] == "ASSIGN":
-            raise OrionSyntaxError("No se permite '=' después de 'in' en el bucle for. ¿Quizá querías usar una expresión iterable?")
-
-        expr, j = parse_expression(tokens, i+3)
-
-        # Detección inteligente de range
-        if (isinstance(expr, tuple) and expr[0] == "CALL" and
-            isinstance(expr[1], tuple) and expr[1][0] == "IDENT" and expr[1][1] == "range"):
-            range_args = expr[2]
-            body, j = parse_block(tokens, j)
-            return ("FOR_RANGE", var_name, range_args, body), j
+        # Soporte para rango estilo 1..n
+        start_expr, i = parse_expression(tokens, i)
+        if i < len(tokens) and tokens[i][0] == "RANGE":
+            i += 1
+            end_expr, i = parse_expression(tokens, i)
+            expr = ("RANGE_LITERAL", start_expr, end_expr)
         else:
-            body, j = parse_block(tokens, j)
+            # Cualquier otra expresión iterable (lista, llamada, etc.)
+            expr = start_expr
+
+        # Cerrar paréntesis si los hubo
+        if has_paren:
+            if i >= len(tokens) or tokens[i][0] != "RPAREN":
+                raise OrionSyntaxError("Se esperaba ')' al final del encabezado del for")
+            i += 1
+
+        # Saltar newlines o puntos y coma antes del cuerpo
+        while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
+            i += 1
+
+        # Bloque del cuerpo
+        if i >= len(tokens) or tokens[i][0] != "LBRACE":
+            raise OrionSyntaxError("Se esperaba '{' al inicio del cuerpo del for'")
+        body, j = parse_block(tokens, i)
+
+        # Distinguir tipo de for
+        if expr[0] == "RANGE_LITERAL":
+            return ("FOR_RANGE", var_name, expr[1], expr[2], body), j
+        else:
             return ("FOR_IN", var_name, expr, body), j
 
     # --- FN statement ---
@@ -430,6 +469,10 @@ def parse_statement(tokens, i):
         if i+2 >= len(tokens) or tokens[i+2][0] != "LPAREN":
             raise OrionSyntaxError("Se esperaba '(' después del nombre de función")
         params, j = parse_fn_params(tokens, i+2)
+
+        # Saltar cualquier NEWLINE o SEMICOLON antes de la llave
+        while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+            j += 1
 
         if j >= len(tokens) or tokens[j][0] != "LBRACE":
             raise OrionSyntaxError("Se esperaba '{' al inicio del cuerpo de la función")
@@ -554,15 +597,14 @@ def parse_block(tokens, i):
     i += 1
 
     while i < len(tokens) and tokens[i][0] != "RBRACE":
-        # MEJORADO: Usar parse_statement para mejor consistencia
-        stmt, i = parse_statement(tokens, i)
+        stmt, next_i = parse_statement(tokens, i)
         stmts.append(stmt)
+        i = next_i  # Avanza correctamente el índice
 
     if i >= len(tokens):
         raise OrionSyntaxError("Se esperaba '}' pero se alcanzó el final del archivo.")
     
     return stmts, i + 1
-
 
 def parse(tokens):
     """Función principal de parsing con mejor manejo de errores."""

@@ -19,7 +19,7 @@ Usage:
     code.progress("orion-core", "Initializing modules", 65)
 """
 
-import datetime, shutil, os, re, math, random
+import datetime, shutil, os, re, math, random, textwrap
 
 # ============================================================
 # ─── Color & Style Engine ───────────────────────────────────
@@ -117,21 +117,33 @@ def _line(level, module, message, color=None, bg=None):
         line = f"{ts} {lvl} {mod} → {msg}"
 
     _write_file(line)
-    return line[:width]
+
+    # Wrap the line if it's too long
+    wrapped_lines = textwrap.wrap(_strip_ansi(line), width)
+    # Re-apply color to each wrapped line
+    return "\n".join([color + l + RESET for l in wrapped_lines])
 
 # ============================================================
 # ─── Public Log Levels ──────────────────────────────────────
 # ============================================================
-def info(msg, module="system"):  print(_line("INFO", module, msg, FG["cyan"], BG["cyan"]))
-def ok(msg, module="system"):    print(_line("OK", module, msg, FG["green"], BG["green"]))
-def warn(msg, module="system"):  print(_line("WARN", module, msg, FG["yellow"], BG["yellow"]))
-def error(msg, module="system"): print(_line("ERROR", module, msg, FG["red"], BG["red"]))
-def debug(msg, module="system"): print(_line("DEBUG", module, msg, FG["gray"], BG["gray"]))
-def trace(msg, module="system"): print(_line("TRACE", module, msg, FG["magenta"], BG["purple"]))
+def info(msg, module="system"):
+    print(_line("INFO", module, msg, FG["cyan"], BG["cyan"]))
 
-# ============================================================
-# ─── Visual Utilities ───────────────────────────────────────
-# ============================================================
+def ok(msg, module="system"):
+    print(_line("OK", module, msg, FG["green"], BG["green"]))
+
+def warn(msg, module="system"):
+    print(_line("WARN", module, msg, FG["yellow"], BG["yellow"]))
+
+def error(msg, module="system"):
+    print(_line("ERROR", module, msg, FG["red"], BG["red"]))
+
+def debug(msg, module="system"):
+    print(_line("DEBUG", module, msg, FG["gray"], BG["gray"]))
+
+def trace(msg, module="system"):
+    print(_line("TRACE", module, msg, FG["magenta"], BG["purple"]))
+
 def divider(title=""):
     width = _width()
     pad = f"{FG['gray']}{'─' * (width - len(title) - 3)}{RESET}"
@@ -144,10 +156,16 @@ def progress(module, step, percent):
     filled = int(bar_len * percent / 100)
     bar = f"{FG['green']}{'█' * filled}{FG['gray']}{'░' * (bar_len - filled)}{RESET}"
     line = _line("PROC", module, f"{step} {bar} {percent:>3.0f}%", FG["cyan"])
-    print(line, end="\r" if percent < 100 else "\n")
+    if percent < 100:
+        print(line, end="\r")
+    else:
+        print(" " * _width(), end="\r")  # Limpia la línea
+        print(line)
+        import sys, time
+        sys.stdout.flush()
+        time.sleep(0.02)  # Pequeña pausa para asegurar separación
 
 def pulse(level="INFO", text="...", frequency=0.08):
-    """Efecto visual de 'latido' en la consola, tipo vivo."""
     import time, sys
     for i in range(3):
         sys.stdout.write(f"{FG['magenta']}{BOLD}[{level}] {text}{RESET}\r")
@@ -165,10 +183,12 @@ def trace_end(title="TRACE END"):
     divider(f"{FG['green']}{BOLD}── {title} ──{RESET}")
 
 def frame(title: str, style="magenta"):
-    """Muestra un marco decorativo alrededor de un título."""
     width = _width()
     border = "═" * (width - len(title) - 4)
     color = FG.get(style, FG["magenta"])
     print(f"{color}{BOLD}╔═ {title} {border}{RESET}")
     print(f"{color}{BOLD}╚{border}{RESET}")
+
+def show(msg, module="user"):
+    ok(str(msg), module=module)
 

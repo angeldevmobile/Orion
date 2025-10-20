@@ -55,7 +55,7 @@ pred = ai.predict([new_task], model, explain=yes)
 show("Predicción de duración:", pred["value"], "min",
      "\n Explicación:", pred["why"], level="info")
 
--- 7. Visualización cognitiva instantánea (opcional)
+-- 7. Visualización cognitiva instantánea 
 vision.plot_clusters(embeds, labels, caption="Mapa cognitivo de tareas")
 
 -- 8. Enviar resultados al servidor Orion Cloud
