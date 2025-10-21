@@ -1,0 +1,13 @@
+use spreadsheet
+
+-- Registrar hoja con ID Orion
+spreadsheet.register("sheet_ventas", "ventas.xlsx")
+
+-- Conectar a la hoja
+s = spreadsheet.attach(id="sheet_ventas")
+
+-- Escribir datos
+s.write("A1", "Conectado desde Orion")
+s.write("B1", "Ventas Totales")
+s.append(["Laptop", 3500])
+s.save()
