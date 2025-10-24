@@ -29,13 +29,54 @@ class OSync:
         if os.path.exists(cache):
             print(f"[OSync] Pushing cached changes for {sheet_id} ...")
             # futuro: subir al daemon Orion Cloud
+            return True
         else:
             print(f"[OSync] No changes to push for {sheet_id}.")
+            return False
 
     @staticmethod
     def pull(sheet_id):
         """Obtiene actualizaciones desde la nube (futuro)."""
         print(f"[OSync] Pulling updates for {sheet_id} ... (not implemented yet)")
+        return False
+
+    @staticmethod
+    def status(sheet_id):
+        """Obtiene el estado de sincronización de una hoja."""
+        cache = os.path.join(SYNC_PATH, f"{sheet_id}.orioncache")
+        if os.path.exists(cache):
+            # Leer el cache para obtener información de estado
+            with open(cache, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            return {
+                "sheet_id": sheet_id,
+                "has_changes": len(lines) > 0,
+                "last_change": lines[-1].strip() if lines else None,
+                "total_changes": len(lines),
+                "synced": False  # Por ahora siempre False hasta implementar sync real
+            }
+        else:
+            return {
+                "sheet_id": sheet_id,
+                "has_changes": False,
+                "last_change": None,
+                "total_changes": 0,
+                "synced": True
+            }
+
+    @staticmethod
+    def list_synced():
+        """Lista todas las hojas que tienen información de sincronización."""
+        os.makedirs(SYNC_PATH, exist_ok=True)
+        synced_sheets = []
+        
+        for file in os.listdir(SYNC_PATH):
+            if file.endswith(".orioncache"):
+                sheet_id = file.replace(".orioncache", "")
+                status = OSync.status(sheet_id)
+                synced_sheets.append(status)
+        
+        return synced_sheets
 
     @staticmethod
     def log(sheet_id, action, cell, value):
@@ -150,3 +191,126 @@ def push(id_name):
 
 def pull(id_name):
     return OSync.pull(id_name)
+
+def status(id_name):
+    """Obtiene el estado de sincronización de una hoja."""
+    return OSync.status(id_name)
+
+def list_synced():
+    """Lista todas las hojas sincronizadas."""
+    return OSync.list_synced()
+
+def clear_cache(id_name):
+    """Limpia el cache de sincronización de una hoja."""
+    cache_file = os.path.join(SYNC_PATH, f"{id_name}.orioncache")
+    if os.path.exists(cache_file):
+        os.remove(cache_file)
+        return f"Cache cleared for {id_name}"
+    return f"No cache found for {id_name}"
+
+# ============================================================
+# Funciones de conveniencia adicionales
+# ============================================================
+
+def create_sheet(id_name, path, data=None):
+    """Crea y registra una nueva hoja de cálculo."""
+    register(id_name, path)
+    sheet = attach(id_name)
+    
+    if data:
+        if isinstance(data, list):
+            for row in data:
+                sheet.append(row)
+        elif isinstance(data, dict):
+            for cell, value in data.items():
+                sheet.write(cell, value)
+    
+    sheet.save()
+    return sheet
+
+def quick_write(id_name, cell, value):
+    """Escribir rápidamente a una celda."""
+    sheet = attach(id_name)
+    sheet.write(cell, value)
+    sheet.save()
+    return f"Written {value} to {cell} in {id_name}"
+
+def quick_read(id_name, cell):
+    """Leer rápidamente de una celda."""
+    sheet = attach(id_name)
+    return sheet.read(cell)
+
+def get_sheet_info(id_name):
+    """Obtiene información sobre una hoja registrada."""
+    if id_name in LocalSheetBridge._registry:
+        path = LocalSheetBridge._registry[id_name]
+        exists = os.path.exists(path)
+        ext = os.path.splitext(path)[1].lower()
+        
+        info = {
+            "id": id_name,
+            "path": path,
+            "exists": exists,
+            "format": ext,
+            "registered": True
+        }
+        
+        if exists:
+            stat = os.stat(path)
+            info["size"] = stat.st_size
+            info["modified"] = time.ctime(stat.st_mtime)
+        
+        return info
+    else:
+        return {"id": id_name, "registered": False}
+
+def list_registered():
+    """Lista todas las hojas registradas."""
+    return {id_name: get_sheet_info(id_name) for id_name in LocalSheetBridge._registry.keys()}
+
+def bulk_operations(id_name, operations):
+    """Ejecuta múltiples operaciones en una hoja de forma eficiente."""
+    sheet = attach(id_name)
+    results = []
+    
+    for op in operations:
+        op_type = op.get("type")
+        
+        if op_type == "write":
+            sheet.write(op["cell"], op["value"])
+            results.append(f"Written {op['value']} to {op['cell']}")
+        
+        elif op_type == "read":
+            value = sheet.read(op["cell"])
+            results.append({"cell": op["cell"], "value": value})
+        
+        elif op_type == "append":
+            sheet.append(op["values"])
+            results.append(f"Appended row: {op['values']}")
+    
+    sheet.save()
+    return results
+
+# ============================================================
+# Exportación para integración con Orion
+# ============================================================
+
+def orion_export():
+    """Exporta todas las funciones disponibles para el sistema Orion."""
+    return {
+        "register": register,
+        "attach": attach,
+        "push": push,
+        "pull": pull,
+        "status": status,
+        "list_synced": list_synced,
+        "clear_cache": clear_cache,
+        "create_sheet": create_sheet,
+        "quick_write": quick_write,
+        "quick_read": quick_read,
+        "get_sheet_info": get_sheet_info,
+        "list_registered": list_registered,
+        "bulk_operations": bulk_operations,
+        "LocalSheetBridge": LocalSheetBridge,
+        "OSync": OSync
+    }

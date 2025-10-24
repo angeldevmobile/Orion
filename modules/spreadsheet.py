@@ -8,7 +8,7 @@ import os
 import csv
 import json
 from openpyxl import Workbook, load_workbook
-from modules import net  # Usa tu propio módulo de red Orion
+from modules import net 
 
 
 class OrionSpreadsheet:
@@ -33,6 +33,7 @@ class OrionSpreadsheet:
             if os.path.exists(filename):
                 with open(filename, newline='', encoding='utf-8') as f:
                     self.rows = list(csv.reader(f))
+            # CORRECCIÓN: Inicializar rows vacío si el archivo no existe
 
         # --- Formato nativo Orion ---
         elif self.ext in [".orion", ".osheet"]:
@@ -52,6 +53,22 @@ class OrionSpreadsheet:
     def write(self, cell, value):
         if self.ext == ".xlsx":
             self.ws[cell] = value
+        elif self.ext == ".csv":
+            # CORRECCIÓN: Agregar soporte para escribir en CSV por celdas
+            row_idx = int(''.join(filter(str.isdigit, cell))) - 1
+            col_letter = ''.join(filter(str.isalpha, cell)).upper()
+            col_idx = ord(col_letter) - 65  # A → 0
+            
+            # Asegurar que hay suficientes filas
+            while len(self.rows) <= row_idx:
+                self.rows.append([])
+            
+            # Asegurar que hay suficientes columnas en la fila
+            while len(self.rows[row_idx]) <= col_idx:
+                self.rows[row_idx].append("")
+            
+            self.rows[row_idx][col_idx] = str(value)
+            
         elif self.ext in [".orion", ".osheet"]:
             # escritura simbólica tipo A1, B2, etc.
             row_idx = int(''.join(filter(str.isdigit, cell))) - 1
@@ -64,19 +81,34 @@ class OrionSpreadsheet:
                 row.append("")
             row[col_idx] = value
         else:
-            raise TypeError("La escritura directa solo aplica a .xlsx o .orion")
+            raise TypeError("La escritura directa solo aplica a .xlsx, .csv o .orion")
 
     def append(self, values):
+        """Agrega una fila completa al final de la hoja."""
         if self.ext == ".xlsx":
             self.ws.append(values)
         elif self.ext == ".csv":
-            self.rows.append(values)
+            # CORRECCIÓN: Asegurar que rows está inicializado
+            if not hasattr(self, 'rows'):
+                self.rows = []
+            self.rows.append([str(v) for v in values])  # Convertir a strings para CSV
         elif self.ext in [".orion", ".osheet"]:
             self.data["rows"].append(values)
+        else:
+            raise TypeError(f"Método append no soportado para formato {self.ext}")
 
     def read(self, cell):
         if self.ext == ".xlsx":
             return self.ws[cell].value
+        elif self.ext == ".csv":
+            # CORRECCIÓN: Agregar soporte para leer CSV por celdas
+            row_idx = int(''.join(filter(str.isdigit, cell))) - 1
+            col_letter = ''.join(filter(str.isalpha, cell)).upper()
+            col_idx = ord(col_letter) - 65
+            try:
+                return self.rows[row_idx][col_idx]
+            except (IndexError, AttributeError):
+                return None
         elif self.ext in [".orion", ".osheet"]:
             row_idx = int(''.join(filter(str.isdigit, cell))) - 1
             col_letter = ''.join(filter(str.isalpha, cell)).upper()
@@ -92,13 +124,40 @@ class OrionSpreadsheet:
         if self.ext == ".xlsx":
             self.wb.save(self.filename)
         elif self.ext == ".csv":
+            # CORRECCIÓN: Asegurar que el directorio existe
+            os.makedirs(os.path.dirname(self.filename) if os.path.dirname(self.filename) else ".", exist_ok=True)
             with open(self.filename, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                writer.writerows(self.rows)
+                if hasattr(self, 'rows') and self.rows:
+                    writer.writerows(self.rows)
         elif self.ext in [".orion", ".osheet"]:
+            os.makedirs(os.path.dirname(self.filename) if os.path.dirname(self.filename) else ".", exist_ok=True)
             with open(self.filename, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=2, ensure_ascii=False)
         return f"Archivo guardado: {self.filename}"
+
+    # -----------------------------------------------------------
+    # Métodos adicionales para compatibilidad
+    # -----------------------------------------------------------
+    
+    def get_all_data(self):
+        """Obtiene todos los datos de la hoja."""
+        if self.ext == ".xlsx":
+            return [[cell.value for cell in row] for row in self.ws.iter_rows()]
+        elif self.ext == ".csv":
+            return self.rows if hasattr(self, 'rows') else []
+        elif self.ext in [".orion", ".osheet"]:
+            return self.data["rows"]
+        
+    def clear(self):
+        """Limpia todo el contenido de la hoja."""
+        if self.ext == ".xlsx":
+            self.wb = Workbook()
+            self.ws = self.wb.active
+        elif self.ext == ".csv":
+            self.rows = []
+        elif self.ext in [".orion", ".osheet"]:
+            self.data = {"headers": [], "rows": []}
 
     # -----------------------------------------------------------
     # Sincronización Cloud

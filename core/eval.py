@@ -22,6 +22,44 @@ from modules import code, show
 from lib.io import io_show
 from lib import math as orion_math
 from lib import strings
+
+# === INTEGRACIÓN CON HOJAS DE CÁLCULO ORION ===
+try:
+    from modules.spreadsheet import OrionSpreadsheet, create, attach, register as spreadsheet_register
+    from modules.sheets_localbridge import LocalSheetBridge, OSync
+    from modules.linksheet import LinkSheet
+    from core.protocol_osync import OSyncProtocol
+    SPREADSHEET_ENABLED = True
+    SPREADSHEET_FUNCTIONS = {
+        # OrionSpreadsheet functions
+        "create_sheet": create,
+        "attach_sheet": LocalSheetBridge.attach,  
+        "register_sheet": spreadsheet_register,
+        
+        # LocalSheetBridge functions
+        "sheet_register": LocalSheetBridge.register,
+        "sheet_attach": LocalSheetBridge.attach,
+        
+        # OSync functions
+        "sync_push": OSync.push,
+        "sync_pull": OSync.pull,
+        "sync_status": OSync.status,
+        "sync_list": OSync.list_synced,
+        
+        # LinkSheet functions
+        "link_sheet": LinkSheet.link,
+        "push_remote": LinkSheet.push,
+        "pull_remote": LinkSheet.pull,
+        
+        # OSyncProtocol function
+        "osync_execute": OSyncProtocol.execute
+    }
+    code.info("Módulo de hojas de cálculo Orion cargado exitosamente", module="spreadsheet-core")
+except ImportError as e:
+    SPREADSHEET_ENABLED = False
+    SPREADSHEET_FUNCTIONS = {}
+    code.warn(f"Módulo de hojas de cálculo no disponible: {e}", module="spreadsheet-core")
+
 # === INTEGRACIÓN DEL MÓDULO AI ===
 try:
     from stdlib.ai import orion_export, think, quantum_embed, recall
@@ -280,6 +318,28 @@ def _register_builtin_functions(functions):
     register_native_function(functions, "float", float)
     register_native_function(functions, "auto", lambda *args, **kwargs: args[0] if args else None)
     
+    # === REGISTRAR FUNCIONES SPREADSHEET COMO BUILT-INS ===
+    if SPREADSHEET_ENABLED:
+        for sheet_func_name, sheet_func in SPREADSHEET_FUNCTIONS.items():
+            if callable(sheet_func):
+                register_native_function(functions, sheet_func_name, sheet_func)
+        
+        # Registrar aliases cortos y funciones específicas
+        register_native_function(functions, "sheet", lambda filename: create(filename))
+        register_native_function(functions, "sync", lambda sheet_id, mode="push": 
+            OSync.push(sheet_id) if mode == "push" else OSync.pull(sheet_id))
+        register_native_function(functions, "osync_cmd", OSyncProtocol.execute)
+        
+        # Funciones específicas para manejo de hojas
+        register_native_function(functions, "sheet_write", lambda sheet_id, cell, value: 
+            LocalSheetBridge.attach(sheet_id).write(cell, value))
+        register_native_function(functions, "sheet_read", lambda sheet_id, cell: 
+            LocalSheetBridge.attach(sheet_id).read(cell))
+        register_native_function(functions, "sheet_save", lambda sheet_id: 
+            LocalSheetBridge.attach(sheet_id).save())
+        
+        code.ok(f"{len(SPREADSHEET_FUNCTIONS)} funciones Spreadsheet registradas como built-ins", module="spreadsheet-registry")
+
     # === REGISTRAR FUNCIONES AI COMO BUILT-INS ===
     if AI_ENABLED:
         # Registrar todas las funciones AI exportadas
@@ -703,6 +763,18 @@ def eval_expr(expr, variables, functions):
 
             # Función nativa
             if fn_def["type"] == "NATIVE_FN":
+                # === MANEJO ESPECIAL PARA FUNCIONES SPREADSHEET ===
+                if SPREADSHEET_ENABLED and (fn_name in SPREADSHEET_FUNCTIONS or fn_name.startswith('sheet_') or 
+                                          fn_name.startswith('sync_') or fn_name.startswith('osync_') or
+                                          fn_name in ["create_sheet", "attach_sheet", "register_sheet", "link_sheet", "push_remote", "pull_remote"]):
+                    try:
+                        result = fn_def["impl"](*pos_args, **kw_args)
+                        if fn_name in ["create_sheet", "attach_sheet", "sync_push", "sync_pull", "osync_execute"]:
+                            code.info(f"[DEBUG SPREADSHEET] Ejecutado {fn_name} con {len(pos_args)} argumentos")
+                        return result
+                    except Exception as e:
+                        raise OrionRuntimeError(f"Error en función Spreadsheet '{fn_name}': {str(e)}")
+
                 # === MANEJO ESPECIAL PARA FUNCIONES AI ===
                 if AI_ENABLED and (fn_name in AI_FUNCTIONS or fn_name.startswith('ai_')):
                     try:
@@ -965,7 +1037,70 @@ def eval_expr(expr, variables, functions):
                     return result
                 else:
                     raise OrionFunctionError("map() requiere una función lambda (usando =>)")
-            
+                
+            # === MÉTODOS ESPECÍFICOS DE MÓDULOS SPREADSHEET ===
+            elif SPREADSHEET_ENABLED and method_name in ["write", "read", "save", "sync", "push", "pull", "register", "attach", "link"]:
+                try:
+                    if method_name == "write":
+                        # Para sheet.write(cell, value)
+                        if len(pos_args) >= 2:
+                            cell = pos_args[0]
+                            value = pos_args[1]
+                            obj_val.write(cell, value)
+                            return obj_val
+                        else:
+                            raise OrionFunctionError("write() requiere al menos 2 argumentos (cell, value)")
+                    
+                    elif method_name == "read":
+                        # Para sheet.read(cell)
+                        if len(pos_args) >= 1:
+                            cell = pos_args[0]
+                            return obj_val.read(cell)
+                        else:
+                            raise OrionFunctionError("read() requiere al menos 1 argumento (cell)")
+                    
+                    elif method_name == "save":
+                        # Para sheet.save()
+                        return obj_val.save()
+                    
+                    elif method_name == "sync":
+                        # Para sheet.sync() o sheet.sync(endpoint)
+                        if len(pos_args) >= 1:
+                            endpoint = pos_args[0]
+                            return obj_val.sync(endpoint)
+                        else:
+                            return obj_val.sync("default")
+                    
+                    elif method_name in ["push", "pull"]:
+                        # Para OSync.push() o OSync.pull()
+                        if hasattr(obj_val, method_name):
+                            method = getattr(obj_val, method_name)
+                            return method(*pos_args, **kw_args)
+                        else:
+                            raise OrionFunctionError(f"Método '{method_name}' no disponible en este objeto")
+                    
+                    elif method_name in ["register", "attach", "link"]:
+                        # Para métodos estáticos de las clases
+                        if hasattr(obj_val, method_name):
+                            method = getattr(obj_val, method_name)
+                            return method(*pos_args, **kw_args)
+                        else:
+                            raise OrionFunctionError(f"Método '{method_name}' no disponible en este objeto")
+                    
+                    else:
+                        # Para otros métodos Spreadsheet
+                        if hasattr(obj_val, method_name):
+                            method = getattr(obj_val, method_name)
+                            if callable(method):
+                                return method(*pos_args, **kw_args)
+                            else:
+                                return method
+                        else:
+                            raise OrionFunctionError(f"Método Spreadsheet '{method_name}' no encontrado")
+
+                except Exception as e:
+                    raise OrionRuntimeError(f"Error en método Spreadsheet '{method_name}': {str(e)}")
+
             # === MÉTODOS ESPECÍFICOS DE MÓDULOS AI/OTROS ===
             elif AI_ENABLED and method_name in ["embed", "think", "fit", "predict", "cluster", "sim", "dist", "normalize", "accuracy", "mse"]:
                 try:
@@ -1130,6 +1265,19 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             variables["yes"] = OrionBool(True)
         if "no" not in variables:
             variables["no"] = OrionBool(False)
+            
+        # === INICIALIZAR CONTEXTOS (solo una vez) ===
+        if SPREADSHEET_ENABLED:
+            variables["SPREADSHEET"] = {
+                "enabled": True,
+                "functions": list(SPREADSHEET_FUNCTIONS.keys()),
+                "version": "1.0.0",
+                "features": ["xlsx", "csv", "orion_sheets", "local_sync", "remote_sync", "osync_protocol"]
+            }
+            code.info("Spreadsheet Context initialized", module="spreadsheet-engine")
+        else:
+            variables["SPREADSHEET"] = {"enabled": False}
+            code.debug("Spreadsheet Context disabled", module="spreadsheet-engine")
 
         # === INICIALIZAR CONTEXTOS (solo una vez) ===
         if AI_ENABLED:
@@ -1275,6 +1423,65 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 code.ok(f"Módulo AI importado con {len(AI_FUNCTIONS)} funciones", module="ai-loader")
                 i += 1
                 continue
+            
+            # === IMPORTACIÓN ESPECIAL PARA MÓDULO SPREADSHEET ===
+            elif base_name == "spreadsheet" and SPREADSHEET_ENABLED:
+                class SpreadsheetModule:
+                    def __init__(self):
+                        # Core functions
+                        self.create = create
+                        self.attach = attach  
+                        self.register = spreadsheet_register
+                        
+                        # Bridge functions
+                        self.sheet_register = LocalSheetBridge.register
+                        self.sheet_attach = LocalSheetBridge.attach
+                        
+                        # Sync functions
+                        self.push = OSync.push
+                        self.pull = OSync.pull
+                        self.status = OSync.status
+                        self.list_synced = OSync.list_synced
+                        
+                        # Remote sync
+                        self.link = LinkSheet.link
+                        self.push_remote = LinkSheet.push
+                        self.pull_remote = LinkSheet.pull
+                        
+                        # Protocol
+                        self.osync = OSyncProtocol.execute
+
+                spreadsheet_module = SpreadsheetModule()
+                variables["spreadsheet"] = spreadsheet_module
+                
+                # También agregar funciones individualmente
+                for func_name, func in SPREADSHEET_FUNCTIONS.items():
+                    variables[func_name] = func
+                    
+                variables["spreadsheet_enabled"] = True
+                code.ok(f"Módulo Spreadsheet importado con {len(SPREADSHEET_FUNCTIONS)} funciones", module="spreadsheet-loader")
+                i += 1
+                continue
+
+            elif base_name == "osync" and SPREADSHEET_ENABLED:
+                # Módulo específico para OSync Protocol
+                class OSyncModule:
+                    def __init__(self):
+                        self.execute = OSyncProtocol.execute
+                        self.push = OSync.push
+                        self.pull = OSync.pull
+                        self.status = OSync.status
+                        self.list_synced = OSync.list_synced
+                        
+                osync_module = OSyncModule()
+                variables["osync"] = osync_module
+                variables["OSyncProtocol"] = OSyncProtocol
+                variables["OSync"] = OSync
+                
+                code.ok("Módulo OSync importado", module="osync-loader")
+                i += 1
+                continue
+            
             elif base_name == "cosmos" and COSMOS_ENABLED:
                 class CosmosModule:
                     def __init__(self, functions_dict):

@@ -1,13 +1,33 @@
 use spreadsheet
+use osync
+use net
+use json
 
--- Registrar hoja con ID Orion
+-- 1. Registrar hoja local
 spreadsheet.register("sheet_ventas", "ventas.xlsx")
 
--- Conectar a la hoja
+-- 2. Conectar
 s = spreadsheet.attach(id="sheet_ventas")
 
--- Escribir datos
+-- 3. Escribir datos
 s.write("A1", "Conectado desde Orion")
 s.write("B1", "Ventas Totales")
 s.append(["Laptop", 3500])
+s.append(["Mouse", 150])
+s.append(["Monitor", 1200])
 s.save()
+
+-- 4. PUSH local (crea storage/sync/sheet_ventas.json)
+osync.push("sheet_ventas")
+
+-- 5. Leer datos locales (para enviar)
+data = json.read("storage/sync/sheet_ventas.json")
+
+-- 6. Enviar a Google Apps Script vía /exec
+res = net.transmit("https://script.google.com/macros/s/AKfycbwWA6_AuTMJmndrTTLIk_aYuFXsrQ3AD9-n0-G6nzIPC6ocsBdMxZYcOyO_b2qVot7rag/exec", json_data=data)
+
+if res.status == 200 {
+    show("Sincronización Orion Cloud completada ✅", level="ok")
+} else {
+    show("Error en la sincronización:", res.status, level="error")
+}
