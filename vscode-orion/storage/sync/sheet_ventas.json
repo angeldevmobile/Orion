@@ -1,0 +1,17 @@
+{
+  "sheet_id": "sheet_ventas",
+  "timestamp": 1761409794.8981647,
+  "content": {
+    "type": "xlsx",
+    "cells": {
+      "A1": "Conectado desde Orion",
+      "B1": "Ventas Totales",
+      "A2": "Laptop",
+      "B2": 3500,
+      "A3": "Mouse",
+      "B3": 150,
+      "A4": "Monitor",
+      "B4": 1200
+    }
+  }
+}

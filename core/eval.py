@@ -974,6 +974,10 @@ def eval_expr(expr, variables, functions):
                     for arg in pos_args:
                         obj_val.value.append(arg)
                     return obj_val
+                elif hasattr(obj_val, "append") and callable(getattr(obj_val, "append")):
+                    for arg in pos_args:
+                        obj_val.append(arg)
+                    return obj_val
                 else:
                     raise OrionFunctionError(f"Método 'append' no disponible para tipo {type(obj_val)}")
             

@@ -390,6 +390,13 @@ def parse_statement(tokens, i):
             return ("RETURN", expr_value), i
         else:
             return ("RETURN", None), i + 1
+        
+    elif kind == "WHILE":
+        condition, i = parse_expression(tokens, i + 1)
+        if i >= len(tokens) or tokens[i][0] != "LBRACE":
+            raise OrionSyntaxError("Se esperaba '{' después de la condición del while")
+        body, i = parse_block(tokens, i)
+        return ("WHILE", condition, body), i
 
     # --- IF statement ---
     elif kind == "IF":
@@ -418,11 +425,18 @@ def parse_statement(tokens, i):
             has_paren = True
             i += 1
 
-        # Variable del bucle
+        var_names = []
         if i >= len(tokens) or tokens[i][0] != "IDENT":
             raise OrionSyntaxError("Se esperaba un identificador después de for")
-        var_name = tokens[i][1]
+        var_names.append(tokens[i][1])
         i += 1
+        while i < len(tokens) and tokens[i][0] == "COMMA":
+            i += 1
+            if i < len(tokens) and tokens[i][0] == "IDENT":
+                var_names.append(tokens[i][1])
+                i += 1
+            else:
+                raise OrionSyntaxError("Se esperaba un identificador después de la coma en el encabezado del for")
 
         # Palabra clave 'in'
         if i >= len(tokens) or tokens[i][0] != "IN":

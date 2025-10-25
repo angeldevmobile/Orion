@@ -17,35 +17,30 @@ import csv
 SYNC_PATH = "storage/sync"
 
 # ============================================================
-# OSync Core: Protocolo Orion Sync
+# OSyncCache Core: Protocolo Orion Sync (solo cache local)
 # ============================================================
 
-class OSync:
-    """Manejador del protocolo Orion Sync (OSync)."""
+class OSyncCache:
+    """Manejador del protocolo Orion Sync (solo cache local, no exporta JSON)."""
     @staticmethod
     def push(sheet_id):
-        """Sincroniza los cambios locales hacia la nube (futuro)."""
         cache = os.path.join(SYNC_PATH, f"{sheet_id}.orioncache")
         if os.path.exists(cache):
-            print(f"[OSync] Pushing cached changes for {sheet_id} ...")
-            # futuro: subir al daemon Orion Cloud
+            print(f"[OSyncCache] Pushing cached changes for {sheet_id} ...")
             return True
         else:
-            print(f"[OSync] No changes to push for {sheet_id}.")
+            print(f"[OSyncCache] No changes to push for {sheet_id}.")
             return False
 
     @staticmethod
     def pull(sheet_id):
-        """Obtiene actualizaciones desde la nube (futuro)."""
-        print(f"[OSync] Pulling updates for {sheet_id} ... (not implemented yet)")
+        print(f"[OSyncCache] Pulling updates for {sheet_id} ... (not implemented yet)")
         return False
 
     @staticmethod
     def status(sheet_id):
-        """Obtiene el estado de sincronización de una hoja."""
         cache = os.path.join(SYNC_PATH, f"{sheet_id}.orioncache")
         if os.path.exists(cache):
-            # Leer el cache para obtener información de estado
             with open(cache, "r", encoding="utf-8") as f:
                 lines = f.readlines()
             return {
@@ -53,7 +48,7 @@ class OSync:
                 "has_changes": len(lines) > 0,
                 "last_change": lines[-1].strip() if lines else None,
                 "total_changes": len(lines),
-                "synced": False  # Por ahora siempre False hasta implementar sync real
+                "synced": False
             }
         else:
             return {
@@ -66,21 +61,17 @@ class OSync:
 
     @staticmethod
     def list_synced():
-        """Lista todas las hojas que tienen información de sincronización."""
         os.makedirs(SYNC_PATH, exist_ok=True)
         synced_sheets = []
-        
         for file in os.listdir(SYNC_PATH):
             if file.endswith(".orioncache"):
                 sheet_id = file.replace(".orioncache", "")
-                status = OSync.status(sheet_id)
+                status = OSyncCache.status(sheet_id)
                 synced_sheets.append(status)
-        
         return synced_sheets
 
     @staticmethod
     def log(sheet_id, action, cell, value):
-        """Registra una acción en cache local."""
         os.makedirs(SYNC_PATH, exist_ok=True)
         cache_file = os.path.join(SYNC_PATH, f"{sheet_id}.orioncache")
         with open(cache_file, "a", encoding="utf-8") as f:
@@ -136,14 +127,14 @@ class LocalSheetBridge:
             while len(self.rows[row]) <= col:
                 self.rows[row].append("")
             self.rows[row][col] = value
-        OSync.log(self.sheet_id, "write", cell, value)
+        OSyncCache.log(self.sheet_id, "write", cell, value)
 
     def append(self, values):
         if self.ext == ".xlsx":
             self.ws.append(values)
         elif self.ext == ".csv":
             self.rows.append(values)
-        OSync.log(self.sheet_id, "append", "-", values)
+        OSyncCache.log(self.sheet_id, "append", "-", values)
 
     def save(self):
         if self.ext == ".xlsx":
@@ -186,22 +177,15 @@ def register(id_name, path):
 def attach(id_name):
     return LocalSheetBridge.attach(id_name)
 
-def push(id_name):
-    return OSync.push(id_name)
-
-def pull(id_name):
-    return OSync.pull(id_name)
+# NO expongas push/pull aquí, deja que el sistema use el de sync/osync.py
 
 def status(id_name):
-    """Obtiene el estado de sincronización de una hoja."""
-    return OSync.status(id_name)
+    return OSyncCache.status(id_name)
 
 def list_synced():
-    """Lista todas las hojas sincronizadas."""
-    return OSync.list_synced()
+    return OSyncCache.list_synced()
 
 def clear_cache(id_name):
-    """Limpia el cache de sincronización de una hoja."""
     cache_file = os.path.join(SYNC_PATH, f"{id_name}.orioncache")
     if os.path.exists(cache_file):
         os.remove(cache_file)
@@ -300,8 +284,7 @@ def orion_export():
     return {
         "register": register,
         "attach": attach,
-        "push": push,
-        "pull": pull,
+        # NO push/pull aquí
         "status": status,
         "list_synced": list_synced,
         "clear_cache": clear_cache,
@@ -312,5 +295,5 @@ def orion_export():
         "list_registered": list_registered,
         "bulk_operations": bulk_operations,
         "LocalSheetBridge": LocalSheetBridge,
-        "OSync": OSync
+        "OSyncCache": OSyncCache
     }

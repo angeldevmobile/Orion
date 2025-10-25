@@ -355,3 +355,13 @@ def stream_emit(path, obj, on_chunk=None):
     for i in range(0, len(raw), 512):
         chunk = raw[i:i+512]
         on_chunk(chunk)
+
+def read(path, encoding="utf-8"):
+    """Lee un archivo JSON y retorna el objeto Python nativo."""
+    with open(path, "r", encoding=encoding) as f:
+        return json.load(f)
+
+def write(path, data, encoding="utf-8", indent=2):
+    """Escribe un objeto Python nativo a un archivo JSON."""
+    with open(path, "w", encoding=encoding) as f:
+        json.dump(data, f, indent=indent, ensure_ascii=False)

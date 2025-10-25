@@ -9,6 +9,7 @@ import csv
 import json
 from openpyxl import Workbook, load_workbook
 from modules import net 
+from modules.sheets_localbridge import register as bridge_register
 
 
 class OrionSpreadsheet:
@@ -208,4 +209,6 @@ def attach(id=None, filename=None):
     return OrionSpreadsheet.attach(id=id, filename=filename)
 
 def register(id_name, filename):
-    return OrionSpreadsheet.register(id_name, filename)
+    OrionSpreadsheet.register(id_name, filename)
+    bridge_register(id_name, filename)  
+    return f"Hoja registrada con ID '{id_name}' → {filename}"

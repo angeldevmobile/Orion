@@ -23,9 +23,28 @@ osync.push("sheet_ventas")
 -- 5. Leer datos locales (para enviar)
 data = json.read("storage/sync/sheet_ventas.json")
 
+-- 5.1. Convertir celdas a filas (solo si es tipo xlsx)
+if data.content.type == "xlsx" {
+    -- Inicializa matriz vacía
+    rows = []
+    for cell, value in data.content.cells {
+        col = ord(cell[0]) - 65
+        row = int(cell[1:]) - 1
+        -- Asegura que la fila existe
+        if len(rows) <= row {
+            rows.append([])
+        }
+        -- Asegura que la columna existe
+        while len(rows[row]) <= col {
+            rows[row].append("")
+        }
+        rows[row][col] = value
+    }
+    data.rows = rows
+}
+
 -- 6. Enviar a Google Apps Script vía /exec
 res = net.transmit("https://script.google.com/macros/s/AKfycbwWA6_AuTMJmndrTTLIk_aYuFXsrQ3AD9-n0-G6nzIPC6ocsBdMxZYcOyO_b2qVot7rag/exec", json_data=data)
-
 if res.status == 200 {
     show("Sincronización Orion Cloud completada ✅", level="ok")
 } else {
