@@ -26,6 +26,7 @@ def lex(code):
         ("IN",       r"\bin\b"),
         ("IF",       r"\bif\b"),
         ("ELSE",     r"\belse\b"),
+        ("ELSIF",    r"\belsif\b"),
         ("WHILE",    r"\bwhile\b"),
         # ("TRUE",     r"\btrue\b"),
         # ("FALSE",    r"\bfalse\b"),
@@ -85,7 +86,7 @@ def lex(code):
             tokens.append(("BOOL", OrionBool(False)))
 
         elif kind in (
-            "IDENT", "OP", "PRINT", "CODE", "FOR", "IF", "ELSE", "ASSIGN",
+            "IDENT", "OP", "PRINT", "CODE", "FOR", "IF", "ELSE", "ELSIF", "WHILE", "ASSIGN",
             "RANGE", "RANGE_EX", "COMPARE", "LBRACE", "RBRACE",
             "LPAREN", "RPAREN", "FN", "RETURN", "TYPE",
             "AND", "OR", "NOT", "MATCH", "USE",
@@ -94,6 +95,7 @@ def lex(code):
             "LBRACKET", "RBRACKET"
         ):
             tokens.append((kind, value))
+
 
         elif kind in ("SKIP", "NEWLINE", "COMMENT"):
             continue

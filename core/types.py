@@ -6,70 +6,156 @@ from datetime import datetime
 
 
 # ===============================
-# OrionString
+# OrionDate
 # ===============================
-class OrionString:
-    """String de Orion con interpolación dinámica futurista."""
-    # Patrón actualizado para manejar acceso a atributos como ${obj.prop}
-    INTERP_RE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
-
-    def __init__(self, value: str):
-        self.value = str(value)
+class OrionDate:
+    """Tipo de fecha nativo de Orion."""
+    def __init__(self, year, month, day):
+        self.date = datetime(year, month, day)
 
     def __str__(self):
+        return self.date.strftime("%Y-%m-%d")
+
+    def __repr__(self):
+        return f"OrionDate({self.date.year}, {self.date.month}, {self.date.day})"
+
+    # ========= Operadores de comparación =========
+    def __eq__(self, other):
+        if isinstance(other, OrionDate):
+            return OrionBool(self.date == other.date)
+        elif isinstance(other, datetime):
+            return OrionBool(self.date.date() == other.date())
+        return OrionBool(False)
+
+    def __ne__(self, other):
+        return OrionBool(not self.__eq__(other).value)
+
+    def __lt__(self, other):
+        if isinstance(other, OrionDate):
+            return OrionBool(self.date < other.date)
+        elif isinstance(other, datetime):
+            return OrionBool(self.date < other)
+        return OrionBool(False)
+
+    def __le__(self, other):
+        if isinstance(other, OrionDate):
+            return OrionBool(self.date <= other.date)
+        elif isinstance(other, datetime):
+            return OrionBool(self.date <= other)
+        return OrionBool(False)
+
+    def __gt__(self, other):
+        if isinstance(other, OrionDate):
+            return OrionBool(self.date > other.date)
+        elif isinstance(other, datetime):
+            return OrionBool(self.date > other)
+        return OrionBool(False)
+
+    def __ge__(self, other):
+        if isinstance(other, OrionDate):
+            return OrionBool(self.date >= other.date)
+        elif isinstance(other, datetime):
+            return OrionBool(self.date >= other)
+        return OrionBool(False)
+
+    # ========= Métodos adicionales =========
+    def futuristic_format(self):
+        return OrionString(self.date.strftime("%d-%m-%Y"))
+
+    def to_future(self, years):
+        return OrionDate(self.date.year + years, self.date.month, self.date.day)
+
+    def to_past(self, years):
+        return OrionDate(self.date.year - years, self.date.month, self.date.day)
+
+    def day_name(self):
+        return OrionString(self.date.strftime("%A"))
+
+    def month_name(self):
+        return OrionString(self.date.strftime("%B"))
+
+    def year(self):
+        return OrionNumber(self.date.year)
+
+    def month(self):
+        return OrionNumber(self.date.month)
+
+    def day(self):
+        return OrionNumber(self.date.day)
+
+    def weekday(self):
+        """Devuelve el día de la semana (0=lunes, 6=domingo)"""
+        return OrionNumber(self.date.weekday())
+
+    def add_days(self, days):
+        """Agrega días a la fecha"""
+        from datetime import timedelta
+        new_date = self.date + timedelta(days=days)
+        return OrionDate(new_date.year, new_date.month, new_date.day)
+
+    def subtract_days(self, days):
+        """Resta días a la fecha"""
+        from datetime import timedelta
+        new_date = self.date - timedelta(days=days)
+        return OrionDate(new_date.year, new_date.month, new_date.day)
+
+    def days_until(self, other_date):
+        """Calcula días hasta otra fecha"""
+        if isinstance(other_date, OrionDate):
+            delta = other_date.date - self.date
+            return OrionNumber(delta.days)
+        return OrionNumber(0)
+
+    def is_weekend(self):
+        """Verifica si es fin de semana"""
+        return OrionBool(self.date.weekday() >= 5)
+
+    def is_today(self):
+        """Verifica si es hoy"""
+        from datetime import date
+        return OrionBool(self.date.date() == date.today())
+    
+# ===============================
+# OrionBool
+# ===============================
+class OrionBool:
+    """Booleano futurista con extras."""
+    def __init__(self, value: bool):
+        self.value = bool(value)
+
+    def __str__(self):
+        return "yes" if self.value else "no"
+
+    def __repr__(self):
+        return f"OrionBool({self.value})"
+
+    # ========= Operadores de comparación =========
+    def __eq__(self, other):
+        if isinstance(other, OrionBool):
+            return OrionBool(self.value == other.value)
+        elif isinstance(other, bool):
+            return OrionBool(self.value == other)
+        elif isinstance(other, str):
+            # Permitir comparación con strings para compatibilidad con type()
+            return OrionBool(str(self) == other)
+        return OrionBool(False)
+
+    def __ne__(self, other):
+        return OrionBool(not self.__eq__(other).value)
+
+    def __bool__(self):
+        """Permite usar el objeto en contextos booleanos (if, while, etc.)"""
         return self.value
 
-    def __add__(self, other):
-        return OrionString(self.value + str(other))
+    # ========= Métodos adicionales =========
+    def toggle(self):
+        return OrionBool(not self.value)
 
-    def interpolate(self, env: dict):
-        """Reemplaza ${var} o ${obj.prop} por su valor en el entorno."""
-        def repl(m):
-            expr = m.group(1)
-            
-            # Si contiene punto, es acceso a propiedad
-            if '.' in expr:
-                parts = expr.split('.')
-                obj_name = parts[0]
-                
-                if obj_name in env:
-                    obj = env[obj_name]
-                    # Navegar por las propiedades
-                    for prop in parts[1:]:
-                        if hasattr(obj, prop):
-                            obj = getattr(obj, prop)
-                        elif isinstance(obj, dict) and prop in obj:
-                            obj = obj[prop]
-                        else:
-                            return f"${{{expr}}}"  # Retorna original si no se encuentra
-                    return str(obj)
-                else:
-                    return f"${{{expr}}}"  # Retorna original si no se encuentra
-            else:
-                # Variable simple
-                if expr in env:
-                    val = env[expr]
-                    return str(val)
-                return f"${{{expr}}}"  # Retorna original si no se encuentra
-                
-        return OrionString(self.INTERP_RE.sub(repl, self.value))
+    def to_icon(self):
+        return "[yes]" if self.value else "[no]"
 
-    # --- Métodos adicionales ---
-    def futuristic_upper(self):
-        return OrionString(self.value.upper())
-
-    def reverse(self):
-        return OrionString(self.value[::-1])
-
-    def wave(self):
-        res = ''.join(
-            c.upper() if i % 2 == 0 else c.lower()
-            for i, c in enumerate(self.value)
-        )
-        return OrionString(res)
-
-    def glitch(self):
-        return OrionString(self.value + " ???")
+    def as_number(self):
+        return OrionNumber(1 if self.value else 0)
 
 
 # ===============================
@@ -166,47 +252,101 @@ class OrionNumber:
 
 
 # ===============================
-# OrionBool
+# OrionString
 # ===============================
-class OrionBool:
-    """Booleano futurista con extras."""
-    def __init__(self, value: bool):
-        self.value = bool(value)
+class OrionString:
+    """String de Orion con interpolación dinámica futurista."""
+    # Patrón actualizado para manejar acceso a atributos como ${obj.prop}
+    INTERP_RE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
+
+    def __init__(self, value: str):
+        self.value = str(value)
 
     def __str__(self):
-        return "yes" if self.value else "no"
+        return self.value
 
-    def toggle(self):
-        return OrionBool(not self.value)
+    def __repr__(self):
+        return f"OrionString('{self.value}')"
 
-    def to_icon(self):
-        return "[yes]" if self.value else "[no]"
+    def __add__(self, other):
+        return OrionString(self.value + str(other))
 
-    def as_number(self):
-        return OrionNumber(1 if self.value else 0)
+    # ========= Operadores de comparación =========
+    def __eq__(self, other):
+        if isinstance(other, OrionString):
+            return OrionBool(self.value == other.value)
+        elif isinstance(other, str):
+            return OrionBool(self.value == other)
+        return OrionBool(False)
 
-# ===============================
-# OrionDate
-# ===============================
-class OrionDate:
-    """Tipo de fecha nativo de Orion."""
-    def __init__(self, year, month, day):
-        self.date = datetime(year, month, day)
+    def __ne__(self, other):
+        return OrionBool(not self.__eq__(other).value)
 
-    def __str__(self):
-        return self.date.strftime("%Y-%m-%d")
+    def __lt__(self, other):
+        other_val = other.value if isinstance(other, OrionString) else str(other)
+        return OrionBool(self.value < other_val)
 
-    def futuristic_format(self):
-        return self.date.strftime("%d-%m-%Y")
+    def __le__(self, other):
+        other_val = other.value if isinstance(other, OrionString) else str(other)
+        return OrionBool(self.value <= other_val)
 
-    def to_future(self, years):
-        return OrionDate(self.date.year + years, self.date.month, self.date.day)
+    def __gt__(self, other):
+        other_val = other.value if isinstance(other, OrionString) else str(other)
+        return OrionBool(self.value > other_val)
 
-    def to_past(self, years):
-        return OrionDate(self.date.year - years, self.date.month, self.date.day)
+    def __ge__(self, other):
+        other_val = other.value if isinstance(other, OrionString) else str(other)
+        return OrionBool(self.value >= other_val)
 
-    def day_name(self):
-        return OrionString(self.date.strftime("%A"))
+    # ========= Métodos existentes =========
+    def interpolate(self, env: dict):
+        """Reemplaza ${var} o ${obj.prop} por su valor en el entorno."""
+        def repl(m):
+            expr = m.group(1)
+            
+            # Si contiene punto, es acceso a propiedad
+            if '.' in expr:
+                parts = expr.split('.')
+                obj_name = parts[0]
+                
+                if obj_name in env:
+                    obj = env[obj_name]
+                    # Navegar por las propiedades
+                    for prop in parts[1:]:
+                        if hasattr(obj, prop):
+                            obj = getattr(obj, prop)
+                        elif isinstance(obj, dict) and prop in obj:
+                            obj = obj[prop]
+                        else:
+                            return f"${{{expr}}}"  # Retorna original si no se encuentra
+                    return str(obj)
+                else:
+                    return f"${{{expr}}}"  # Retorna original si no se encuentra
+            else:
+                # Variable simple
+                if expr in env:
+                    val = env[expr]
+                    return str(val)
+                return f"${{{expr}}}"  # Retorna original si no se encuentra
+                
+        return OrionString(self.INTERP_RE.sub(repl, self.value))
+
+    # --- Métodos adicionales ---
+    def futuristic_upper(self):
+        return OrionString(self.value.upper())
+
+    def reverse(self):
+        return OrionString(self.value[::-1])
+
+    def wave(self):
+        res = ''.join(
+            c.upper() if i % 2 == 0 else c.lower()
+            for i, c in enumerate(self.value)
+        )
+        return OrionString(res)
+
+    def glitch(self):
+        return OrionString(self.value + " ???")
 
 
 # ===============================
@@ -223,6 +363,20 @@ class OrionList:
 
     def __repr__(self):
         return f"OrionList({self.items})"
+
+    # ========= Operadores de comparación =========
+    def __eq__(self, other):
+        if isinstance(other, OrionList):
+            return OrionBool(self.items == other.items)
+        elif isinstance(other, list):
+            return OrionBool(self.items == other)
+        elif isinstance(other, str):
+            # Permitir comparación con strings para compatibilidad con type()
+            return OrionBool("list" == other)
+        return OrionBool(False)
+
+    def __ne__(self, other):
+        return OrionBool(not self.__eq__(other).value)
 
     # ===============================
     #   INDEXACIÓN Y OPERACIONES
@@ -306,6 +460,7 @@ class OrionList:
         """Devuelve el último elemento"""
         return self.items[-1] if self.items else None
 
+
 # ===============================
 # OrionDict
 # ===============================
@@ -382,6 +537,7 @@ class OrionDict:
     def map(self, fn):
         """Aplica una función a cada (clave, valor)."""
         return OrionList([fn(k, v) for k, v in self.value.items()])
+
 
 # ===============================
 # Operador Null-safe

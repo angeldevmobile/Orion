@@ -20,3 +20,21 @@ def load_builtins(env):
 
     # también podemos registrar utilidades como print/show
     register_native_function(env, "show", show)
+
+    # Registrar función ord de Python
+    register_native_function(env, "ord", ord)
+    
+    # Registrar función len de Python
+    register_native_function(env, "len", len)
+    
+    # Registrar función int de Python
+    register_native_function(env, "int", int)
+    
+    # Registrar métodos de string
+    def isdigit_wrapper(s):
+        """Wrapper para el método isdigit de strings"""
+        if isinstance(s, str):
+            return s.isdigit()
+        return False
+    
+    register_native_function(env, "isdigit", isdigit_wrapper)

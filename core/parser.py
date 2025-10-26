@@ -184,10 +184,28 @@ def parse_primary(tokens, i):
 
     elif kind == "LPAREN":
         i += 1
-        expr, i = parse_expression(tokens, i)
-        if i >= len(tokens) or tokens[i][0] != "RPAREN":
+        depth = 1
+        start_i = i
+
+        # Contar niveles de anidación hasta cerrar todos los '('
+        while i < len(tokens) and depth > 0:
+            tkind, _ = tokens[i]
+            if tkind == "LPAREN":
+                depth += 1
+            elif tkind == "RPAREN":
+                depth -= 1
+            i += 1
+
+        if depth != 0:
             raise OrionSyntaxError("Se esperaba ')'")
-        return expr, i + 1
+
+        # Extraer los tokens internos entre los paréntesis
+        inner_tokens = tokens[start_i:i - 1]
+
+        # Evaluar la expresión interna recursivamente
+        expr, _ = parse_expression(inner_tokens, 0)
+
+        return expr, i
 
     elif kind == "LBRACKET":
         i += 1
@@ -205,6 +223,24 @@ def parse_primary(tokens, i):
         return ("LIST", elements), i
 
     elif kind == "LBRACE":
+        # Si lo que sigue NO es STRING o IDENT seguido de COLON, NO es un diccionario
+        lookahead = tokens[i+1:i+3] if i+1 < len(tokens) else []
+        is_dict = False
+        
+        if len(lookahead) >= 2:
+            if lookahead[0][0] in ("STRING", "IDENT") and lookahead[1][0] == "COLON":
+                is_dict = True
+        elif len(lookahead) == 1 and lookahead[0][0] == "RBRACE":
+            # Diccionario vacío {}
+            is_dict = True
+            
+        if not is_dict:
+            # No es un diccionario, probablemente es un bloque de código
+            # En lugar de lanzar error, retornamos sin consumir el token
+            # para que parse_statement pueda manejarlo
+            raise OrionSyntaxError("Token '{' encontrado en contexto de expresión")
+        
+        # Si sí es un diccionario, sigue como antes
         i += 1
         items = []
         while i < len(tokens) and tokens[i][0] != "RBRACE":
@@ -229,7 +265,9 @@ def parse_primary(tokens, i):
         return ("DICT", items), i
 
     # --- CORRECCIÓN: Manejar tokens no válidos para expresiones primarias ---
+        
     else:
+        print("DEBUG: tokens[i-2:i+3]", tokens[max(0, i-2):i+3])
         raise OrionSyntaxError(f"Token inesperado en expresión primaria: '{kind}' ('{value}')")
 
 def parse_unary(tokens, i):
@@ -244,6 +282,17 @@ def parse_unary(tokens, i):
     # parse_primary ya maneja todos los errores internamente
     expr, j = parse_primary(tokens, i)
     return expr, j
+
+def parse_expression_until(tokens, i, stop_tokens):
+    """
+    Parsea una expresión y se detiene si el siguiente token es de parada (por ejemplo, 'LBRACE').
+    Devuelve (expr, next_i) donde next_i es el índice del token de parada.
+    """
+    # Si el siguiente token es de parada, no hay expresión (error de sintaxis)
+    if i < len(tokens) and tokens[i][0] in stop_tokens:
+        raise OrionSyntaxError(f"Se esperaba una expresión antes de '{tokens[i][1]}'")
+    expr, next_i = parse_expression(tokens, i)
+    return expr, next_i
 
 def parse_term(tokens, i):
     left, i = parse_unary(tokens, i)
@@ -331,7 +380,7 @@ def parse_statement(tokens, i):
         
     kind = tokens[i][0]
     value = tokens[i][1] if len(tokens[i]) > 1 else None
-    
+
     # --- VAR statement ---
     if kind == "IDENT" and value == "var":
         if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
@@ -352,22 +401,17 @@ def parse_statement(tokens, i):
     # --- PRINT/SHOW statement ---
     elif kind == "PRINT":
         if i+1 < len(tokens) and tokens[i+1][0] == "LPAREN":
-            # Sintaxis tradicional: show(expr)
             args, kwargs, i = parse_call_args(tokens, i+1)
             return ("CALL", "show", args, kwargs), i
         else:
-            # Sintaxis sin paréntesis: show expr, arg2, ..., kwarg1=val1, ...
             args = []
             kwargs = {}
             i += 1
-            # Primer argumento obligatorio
             expr, i = parse_expression(tokens, i)
             args.append(expr)
-            # Procesar argumentos adicionales
             while i < len(tokens):
                 if tokens[i][0] == "COMMA":
                     i += 1
-                    # Argumento nombrado: IDENT ASSIGN expr
                     if (i + 1 < len(tokens)
                         and tokens[i][0] == "IDENT"
                         and tokens[i+1][0] == "ASSIGN"):
@@ -376,7 +420,6 @@ def parse_statement(tokens, i):
                         value, i = parse_expression(tokens, i)
                         kwargs[name] = value
                     else:
-                        # Argumento posicional extra
                         value, i = parse_expression(tokens, i)
                         args.append(value)
                 else:
@@ -390,21 +433,40 @@ def parse_statement(tokens, i):
             return ("RETURN", expr_value), i
         else:
             return ("RETURN", None), i + 1
-        
+
+    # --- WHILE statement ---
     elif kind == "WHILE":
-        condition, i = parse_expression(tokens, i + 1)
+        condition, i = parse_expression_until(tokens, i + 1, {"LBRACE"})
+        # Saltar NEWLINE o SEMICOLON antes de la llave
+        while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
+            i += 1
         if i >= len(tokens) or tokens[i][0] != "LBRACE":
             raise OrionSyntaxError("Se esperaba '{' después de la condición del while")
         body, i = parse_block(tokens, i)
         return ("WHILE", condition, body), i
 
-    # --- IF statement ---
     elif kind == "IF":
-        condition, i = parse_expression(tokens, i + 1)
+        condition, i = parse_expression_until(tokens, i + 1, {"LBRACE"})
+        while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
+            i += 1
         if i >= len(tokens) or tokens[i][0] != "LBRACE":
+            print("DEBUG IF: tokens[i-3:i+3]", tokens[max(0, i-3):i+3])
             raise OrionSyntaxError("Se esperaba '{' después de la condición del if")
         body_true, i = parse_block(tokens, i)
 
+        # Manejar múltiples elsif
+        elsif_parts = []
+        while i < len(tokens) and tokens[i][0] == "ELSIF":
+            i += 1  # consumir ELSIF
+            elsif_condition, i = parse_expression_until(tokens, i, {"LBRACE"})
+            while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
+                i += 1
+            if i >= len(tokens) or tokens[i][0] != "LBRACE":
+                raise OrionSyntaxError("Se esperaba '{' después de la condición del elsif")
+            elsif_body, i = parse_block(tokens, i)
+            elsif_parts.append((elsif_condition, elsif_body))
+
+        # Manejar else final
         body_false = []
         if i < len(tokens) and tokens[i][0] == "ELSE":
             i += 1
@@ -413,9 +475,13 @@ def parse_statement(tokens, i):
             else:
                 raise OrionSyntaxError("Se esperaba '{' después de 'else'")
 
-        return ("IF", condition, body_true, body_false), i
+        # Retornar estructura IF extendida con elsif
+        if elsif_parts:
+            return ("IF_ELSIF", condition, body_true, elsif_parts, body_false), i
+        else:
+            return ("IF", condition, body_true, body_false), i
 
-        # --- FOR statement ---
+    # --- FOR statement ---
     elif kind == "FOR":
         i += 1
 
@@ -468,11 +534,16 @@ def parse_statement(tokens, i):
             raise OrionSyntaxError("Se esperaba '{' al inicio del cuerpo del for'")
         body, j = parse_block(tokens, i)
 
-        # Distinguir tipo de for
-        if expr[0] == "RANGE_LITERAL":
-            return ("FOR_RANGE", var_name, expr[1], expr[2], body), j
+        # CORRECCIÓN: Manejar múltiples variables correctamente
+        if isinstance(expr, tuple) and expr[0] == "RANGE_LITERAL":
+            # Para rangos, usar solo la primera variable (rangos no soportan múltiples variables)
+            if len(var_names) > 1:
+                raise OrionSyntaxError("Los bucles de rango no soportan múltiples variables")
+            return ("FOR_RANGE", var_names[0], expr[1], expr[2], body), j
         else:
-            return ("FOR_IN", var_name, expr, body), j
+            # Para iterables, pasar la lista de variables si hay más de una
+            var_spec = var_names if len(var_names) > 1 else var_names[0]
+            return ("FOR_IN", var_spec, expr, body), j
 
     # --- FN statement ---
     elif kind == "FN" or (kind == "IDENT" and value == "fn"):
@@ -524,15 +595,33 @@ def parse_statement(tokens, i):
             raise OrionSyntaxError("Se esperaba '}' al final de match")
         return ("MATCH", expr, cases), j + 1
 
-    # --- IDENT - Manejar asignaciones múltiples primero ---
-    elif kind == "IDENT":
-        # Asignación simple: IDENT ASSIGN expr
-        if i+1 < len(tokens) and tokens[i+1][0] == "ASSIGN":
-            var_name = tokens[i][1]
-            expr_value, j = parse_expression(tokens, i+2)
-            return ("ASSIGN", var_name, expr_value), j
+    # --- LPAREN: Detectar if implícito ---
+    elif kind == "LPAREN":
+        # Esto podría ser un if sin la palabra clave 'if'
+        # Buscar el patrón: (expresión) { bloque }
+        condition, i = parse_expression(tokens, i)
+        
+        if i < len(tokens) and tokens[i][0] == "LBRACE":
+            # Es un if implícito: (condición) { bloque }
+            body_true, i = parse_block(tokens, i)
+            body_false = []
+            
+            # Verificar si hay else
+            if i < len(tokens) and tokens[i][0] == "ELSE":
+                i += 1
+                if i < len(tokens) and tokens[i][0] == "LBRACE":
+                    body_false, i = parse_block(tokens, i)
+                else:
+                    raise OrionSyntaxError("Se esperaba '{' después de 'else'")
+            
+            return ("IF", condition, body_true, body_false), i
+        else:
+            # No es un if implícito, es solo una expresión
+            return condition, i
 
-        # Verificar si es una asignación múltiple: IDENT, IDENT, ... = expr
+    # --- IDENT - Manejo mejorado de asignaciones ---
+    elif kind == "IDENT":
+        # PASO 1: Verificar asignación múltiple
         if i+1 < len(tokens) and tokens[i+1][0] == "COMMA":
             # Es una asignación múltiple
             var_names = [tokens[i][1]]
@@ -554,18 +643,26 @@ def parse_statement(tokens, i):
                 expr, i = parse_expression(tokens, i)
                 return expr, i
         
-        # No es asignación múltiple, verificar si es asignación simple o compleja
+        # PASO 2: Verificar asignación simple (IDENT = ...)
+        elif i+1 < len(tokens) and tokens[i+1][0] == "ASSIGN":
+            var_name = tokens[i][1]
+            # CORRECCIÓN CRÍTICA: Parsear toda la expresión del lado derecho
+            # esto incluye llamadas como int(cell[1:]) - 1
+            expr_value, j = parse_expression(tokens, i+2)
+            return ("ASSIGN", var_name, expr_value), j
+        
+        # PASO 3: Intentar parsear como expresión compleja con posible asignación
         else:
-            # Intentar parsear la expresión completa del lado izquierdo
             saved_i = i
             try:
-                left_expr, temp_i = parse_primary(tokens, i)
+                # Intentar parsear el lado izquierdo completo (puede incluir indexación, acceso a atributos, etc.)
+                left_expr, temp_i = parse_expression_for_assignment(tokens, i)
                 
-                # Buscar el operador de asignación
+                # Verificar si hay operador de asignación
                 if temp_i < len(tokens) and tokens[temp_i][0] == "ASSIGN":
                     right_expr, final_i = parse_expression(tokens, temp_i + 1)
                     
-                    # Detectar tipo de asignación basado en la estructura del lado izquierdo
+                    # Determinar el tipo de asignación basado en la estructura del lado izquierdo
                     if isinstance(left_expr, tuple):
                         if left_expr[0] == "INDEX":
                             return ("INDEX_ASSIGN", left_expr[1], left_expr[2], right_expr), final_i
@@ -574,7 +671,7 @@ def parse_statement(tokens, i):
                         elif left_expr[0] == "IDENT":
                             return ("ASSIGN", left_expr[1], right_expr), final_i
                         else:
-                            # Asignación compleja (llamada, acceso seguro, etc.)
+                            # Asignación a expresión compleja
                             return ("COMPLEX_ASSIGN", left_expr, right_expr), final_i
                     else:
                         # Asignación simple de variable
@@ -584,24 +681,36 @@ def parse_statement(tokens, i):
                     return left_expr, temp_i
                     
             except OrionSyntaxError:
-                # Si falla el parsing como expresión primaria, intentar como expresión completa
+                # Si falla el parsing especializado, intentar como expresión normal
                 try:
                     expr, i = parse_expression(tokens, saved_i)
                     return expr, i
                 except OrionSyntaxError:
-                    # Si todo falla, lanzar un error más descriptivo
                     current_token = tokens[saved_i] if saved_i < len(tokens) else ("EOF", "")
                     raise OrionSyntaxError(f"No se pudo parsear la declaración que comienza con '{current_token[1]}'")
     
-    # --- DEFAULT: Manejar como expresión ---
+    # --- DEFAULT: Manejar como expresión solo si no es un token de bloque ---
     else:
+        if kind == "LBRACE":
+            raise OrionSyntaxError("Bloque de código encontrado fuera de contexto")
+        elif kind == "RBRACE":
+            raise OrionSyntaxError("'}' encontrado sin '{' correspondiente")
+        
         try:
             expr, i = parse_expression(tokens, i)
             return expr, i
         except OrionSyntaxError as e:
             current_token = tokens[i] if i < len(tokens) else ("EOF", "")
             raise OrionSyntaxError(f"Error parseando expresión que comienza con '{current_token[1]}': {str(e)}")
-        
+
+def parse_expression_for_assignment(tokens, i):
+    """
+    Parsea una expresión que puede ser el lado izquierdo de una asignación.
+    Se detiene antes de operadores de comparación, lógicos, etc., pero permite
+    acceso a índices y atributos.
+    """
+    return parse_primary(tokens, i)
+
 def parse_block(tokens, i):
     """Parsea un bloque de código con mejor manejo de declaraciones."""
     stmts = []
@@ -611,8 +720,20 @@ def parse_block(tokens, i):
     i += 1
 
     while i < len(tokens) and tokens[i][0] != "RBRACE":
+        # Saltar NEWLINE y SEMICOLON dentro del bloque
+        while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
+            i += 1
+        # --- NUEVO: Si ya estamos en RBRACE, no parsear más ---
+        if i < len(tokens) and tokens[i][0] == "RBRACE":
+            break
+        # --- FIN NUEVO ---
+        if i >= len(tokens):
+            break
         stmt, next_i = parse_statement(tokens, i)
         stmts.append(stmt)
+        if next_i == i:
+            # Previene bucle infinito si parse_statement no avanza
+            raise OrionSyntaxError(f"El parser no avanzó en el índice en parse_block cerca de '{tokens[i]}'")
         i = next_i  # Avanza correctamente el índice
 
     if i >= len(tokens):

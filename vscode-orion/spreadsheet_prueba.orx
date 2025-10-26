@@ -3,13 +3,11 @@ use osync
 use net
 use json
 
--- 1. Registrar hoja local
+-- 1. Registrar hoja local y conectar
 spreadsheet.register("sheet_ventas", "ventas.xlsx")
-
--- 2. Conectar
 s = spreadsheet.attach(id="sheet_ventas")
 
--- 3. Escribir datos
+-- 2. Escribir datos en el Excel local
 s.write("A1", "Conectado desde Orion")
 s.write("B1", "Ventas Totales")
 s.append(["Laptop", 3500])
@@ -17,36 +15,111 @@ s.append(["Mouse", 150])
 s.append(["Monitor", 1200])
 s.save()
 
--- 4. PUSH local (crea storage/sync/sheet_ventas.json)
+-- 3. Generar archivo de sincronización local (.json)
 osync.push("sheet_ventas")
 
--- 5. Leer datos locales (para enviar)
+-- 4. Leer JSON de sincronización
 data = json.read("storage/sync/sheet_ventas.json")
+data = to_native(data)
 
--- 5.1. Convertir celdas a filas (solo si es tipo xlsx)
-if data.content.type == "xlsx" {
-    -- Inicializa matriz vacía
+-- 5. Convertir celdas a formato de filas dinámicamente
+if (data["content"]["type"] == "xlsx") {
     rows = []
-    for cell, value in data.content.cells {
-        col = ord(cell[0]) - 65
-        row = int(cell[1:]) - 1
-        -- Asegura que la fila existe
-        if len(rows) <= row {
-            rows.append([])
+    cells = data["content"]["cells"]
+    
+    -- Encontrar el rango máximo de filas y columnas
+    max_row = 0
+    max_col = 0
+    
+    -- Obtener todas las posiciones de celdas
+    cell_positions = []
+    for cell_ref, value in cells.items() {
+        -- Parsing simple de referencias como "A1", "B2", etc.
+        cell_str = str(cell_ref)
+        
+        -- Extraer fila (números al final)
+        row_num = 0
+        col_num = 0
+        
+        -- Método simple: buscar primer dígito
+        for i in range(len(cell_str)) {
+            char = substring(cell_str, i, i + 1)
+            if char >= "0" && char <= "9" {
+                -- Encontramos el inicio de la fila
+                col_part = substring(cell_str, 0, i)
+                row_part = substring(cell_str, i, len(cell_str))
+                
+                row_num = int(row_part) - 1  -- Convertir a base 0
+                
+                -- Convertir columna usando elsif para más columnas
+                if col_part == "A" { 
+                    col_num = 0 
+                } elsif col_part == "B" { 
+                    col_num = 1 
+                } elsif col_part == "C" { 
+                    col_num = 2 
+                } elsif col_part == "D" { 
+                    col_num = 3 
+                } elsif col_part == "E" { 
+                    col_num = 4 
+                } elsif col_part == "F" { 
+                    col_num = 5 
+                } elsif col_part == "G" { 
+                    col_num = 6 
+                } elsif col_part == "H" { 
+                    col_num = 7 
+                } else { 
+                    col_num = 0  -- Fallback
+                }
+                
+                break
+            }
         }
-        -- Asegura que la columna existe
-        while len(rows[row]) <= col {
-            rows[row].append("")
-        }
-        rows[row][col] = value
+        
+        cell_positions.append([row_num, col_num, value])
+        
+        if row_num > max_row { max_row = row_num }
+        if col_num > max_col { max_col = col_num }
     }
-    data.rows = rows
+    
+    -- Crear matriz de filas y columnas
+    for r in range(max_row + 1) {
+        row = []
+        for c in range(max_col + 1) {
+            row.append("")
+        }
+        rows.append(row)
+    }
+    
+    -- Llenar la matriz con los datos reales
+    for pos in cell_positions {
+        row_idx = pos[0]
+        col_idx = pos[1] 
+        value = pos[2]
+        rows[row_idx][col_idx] = value
+    }
+    
+    show("✅ Filas generadas dinámicamente:", rows)
+    data["rows"] = to_native(rows)
+    json.write("storage/sync/sheet_ventas.json", data)
 }
 
--- 6. Enviar a Google Apps Script vía /exec
-res = net.transmit("https://script.google.com/macros/s/AKfycbwWA6_AuTMJmndrTTLIk_aYuFXsrQ3AD9-n0-G6nzIPC6ocsBdMxZYcOyO_b2qVot7rag/exec", json_data=data)
+-- 6. Releer el JSON actualizado antes de enviar
+data = json.read("storage/sync/sheet_ventas.json")
+
+-- 7. Enviar datos a Google Apps Script
+res = net.transmit(
+    "https://script.google.com/macros/s/AKfycbwWA6_AuTMJmndrTTLIk_aYuFXsrQ3AD9-n0-G6nzIPC6ocsBdMxZYcOyO_b2qVot7rag/exec",
+    json_data=data
+)
+
+-- 8. Verificar resultado
 if res.status == 200 {
-    show("Sincronización Orion Cloud completada ✅", level="ok")
+    show("✅ Sincronización Orion Cloud completada correctamente", level="ok")
+} elsif res.status == 404 {
+    show("❌ Endpoint no encontrado - verificar URL", level="warn")
+} elsif res.status >= 500 {
+    show("❌ Error del servidor:", res.status, level="error")
 } else {
-    show("Error en la sincronización:", res.status, level="error")
+    show("❌ Error al sincronizar con Google Apps Script:", res.status, level="error")
 }
