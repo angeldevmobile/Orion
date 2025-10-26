@@ -235,10 +235,17 @@ def parse_primary(tokens, i):
             is_dict = True
             
         if not is_dict:
-            # No es un diccionario, probablemente es un bloque de código
-            # En lugar de lanzar error, retornamos sin consumir el token
-            # para que parse_statement pueda manejarlo
-            raise OrionSyntaxError("Token '{' encontrado en contexto de expresión")
+            context_valid = False
+            temp_i = max(0, i - 5)  # buscar en los últimos 5 tokens
+            while temp_i < i:
+                if (tokens[temp_i][0] == "IDENT" and 
+                    tokens[temp_i][1] in ("attempt", "handle", "if", "while", "for", "fn")):
+                    context_valid = True
+                    break
+                temp_i += 1
+            
+            if not context_valid:
+                raise OrionSyntaxError("Token '{' encontrado en contexto de expresión")
         
         # Si sí es un diccionario, sigue como antes
         i += 1
@@ -275,6 +282,12 @@ def parse_unary(tokens, i):
         expr, j = parse_unary(tokens, i+1)
         return ("UNARY_OP", "!", expr), j
     
+    # Agregar soporte para operadores unarios + y -
+    elif i < len(tokens) and tokens[i][0] == "OP" and tokens[i][1] in ("+", "-"):
+        op = tokens[i][1]
+        expr, j = parse_unary(tokens, i+1)
+        return ("UNARY_OP", op, expr), j
+    
     # Verificar que hay tokens disponibles
     if i >= len(tokens):
         raise OrionSyntaxError("Fin inesperado de entrada en expresión unaria")
@@ -295,10 +308,10 @@ def parse_expression_until(tokens, i, stop_tokens):
     return expr, next_i
 
 def parse_term(tokens, i):
-    left, i = parse_unary(tokens, i)
+    left, i = parse_power(tokens, i)
     while i < len(tokens) and tokens[i][0] == "OP" and tokens[i][1] in ("*", "/", "%"):
         op = tokens[i][1]
-        right, i = parse_unary(tokens, i+1)
+        right, i = parse_power(tokens, i+1)
         left = ("BINARY_OP", op, left, right)
     return left, i
 
@@ -390,6 +403,44 @@ def parse_statement(tokens, i):
             raise OrionSyntaxError("Se esperaba '=' después del nombre de variable")
         expr_value, j = parse_expression(tokens, i+3)
         return ("VAR", var_name, expr_value), j
+    
+    # --- ATTEMPT/HANDLE statement ---
+    elif kind == "ATTEMPT":  # Cambio aquí: usar ATTEMPT directamente
+        i += 1  # consumir 'attempt'
+        
+        # Saltar newlines antes del bloque
+        while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
+            i += 1
+            
+        if i >= len(tokens) or tokens[i][0] != "LBRACE":
+            raise OrionSyntaxError("Se esperaba '{' después de 'attempt'")
+            
+        # Parsear el bloque attempt
+        body_attempt, i = parse_block(tokens, i)
+        
+        # Verificar si hay handle
+        handler = None
+        if i < len(tokens) and tokens[i][0] == "HANDLE":  # Cambio aquí también
+            i += 1  # consumir 'handle'
+            
+            # Parsear nombre de variable de error (opcional)
+            err_name = "_error"  # nombre por defecto
+            if i < len(tokens) and tokens[i][0] == "IDENT":
+                err_name = tokens[i][1]
+                i += 1
+            
+            # Saltar newlines antes del bloque
+            while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
+                i += 1
+                
+            if i >= len(tokens) or tokens[i][0] != "LBRACE":
+                raise OrionSyntaxError("Se esperaba '{' después de 'handle'")
+                
+            # Parsear el bloque handle
+            body_handle, i = parse_block(tokens, i)
+            handler = ("HANDLE", err_name, body_handle)
+        
+        return ("ATTEMPT", body_attempt, handler), i
 
     # --- USE statement ---
     elif kind == "USE":
@@ -651,6 +702,17 @@ def parse_statement(tokens, i):
             expr_value, j = parse_expression(tokens, i+2)
             return ("ASSIGN", var_name, expr_value), j
         
+        elif i+1 < len(tokens) and tokens[i+1][0] == "OP_ASSIGN":
+            var_name = tokens[i][1]
+            op_assign = tokens[i+1][1]  # e.g. '+=', '-=', '*=', '/='
+            op = op_assign[0]           # '+', '-', '*', '/'
+            expr_value, j = parse_expression(tokens, i+2)
+            # Expande: a += b  ->  a = a + b
+            left = ("IDENT", var_name)
+            right = expr_value
+            bin_expr = ("BINARY_OP", op, left, right)
+            return ("ASSIGN", var_name, bin_expr), j
+        
         # PASO 3: Intentar parsear como expresión compleja con posible asignación
         else:
             saved_i = i
@@ -711,35 +773,44 @@ def parse_expression_for_assignment(tokens, i):
     """
     return parse_primary(tokens, i)
 
+def parse_power(tokens, i):
+    left, i = parse_unary(tokens, i)
+    while i + 1 < len(tokens) and tokens[i][0] == "OP" and tokens[i][1] == "*" and tokens[i+1][0] == "OP" and tokens[i+1][1] == "*":
+        # Detectar '**'
+        i += 2
+        right, i = parse_unary(tokens, i)
+        left = ("BINARY_OP", "**", left, right)
+    return left, i
+
 def parse_block(tokens, i):
-    """Parsea un bloque de código con mejor manejo de declaraciones."""
+    """Parsea un bloque de código con mejor manejo de declaraciones y tolerancia a cierres mal escritos."""
     stmts = []
     if i >= len(tokens) or tokens[i][0] != "LBRACE":
         raise OrionSyntaxError("Se esperaba '{'")
 
     i += 1
 
-    while i < len(tokens) and tokens[i][0] != "RBRACE":
+    while i < len(tokens) and tokens[i][0] not in ("RBRACE", "RBRACEE"):
         # Saltar NEWLINE y SEMICOLON dentro del bloque
         while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
             i += 1
-        # --- NUEVO: Si ya estamos en RBRACE, no parsear más ---
-        if i < len(tokens) and tokens[i][0] == "RBRACE":
-            break
-        # --- FIN NUEVO ---
+        # Saltar tokens de cierre de bloque mal escritos
+        if i < len(tokens) and tokens[i][0] in ("RBRACEE", "RBRACES", "RBRACE2"):
+            i += 1
+            continue
         if i >= len(tokens):
             break
         stmt, next_i = parse_statement(tokens, i)
         stmts.append(stmt)
         if next_i == i:
-            # Previene bucle infinito si parse_statement no avanza
             raise OrionSyntaxError(f"El parser no avanzó en el índice en parse_block cerca de '{tokens[i]}'")
-        i = next_i  # Avanza correctamente el índice
+        i = next_i
 
     if i >= len(tokens):
         raise OrionSyntaxError("Se esperaba '}' pero se alcanzó el final del archivo.")
-    
-    return stmts, i + 1
+    # Saltar el token de cierre de bloque (RBRACE o variantes)
+    i += 1
+    return stmts, i
 
 def parse(tokens):
     """Función principal de parsing con mejor manejo de errores."""

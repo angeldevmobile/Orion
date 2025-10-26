@@ -28,6 +28,8 @@ def lex(code):
         ("ELSE",     r"\belse\b"),
         ("ELSIF",    r"\belsif\b"),
         ("WHILE",    r"\bwhile\b"),
+        ("ATTEMPT",  r"\battempt\b"),  # Nueva palabra clave
+        ("HANDLE",   r"\bhandle\b"),   # Nueva palabra clave
         # ("TRUE",     r"\btrue\b"),
         # ("FALSE",    r"\bfalse\b"),
         ("YES",      r"\byes\b"),
@@ -38,6 +40,7 @@ def lex(code):
         ("IDENT",    r"[a-zA-Z_][a-zA-Z0-9_]*"),
 
         # --- Operadores y símbolos ---
+        ("OP_ASSIGN", r"(\+=|-=|\*=|/=)"),  # <-- Agrega esta línea
         ("RANGE_EX", r"\.\.<"),
         ("RANGE",    r"\.\."),
         ("NULL_SAFE", r"\?\."),
@@ -92,10 +95,9 @@ def lex(code):
             "AND", "OR", "NOT", "MATCH", "USE",
             "ARROW", "THIN_ARROW", "IN", "NULL_SAFE",
             "COLON", "COMMA", "DOT",
-            "LBRACKET", "RBRACKET"
+            "LBRACKET", "RBRACKET", "ATTEMPT", "HANDLE", "OP_ASSIGN"  # Agregar los nuevos tokens
         ):
             tokens.append((kind, value))
-
 
         elif kind in ("SKIP", "NEWLINE", "COMMENT"):
             continue

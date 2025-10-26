@@ -21,7 +21,7 @@ from lib import collections
 from modules import code, show 
 from lib.io import io_show
 from lib import math as orion_math
-from lib import strings
+from modules import strings
 
 
 class ContinueException(Exception):
@@ -636,7 +636,7 @@ def eval_expr(expr, variables, functions):
             right_val = eval_expr(right, variables, functions)
 
             # DEBUG: Mostrar qué estamos comparando
-            print(f"DEBUG BINARY_OP: {op} entre {type(left_val).__name__}({left_val}) y {type(right_val).__name__}({right_val})")
+            # print(f"DEBUG BINARY_OP: {op} entre {type(left_val).__name__}({left_val}) y {type(right_val).__name__}({right_val})")
 
             if hasattr(left_val, "value"):
                 left_val = left_val.value
@@ -659,12 +659,19 @@ def eval_expr(expr, variables, functions):
                 if isinstance(left_val, str) or isinstance(right_val, str):
                     return str(left_val) + str(right_val)
                 return left_val + right_val
+
             elif op == "-":
                 return left_val - right_val
+
             elif op == "*":
                 return left_val * right_val
+            
+            if op == "**":
+                return left_val ** right_val
+
             elif op == "/":
                 return left_val / right_val
+
             elif op in [">", "<", ">=", "<=", "==", "!="]:
                 # MEJORADO: Manejo especial para comparaciones con tipos
                 if op in ["==", "!="]:
@@ -693,12 +700,12 @@ def eval_expr(expr, variables, functions):
                     left_type = normalize_type_name(left_val)
                     right_type = normalize_type_name(right_val)
                     
-                    print(f"DEBUG TYPE COMPARISON: '{left_type}' {op} '{right_type}'")
+                    # print(f"DEBUG TYPE COMPARISON: '{left_type}' {op} '{right_type}'")
                     
                     if (left_type in ["list", "string", "number", "bool", "dict"] or 
                         right_type in ["list", "string", "number", "bool", "dict"]):
                         result = (left_type == right_type) if op == "==" else (left_type != right_type)
-                        print(f"DEBUG TYPE RESULT: {result}")
+                        # print(f"DEBUG TYPE RESULT: {result}")
                         return result
 
                 # FIXED: Comparaciones de caracteres/strings - MOVER ANTES de try_cast_numeric
@@ -757,18 +764,38 @@ def eval_expr(expr, variables, functions):
                     f"No se puede comparar {type(left_val).__name__} con {type(right_val).__name__}"
                 )
 
-            elif op == "&&":
-                return bool(left_val) and bool(right_val)
-            elif op == "||":
-                return bool(left_val) or bool(right_val)
+            # --- FIX DEFINITIVO: operadores lógicos (&& y ||) ---
+            elif op in ["&&", "||"]:
+                # Extrae el valor interno de OrionBool, OrionNumber, etc.
+                if hasattr(left_val, "value"):
+                    left_val = left_val.value
+                if hasattr(right_val, "value"):
+                    right_val = right_val.value
+
+                left_bool = bool(left_val)
+                right_bool = bool(right_val)
+
+                # print(f"DEBUG LOGICAL_OP: {op} entre {left_bool} y {right_bool}")
+
+                if op == "&&":
+                    return left_bool and right_bool
+                else:
+                    return left_bool or right_bool
+
             else:
                 raise OrionRuntimeError(f"Operador binario desconocido: {op}")
 
         # --- UNARY_OP ---
         elif tag == "UNARY_OP":
             _, op, operand = expr
+            operand_val = eval_expr(operand, variables, functions)
+            
             if op == "!":
-                return not eval_expr(operand, variables, functions)
+                return not operand_val
+            elif op == "-":
+                return -operand_val
+            elif op == "+":
+                return +operand_val
             else:
                 raise OrionRuntimeError(f"Operador unario desconocido: {op}")
 
@@ -1041,6 +1068,100 @@ def eval_expr(expr, variables, functions):
                     # FALLBACK: Convertir a string y aplicar upper, verificando longitud
                     str_val = str(obj_val)
                     return str_val.upper() if len(str_val) > 0 else ""
+            
+            elif method_name == "items":
+                # ✅ ORION ADVANCED ITERATOR SAFETY SYSTEM - FINAL FIX
+                cache_key = f"_items_cache_{id(obj_val)}"
+                
+                # ✅ CHECK GLOBAL CACHE FIRST (MOST IMPORTANT)
+                if hasattr(eval_expr, '_dict_cache') and id(obj_val) in eval_expr._dict_cache:
+                    return eval_expr._dict_cache[id(obj_val)]
+                
+                # Cache hit - return immediately from object cache
+                if hasattr(obj_val, cache_key):
+                    return getattr(obj_val, cache_key)
+                
+                # Direct dict - fastest path
+                if isinstance(obj_val, dict):
+                    result = list(obj_val.items())
+                    # Store in global cache
+                    if not hasattr(eval_expr, '_dict_cache'):
+                        eval_expr._dict_cache = {}
+                    eval_expr._dict_cache[id(obj_val)] = result
+                    return result
+                
+                # Wrapped dict (OrionDict, etc.)
+                elif hasattr(obj_val, 'value') and isinstance(obj_val.value, dict):
+                    result = list(obj_val.value.items())
+                    # Store in global cache
+                    if not hasattr(eval_expr, '_dict_cache'):
+                        eval_expr._dict_cache = {}
+                    eval_expr._dict_cache[id(obj_val)] = result
+                    try:
+                        setattr(obj_val, cache_key, result)
+                    except (AttributeError, TypeError):
+                        pass  # Global cache is enough
+                    return result
+                
+                # Object with items() method - needs recursion protection
+                elif hasattr(obj_val, 'items') and callable(obj_val.items):
+                    # 🔒 CRITICAL: Check if already processing this exact object
+                    if hasattr(obj_val, '_processing_items'):
+                        # Emergency fallback - return cached result or empty list
+                        if hasattr(eval_expr, '_dict_cache') and id(obj_val) in eval_expr._dict_cache:
+                            return eval_expr._dict_cache[id(obj_val)]
+                        return []  # Safe fallback
+                    
+                    try:
+                        # Mark as processing to prevent recursion
+                        obj_val._processing_items = True
+                        
+                        # Store empty result in cache immediately to break any deep recursion
+                        if not hasattr(eval_expr, '_dict_cache'):
+                            eval_expr._dict_cache = {}
+                        eval_expr._dict_cache[id(obj_val)] = []  # Emergency fallback
+                        
+                        # Now try to call the actual method
+                        result = obj_val.items()
+                        
+                        # Convert to immutable snapshot if iterable
+                        if hasattr(result, '__iter__') and not isinstance(result, (str, bytes)):
+                            cached_result = list(result)
+                            # Update cache with real result
+                            eval_expr._dict_cache[id(obj_val)] = cached_result
+                            try:
+                                setattr(obj_val, cache_key, cached_result)
+                            except (AttributeError, TypeError):
+                                pass  # Global cache is enough
+                            return cached_result
+                        else:
+                            # Non-iterable result, cache as-is
+                            eval_expr._dict_cache[id(obj_val)] = result
+                            try:
+                                setattr(obj_val, cache_key, result)
+                            except (AttributeError, TypeError):
+                                pass  # Global cache is enough
+                            return result
+                            
+                    except RecursionError as e:
+                        # Deep recursion caught - use emergency cache
+                        code.error(f"Deep recursion in items() - using emergency cache: {str(e)}", module="iterator-safety")
+                        return eval_expr._dict_cache.get(id(obj_val), [])
+                        
+                    except Exception as e:
+                        # Other errors - use emergency cache
+                        code.warn(f"Error in items() call: {str(e)} - using emergency cache", module="iterator-safety")
+                        return eval_expr._dict_cache.get(id(obj_val), [])
+                        
+                    finally:
+                        # ✅ CRITICAL: Always cleanup processing flag
+                        if hasattr(obj_val, '_processing_items'):
+                            delattr(obj_val, '_processing_items')
+                            
+                else:
+                    # Type doesn't support items()
+                    raise OrionFunctionError(f"Método 'items' no disponible para tipo {type(obj_val).__name__}")
+    
             # === MÉTODOS BUILT-IN COMUNES ===
             if method_name == "len":
                 if hasattr(obj_val, '__len__'):
@@ -1521,13 +1642,13 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         functions["_variables"] = variables
 
         # Registrar funciones FN antes de ejecutar el resto
-        code.progress("orion-core", "Registering user functions", 25)
+        # code.progress("orion-core", "Registering user functions", 25)
         for node in ast:
             if node[0] == "FN":
                 _, fn_name, params, body = node
                 register_function(functions, fn_name, params, body)
 
-        code.progress("orion-core", "Executing AST nodes", 50)
+        # code.progress("orion-core", "Executing AST nodes", 50)
         
         # Marcar como inicializado
         evaluate._initialized = True
@@ -1945,6 +2066,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 raise OrionRuntimeError(
                     f"No se puede desempaquetar el valor {type(values).__name__} en múltiples variables"
                 )
+                
+        
 
         elif tag == "DECLARE":
             _, type_name, var_name, expr_value = node
@@ -2094,12 +2217,12 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             # Evaluar la colección
             collection = eval_expr(collection_expr, variables, functions)
 
-            print(f"DEBUG: FOR_IN iterando sobre {type(collection)} - {collection}")
+            # print(f"DEBUG: FOR_IN iterando sobre {type(collection)} - {collection}")
 
             if callable(collection):
                 try:
                     collection = collection()
-                    print(f"DEBUG: Resultado de llamar función: {type(collection)} - {collection}")
+                    # print(f"DEBUG: Resultado de llamar función: {type(collection)} - {collection}")
                 except Exception as e:
                     raise OrionRuntimeError(f"Error al llamar función en FOR_IN: {str(e)}")
 
@@ -2149,23 +2272,32 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                                     variables[var_names[0]] = item
                                     for i in range(1, len(var_names)):
                                         variables[var_names[i]] = None
-                            result = evaluate(body, variables, functions, inside_fn=True)
-                            if inside_fn and result is not None:
-                                return result
+                            
+                            # Execute body and handle control flow exceptions
+                            try:
+                                result = evaluate(body, variables, functions, inside_fn=True)
+                                if inside_fn and result is not None:
+                                    return result
+                            except ContinueException:
+                                continue  # Continue to next iteration
+                            except BreakException:
+                                break     # Exit the loop completely
+                                
                         except ContinueException:
                             continue
                         except BreakException:
                             break
 
+                except BreakException:
+                    pass  # Break caught at outer level
+                except ContinueException:
+                    pass  # Continue caught at outer level
                 except TypeError as e:
                     raise OrionRuntimeError(f"Error de tipo al iterar en FOR_IN: {str(e)}")
-                except BreakException:
-                    pass
-                except ContinueException:
-                    pass
                 except Exception as e:
                     raise OrionRuntimeError(f"Error inesperado en FOR_IN: {str(e)}")
 
+                # Restore previous variable values
                 for var_name in var_names:
                     prev_value = prev_values[var_name]
                     if prev_value is not None:
@@ -2189,23 +2321,32 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                                 variables[var_name] = (item[0], item[1])
                             else:
                                 variables[var_name] = item
-                            result = evaluate(body, variables, functions, inside_fn=True)
-                            if inside_fn and result is not None:
-                                return result
+                            
+                            # Execute body and handle control flow exceptions
+                            try:
+                                result = evaluate(body, variables, functions, inside_fn=True)
+                                if inside_fn and result is not None:
+                                    return result
+                            except ContinueException:
+                                continue  # Continue to next iteration
+                            except BreakException:
+                                break     # Exit the loop completely
+                                
                         except ContinueException:
                             continue
                         except BreakException:
                             break
 
+                except BreakException:
+                    pass  # Break caught at outer level
+                except ContinueException:
+                    pass  # Continue caught at outer level
                 except TypeError as e:
                     raise OrionRuntimeError(f"Error de tipo al iterar en FOR_IN: {str(e)}")
-                except BreakException:
-                    pass
-                except ContinueException:
-                    pass
                 except Exception as e:
                     raise OrionRuntimeError(f"Error inesperado en FOR_IN: {str(e)}")
 
+                # Restore previous variable value
                 if prev_value is not None:
                     variables[var_name] = prev_value
                 elif var_name in variables:
@@ -2262,6 +2403,40 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             result = eval_expr(node, variables, functions)
             if inside_fn and result is not None:
                 return result
+        
+        elif tag == "ATTEMPT":
+            try_body = node[1]
+            handler = node[2] if len(node) > 2 else None
+            
+            try:
+                # Ejecutar el bloque attempt
+                result = None
+                for stmt in try_body:
+                    result = evaluate([stmt], variables, functions, inside_fn=True)
+                return result if inside_fn else None
+            except Exception as e:
+                # Si hay un handler, ejecutarlo
+                if handler and handler[0] == "HANDLE":
+                    error_var = handler[1]
+                    handle_body = handler[2]
+                    
+                    # Crear un nuevo scope para el handler con la variable de error
+                    handler_vars = variables.copy()
+                    # Convertir la excepción a un formato más amigable
+                    error_msg = str(e) if hasattr(e, '__str__') else repr(e)
+                    handler_vars[error_var] = error_msg
+                    
+                    result = None
+                    for stmt in handle_body:
+                        result = evaluate([stmt], handler_vars, functions, inside_fn=True)
+                    return result if inside_fn else None
+                else:
+                    # Si no hay handler, re-lanzar la excepción
+                    raise e
+
+        elif tag == "HANDLE":
+            # HANDLE nodes are processed as part of ATTEMPT
+            raise OrionRuntimeError("HANDLE encontrado fuera de contexto ATTEMPT")
 
         else:
             raise OrionRuntimeError(f"Nodo desconocido en AST: {tag}")
@@ -2280,7 +2455,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 summary = "(sin contenido)"
             clusters[f"Cluster_{cluster_id}"] = summary
             
-    code.progress("orion-core", "Execution completed", 100)
+    # code.progress("orion-core", "Execution completed", 100)
     # 3. Si estamos en nivel superior
     if not inside_fn:
         if "main" in functions:
@@ -2302,6 +2477,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             return evaluate(body, variables, functions, inside_fn=True)
         return None
     
+
 def to_native(val):
     from core.types import OrionList, OrionString, OrionNumber, OrionBool, OrionDate, OrionDict
     if isinstance(val, OrionList):
