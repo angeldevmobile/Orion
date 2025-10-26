@@ -813,21 +813,26 @@ def parse_block(tokens, i):
     return stmts, i
 
 def parse(tokens):
-    """Función principal de parsing con mejor manejo de errores."""
+    """Función principal de parsing con mejor manejo de errores y avance seguro."""
     ast = []
     i = 0
-    
     while i < len(tokens):
         try:
-            stmt, i = parse_statement(tokens, i)
+            stmt, next_i = parse_statement(tokens, i)
+            if next_i == i:
+                # Previene bucles infinitos si el parser no avanza
+                raise OrionSyntaxError(f"El parser no avanzó en el índice en parse() cerca de '{tokens[i]}'")
             ast.append(stmt)
+            i = next_i
         except OrionSyntaxError as e:
-            # Proporcionar mejor información de error
             current_token = tokens[i] if i < len(tokens) else ("EOF", "")
-            raise OrionSyntaxError(f"{str(e)} en línea cerca del token '{current_token[1]}'")
-
+            print(f"[ORION PARSER WARNING] {str(e)} en línea cerca del token '{current_token[1]}'")
+            # Sincroniza: avanza hasta el siguiente NEWLINE, SEMICOLON o RBRACE para evitar loops
+            sync_tokens = {"NEWLINE", "SEMICOLON", "RBRACE", "RBRACEE", "RBRACES", "RBRACE2"}
+            while i < len(tokens) and tokens[i][0] not in sync_tokens:
+                i += 1
+            i += 1  # Salta el token de sincronización
     return ast
-
 
 def parse_fn_params(tokens, i):
     """Parsea los parámetros de una función."""

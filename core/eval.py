@@ -324,6 +324,21 @@ def _register_builtin_functions(functions):
                 if isinstance(v, types.FunctionType):
                     register_native_function(functions, k, v)
 
+
+    # === Conversión flexible list() ===
+    def orion_list(value):
+        """Convierte cualquier objeto iterable a OrionList."""
+        if isinstance(value, (OrionList, list)):
+            return OrionList(value)
+        elif isinstance(value, (OrionDict, dict)):
+            return OrionList(list(value.keys()))
+        elif isinstance(value, (OrionString, str)):
+            return OrionList(list(value))
+        elif hasattr(value, "__iter__"):
+            return OrionList(list(value))
+        else:
+            raise OrionTypeError("Tipo no convertible a lista")
+        
     # Función type() mejorada
     def handle_builtin_type(obj):
         """Función type() nativa de Orion que devuelve string del tipo"""
@@ -350,6 +365,7 @@ def _register_builtin_functions(functions):
     register_native_function(functions, "auto", lambda *args, **kwargs: args[0] if args else None)
     register_native_function(functions, "substring", substring)
     register_native_function(functions, "to_native", to_native)
+    register_native_function(functions, "list", orion_list)
     
     # Asegurar que type() esté disponible también como función standalone
     functions["type"] = {
@@ -1072,95 +1088,69 @@ def eval_expr(expr, variables, functions):
             elif method_name == "items":
                 # ✅ ORION ADVANCED ITERATOR SAFETY SYSTEM - FINAL FIX
                 cache_key = f"_items_cache_{id(obj_val)}"
-                
-                # ✅ CHECK GLOBAL CACHE FIRST (MOST IMPORTANT)
+
+                # 1. Global cache (más importante)
                 if hasattr(eval_expr, '_dict_cache') and id(obj_val) in eval_expr._dict_cache:
                     return eval_expr._dict_cache[id(obj_val)]
-                
-                # Cache hit - return immediately from object cache
+
+                # 2. Objeto ya tiene snapshot cacheado
                 if hasattr(obj_val, cache_key):
                     return getattr(obj_val, cache_key)
-                
-                # Direct dict - fastest path
+
+                # 3. Diccionario nativo
                 if isinstance(obj_val, dict):
                     result = list(obj_val.items())
-                    # Store in global cache
                     if not hasattr(eval_expr, '_dict_cache'):
                         eval_expr._dict_cache = {}
                     eval_expr._dict_cache[id(obj_val)] = result
                     return result
-                
-                # Wrapped dict (OrionDict, etc.)
+
+                # 4. Diccionario envuelto (OrionDict, etc.)
                 elif hasattr(obj_val, 'value') and isinstance(obj_val.value, dict):
                     result = list(obj_val.value.items())
-                    # Store in global cache
                     if not hasattr(eval_expr, '_dict_cache'):
                         eval_expr._dict_cache = {}
                     eval_expr._dict_cache[id(obj_val)] = result
                     try:
                         setattr(obj_val, cache_key, result)
                     except (AttributeError, TypeError):
-                        pass  # Global cache is enough
+                        pass
                     return result
-                
-                # Object with items() method - needs recursion protection
+
+                # 5. Objeto con método items() (proteger recursión)
                 elif hasattr(obj_val, 'items') and callable(obj_val.items):
-                    # 🔒 CRITICAL: Check if already processing this exact object
                     if hasattr(obj_val, '_processing_items'):
-                        # Emergency fallback - return cached result or empty list
+                        # Recursión detectada, usar caché o lista vacía
                         if hasattr(eval_expr, '_dict_cache') and id(obj_val) in eval_expr._dict_cache:
                             return eval_expr._dict_cache[id(obj_val)]
-                        return []  # Safe fallback
-                    
+                        return []
                     try:
-                        # Mark as processing to prevent recursion
                         obj_val._processing_items = True
-                        
-                        # Store empty result in cache immediately to break any deep recursion
                         if not hasattr(eval_expr, '_dict_cache'):
                             eval_expr._dict_cache = {}
-                        eval_expr._dict_cache[id(obj_val)] = []  # Emergency fallback
-                        
-                        # Now try to call the actual method
+                        eval_expr._dict_cache[id(obj_val)] = []
                         result = obj_val.items()
-                        
-                        # Convert to immutable snapshot if iterable
-                        if hasattr(result, '__iter__') and not isinstance(result, (str, bytes)):
-                            cached_result = list(result)
-                            # Update cache with real result
-                            eval_expr._dict_cache[id(obj_val)] = cached_result
-                            try:
-                                setattr(obj_val, cache_key, cached_result)
-                            except (AttributeError, TypeError):
-                                pass  # Global cache is enough
-                            return cached_result
-                        else:
-                            # Non-iterable result, cache as-is
-                            eval_expr._dict_cache[id(obj_val)] = result
-                            try:
-                                setattr(obj_val, cache_key, result)
-                            except (AttributeError, TypeError):
-                                pass  # Global cache is enough
-                            return result
-                            
+                        # Siempre snapshot como lista
+                        cached_result = list(result) if hasattr(result, '__iter__') and not isinstance(result, (str, bytes)) else result
+                        eval_expr._dict_cache[id(obj_val)] = cached_result
+                        try:
+                            setattr(obj_val, cache_key, cached_result)
+                        except (AttributeError, TypeError):
+                            pass
+                        return cached_result
                     except RecursionError as e:
-                        # Deep recursion caught - use emergency cache
                         code.error(f"Deep recursion in items() - using emergency cache: {str(e)}", module="iterator-safety")
                         return eval_expr._dict_cache.get(id(obj_val), [])
-                        
                     except Exception as e:
-                        # Other errors - use emergency cache
                         code.warn(f"Error in items() call: {str(e)} - using emergency cache", module="iterator-safety")
                         return eval_expr._dict_cache.get(id(obj_val), [])
-                        
                     finally:
-                        # ✅ CRITICAL: Always cleanup processing flag
                         if hasattr(obj_val, '_processing_items'):
                             delattr(obj_val, '_processing_items')
-                            
+
                 else:
-                    # Type doesn't support items()
                     raise OrionFunctionError(f"Método 'items' no disponible para tipo {type(obj_val).__name__}")
+
     
             # === MÉTODOS BUILT-IN COMUNES ===
             if method_name == "len":
@@ -1529,6 +1519,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             variables["yes"] = OrionBool(True)
         if "no" not in variables:
             variables["no"] = OrionBool(False)
+        if "clusters" not in variables:
+            variables["clusters"] = {}
             
         # === INICIALIZAR CONTEXTOS (solo una vez) ===
         if SPREADSHEET_ENABLED:
@@ -1647,12 +1639,31 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             if node[0] == "FN":
                 _, fn_name, params, body = node
                 register_function(functions, fn_name, params, body)
+        # Marcar como inicializado
+        evaluate._initialized = True  
 
         # code.progress("orion-core", "Executing AST nodes", 50)
-        
-        # Marcar como inicializado
-        evaluate._initialized = True
-
+        # code.progress("orion-core", "Execution completed", 100)
+    # 3. Si estamos en nivel superior
+    if not inside_fn:
+        if "main" in functions:
+            code.trace("Executing main function", module="orion-runtime")
+            main_functions = functions["main"]
+                
+            # functions["main"] es una lista de definiciones de función
+            if isinstance(main_functions, list) and len(main_functions) > 0:
+                main_def = main_functions[0]  # Tomar la primera definición
+                    
+                if isinstance(main_def, dict):
+                    params = main_def.get("params", [])
+                    body = main_def.get("body", [])
+                else:
+                    raise OrionRuntimeError(f"Formato de función inválido para 'main': {type(main_def)}")
+            else:
+                raise OrionRuntimeError("Función 'main' no encontrada o mal formateada")
+                
+            return evaluate(body, variables, functions, inside_fn=True)
+          
     i = 0
     while i < len(ast):
         node = ast[i]
@@ -2454,30 +2465,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             else:
                 summary = "(sin contenido)"
             clusters[f"Cluster_{cluster_id}"] = summary
-            
-    # code.progress("orion-core", "Execution completed", 100)
-    # 3. Si estamos en nivel superior
-    if not inside_fn:
-        if "main" in functions:
-            code.trace("Executing main function", module="orion-runtime")
-            main_functions = functions["main"]
-            
-            # functions["main"] es una lista de definiciones de función
-            if isinstance(main_functions, list) and len(main_functions) > 0:
-                main_def = main_functions[0]  # Tomar la primera definición
-                
-                if isinstance(main_def, dict):
-                    params = main_def.get("params", [])
-                    body = main_def.get("body", [])
-                else:
-                    raise OrionRuntimeError(f"Formato de función inválido para 'main': {type(main_def)}")
-            else:
-                raise OrionRuntimeError("Función 'main' no encontrada o mal formateada")
-            
-            return evaluate(body, variables, functions, inside_fn=True)
-        return None
     
-
 def to_native(val):
     from core.types import OrionList, OrionString, OrionNumber, OrionBool, OrionDate, OrionDict
     if isinstance(val, OrionList):

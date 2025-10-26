@@ -3,14 +3,17 @@ use osync
 use net
 use json
 use strings
+use random  -- Para generar ID de ejecución único
 
 trace_start("SYNC SPREADSHEET → GOOGLE APPS SCRIPT")
 
--- 1. Registrar hoja local y conectar
+-- ✅ usar uuid4 para obtener un identificador real, no el módulo uuid
+run_id = random.uuid()
+show("🚀 Ejecución Orion:", run_id)
+
 spreadsheet.register("sheet_ventas", "ventas.xlsx")
 s = spreadsheet.attach(id="sheet_ventas")
 
--- 2. Escribir datos en el Excel local
 s.write("A1", "Conectado desde Orion")
 s.write("B1", "Ventas Totales")
 s.append(["Laptop", 3500])
@@ -18,15 +21,12 @@ s.append(["Mouse", 150])
 s.append(["Monitor", 1200])
 s.save()
 
--- 3. Generar archivo de sincronización local (.json)
 osync.push("sheet_ventas")
 
--- 4. Leer JSON de sincronización
 data = json.read("storage/sync/sheet_ventas.json")
 data = to_native(data)
 show("🔎 JSON leído:", data)
 
--- ✅ Función global: convertir letras de columna a número (A→0, B→1, AA→26, etc.)
 fn col_a_num(col_str) {
     col_str = strings.upper(col_str)
     col_str = strings.reverse(col_str)
@@ -39,129 +39,102 @@ fn col_a_num(col_str) {
     return num - 1
 }
 
--- 5. Convertir celdas a formato de filas (OPTIMIZADO - EVITAR BUCLE INFINITO)
 show("Tipo de hoja:", data["content"]["type"])
-if (data["content"]["type"] == "xlsx") {
-    show("▶ Iniciando conversión de celdas a filas...")
+
+if (data.get("_converted") == yes) {
+    show("⚠️ Conversión ya realizada — evitando bucle infinito.")
+} elsif (data["content"]["type"] == "xlsx") {
+    show("▶ Iniciando conversión de celdas a filas... (Ejecución:", run_id, ")")
     cells = data["content"]["cells"]
     rows = []
 
     max_row = 0
     max_col = 0
 
-    -- ✅ CLAVE: Almacenar items() UNA SOLA VEZ para evitar bucle infinito
-    cell_items = cells.items()
-    show("📋 Total de celdas a procesar:", cell_items.len())
+    -- ✅ Corrección: forzamos conversión total antes del bucle
+    temp_items = to_native(cells.items())
+    cell_items = []
+    for pair in temp_items {
+        cell_items.append(to_native(pair))
+    }
 
-    -- PRIMER PASE: Calcular dimensiones
+    show("📋 Total de celdas a procesar (precalculado):", len(cell_items))
+
     for cell_ref, _ in cell_items {
         col_part = ""
         row_part = ""
-
         for ch in str(cell_ref) {
-            if (ch >= "A" && ch <= "Z") {
-                col_part = col_part + ch
-            } else {
-                row_part = row_part + ch
-            }
+            if (ch >= "A" && ch <= "Z") { col_part = col_part + ch }
+            else { row_part = row_part + ch }
         }
 
-        if (col_part == "" || row_part == "") {
-            show("⚠️ Celda inválida encontrada:", cell_ref)
-        } else {
-            show("🧩 Analizando celda:", cell_ref, "→ Col:", col_part, "Fila:", row_part)
+        if (col_part != "" && row_part != "") {
             col_num = col_a_num(col_part)
-            
-            attempt {
-                row_num = int(row_part) - 1
-            } handle conversion_error {
-                show("❌ Error convirtiendo fila en celda:", cell_ref, "→", conversion_error)
+            attempt { row_num = int(row_part) - 1 }
+            handle conversion_error {
+                show("❌ Error convirtiendo fila:", cell_ref)
                 row_num = -1
             }
-
             if (row_num >= 0) {
                 if (row_num > max_row) { max_row = row_num }
                 if (col_num > max_col) { max_col = col_num }
-                show("✅ Índices calculados:", "Col:", col_num, "Fila:", row_num)
             }
         }
     }
 
     show("📏 Tamaño detectado → Filas:", max_row + 1, "Columnas:", max_col + 1)
 
-    -- Crear matriz vacía
     for r in range(max_row + 1) {
         row = []
-        for c in range(max_col + 1) {
-            row.append("")
-        }
+        for c in range(max_col + 1) { row.append("") }
         rows.append(row)
     }
 
-    -- SEGUNDO PASE: Llenar la matriz (usando la MISMA lista almacenada)
     for cell_ref, value in cell_items {
         col_part = ""
         row_part = ""
-
         for ch in str(cell_ref) {
-            if (ch >= "A" && ch <= "Z") {
-                col_part = col_part + ch
-            } else {
-                row_part = row_part + ch
-            }
+            if (ch >= "A" && ch <= "Z") { col_part = col_part + ch }
+            else { row_part = row_part + ch }
         }
-
-        if (col_part == "" || row_part == "") {
-            show("⚠️ Saltando celda vacía:", cell_ref)
-        } else {
+        if (col_part != "" && row_part != "") {
             attempt {
                 col_num = col_a_num(col_part)
                 row_num = int(row_part) - 1
                 rows[row_num][col_num] = value
-                show("📥 Celda", cell_ref, "→ posición [", row_num, ",", col_num, "] =", value)
             } handle matrix_error {
-                show("❌ Error procesando celda", cell_ref, ":", matrix_error)
-                show("🔧 Continuando con la siguiente celda...")
+                show("❌ Error procesando celda", cell_ref)
             }
         }
     }
 
-    show("✅ Filas generadas dinámicamente:", rows)
     data["rows"] = to_native(rows)
-    
+    data["_converted"] = yes
+
     attempt {
         json.write("storage/sync/sheet_ventas.json", to_native(data))
         show("📝 JSON actualizado con 'rows' guardado correctamente")
     } handle save_error {
         show("❌ Error guardando JSON:", save_error)
-        show("🔄 Intentando crear directorio y guardar de nuevo...")
     }
 }
 
--- 6. Enviar a Google Apps Script con manejo de errores mejorado
 attempt {
     data = json.read("storage/sync/sheet_ventas.json")
-    show("🚀 JSON enviado a Google Apps Script:", data)
-    
     res = net.transmit(
         "https://script.google.com/macros/s/AKfycbwWA6_AuTMJmndrTTLIk_aYuFXsrQ3AD9-n0-G6nzIPC6ocsBdMxZYcOyO_b2qVot7rag/exec",
         json_data=data
     )
-    
-    -- 7. Verificar resultado
-    show("🌐 Respuesta de Google Apps Script:", res)
     if res.status == 200 {
         show("✅ Sincronización Orion Cloud completada correctamente", level="ok")
     } elsif res.status == 404 {
-        show("❌ Endpoint no encontrado - verificar URL", level="warn")
+        show("❌ Endpoint no encontrado", level="warn")
     } elsif res.status >= 500 {
         show("❌ Error del servidor:", res.status, level="error")
     } else {
         show("❌ Error al sincronizar con Google Apps Script:", res.status, level="error")
     }
-    
 } handle network_error {
-    show("🚫 Error de red o conexión:", network_error)
-    show("🔄 Sugerencia: Verificar conectividad y reintentar")
-    show("📂 Los datos locales están guardados en: storage/sync/sheet_ventas.json")
+    show("🚫 Error de red:", network_error)
+    show("📂 Datos locales guardados en storage/sync/sheet_ventas.json")
 }
