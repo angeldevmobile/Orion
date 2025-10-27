@@ -1966,6 +1966,27 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             i += 1
             continue
         
+        elif tag == "EXPR":
+            # Evalúa la expresión y retorna el resultado
+            if len(node) > 1:
+                result = eval_expr(node[1], variables, functions)
+            else:
+                # Si no hay segundo elemento, probablemente es una expresión directa
+                result = eval_expr(node, variables, functions)
+            if inside_fn:
+                return result
+            # Si no está en función, mostrar el resultado (útil para REPL)
+            return result
+        
+        # --- NUEVO: Manejar expresiones directas que no están envueltas en EXPR ---
+        elif tag in ["BINARY_OP", "UNARY_OP", "CALL", "CALL_METHOD", "INDEX", "IDENT", "LIST", "DICT", "LAMBDA"]:
+            # Es una expresión directa, evaluarla
+            result = eval_expr(node, variables, functions)
+            if inside_fn:
+                return result
+            # Si no está en función, mostrar el resultado (útil para REPL)
+            return result
+        
         # --- MANEJO DE CONTROL DE FLUJO ---
         elif tag == "IDENT":
             # Manejar instrucciones de control de flujo especiales

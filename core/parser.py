@@ -740,13 +740,12 @@ def parse_statement(tokens, i):
                         return ("ASSIGN", left_expr, right_expr), final_i
                 else:
                     # No hay asignación, es solo una expresión
-                    return left_expr, temp_i
-                    
+                    return left_expr, temp_i  # Cambio: devolver expr directamente
             except OrionSyntaxError:
                 # Si falla el parsing especializado, intentar como expresión normal
                 try:
                     expr, i = parse_expression(tokens, saved_i)
-                    return expr, i
+                    return expr, i  # Cambio: devolver expr directamente
                 except OrionSyntaxError:
                     current_token = tokens[saved_i] if saved_i < len(tokens) else ("EOF", "")
                     raise OrionSyntaxError(f"No se pudo parsear la declaración que comienza con '{current_token[1]}'")
@@ -759,8 +758,8 @@ def parse_statement(tokens, i):
             raise OrionSyntaxError("'}' encontrado sin '{' correspondiente")
         
         try:
-            expr, i = parse_expression(tokens, i)
-            return expr, i
+            expr, next_i = parse_expression(tokens, i)
+            return expr, next_i  # Cambio: devolver expr directamente
         except OrionSyntaxError as e:
             current_token = tokens[i] if i < len(tokens) else ("EOF", "")
             raise OrionSyntaxError(f"Error parseando expresión que comienza con '{current_token[1]}': {str(e)}")

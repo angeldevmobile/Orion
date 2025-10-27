@@ -11,6 +11,8 @@ from rich.text import Text
 from rich.table import Table
 from rich.prompt import Prompt
 from pyfiglet import Figlet
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from core import parser as orion_parser, eval as orion_eval
 
 console = Console(width=120)
@@ -227,7 +229,6 @@ def main():
         if args.file:
             console.print(f"[red]Archivo no válido o no encontrado: {args.file}[/red]")
             sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,109 @@
+Metadata-Version: 2.4
+Name: orion
+Version: 1.1.0
+Summary: Orion Language — Cognitive Runtime for next-gen programming.
+Author: Gabriel Zapata
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: rich>=13.0.0
+Requires-Dist: pyfiglet>=1.0.0
+Requires-Dist: textual>=0.60.0
+Dynamic: author
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+Historia de Orion 
+
+Orion nace en 2025 con una idea clara:
+
+Un lenguaje que combine la simplicidad de la programación moderna con la velocidad y el poder de la ejecución eficiente, pensado para la nueva generación de desarrolladores que quieren construir más rápido y mejor.
+
+El nombre viene de la constelación Orion, símbolo de guía y exploración. La idea es que tu lenguaje sea una “estrella” que guíe a los programadores hacia un estilo de código más legible, conciso y futurista.
+
+Filosofía de Orion
+
+Legibilidad primero → código que parece pseudocódigo, fácil de enseñar y entender.
+
+Rapidez → diseñado para ser compilado y correr veloz, como Go o Rust.
+
+Modernidad → incluye features que otros lenguajes no traen listos (async, match, interpolación de strings).
+
+Universalidad → sirve tanto para scripts simples como para proyectos grandes.
+
+Accesible → cualquiera puede instalarlo, aprenderlo y usarlo en minutos.
+
+Desarrollo de Orion (Roadmap)
+Fase 1 – Prototipo (2025)
+
+Objetivo: Demostrar que funciona.
+
+Escribir un intérprete en Python que entienda lo básico:
+
+let para variables.
+
+print para mostrar resultados.
+
+if/else y for/each.
+
+Extensión .orx funcionando.
+
+Subir a GitHub con ejemplos.
+
+Resultado esperado: un “Hola Mundo” oficial en Orion.
+
+Fase 2 – Herramientas iniciales (2025 – 2026)
+
+Objetivo: Hacerlo usable para otros devs.
+
+Crear un CLI oficial (orion run archivo.orx).
+
+Extensión de VS Code con:
+
+Resaltado de sintaxis.
+
+Ejecución directa desde el editor.
+
+Documentación inicial: tutoriales y ejemplos.
+
+Resultado esperado: la gente puede escribir y correr Orion en su laptop.
+
+Fase 3 – Crecimiento (2026 – 2027)
+
+Objetivo: Escalar Orion a producción.
+
+Reescribir el intérprete en Go o Rust para darle velocidad real.
+
+Añadir más features:
+
+Tipado opcional.
+
+Concurrencia (async).
+
+Librerías estándar (archivos, red, JSON).
+
+Primeros proyectos reales en Orion (ej. scripts de automatización, APIs pequeñas).
+
+Resultado esperado: Orion ya no es un juguete, es un lenguaje serio.
+
+Fase 4 – Comunidad y Ecosistema (2027 en adelante)
+
+Objetivo: Construir una comunidad activa.
+
+Lanzar gestor de paquetes (orion add paquete).
+
+Crear frameworks y librerías (web, IA, bases de datos).
+
+Generar comunidad global: Discord, foros, conferencias.
+
+Recibir contribuciones de otros programadores.
+
+Resultado esperado: Orion tiene su propio ecosistema como hoy lo tienen Python o Rust.
+
+Visión a futuro
+
+La historia que puedes contar es algo así:
+
+✨ “Orion nació como un experimento personal, un lenguaje creado para ser simple como Python, moderno como Rust y rápido como Go. Lo que empezó como un prototipo, poco a poco se convirtió en una comunidad de desarrolladores que creen en escribir código claro, eficiente y preparado para el futuro. Orion es un lenguaje joven, pero con una meta ambiciosa: ser la constelación que guíe a los programadores hacia nuevas fronteras.”
