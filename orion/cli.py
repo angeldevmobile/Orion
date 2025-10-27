@@ -13,7 +13,9 @@ from rich.prompt import Prompt
 from pyfiglet import Figlet
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from core import parser as orion_parser, eval as orion_eval
+from core.lexer import lex
+from core.parser import parse
+from core.eval import evaluate
 
 console = Console(width=120)
 VERSION = "1.1.0-alpha"
@@ -62,11 +64,17 @@ def run_script(path: str):
         sys.exit(1)
 
     console.print(f"[blue]Ejecutando:[/blue] {path}\n")
-    source = open(path, "r", encoding="utf-8").read()
+    with open(path, "r", encoding="utf-8") as f:
+        source = f.read()
+    
     try:
-        tree = orion_parser.parse(source)
-        result = orion_eval.evaluate(tree)
-        if result:
+        tokens = lex(source)
+        ast = parse(tokens)
+        # Agregar variables y funciones
+        variables = {}
+        functions = {}
+        result = evaluate(ast, variables, functions)
+        if result is not None:
             console.print(Panel(str(result), title="Resultado", border_style="green"))
         console.print("\n[green]Ejecución completada[/green]")
     except Exception as e:
@@ -85,8 +93,10 @@ def repl():
         )
     )
 
-    env = {}
+    variables = {}
+    functions = {}
     line_count = 0
+    
     while True:
         try:
             line_count += 1
@@ -97,8 +107,9 @@ def repl():
             if not src.strip():
                 continue
 
-            tree = orion_parser.parse(src)
-            result = orion_eval.evaluate(tree, env)
+            tokens = lex(src)
+            ast = parse(tokens)
+            result = evaluate(ast, variables, functions)
             if result is not None:
                 console.print(f"➤ [green]{result}[/green]")
 
@@ -151,6 +162,10 @@ try:
             self.status = Static("[italic cyan]Cognitive Runtime Environment[/italic cyan]")
             self.progress_bar = ProgressBar(total=100)
             self.input = Input(placeholder="> Escribe un comando Orion...")
+            
+            # Inicializar variables y funciones para mantener estado
+            self.variables = {}
+            self.functions = {}
 
             layout = Container(self.logo, self.status, self.progress_bar, self.input)
             await self.view.dock(Header(), edge="top")
@@ -173,9 +188,20 @@ try:
             cmd = event.value.strip()
             if not cmd:
                 return
-            self.status.update(f"[cyan]Ejecutando:[/cyan] {cmd}")
-            await asyncio.sleep(1.5)
-            self.status.update(f"[green]✔ Comando '{cmd}' completado[/green]")
+            
+            try:
+                self.status.update(f"[cyan]Ejecutando:[/cyan] {cmd}")
+                tokens = lex(cmd)
+                ast = parse(tokens)
+                # Usar las variables y funciones de la instancia
+                result = evaluate(ast, self.variables, self.functions)
+                if result is not None:
+                    self.status.update(f"[green]✔ Resultado: {result}[/green]")
+                else:
+                    self.status.update(f"[green]✔ Comando '{cmd}' completado[/green]")
+            except Exception as e:
+                self.status.update(f"[red]✖ Error: {e}[/red]")
+            
             self.input.value = ""
 
     def visual_mode():

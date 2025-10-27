@@ -517,19 +517,8 @@ def eval_expr(expr, variables, functions):
         if name in ("str", "int", "bool", "float"):
             return name  # Retorna el nombre del tipo como string
         if name in variables:
-            val = variables[name]
-            if hasattr(val, "value"):
-                val = val.value
-
-            # Conversión automática de strings numéricos
-            if isinstance(val, str):
-                if val.isdigit():
-                    return int(val)
-                try:
-                    return float(val)
-                except ValueError:
-                    pass
-            return val
+            print(f"DEBUG IDENT: {name} = {variables[name]} ({type(variables[name])})")
+            return variables[name] 
         else:
             raise OrionRuntimeError(f"Variable '{name}' no definida")
 
@@ -606,10 +595,7 @@ def eval_expr(expr, variables, functions):
             if name in ("str", "int", "bool", "float"):
                 return name
             if name in variables:
-                val = variables[name]
-                if hasattr(val, "value"):
-                    return val.value
-                return val
+                return variables[name] 
             else:
                 raise OrionRuntimeError(f"Variable '{name}' no definida")
         
@@ -650,14 +636,15 @@ def eval_expr(expr, variables, functions):
             _, op, left, right = expr
             left_val = eval_expr(left, variables, functions)
             right_val = eval_expr(right, variables, functions)
+            print(f"DEBUG BINARY_OP: {op} | left={left_val} ({type(left_val)}) | right={right_val} ({type(right_val)})")
 
             # DEBUG: Mostrar qué estamos comparando
             # print(f"DEBUG BINARY_OP: {op} entre {type(left_val).__name__}({left_val}) y {type(right_val).__name__}({right_val})")
 
-            if hasattr(left_val, "value"):
-                left_val = left_val.value
-            if hasattr(right_val, "value"):
-                right_val = right_val.value
+            # if hasattr(left_val, "value"):
+            #     left_val = left_val.value
+            # if hasattr(right_val, "value"):
+            #     right_val = right_val.value
 
             # Intentar convertir strings numéricos a enteros o flotantes
             def try_cast_numeric(v):
@@ -670,23 +657,43 @@ def eval_expr(expr, variables, functions):
                         return v
                 return v
 
-            # --- OPERADORES BINARIOS ---
+             # --- OPERADORES BINARIOS ---
             if op == "+":
+                # Si alguno es OrionString, resultado OrionString
+                if isinstance(left_val, OrionString) or isinstance(right_val, OrionString):
+                    return OrionString(str(left_val) + str(right_val))
+                # Si alguno es OrionNumber, resultado OrionNumber
+                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
+                    return left_val + right_val  # <--- sin OrionNumber(...)
+                # Si alguno es string, resultado string
                 if isinstance(left_val, str) or isinstance(right_val, str):
                     return str(left_val) + str(right_val)
                 return left_val + right_val
 
             elif op == "-":
+                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
+                    return left_val - right_val
                 return left_val - right_val
 
             elif op == "*":
+                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
+                    return left_val * right_val
                 return left_val * right_val
-            
-            if op == "**":
+
+            elif op == "**":
+                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
+                    return left_val ** right_val
                 return left_val ** right_val
 
             elif op == "/":
+                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
+                    return left_val / right_val
                 return left_val / right_val
+
+            elif op == "%":
+                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
+                    return left_val % right_val
+                return left_val % right_val
 
             elif op in [">", "<", ">=", "<=", "==", "!="]:
                 # MEJORADO: Manejo especial para comparaciones con tipos
