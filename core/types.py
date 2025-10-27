@@ -164,10 +164,10 @@ class OrionBool:
 class OrionNumber:
     """Número con operaciones extendidas."""
     def __init__(self, value):
-        if isinstance(value, OrionNumber):
-            self.value = value.value
-        else:
-            self.value = int(value) if isinstance(value, bool) else value
+        # Desempaqueta OrionNumber anidados (varias capas)
+        while isinstance(value, OrionNumber):
+            value = value.value
+        self.value = int(value) if isinstance(value, bool) else value
 
     def __str__(self):
         return str(self.value)

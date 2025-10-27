@@ -506,6 +506,7 @@ def eval_call_args(args, variables, functions):
     return pos_args, kw_args
 
 def eval_expr(expr, variables, functions):
+    print("DEBUG EXPR:", expr)
     # 1. Caso nulo
     if expr is None:
         return None
@@ -657,43 +658,40 @@ def eval_expr(expr, variables, functions):
                         return v
                 return v
 
-             # --- OPERADORES BINARIOS ---
+            # --- OPERADORES BINARIOS ---
             if op == "+":
-                # Si alguno es OrionString, resultado OrionString
                 if isinstance(left_val, OrionString) or isinstance(right_val, OrionString):
                     return OrionString(str(left_val) + str(right_val))
-                # Si alguno es OrionNumber, resultado OrionNumber
-                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
-                    return left_val + right_val  # <--- sin OrionNumber(...)
-                # Si alguno es string, resultado string
-                if isinstance(left_val, str) or isinstance(right_val, str):
-                    return str(left_val) + str(right_val)
-                return left_val + right_val
+
+                # Forzar extracción de valores puros
+                l = left_val.value if hasattr(left_val, "value") else left_val
+                r = right_val.value if hasattr(right_val, "value") else right_val
+                return OrionNumber(l + r)
 
             elif op == "-":
-                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
-                    return left_val - right_val
-                return left_val - right_val
+                l = left_val.value if hasattr(left_val, "value") else left_val
+                r = right_val.value if hasattr(right_val, "value") else right_val
+                return OrionNumber(l - r)
 
             elif op == "*":
-                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
-                    return left_val * right_val
-                return left_val * right_val
-
-            elif op == "**":
-                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
-                    return left_val ** right_val
-                return left_val ** right_val
+                l = left_val.value if hasattr(left_val, "value") else left_val
+                r = right_val.value if hasattr(right_val, "value") else right_val
+                return OrionNumber(l * r)
 
             elif op == "/":
-                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
-                    return left_val / right_val
-                return left_val / right_val
+                l = left_val.value if hasattr(left_val, "value") else left_val
+                r = right_val.value if hasattr(right_val, "value") else right_val
+                return OrionNumber(l / r)
 
             elif op == "%":
-                if isinstance(left_val, OrionNumber) or isinstance(right_val, OrionNumber):
-                    return left_val % right_val
-                return left_val % right_val
+                l = left_val.value if hasattr(left_val, "value") else left_val
+                r = right_val.value if hasattr(right_val, "value") else right_val
+                return OrionNumber(l % r)
+
+            elif op == "**":
+                l = left_val.value if hasattr(left_val, "value") else left_val
+                r = right_val.value if hasattr(right_val, "value") else right_val
+                return OrionNumber(l ** r)
 
             elif op in [">", "<", ">=", "<=", "==", "!="]:
                 # MEJORADO: Manejo especial para comparaciones con tipos

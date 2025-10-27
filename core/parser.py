@@ -315,7 +315,6 @@ def parse_term(tokens, i):
         left = ("BINARY_OP", op, left, right)
     return left, i
 
-
 def parse_arith(tokens, i):
     left, i = parse_term(tokens, i)
     while i < len(tokens) and tokens[i][0] == "OP" and tokens[i][1] in ("+", "-"):
