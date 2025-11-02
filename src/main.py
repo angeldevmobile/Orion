@@ -20,12 +20,12 @@ def run_orion(filename):
         print(f"Error de sintaxis: {e}")
         return  # Detiene la ejecución si hay error
 
-    print("=== TOKENS ===")
-    print(tokens)
+    # print("=== TOKENS ===")
+    # print(tokens)
     ast = parse(tokens)
-    print("=== AST ===")
+    # print("=== AST ===")
     print(ast)
-    print("=== EJECUCIÓN ===")
+    # print("=== EJECUCIÓN ===")
     variables = {}
     functions = {}
     load_builtins(functions)  # Carga funciones nativas en el entorno de funciones
