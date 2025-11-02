@@ -25,7 +25,7 @@ VERSION = "1.1.0-alpha"
 # ║                 SECCIÓN: INTERFAZ BASE CLI           ║
 # ╚══════════════════════════════════════════════════════╝
 def banner():
-    """Muestra el banner tipo Gemini con gradiente"""
+    """Muestra el banner con gradiente"""
     fig = Figlet(font="ansi_shadow")
     logo = fig.renderText("> ORION")
 

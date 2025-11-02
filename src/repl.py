@@ -14,6 +14,7 @@ def start_repl():
 
         try:
             tokens = lex(code)
+            # print("TOKENS:", tokens)  
             ast = parse(tokens)
             result = evaluate(ast, variables, functions)
             

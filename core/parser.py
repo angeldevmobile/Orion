@@ -691,13 +691,11 @@ def parse_statement(tokens, i):
             else:
                 # No es asignación múltiple, manejar como expresión
                 expr, i = parse_expression(tokens, i)
-                return expr, i
+                return ("EXPR", expr), i
         
         # PASO 2: Verificar asignación simple (IDENT = ...)
         elif i+1 < len(tokens) and tokens[i+1][0] == "ASSIGN":
             var_name = tokens[i][1]
-            # CORRECCIÓN CRÍTICA: Parsear toda la expresión del lado derecho
-            # esto incluye llamadas como int(cell[1:]) - 1
             expr_value, j = parse_expression(tokens, i+2)
             return ("ASSIGN", var_name, expr_value), j
         
@@ -712,43 +710,11 @@ def parse_statement(tokens, i):
             bin_expr = ("BINARY_OP", op, left, right)
             return ("ASSIGN", var_name, bin_expr), j
         
-        # PASO 3: Intentar parsear como expresión compleja con posible asignación
+        # PASO 3: NO es asignación - parsear como expresión completa
         else:
-            saved_i = i
-            try:
-                # Intentar parsear el lado izquierdo completo (puede incluir indexación, acceso a atributos, etc.)
-                left_expr, temp_i = parse_expression_for_assignment(tokens, i)
-                
-                # Verificar si hay operador de asignación
-                if temp_i < len(tokens) and tokens[temp_i][0] == "ASSIGN":
-                    right_expr, final_i = parse_expression(tokens, temp_i + 1)
-                    
-                    # Determinar el tipo de asignación basado en la estructura del lado izquierdo
-                    if isinstance(left_expr, tuple):
-                        if left_expr[0] == "INDEX":
-                            return ("INDEX_ASSIGN", left_expr[1], left_expr[2], right_expr), final_i
-                        elif left_expr[0] == "ATTR_ACCESS":
-                            return ("ATTR_ASSIGN", left_expr[1], left_expr[2], right_expr), final_i
-                        elif left_expr[0] == "IDENT":
-                            return ("ASSIGN", left_expr[1], right_expr), final_i
-                        else:
-                            # Asignación a expresión compleja
-                            return ("COMPLEX_ASSIGN", left_expr, right_expr), final_i
-                    else:
-                        # Asignación simple de variable
-                        return ("ASSIGN", left_expr, right_expr), final_i
-                else:
-                    # No hay asignación, es solo una expresión
-                    return left_expr, temp_i  # Cambio: devolver expr directamente
-            except OrionSyntaxError:
-                # Si falla el parsing especializado, intentar como expresión normal
-                try:
-                    expr, i = parse_expression(tokens, saved_i)
-                    return expr, i  # Cambio: devolver expr directamente
-                except OrionSyntaxError:
-                    current_token = tokens[saved_i] if saved_i < len(tokens) else ("EOF", "")
-                    raise OrionSyntaxError(f"No se pudo parsear la declaración que comienza con '{current_token[1]}'")
-    
+            # CAMBIO CRÍTICO: Siempre usar parse_expression para toda la línea
+            expr, final_i = parse_expression(tokens, i)
+            return ("EXPR", expr), final_i
     # --- DEFAULT: Manejar como expresión solo si no es un token de bloque ---
     else:
         if kind == "LBRACE":
@@ -758,7 +724,7 @@ def parse_statement(tokens, i):
         
         try:
             expr, next_i = parse_expression(tokens, i)
-            return expr, next_i  # Cambio: devolver expr directamente
+            return ("EXPR", expr), next_i 
         except OrionSyntaxError as e:
             current_token = tokens[i] if i < len(tokens) else ("EOF", "")
             raise OrionSyntaxError(f"Error parseando expresión que comienza con '{current_token[1]}': {str(e)}")
@@ -822,6 +788,12 @@ def parse(tokens):
                 raise OrionSyntaxError(f"El parser no avanzó en el índice en parse() cerca de '{tokens[i]}'")
             ast.append(stmt)
             i = next_i
+            # --- AGREGADO: Si ya consumiste todos los tokens, sal del bucle ---
+            if i >= len(tokens):
+                break
+            # --- AGREGADO: Si el siguiente token es NEWLINE o SEMICOLON, sáltalo ---
+            while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
+                i += 1
         except OrionSyntaxError as e:
             current_token = tokens[i] if i < len(tokens) else ("EOF", "")
             print(f"[ORION PARSER WARNING] {str(e)} en línea cerca del token '{current_token[1]}'")
@@ -830,6 +802,7 @@ def parse(tokens):
             while i < len(tokens) and tokens[i][0] not in sync_tokens:
                 i += 1
             i += 1  # Salta el token de sincronización
+    print("AST generado:", ast)
     return ast
 
 def parse_fn_params(tokens, i):
