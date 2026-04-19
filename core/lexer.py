@@ -54,6 +54,8 @@ _TOKEN_SPECIFICATION = [
     ("HANDLE",   r"\bhandle\b"),
     ("YES",      r"\byes\b"),
     ("NO",       r"\bno\b"),
+    ("AS",       r"\bas\b"),
+    ("TAKE",     r"\btake\b"),
     ("TYPE",     r"\b(int|float|bool|string|list|dict|any|auto)\b"),
 
     # --- Programación Orientada a Objetos ---
@@ -101,6 +103,7 @@ _TOKEN_SPECIFICATION = [
     ("MOD",          r"%"),
     ("AND",          r"&&"),
     ("OR",           r"\|\|"),
+    ("COMPARE",      r"(==|!=|<=|>=|<|>)"),
     ("NOT",          r"!"),
     ("LPAREN",       r"\("),
     ("RPAREN",       r"\)"),
@@ -111,7 +114,6 @@ _TOKEN_SPECIFICATION = [
     ("SEMICOLON",    r";"),          
     ("THIN_ARROW",   r"->"),
     ("ARROW",        r"=>"),
-    ("COMPARE",      r"(==|!=|<=|>=|<|>)"),
     ("ASSIGN",       r"="),
     ("OP",           r"[+\-*/]"),
     ("DOT",          r"\."),
@@ -229,7 +231,8 @@ def lex(code, track_position=False):
             "ASYNC", "AWAIT", "CHANNEL", "PARALLEL", "LOCK", "THINK", "LEARN", "SENSE",
             "ADAPT", "EMBED", "PREDICT", "TRAIN", "SYNC", "SEND", "RECEIVE", "PIPE",
             "TASK", "STREAM", "ON_CREATE", "ON_EVENT", "ON_ERROR", "ME", "SUPER",
-            "NULL", "UNDEFINED", "AUTO", "ANY", "AMPERSAND", "AT"
+            "NULL", "UNDEFINED", "AUTO", "ANY", "AMPERSAND", "AT",
+            "AS", "TAKE"
         ):
             tokens.append(Token(kind, value, line, column) if track_position
                          else (kind, value, line))

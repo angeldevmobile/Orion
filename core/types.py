@@ -197,6 +197,17 @@ class OrionNumber:
     def __pow__(self, other):
         return OrionNumber(self.value ** self._unwrap(other))
 
+    # ========= Conversión a int/float (para indexado y aritmética Python) =========
+    def __int__(self):
+        return int(self.value)
+
+    def __float__(self):
+        return float(self.value)
+
+    def __index__(self):
+        """Permite usar OrionNumber como índice en listas Python."""
+        return int(self.value)
+
     # ========= Comparaciones =========
     def __eq__(self, other):
         return OrionBool(self.value == self._unwrap(other))

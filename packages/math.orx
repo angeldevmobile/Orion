@@ -1,0 +1,79 @@
+-- math.orx — Módulo de matemáticas para Orion
+-- Uso: use "packages/math"
+--      show math.sqrt(16)
+
+-- Constantes
+PI = 3.141592653589793
+E  = 2.718281828459045
+TAU = 6.283185307179586
+PHI = 1.6180339887498949
+
+-- Raíz cuadrada (aproximación Newton-Raphson)
+fn sqrt(n) {
+    if n < 0 { return -1 }
+    if n == 0 { return 0 }
+    x = n
+    x = (x + n / x) / 2
+    x = (x + n / x) / 2
+    x = (x + n / x) / 2
+    x = (x + n / x) / 2
+    x = (x + n / x) / 2
+    x = (x + n / x) / 2
+    return x
+}
+
+-- Valor absoluto
+fn abs(n) {
+    if n < 0 { return n * -1 }
+    return n
+}
+
+-- Máximo entre dos números
+fn max(a, b) {
+    if a > b { return a }
+    return b
+}
+
+-- Mínimo entre dos números
+fn min(a, b) {
+    if a < b { return a }
+    return b
+}
+
+-- Potencia (base ** exp)
+fn pow(base, exp) {
+    result = 1
+    i = 0
+    while i < exp {
+        result = result * base
+        i = i + 1
+    }
+    return result
+}
+
+-- Factorial
+fn factorial(n) {
+    if n <= 1 { return 1 }
+    return n * factorial(n - 1)
+}
+
+-- Redondear hacia abajo (floor)
+fn floor(n) {
+    i = int(n)
+    if n < 0 && n != i { return i - 1 }
+    return i
+}
+
+-- Redondear hacia arriba (ceil)
+fn ceil(n) {
+    i = int(n)
+    if n > i { return i + 1 }
+    return i
+}
+
+-- Clamp — limitar un valor entre min y max
+fn clamp(val, lo, hi) {
+    if val < lo { return lo }
+    if val > hi { return hi }
+    return val
+}

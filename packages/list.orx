@@ -1,0 +1,156 @@
+-- list.orx — Utilidades de listas para Orion
+-- Uso: use "packages/list"
+--      use "packages/list" as lst
+--      use "packages/list" take [sort, unique, sum]
+
+-- Sumar todos los elementos de una lista numérica
+fn sum(lst) {
+    total = 0
+    i = 0
+    while i < len(lst) {
+        total = total + lst[i]
+        i = i + 1
+    }
+    return total
+}
+
+-- Verificar si una lista contiene un elemento
+fn contains(lst, item) {
+    i = 0
+    while i < len(lst) {
+        if lst[i] == item {
+            return yes
+        }
+        i = i + 1
+    }
+    return no
+}
+
+-- Primer elemento de la lista
+fn first(lst) {
+    return lst[0]
+}
+
+-- Último elemento de la lista
+fn last(lst) {
+    return lst[len(lst) - 1]
+}
+
+-- Helper interno: copia la lista saltando el índice dado
+fn _skip(lst, skip_idx) {
+    result = []
+    i = 0
+    while i < len(lst) {
+        if i != skip_idx {
+            result.append(lst[i])
+        }
+        i = i + 1
+    }
+    return result
+}
+
+-- Ordenar lista en orden ascendente (selection sort — retorna nueva lista)
+fn sort(lst) {
+    remaining = []
+    i = 0
+    while i < len(lst) {
+        remaining.append(lst[i])
+        i = i + 1
+    }
+    result = []
+    while len(remaining) > 0 {
+        min_val = remaining[0]
+        min_idx = 0
+        j = 1
+        while j < len(remaining) {
+            if remaining[j] < min_val {
+                min_val = remaining[j]
+                min_idx = j
+            }
+            j = j + 1
+        }
+        result.append(min_val)
+        remaining = _skip(remaining, min_idx)
+    }
+    return result
+}
+
+-- Eliminar duplicados (preserva el orden de primera aparición)
+fn unique(lst) {
+    result = []
+    i = 0
+    while i < len(lst) {
+        found = no
+        j = 0
+        while j < len(result) {
+            if result[j] == lst[i] {
+                found = yes
+            }
+            j = j + 1
+        }
+        if found == no {
+            result.append(lst[i])
+        }
+        i = i + 1
+    }
+    return result
+}
+
+-- Combinar dos listas en pares [[a1,b1], [a2,b2], ...]
+fn zip(lst1, lst2) {
+    n = len(lst1)
+    if len(lst2) < n {
+        n = len(lst2)
+    }
+    result = []
+    i = 0
+    while i < n {
+        result.append([lst1[i], lst2[i]])
+        i = i + 1
+    }
+    return result
+}
+
+-- Aplanar una lista de listas (un nivel)
+fn flatten(lst) {
+    result = []
+    i = 0
+    while i < len(lst) {
+        item = lst[i]
+        if type(item) == "list" {
+            j = 0
+            while j < len(item) {
+                result.append(item[j])
+                j = j + 1
+            }
+        } else {
+            result.append(item)
+        }
+        i = i + 1
+    }
+    return result
+}
+
+-- Invertir el orden de una lista
+fn reverse(lst) {
+    result = []
+    i = len(lst) - 1
+    while i >= 0 {
+        result.append(lst[i])
+        i = i - 1
+    }
+    return result
+}
+
+-- Obtener sub-lista desde start hasta end (exclusivo)
+fn slice(lst, start, end) {
+    result = []
+    i = start
+    while i < end {
+        if i < len(lst) {
+            result.append(lst[i])
+        }
+        i = i + 1
+    }
+    return result
+}

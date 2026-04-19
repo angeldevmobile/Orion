@@ -1,0 +1,65 @@
+-- test_phase2b.orx — Test del sistema de módulos extendido
+-- Prueba: alias (as), imports selectivos (take), caché, list.orx, strings fixes
+
+-- === 1. ALIAS CON AS ===
+show "=== use as alias ==="
+use "packages/math" as m
+show m.sqrt(25)       -- 5.0
+show m.PI             -- 3.14159...
+
+-- === 2. IMPORTS SELECTIVOS CON TAKE ===
+show "=== use take selectivo ==="
+use "packages/math" take [pow, factorial]
+show pow(2, 8)        -- 256
+show factorial(6)     -- 720
+
+-- === 3. AS + TAKE COMBINADOS ===
+show "=== use as + take ==="
+use "packages/strings" as str take [repeat, reverse]
+show repeat("Hola ", 3)   -- Hola Hola Hola
+show reverse("mundo")     -- odnum
+
+-- === 4. CACHÉ: segundo use del mismo módulo no re-parsea ===
+show "=== cache de módulos ==="
+use "packages/math" as m2
+show m2.sqrt(9)       -- 3.0 (cargado desde caché)
+
+-- === 5. STRINGS FIX: capitalize y title ===
+show "=== strings capitalize y title ==="
+use "packages/strings" as s
+show s.capitalize("hola mundo")   -- Hola mundo
+show s.title("el rey leon")       -- El Rey Leon
+
+-- === 6. LIST MODULE ===
+show "=== packages/list ==="
+use "packages/list" as lst
+
+nums = [5, 3, 8, 1, 9, 2, 7, 4, 6]
+show lst.sort(nums)         -- [1,2,3,4,5,6,7,8,9]
+show lst.sum([1,2,3,4,5])   -- 15
+show lst.unique([1,2,2,3,1,4,3])  -- [1,2,3,4]
+show lst.first([10,20,30])  -- 10
+show lst.last([10,20,30])   -- 30
+show lst.contains([1,2,3], 2)  -- yes
+show lst.contains([1,2,3], 9)  -- no
+show lst.reverse([1,2,3,4])    -- [4,3,2,1]
+
+zipped = lst.zip([1,2,3], ["a","b","c"])
+show zipped    -- [[1,a],[2,b],[3,c]]
+
+-- === 7. LIST TAKE SELECTIVO ===
+show "=== list take ==="
+use "packages/list" take [sort, sum, unique]
+show sort([9,1,5,3])   -- [1,3,5,9]
+show sum([10,20,30])   -- 60
+show unique([1,1,2,2,3]) -- [1,2,3]
+
+-- === 8. IO MODULE (lib/io.py) ===
+show "=== use io ==="
+use "io" as io
+show "io cargado ok"   -- solo verificar que cargó sin llamar ask
+
+-- === 9. JSON MODULE ===
+show "=== use json ==="
+use "json" as j
+show "json cargado ok"

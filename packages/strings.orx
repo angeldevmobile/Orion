@@ -1,0 +1,94 @@
+-- strings.orx — Módulo de utilidades de strings para Orion
+-- Uso: use "packages/strings"
+--      show strings.capitalize("hola mundo")
+
+-- Capitalizar primera letra
+fn capitalize(s) {
+    chars = s.split("")
+    result = ""
+    i = 0
+    while i < len(chars) {
+        if i == 0 {
+            result = result + chars[0].upper()
+        } else {
+            result = result + chars[i]
+        }
+        i = i + 1
+    }
+    return result
+}
+
+-- Repetir un string n veces
+fn repeat(s, n) {
+    result = ""
+    i = 0
+    while i < n {
+        result = result + s
+        i = i + 1
+    }
+    return result
+}
+
+-- Verificar si el string está vacío
+fn is_empty(s) {
+    return len(s.trim()) == 0
+}
+
+-- Invertir un string
+fn reverse(s) {
+    chars = s.split("")
+    result = ""
+    i = len(chars) - 1
+    while i >= 0 {
+        result = result + chars[i]
+        i = i - 1
+    }
+    return result
+}
+
+-- Contar ocurrencias de sub en s
+fn count(s, sub) {
+    parts = s.split(sub)
+    return len(parts) - 1
+}
+
+-- Padding izquierdo
+fn pad_left(s, width, char) {
+    result = s
+    while len(result) < width {
+        result = char + result
+    }
+    return result
+}
+
+-- Padding derecho
+fn pad_right(s, width, char) {
+    result = s
+    while len(result) < width {
+        result = result + char
+    }
+    return result
+}
+
+-- Convertir a título (primera letra de cada palabra en mayúscula)
+fn title(s) {
+    words = s.split(" ")
+    result = []
+    i = 0
+    while i < len(words) {
+        w = words[i]
+        if len(w) > 0 {
+            chars = w.split("")
+            first = chars[0].upper()
+            rest_str = ""
+            j = 1
+            while j < len(chars) {
+                rest_str = rest_str + chars[j]
+                j = j + 1
+            }
+            result.append(first + rest_str)
+        }
+        i = i + 1
+    }
+    return result.join(" ")
+}

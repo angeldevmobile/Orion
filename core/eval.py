@@ -310,6 +310,9 @@ def _wrap_orion_type(val):
     elif isinstance(val, list) and not isinstance(val, OrionList):
         return OrionList(val)
     elif isinstance(val, dict) and not isinstance(val, OrionDict):
+        # Don't wrap function definitions — they must stay as plain Python dicts
+        if val.get("type") in ("FN_DEF", "ANON_FN", "NATIVE_FN"):
+            return val
         return OrionDict(val)
     return val
 
@@ -584,7 +587,15 @@ def _call_fn_value(fn_val, pos_args, kw_args, variables, functions):
         for p, a in zip(params, pos_args):
             local_vars[p] = a
         local_vars.update(kw_args)
-        return evaluate(body, local_vars, functions, inside_fn=True)
+        _mod_fns = fn_val.get("module_fns", {})
+        _fn_functions = {**_mod_fns, **functions} if _mod_fns else functions
+        result = evaluate(body, local_vars, _fn_functions, inside_fn=True)
+        # Write back mutations to captured closure variables so state persists
+        if closure:
+            for k in list(closure.keys()):
+                if k in local_vars:
+                    fn_val["closure"][k] = local_vars[k]
+        return result.val if isinstance(result, _ReturnValue) else result
 
     # Lambda AST: ('LAMBDA', params, body)
     if isinstance(fn_val, tuple) and fn_val[0] == "LAMBDA":
@@ -637,8 +648,12 @@ def eval_expr(expr, variables, functions):
             return name  # Retorna el nombre del tipo como string
         if name in variables:
             return variables[name]
-        else:
-            raise OrionRuntimeError(f"Variable '{name}' no definida")
+        # Buscar función por nombre (para pasar funciones como valores)
+        if name in functions:
+            fn_list = functions[name]
+            if isinstance(fn_list, list) and len(fn_list) > 0:
+                return fn_list[0]  # Retorna la primera definición de función
+        raise OrionRuntimeError(f"Variable '{name}' no definida")
 
     # 3. Caso: la expresión es una cadena y coincide con una variable existente
     if isinstance(expr, str) and expr in variables:
@@ -773,8 +788,10 @@ def eval_expr(expr, variables, functions):
 
             # --- OPERADORES BINARIOS ---
             if op == "+":
-                if isinstance(left_val, OrionString) or isinstance(right_val, OrionString):
-                    return OrionString(str(left_val) + str(right_val))
+                if isinstance(left_val, (str, OrionString)) or isinstance(right_val, (str, OrionString)):
+                    left_s = left_val.value if isinstance(left_val, OrionString) else str(left_val)
+                    right_s = right_val.value if isinstance(right_val, OrionString) else str(right_val)
+                    return left_s + right_s
 
                 # Forzar extracción de valores puros
                 l = left_val.value if hasattr(left_val, "value") else left_val
@@ -807,36 +824,43 @@ def eval_expr(expr, variables, functions):
                 return OrionNumber(l ** r)
 
             elif op in [">", "<", ">=", "<=", "==", "!="]:
-                # MEJORADO: Manejo especial para comparaciones con tipos
+                # Manejo especial SOLO para comparaciones de tipos: type(x) == "list"
                 if op in ["==", "!="]:
-                    # Función para normalizar nombres de tipo
-                    def normalize_type_name(val):
-                        if isinstance(val, str):
-                            if val in ["list", "string", "number", "bool", "dict"]:
+                    ORION_TYPE_NAMES = {"list", "string", "number", "bool", "dict"}
+                    # Solo hacer comparación de tipos si uno de los lados es un nombre de tipo
+                    if isinstance(right_val, str) and right_val in ORION_TYPE_NAMES:
+                        def normalize_type_name(val):
+                            if isinstance(val, str) and val in ORION_TYPE_NAMES:
                                 return val
-                            return val
-                        elif hasattr(val, '__class__'):
-                            class_name = val.__class__.__name__
-                            if class_name == 'OrionList' or isinstance(val, list):
-                                return "list"
-                            elif class_name == 'OrionString' or isinstance(val, str):
-                                return "string"
-                            elif class_name == 'OrionNumber' or isinstance(val, (int, float)):
-                                return "number"
-                            elif class_name == 'OrionBool' or isinstance(val, bool):
-                                return "bool"
-                            elif class_name == 'OrionDict' or isinstance(val, dict):
-                                return "dict"
-                            else:
-                                return class_name.lower()
-                        return str(type(val).__name__).lower()
-                    
-                    left_type = normalize_type_name(left_val)
-                    right_type = normalize_type_name(right_val)
-                    
-                    if (left_type in ["list", "string", "number", "bool", "dict"] or 
-                        right_type in ["list", "string", "number", "bool", "dict"]):
-                        result = (left_type == right_type) if op == "==" else (left_type != right_type)
+                            class_name = type(val).__name__
+                            if class_name in ('OrionList', 'list'): return "list"
+                            elif class_name in ('OrionString',): return "string"
+                            elif isinstance(val, str): return "string"
+                            elif class_name in ('OrionNumber',): return "number"
+                            elif isinstance(val, (int, float)): return "number"
+                            elif class_name in ('OrionBool',): return "bool"
+                            elif isinstance(val, bool): return "bool"
+                            elif class_name in ('OrionDict', 'dict'): return "dict"
+                            return class_name.lower()
+                        left_type = normalize_type_name(left_val)
+                        result = (left_type == right_val) if op == "==" else (left_type != right_val)
+                        return result
+                    elif isinstance(left_val, str) and left_val in ORION_TYPE_NAMES:
+                        def normalize_type_name(val):
+                            if isinstance(val, str) and val in ORION_TYPE_NAMES:
+                                return val
+                            class_name = type(val).__name__
+                            if class_name in ('OrionList', 'list'): return "list"
+                            elif class_name in ('OrionString',): return "string"
+                            elif isinstance(val, str): return "string"
+                            elif class_name in ('OrionNumber',): return "number"
+                            elif isinstance(val, (int, float)): return "number"
+                            elif class_name in ('OrionBool',): return "bool"
+                            elif isinstance(val, bool): return "bool"
+                            elif class_name in ('OrionDict', 'dict'): return "dict"
+                            return class_name.lower()
+                        right_type = normalize_type_name(right_val)
+                        result = (left_val == right_type) if op == "==" else (left_val != right_type)
                         return result
 
                 # === FIX: Extraer valores de wrappers ANTES de cualquier comparación ===
@@ -1169,7 +1193,10 @@ def eval_expr(expr, variables, functions):
                 for p, a in zip(params, pos_args):
                     local_vars[p] = a
                 local_vars.update(kw_args)
-                return evaluate(body, local_vars, functions, inside_fn=True)
+                _mod_fns = fn_def.get("module_fns", {})
+                _merged_fns = {**_mod_fns, **functions} if _mod_fns else functions
+                _r = evaluate(body, local_vars, _merged_fns, inside_fn=True)
+                return _r.val if isinstance(_r, _ReturnValue) else _r
 
             # Función anónima (valor de variable con cuerpo AST)
             elif fn_def["type"] == "ANON_FN":
@@ -1186,7 +1213,10 @@ def eval_expr(expr, variables, functions):
                 for p, a in zip(params, pos_args):
                     local_vars[p] = a
                 local_vars.update(kw_args)
-                return evaluate(body, local_vars, functions, inside_fn=True)
+                _mod_fns = fn_def.get("module_fns", {})
+                _merged_fns = {**_mod_fns, **functions} if _mod_fns else functions
+                _r = evaluate(body, local_vars, _merged_fns, inside_fn=True)
+                return _r.val if isinstance(_r, _ReturnValue) else _r
             
             else:
                 raise OrionFunctionError(f"Tipo de función desconocido: {fn_def.get('type', 'UNKNOWN')}")
@@ -1207,6 +1237,18 @@ def eval_expr(expr, variables, functions):
             if kwargs:
                 for k, v in kwargs.items():
                     kw_args[k] = to_native(eval_expr(v, variables, functions))
+
+            # === DISPATCH TEMPRANO PARA OBJETOS MÓDULO/NAMESPACE ===
+            # Antes de los handlers de string/list, despachar objetos que no son tipos primitivos
+            if hasattr(obj_val, method_name) and not isinstance(obj_val, (str, list, dict, OrionString, OrionList, OrionDict, OrionNumber, OrionBool)):
+                _method = getattr(obj_val, method_name)
+                if isinstance(_method, dict) and _method.get("type") in ("FN_DEF", "ANON_FN"):
+                    return _call_fn_value(_method, pos_args, kw_args, variables, functions)
+                elif callable(_method):
+                    return _method(*pos_args, **kw_args)
+                else:
+                    return _method
+
             if method_name == "isdigit":
                 if isinstance(obj_val, int):
                     return True
@@ -1317,6 +1359,8 @@ def eval_expr(expr, variables, functions):
                 s = _get_str(obj_val)
                 if pos_args:
                     sep = str(pos_args[0]) if not isinstance(pos_args[0], str) else pos_args[0]
+                    if sep == "":
+                        return list(s)  # split("") → lista de caracteres
                     return s.split(sep)
                 return s.split()
 
@@ -1611,18 +1655,22 @@ def eval_expr(expr, variables, functions):
                 except Exception as e:
                     raise OrionRuntimeError(f"Error en método AI '{method_name}': {str(e)}")
 
-            # === FALLBACK A lib.math ===
-            elif hasattr(orion_math, method_name):
-                fn = getattr(orion_math, method_name)
-                return fn(obj_val, *pos_args, **kw_args)
-            
-            # === MÉTODO NATIVO DEL OBJETO ===
+            # === MÉTODO NATIVO DEL OBJETO (incluyendo módulos Orion) ===
+            # Va ANTES del fallback orion_math para que módulos con nombre colisionante funcionen
             elif hasattr(obj_val, method_name):
                 method = getattr(obj_val, method_name)
-                if callable(method):
+                # FN_DEF dict (función definida en módulo .orx)
+                if isinstance(method, dict) and method.get("type") in ("FN_DEF", "ANON_FN"):
+                    return _call_fn_value(method, pos_args, kw_args, variables, functions)
+                elif callable(method):
                     return method(*pos_args, **kw_args)
                 else:
                     return method
+
+            # === FALLBACK A lib.math (solo cuando obj_val es un número/valor, no módulo) ===
+            elif hasattr(orion_math, method_name):
+                fn = getattr(orion_math, method_name)
+                return fn(obj_val, *pos_args, **kw_args)
             
             else:
                 raise OrionFunctionError(
@@ -1706,6 +1754,32 @@ def eval_expr(expr, variables, functions):
 
     # 6. Si no coincide con nada
     return expr
+
+# === CACHÉ DE MÓDULOS (evita re-parsear el mismo archivo) ===
+_MODULE_CACHE = {}
+
+class _ReturnValue:
+    """Sentinel para distinguir 'return val' explícito de valores de expresiones."""
+    __slots__ = ("val",)
+    def __init__(self, val):
+        self.val = val
+
+def _apply_module_binding(variables, mod_obj, module_name, alias, selective):
+    """Aplica alias (as) y/o imports selectivos (take) al namespace del módulo."""
+    bind_name = alias if alias is not None else module_name
+    if selective is not None:
+        for sel_name in selective:
+            if hasattr(mod_obj, sel_name):
+                variables[sel_name] = getattr(mod_obj, sel_name)
+            else:
+                raise OrionRuntimeError(
+                    f"'{sel_name}' no existe en módulo '{module_name}'\n"
+                    f"  Verifica el nombre con take [nombre_correcto]"
+                )
+        if alias is not None:
+            variables[bind_name] = mod_obj
+    else:
+        variables[bind_name] = mod_obj
 
 def evaluate(ast, variables=None, functions=None, inside_fn=False):
     if variables is None:
@@ -1877,11 +1951,16 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
     i = 0
     while i < len(ast):
         node = ast[i]
+        # Strip trailing line number (same as bytecode_compiler does)
+        if isinstance(node, tuple) and len(node) >= 2 and isinstance(node[-1], int) and not isinstance(node[-1], bool):
+            node = node[:-1]
         tag = node[0]
 
         # --- Soporte para USE con o sin comillas ---
         if tag == "USE":
-            _, module_path = node
+            module_path = node[1]
+            alias = node[2] if len(node) > 2 else None
+            selective = node[3] if len(node) > 3 else None
             if module_path.startswith('"') and module_path.endswith('"'):
                 base_name = module_path[1:-1]
             else:
@@ -2152,43 +2231,65 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 os.path.join(os.getcwd(), base_name + ".orion"),
             ]
             orion_file = next((p for p in candidate_paths if os.path.exists(p)), None)
+            lib_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "lib", base_name + ".py"))
             py_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "modules", base_name + ".py"))
 
             #  Si existe un módulo Orion local
             if orion_file and os.path.exists(orion_file):
-                from core.lexer import lex
-                from core.parser import parse
-                with open(orion_file, "r", encoding="utf-8") as f:
-                    file_code = f.read() 
-                # Guardar el archivo actual para resolución de rutas relativas
-                prev_file = variables.get("_current_file")
-                variables["_current_file"] = orion_file
-                mod_vars = variables.copy()
-                mod_vars["_current_file"] = orion_file
-                imported_tokens = lex(file_code)
-                imported_ast = parse(imported_tokens)
-                # Ejecutar en scope separado para aislar variables del módulo
-                mod_functions = functions.copy() if hasattr(functions, 'copy') else dict(functions)
-                evaluate(imported_ast, mod_vars, mod_functions)
-                # Exportar solo funciones definidas en el módulo al scope actual
-                for fn_key in mod_functions:
-                    if fn_key not in functions and fn_key not in ("_variables",):
-                        functions[fn_key] = mod_functions[fn_key]
-                # Exportar variables públicas (no comenzando con _)
+                _abs_orion = os.path.abspath(orion_file)
                 module_name = os.path.splitext(os.path.basename(orion_file))[0]
+                if _abs_orion in _MODULE_CACHE:
+                    mod_obj = _MODULE_CACHE[_abs_orion]
+                    code.info(f"Módulo '{module_name}' cargado desde caché", module="orion-loader")
+                else:
+                    from core.lexer import lex as _lex
+                    from core.parser import parse as _parse
+                    with open(orion_file, "r", encoding="utf-8") as f:
+                        file_code = f.read()
+                    prev_file = variables.get("_current_file")
+                    # Scope aislado — el módulo no contamina el scope global
+                    mod_vars = {"_current_file": orion_file}
+                    mod_fns = {}
+                    imported_tokens = _lex(file_code)
+                    imported_ast = _parse(imported_tokens)
+                    evaluate(imported_ast, mod_vars, mod_fns, inside_fn=False)
+                    # Construir objeto namespace del módulo
+                    class OrionModule:
+                        def __repr__(self): return f"<module '{module_name}'>"
+                    mod_obj = OrionModule()
+                    # Variables públicas del módulo
+                    for k, v in mod_vars.items():
+                        if not k.startswith("_"):
+                            setattr(mod_obj, k, v)
+                    # Funciones definidas en el módulo (FN_DEF dicts)
+                    for fn_key, fn_val in mod_fns.items():
+                        if not fn_key.startswith("_"):
+                            fn_def = fn_val[0] if isinstance(fn_val, list) and fn_val else fn_val
+                            fn_def["module_fns"] = mod_fns  # privadas accesibles desde el módulo
+                            setattr(mod_obj, fn_key, fn_def)
+                    _MODULE_CACHE[_abs_orion] = mod_obj
+                    if prev_file is not None:
+                        variables["_current_file"] = prev_file
+                    elif "_current_file" in variables:
+                        del variables["_current_file"]
+                    code.ok(f"Módulo '{module_name}' cargado desde '{orion_file}'", module="orion-loader")
+                _apply_module_binding(variables, mod_obj, module_name, alias, selective)
+
+            # Si existe un módulo Python en /lib/
+            elif os.path.exists(lib_file):
+                import importlib.util as _ilu
+                module_name = base_name
+                spec = _ilu.spec_from_file_location(module_name, lib_file)
+                lib_mod = _ilu.module_from_spec(spec)
+                spec.loader.exec_module(lib_mod)
                 class OrionModule:
-                    pass
+                    def __repr__(self): return f"<module '{module_name}'>"
                 mod_obj = OrionModule()
-                for k, v in mod_vars.items():
-                    if not k.startswith("_"):
-                        setattr(mod_obj, k, v)
-                        variables[k] = v
-                variables[module_name] = mod_obj
-                if prev_file is not None:
-                    variables["_current_file"] = prev_file
-                elif "_current_file" in variables:
-                    del variables["_current_file"]
-                code.ok(f"Módulo Orion '{base_name}' cargado desde '{orion_file}'", module="orion-loader")
+                for attr_name in dir(lib_mod):
+                    if not attr_name.startswith("_"):
+                        setattr(mod_obj, attr_name, getattr(lib_mod, attr_name))
+                _apply_module_binding(variables, mod_obj, module_name, alias, selective)
+                code.ok(f"Módulo lib '{module_name}' cargado con namespace", module="lib-loader")
 
             # Si existe un módulo Python en /modules/
             elif os.path.exists(py_file):
@@ -2196,11 +2297,17 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
                 from modules import load_module
                 mod_exports = load_module(variables, base_name)
-                code.ok(f"Módulo Python '{base_name}' cargado con {len(mod_exports)} funciones", module="python-loader")
-
+                # Construir objeto namespace además de la carga global
+                module_name = base_name
+                class OrionModule:
+                    def __repr__(self): return f"<module '{module_name}'>"
+                mod_obj = OrionModule()
                 for fname, fref in mod_exports.items():
                     if callable(fref):
+                        setattr(mod_obj, fname, fref)
                         register_native_function(functions, fname, fref)
+                _apply_module_binding(variables, mod_obj, module_name, alias, selective)
+                code.ok(f"Módulo Python '{base_name}' cargado con {len(mod_exports)} funciones", module="python-loader")
 
             else:
                 raise OrionRuntimeError(
@@ -2238,12 +2345,12 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 result = eval_expr(node[1], variables, functions)
             else:
                 result = eval_expr(node, variables, functions)
-            if inside_fn:
+            if isinstance(result, _ReturnValue):
                 return result
         
         elif tag in ["BINARY_OP", "UNARY_OP", "CALL", "CALL_METHOD", "INDEX", "IDENT", "LIST", "DICT", "LAMBDA"]:
             result = eval_expr(node, variables, functions)
-            if inside_fn:
+            if isinstance(result, _ReturnValue):
                 return result
         
         # --- MANEJO DE CONTROL DE FLUJO ---
@@ -2614,6 +2721,22 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 elif var_name in variables:
                     del variables[var_name]
         
+        elif tag == "WHILE":
+            condition = node[1]
+            body = node[2]
+            try:
+                while eval_expr(condition, variables, functions):
+                    try:
+                        result = evaluate(body, variables, functions, inside_fn=inside_fn)
+                        if inside_fn and result is not None:
+                            return result
+                    except ContinueException:
+                        continue
+                    except BreakException:
+                        break
+            except BreakException:
+                pass
+
         elif tag == "IF":
             _, condition, body_true, body_false = node
             if eval_expr(condition, variables, functions):
@@ -2659,7 +2782,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
 
         elif tag == "RETURN":
             _, value = node
-            return eval_expr(value, variables, functions) if value is not None else None
+            return _ReturnValue(eval_expr(value, variables, functions) if value is not None else None)
 
         elif tag == "MATCH":
             result = eval_expr(node, variables, functions)
@@ -2671,37 +2794,22 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             handler = node[2] if len(node) > 2 else None
             
             try:
-                # Ejecutar el bloque attempt
-                result = None
                 for stmt in try_body:
-                    result = evaluate([stmt], variables, functions, inside_fn=True)
-                return result if inside_fn else None
+                    evaluate([stmt], variables, functions, inside_fn=inside_fn)
             except Exception as e:
                 # Si hay un handler, ejecutarlo
                 if handler and handler[0] == "HANDLE":
                     error_var = handler[1]
                     handle_body = handler[2]
                     
-                    # Crear un nuevo scope para el handler con la variable de error
                     handler_vars = variables.copy()
-                    # Convertir la excepción a un formato más amigable
                     error_msg = str(e) if hasattr(e, '__str__') else repr(e)
                     handler_vars[error_var] = error_msg
                     
-                    result = None
                     for stmt in handle_body:
-                        result = evaluate([stmt], handler_vars, functions, inside_fn=True)
-                    return result if inside_fn else None
+                        evaluate([stmt], handler_vars, functions, inside_fn=inside_fn)
                 else:
-                    # Si no hay handler, re-lanzar la excepción
                     raise e
-
-        elif tag == "HANDLE":
-            # HANDLE nodes are processed as part of ATTEMPT
-            raise OrionRuntimeError("HANDLE encontrado fuera de contexto ATTEMPT")
-
-        else:
-            raise OrionRuntimeError(f"Nodo desconocido en AST: {tag}")
 
         i += 1
         

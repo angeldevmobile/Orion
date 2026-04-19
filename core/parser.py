@@ -117,11 +117,31 @@ def parse_primary(tokens, i):
     if kind == "NUMBER":
         return value, i + 1
     elif kind == "STRING":
-        return value, i + 1
+        expr = value
+        i += 1
+        # Support method calls on string literals: "hello".upper()
+        while i < len(tokens) and tokens[i][0] == "DOT":
+            i += 1
+            if i >= len(tokens) or tokens[i][0] != "IDENT":
+                raise OrionSyntaxError("Se esperaba un identificador después de '.'")
+            attr_name = tokens[i][1]
+            i += 1
+            if i < len(tokens) and tokens[i][0] == "LPAREN":
+                args, kwargs, i = parse_call_args(tokens, i)
+                expr = ("CALL_METHOD", attr_name, expr, args, kwargs)
+            else:
+                expr = ("ATTR_ACCESS", expr, attr_name)
+        return expr, i
     elif kind == "BOOL":
         return value.value, i + 1
     elif kind == "TYPE":
-        return ("TYPE", value), i + 1
+        expr = ("IDENT", value)
+        i += 1
+        # Treat int(...), float(...) etc. as function calls
+        if i < len(tokens) and tokens[i][0] == "LPAREN":
+            args, kwargs, i = parse_call_args(tokens, i)
+            expr = ("CALL", expr, args, kwargs)
+        return expr, i
 
     elif kind == "IDENT":
         expr = ("IDENT", value)
@@ -189,7 +209,7 @@ def parse_primary(tokens, i):
 
         # Contar niveles de anidación hasta cerrar todos los '('
         while i < len(tokens) and depth > 0:
-            tkind, _ = tokens[i]
+            tkind = tokens[i][0]
             if tkind == "LPAREN":
                 depth += 1
             elif tkind == "RPAREN":
@@ -309,7 +329,10 @@ def parse_expression_until(tokens, i, stop_tokens):
 
 def parse_term(tokens, i):
     left, i = parse_power(tokens, i)
-    while i < len(tokens) and tokens[i][0] == "OP" and tokens[i][1] in ("*", "/", "%"):
+    while i < len(tokens) and (
+        (tokens[i][0] == "OP" and tokens[i][1] in ("*", "/", "%")) or
+        tokens[i][0] == "MOD"
+    ):
         op = tokens[i][1]
         right, i = parse_power(tokens, i+1)
         left = ("BINARY_OP", op, left, right)
@@ -460,12 +483,38 @@ def _parse_statement(tokens, i):
         
         return ("ATTEMPT", body_attempt, handler), i
 
-    # --- USE statement (import eliminado, usar solo 'use') ---
+    # --- USE statement con alias (as) e imports selectivos (take) ---
     elif kind == "USE":
         if i+1 >= len(tokens) or tokens[i+1][0] not in ("STRING", "IDENT"):
             raise OrionSyntaxError("Se esperaba un módulo después de 'use'")
         module_path = tokens[i+1][1]
-        return ("USE", module_path), i + 2
+        j = i + 2
+        alias = None
+        selective = None
+        # use "path" as nombre
+        if j < len(tokens) and tokens[j][0] == "AS":
+            j += 1
+            if j >= len(tokens) or tokens[j][0] != "IDENT":
+                raise OrionSyntaxError("Se esperaba un nombre después de 'as'")
+            alias = tokens[j][1]
+            j += 1
+        # use "path" take [fn1, fn2, ...]
+        if j < len(tokens) and tokens[j][0] == "TAKE":
+            j += 1
+            if j >= len(tokens) or tokens[j][0] != "LBRACKET":
+                raise OrionSyntaxError("Se esperaba '[' después de 'take'")
+            j += 1  # skip [
+            selective = []
+            while j < len(tokens) and tokens[j][0] != "RBRACKET":
+                if tokens[j][0] == "IDENT":
+                    selective.append(tokens[j][1])
+                elif tokens[j][0] != "COMMA":
+                    raise OrionSyntaxError(f"Se esperaba un nombre en lista de 'take', no '{tokens[j][1]}'")
+                j += 1
+            if j >= len(tokens):
+                raise OrionSyntaxError("Se esperaba ']' para cerrar 'take'")
+            j += 1  # skip ]
+        return ("USE", module_path, alias, selective), j
 
     # --- PRINT/SHOW statement ---
     elif kind == "PRINT":

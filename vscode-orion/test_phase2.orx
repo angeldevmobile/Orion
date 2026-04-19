@@ -1,0 +1,31 @@
+-- test_phase2.orx — Prueba del sistema de módulos con namespace
+
+-- === 1. Módulo math (lib/math.py via namespace) ===
+show "=== use math (lib/math.py) ==="
+use "math"
+show math.sqrt(25)         -- 5.0
+show math.PI               -- 3.14159...
+show math.factorial(5)     -- 120
+
+-- === 2. Módulo .orx custom con namespace ===
+show "=== use packages/math ==="
+use "packages/math"
+-- renombrar para no colisionar con el anterior
+-- (se accede como 'math' — el más reciente sobreescribe)
+show math.sqrt(9)          -- 3.0 aprox
+show math.abs(-7)          -- 7
+show math.max(3, 8)        -- 8
+show math.min(3, 8)        -- 3
+show math.pow(2, 10)       -- 1024
+show math.factorial(6)     -- 720
+show math.clamp(15, 0, 10) -- 10
+
+-- === 3. Módulo strings.orx con namespace ===
+show "=== use packages/strings ==="
+use "packages/strings"
+show strings.repeat("Orion ", 3)    -- Orion Orion Orion
+show strings.reverse("hola")        -- aloh
+show strings.is_empty("   ")        -- yes (true)
+show strings.is_empty("texto")      -- no  (false)
+show strings.pad_left("42", 5, "0") -- 00042
+show strings.count("banana", "a")   -- 3
