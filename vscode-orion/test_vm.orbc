@@ -1,0 +1,284 @@
+{
+  "main": [
+    {
+      "LoadStr": "Angel"
+    },
+    {
+      "StoreVar": "nombre"
+    },
+    {
+      "LoadInt": 25
+    },
+    {
+      "StoreVar": "edad"
+    },
+    {
+      "LoadFloat": 9.99
+    },
+    {
+      "StoreVar": "precio"
+    },
+    {
+      "LoadBool": true
+    },
+    {
+      "StoreVar": "activo"
+    },
+    {
+      "LoadInt": 1
+    },
+    {
+      "LoadInt": 2
+    },
+    {
+      "LoadInt": 3
+    },
+    {
+      "MakeList": 3
+    },
+    {
+      "StoreVar": "lista"
+    },
+    {
+      "LoadStr": "=== Inferencia de tipos ==="
+    },
+    "Show",
+    {
+      "LoadStr": "nombre: "
+    },
+    {
+      "LoadVar": "nombre"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "edad:   "
+    },
+    {
+      "LoadVar": "edad"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "precio: "
+    },
+    {
+      "LoadVar": "precio"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "1.0.0"
+    },
+    {
+      "StoreConst": "VERSION"
+    },
+    {
+      "LoadStr": "Orion Language"
+    },
+    {
+      "StoreConst": "APP"
+    },
+    {
+      "LoadStr": "=== Constantes ==="
+    },
+    "Show",
+    {
+      "LoadVar": "APP"
+    },
+    {
+      "LoadStr": " v"
+    },
+    "Add",
+    {
+      "LoadVar": "VERSION"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "=== Condicionales ==="
+    },
+    "Show",
+    {
+      "LoadVar": "edad"
+    },
+    {
+      "LoadInt": 18
+    },
+    "GtEq",
+    {
+      "JumpIfFalse": 50
+    },
+    {
+      "LoadStr": "Adulto"
+    },
+    "Show",
+    {
+      "Jump": 59
+    },
+    {
+      "LoadVar": "edad"
+    },
+    {
+      "LoadInt": 13
+    },
+    "GtEq",
+    {
+      "JumpIfFalse": 57
+    },
+    {
+      "LoadStr": "Adolescente"
+    },
+    "Show",
+    {
+      "Jump": 59
+    },
+    {
+      "LoadStr": "Nino"
+    },
+    "Show",
+    {
+      "LoadStr": "=== Loops ==="
+    },
+    "Show",
+    {
+      "LoadInt": 0
+    },
+    {
+      "StoreVar": "i"
+    },
+    {
+      "LoadVar": "i"
+    },
+    {
+      "LoadInt": 3
+    },
+    "LtEq",
+    {
+      "JumpIfFalse": 77
+    },
+    {
+      "LoadStr": "Item: "
+    },
+    {
+      "LoadVar": "i"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    "Show",
+    {
+      "LoadVar": "i"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    {
+      "StoreVar": "i"
+    },
+    {
+      "Jump": 63
+    },
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    2,
+    2,
+    3,
+    3,
+    4,
+    4,
+    5,
+    5,
+    6,
+    6,
+    6,
+    6,
+    6,
+    8,
+    8,
+    9,
+    9,
+    9,
+    9,
+    10,
+    10,
+    10,
+    10,
+    10,
+    11,
+    11,
+    11,
+    11,
+    11,
+    13,
+    13,
+    14,
+    14,
+    16,
+    16,
+    17,
+    17,
+    17,
+    17,
+    17,
+    17,
+    19,
+    19,
+    20,
+    20,
+    20,
+    20,
+    21,
+    21,
+    21,
+    21,
+    21,
+    21,
+    21,
+    23,
+    23,
+    23,
+    25,
+    25,
+    28,
+    28,
+    29,
+    29,
+    29,
+    29,
+    29,
+    29,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30
+  ],
+  "functions": {}
+}

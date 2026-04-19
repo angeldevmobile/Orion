@@ -8,12 +8,16 @@ use crate::instruction::Instruction;
 pub struct FunctionDef {
     pub params: Vec<String>,
     pub body: Vec<Instruction>,
+    #[serde(default)]
+    pub lines: Vec<u32>,
 }
 
 /// Formato completo del archivo .orbc
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OrionBytecode {
     pub main: Vec<Instruction>,
+    #[serde(default)]
+    pub lines: Vec<u32>,
     pub functions: HashMap<String, FunctionDef>,
 }
 

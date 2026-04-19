@@ -169,54 +169,54 @@ def lex(code, track_position=False):
         # === NÚMEROS ===
         elif kind == "NUMBER_HEX":
             num_value = int(value, 16)
-            tokens.append(Token("NUMBER", num_value, line, column) if track_position 
-                         else ("NUMBER", num_value))
-        
+            tokens.append(Token("NUMBER", num_value, line, column) if track_position
+                         else ("NUMBER", num_value, line))
+
         elif kind == "NUMBER_BIN":
             num_value = int(value, 2)
-            tokens.append(Token("NUMBER", num_value, line, column) if track_position 
-                         else ("NUMBER", num_value))
+            tokens.append(Token("NUMBER", num_value, line, column) if track_position
+                         else ("NUMBER", num_value, line))
         
         elif kind == "NUMBER_SCI":
             num_value = float(value)
-            tokens.append(Token("NUMBER", num_value, line, column) if track_position 
-                         else ("NUMBER", num_value))
-        
+            tokens.append(Token("NUMBER", num_value, line, column) if track_position
+                         else ("NUMBER", num_value, line))
+
         elif kind == "NUMBER":
             num_value = float(value) if '.' in value else int(value)
-            tokens.append(Token("NUMBER", num_value, line, column) if track_position 
-                         else ("NUMBER", num_value))
+            tokens.append(Token("NUMBER", num_value, line, column) if track_position
+                         else ("NUMBER", num_value, line))
 
         # === STRINGS ===
         elif kind == "STRING_RAW":
             str_value = value[2:-1]  # Quitar r" y "
-            tokens.append(Token("STRING", f'"{str_value}"', line, column) if track_position 
-                         else ("STRING", f'"{str_value}"'))
-        
+            tokens.append(Token("STRING", f'"{str_value}"', line, column) if track_position
+                         else ("STRING", f'"{str_value}"', line))
+
         elif kind == "STRING_MULTI":
             # Multi-line string
-            str_value = value[3:-3] 
-            tokens.append(Token("STRING", f'"{str_value}"', line, column) if track_position 
-                         else ("STRING", f'"{str_value}"'))
-        
+            str_value = value[3:-3]
+            tokens.append(Token("STRING", f'"{str_value}"', line, column) if track_position
+                         else ("STRING", f'"{str_value}"', line))
+
         elif kind == "STRING":
-            tokens.append(Token("STRING", value, line, column) if track_position 
-                         else ("STRING", value))
-        
+            tokens.append(Token("STRING", value, line, column) if track_position
+                         else ("STRING", value, line))
+
         elif kind == "CHAR":
             # Caracteres individuales
             char_value = value[1:-1]  # Quitar comillas simples
-            tokens.append(Token("CHAR", char_value, line, column) if track_position 
-                         else ("CHAR", char_value))
+            tokens.append(Token("CHAR", char_value, line, column) if track_position
+                         else ("CHAR", char_value, line))
 
         # === BOOLEANOS ===
         elif kind == "YES":
             tokens.append(Token("BOOL", OrionBool(True), line, column) if track_position
-                         else ("BOOL", OrionBool(True)))
+                         else ("BOOL", OrionBool(True), line))
 
         elif kind == "NO":
             tokens.append(Token("BOOL", OrionBool(False), line, column) if track_position
-                         else ("BOOL", OrionBool(False)))
+                         else ("BOOL", OrionBool(False), line))
 
         # === KEYWORDS Y OPERADORES ===
         elif kind in (
@@ -231,8 +231,8 @@ def lex(code, track_position=False):
             "TASK", "STREAM", "ON_CREATE", "ON_EVENT", "ON_ERROR", "ME", "SUPER",
             "NULL", "UNDEFINED", "AUTO", "ANY", "AMPERSAND", "AT"
         ):
-            tokens.append(Token(kind, value, line, column) if track_position 
-                         else (kind, value))
+            tokens.append(Token(kind, value, line, column) if track_position
+                         else (kind, value, line))
 
         # === CONTROL DE LÍNEAS ===
         elif kind == "NEWLINE":

@@ -370,7 +370,7 @@ def _register_builtin_functions(functions):
 
     # Registrar funciones nativas de Python necesarias
     register_native_function(functions, "len", len)
-    register_native_function(functions, "range", range)
+    register_native_function(functions, "range", lambda *args: list(range(*[int(a) for a in args])))
     register_native_function(functions, "str", str)
     register_native_function(functions, "int", int)
     register_native_function(functions, "float", float)
@@ -379,6 +379,65 @@ def _register_builtin_functions(functions):
     register_native_function(functions, "substring", substring)
     register_native_function(functions, "to_native", to_native)
     register_native_function(functions, "list", orion_list)
+
+    # === input() — leer desde stdin ===
+    def orion_input(prompt=""):
+        """Lee una línea de stdin, con prompt opcional."""
+        try:
+            return input(str(prompt) if prompt else "")
+        except EOFError:
+            return ""
+
+    register_native_function(functions, "input", orion_input)
+
+    # === Funciones de string globales ===
+    def orion_split(s, sep=None):
+        raw = str(s.value) if hasattr(s, "value") else str(s)
+        if sep is None:
+            return raw.split()
+        return raw.split(str(sep.value) if hasattr(sep, "value") else str(sep))
+
+    def orion_trim(s):
+        raw = str(s.value) if hasattr(s, "value") else str(s)
+        return raw.strip()
+
+    def orion_lower(s):
+        raw = str(s.value) if hasattr(s, "value") else str(s)
+        return raw.lower()
+
+    def orion_upper_fn(s):
+        raw = str(s.value) if hasattr(s, "value") else str(s)
+        return raw.upper()
+
+    def orion_replace(s, old, new):
+        raw = str(s.value) if hasattr(s, "value") else str(s)
+        o = str(old.value) if hasattr(old, "value") else str(old)
+        n = str(new.value) if hasattr(new, "value") else str(new)
+        return raw.replace(o, n)
+
+    def orion_starts_with(s, prefix):
+        raw = str(s.value) if hasattr(s, "value") else str(s)
+        p = str(prefix.value) if hasattr(prefix, "value") else str(prefix)
+        return raw.startswith(p)
+
+    def orion_ends_with(s, suffix):
+        raw = str(s.value) if hasattr(s, "value") else str(s)
+        sf = str(suffix.value) if hasattr(suffix, "value") else str(suffix)
+        return raw.endswith(sf)
+
+    def orion_contains(s, sub):
+        raw = str(s.value) if hasattr(s, "value") else str(s)
+        su = str(sub.value) if hasattr(sub, "value") else str(sub)
+        return su in raw
+
+    register_native_function(functions, "split", orion_split)
+    register_native_function(functions, "trim", orion_trim)
+    register_native_function(functions, "lower", orion_lower)
+    register_native_function(functions, "upper", orion_upper_fn)
+    register_native_function(functions, "replace", orion_replace)
+    register_native_function(functions, "starts_with", orion_starts_with)
+    register_native_function(functions, "ends_with", orion_ends_with)
+    register_native_function(functions, "contains", orion_contains)
     
     functions["type"] = {
         "type": "NATIVE_FN", 
@@ -503,6 +562,54 @@ def _register_builtin_functions(functions):
                         register_native_function(functions, f"vision_{func_name}", func)
         
         code.ok(f"{len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins", module="vision-registry")
+
+
+def _call_fn_value(fn_val, pos_args, kw_args, variables, functions):
+    """
+    Llama un valor que representa una función: dict FN_DEF/ANON_FN, lambda AST,
+    o callable Python. Usado para funciones como valores / callbacks.
+    """
+    # Función definida en Orion almacenada en variable
+    if isinstance(fn_val, dict) and fn_val.get("type") in ("FN_DEF", "ANON_FN"):
+        params = fn_val.get("params", [])
+        body = fn_val.get("body", [])
+        closure = fn_val.get("closure", {})
+        if len(pos_args) != len(params):
+            raise OrionFunctionError(
+                f"Argumentos esperados: {len(params)}, recibidos: {len(pos_args)}"
+            )
+        local_vars = variables.copy()
+        if closure:
+            local_vars.update(closure)
+        for p, a in zip(params, pos_args):
+            local_vars[p] = a
+        local_vars.update(kw_args)
+        return evaluate(body, local_vars, functions, inside_fn=True)
+
+    # Lambda AST: ('LAMBDA', params, body)
+    if isinstance(fn_val, tuple) and fn_val[0] == "LAMBDA":
+        _, params, body = fn_val
+        local_vars = variables.copy()
+        for p, a in zip(params, pos_args):
+            local_vars[p] = a
+        local_vars.update(kw_args)
+        return eval_expr(body, local_vars, functions)
+
+    # Lista de definiciones (sobrecarga)
+    if isinstance(fn_val, list):
+        for fn_def in fn_val:
+            if isinstance(fn_def, dict) and fn_def.get("type") in ("FN_DEF", "ANON_FN"):
+                if len(pos_args) == len(fn_def.get("params", [])):
+                    return _call_fn_value(fn_def, pos_args, kw_args, variables, functions)
+        # Si no hay coincidencia exacta, usar la primera
+        if fn_val:
+            return _call_fn_value(fn_val[0], pos_args, kw_args, variables, functions)
+
+    # Callable Python nativo
+    if callable(fn_val):
+        return fn_val(*pos_args, **kw_args)
+
+    raise OrionFunctionError(f"El valor no es una función: {type(fn_val).__name__}")
 
 
 def eval_call_args(args, variables, functions):
@@ -835,6 +942,16 @@ def eval_expr(expr, variables, functions):
             else:
                 raise OrionRuntimeError(f"Formato de llamada de función desconocido: {expr}")
             
+            # Si fn_name es una expresión compleja (acceso a atributo, índice, etc.)
+            # evalúala primero para obtener la función
+            if isinstance(fn_name, tuple) and fn_name[0] not in ("IDENT",):
+                fn_val = eval_expr(fn_name, variables, functions)
+                pos_args, kw_args = eval_call_args(args, variables, functions)
+                if kwargs:
+                    for k, v in kwargs.items():
+                        kw_args[k] = to_native(eval_expr(v, variables, functions))
+                return _call_fn_value(fn_val, pos_args, kw_args, variables, functions)
+
             if isinstance(fn_name, tuple) and fn_name[0] == "IDENT":
                 fn_name = fn_name[1]
             
@@ -905,6 +1022,14 @@ def eval_expr(expr, variables, functions):
                     "type": "NATIVE_FN",
                     "impl": NATIVE_FUNCTIONS[fn_name]
                 }
+            # Si no se encontró en functions, buscar en variables (funciones como valores)
+            if fn_def is None and fn_name in variables:
+                fn_val = variables[fn_name]
+                pos_args, kw_args = eval_call_args(args, variables, functions)
+                if kwargs:
+                    for k, v in kwargs.items():
+                        kw_args[k] = to_native(eval_expr(v, variables, functions))
+                return _call_fn_value(fn_val, pos_args, kw_args, variables, functions)
             if not fn_def:
                 raise OrionFunctionError(f"Función no definida: {fn_name}")
 
@@ -1032,11 +1157,32 @@ def eval_expr(expr, variables, functions):
             elif fn_def["type"] == "FN_DEF":
                 params = fn_def.get("params", [])
                 body = fn_def.get("body", [])
+                closure = fn_def.get("closure", {})
+                if len(pos_args) != len(params):
+                    raise OrionFunctionError(
+                        f"Argumentos esperados: {len(params)}, recibidos: {len(pos_args)}"
+                    )
+                # Start with global scope, then apply closure, then current scope, then args
+                local_vars = variables.copy()
+                if closure:
+                    local_vars.update(closure)
+                for p, a in zip(params, pos_args):
+                    local_vars[p] = a
+                local_vars.update(kw_args)
+                return evaluate(body, local_vars, functions, inside_fn=True)
+
+            # Función anónima (valor de variable con cuerpo AST)
+            elif fn_def["type"] == "ANON_FN":
+                params = fn_def.get("params", [])
+                body = fn_def.get("body", [])
+                closure = fn_def.get("closure", {})
                 if len(pos_args) != len(params):
                     raise OrionFunctionError(
                         f"Argumentos esperados: {len(params)}, recibidos: {len(pos_args)}"
                     )
                 local_vars = variables.copy()
+                if closure:
+                    local_vars.update(closure)
                 for p, a in zip(params, pos_args):
                     local_vars[p] = a
                 local_vars.update(kw_args)
@@ -1161,6 +1307,59 @@ def eval_expr(expr, variables, functions):
                     raise OrionFunctionError(f"Método 'items' no disponible para tipo {type(obj_val).__name__}")
 
     
+            # === MÉTODOS DE STRING ===
+            def _get_str(v):
+                if hasattr(v, "value") and isinstance(v.value, str):
+                    return v.value
+                return str(v)
+
+            if method_name == "split":
+                s = _get_str(obj_val)
+                if pos_args:
+                    sep = str(pos_args[0]) if not isinstance(pos_args[0], str) else pos_args[0]
+                    return s.split(sep)
+                return s.split()
+
+            elif method_name == "trim":
+                return _get_str(obj_val).strip()
+
+            elif method_name == "lower":
+                return _get_str(obj_val).lower()
+
+            elif method_name == "replace":
+                if len(pos_args) < 2:
+                    raise OrionFunctionError("replace() requiere 2 argumentos: old, new")
+                return _get_str(obj_val).replace(str(pos_args[0]), str(pos_args[1]))
+
+            elif method_name == "starts_with":
+                if not pos_args:
+                    raise OrionFunctionError("starts_with() requiere 1 argumento")
+                return _get_str(obj_val).startswith(str(pos_args[0]))
+
+            elif method_name == "ends_with":
+                if not pos_args:
+                    raise OrionFunctionError("ends_with() requiere 1 argumento")
+                return _get_str(obj_val).endswith(str(pos_args[0]))
+
+            elif method_name == "contains":
+                if not pos_args:
+                    raise OrionFunctionError("contains() requiere 1 argumento")
+                return str(pos_args[0]) in _get_str(obj_val)
+
+            elif method_name == "to_upper":
+                return _get_str(obj_val).upper()
+
+            elif method_name == "to_lower":
+                return _get_str(obj_val).lower()
+
+            elif method_name == "repeat":
+                if not pos_args:
+                    raise OrionFunctionError("repeat() requiere 1 argumento")
+                return _get_str(obj_val) * int(pos_args[0])
+
+            elif method_name == "chars":
+                return list(_get_str(obj_val))
+
             # === MÉTODOS BUILT-IN COMUNES ===
             if method_name == "len":
                 if hasattr(obj_val, '__len__'):
@@ -1516,7 +1715,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
     
     for node in ast:
         if isinstance(node, tuple) and len(node) >= 4 and node[0] == "FN":
-            _, fn_name, params, body = node
+            fn_name, params, body = node[1], node[2], node[3]
             register_function(functions, fn_name, params, body)
             code.debug(f"Function '{fn_name}' registered with {len(params)} params", module="fn-registry")
 
@@ -1648,8 +1847,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         functions["_variables"] = variables
 
         for node in ast:
-            if node[0] == "FN":
-                _, fn_name, params, body = node
+            if isinstance(node, tuple) and node[0] == "FN":
+                fn_name, params, body = node[1], node[2], node[3]
                 register_function(functions, fn_name, params, body)
         # Marcar como inicializado
         evaluate._initialized = True  
@@ -1939,20 +2138,57 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 i += 1
                 continue
 
-            #  Rutas posibles
-            orion_file = os.path.join(os.getcwd(), base_name + ".orion")
+            #  Rutas posibles para archivos Orion (.orx o .orion)
+            # Buscar relativo al archivo que llama si está disponible
+            caller_dir = os.getcwd()
+            if "_current_file" in variables:
+                caller_dir = os.path.dirname(os.path.abspath(variables["_current_file"]))
+
+            # Soportar .orx y .orion, también rutas con barras
+            candidate_paths = [
+                os.path.join(caller_dir, base_name + ".orx"),
+                os.path.join(caller_dir, base_name + ".orion"),
+                os.path.join(os.getcwd(), base_name + ".orx"),
+                os.path.join(os.getcwd(), base_name + ".orion"),
+            ]
+            orion_file = next((p for p in candidate_paths if os.path.exists(p)), None)
             py_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "modules", base_name + ".py"))
 
             #  Si existe un módulo Orion local
-            if os.path.exists(orion_file):
+            if orion_file and os.path.exists(orion_file):
                 from core.lexer import lex
                 from core.parser import parse
                 with open(orion_file, "r", encoding="utf-8") as f:
                     file_code = f.read() 
+                # Guardar el archivo actual para resolución de rutas relativas
+                prev_file = variables.get("_current_file")
+                variables["_current_file"] = orion_file
+                mod_vars = variables.copy()
+                mod_vars["_current_file"] = orion_file
                 imported_tokens = lex(file_code)
                 imported_ast = parse(imported_tokens)
-                evaluate(imported_ast, variables, functions)
-                code.ok(f"Módulo Orion '{base_name}' ejecutado", module="orion-loader")
+                # Ejecutar en scope separado para aislar variables del módulo
+                mod_functions = functions.copy() if hasattr(functions, 'copy') else dict(functions)
+                evaluate(imported_ast, mod_vars, mod_functions)
+                # Exportar solo funciones definidas en el módulo al scope actual
+                for fn_key in mod_functions:
+                    if fn_key not in functions and fn_key not in ("_variables",):
+                        functions[fn_key] = mod_functions[fn_key]
+                # Exportar variables públicas (no comenzando con _)
+                module_name = os.path.splitext(os.path.basename(orion_file))[0]
+                class OrionModule:
+                    pass
+                mod_obj = OrionModule()
+                for k, v in mod_vars.items():
+                    if not k.startswith("_"):
+                        setattr(mod_obj, k, v)
+                        variables[k] = v
+                variables[module_name] = mod_obj
+                if prev_file is not None:
+                    variables["_current_file"] = prev_file
+                elif "_current_file" in variables:
+                    del variables["_current_file"]
+                code.ok(f"Módulo Orion '{base_name}' cargado desde '{orion_file}'", module="orion-loader")
 
             # Si existe un módulo Python en /modules/
             elif os.path.exists(py_file):
@@ -1967,13 +2203,32 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                         register_native_function(functions, fname, fref)
 
             else:
-                raise OrionRuntimeError(f"No se encontró el módulo: {orion_file} ni {py_file}")
+                raise OrionRuntimeError(
+                    f"No se encontró el módulo '{base_name}'.\n"
+                    f"  Buscado en: {', '.join(candidate_paths)}\n"
+                    f"  También intenté: {py_file}"
+                )
 
             i += 1
             continue
 
         elif tag == "FN":
-            # Ya registradas antes del bucle
+            # Si estamos dentro de una función, crear closure con el scope actual
+            # Esto permite que funciones anidadas capturen variables del scope externo
+            if inside_fn:
+                fn_tuple = node
+                fn_name_inner = fn_tuple[1]
+                fn_params = fn_tuple[2]
+                fn_body = fn_tuple[3]
+                # Capturar scope actual como closure (excluyendo __consts__ y _variables)
+                captured = {k: v for k, v in variables.items()
+                            if k not in ("__consts__", "_variables")}
+                register_function(functions, fn_name_inner, fn_params, fn_body, closure=captured)
+                # También almacenar como valor de variable para pasar como argumento
+                from core.functions import create_anonymous_function
+                fn_as_value = create_anonymous_function(fn_params, fn_body, closure=captured)
+                fn_as_value["type"] = "FN_DEF"
+                variables[fn_name_inner] = fn_as_value
             i += 1
             continue
         

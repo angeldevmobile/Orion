@@ -1,0 +1,20 @@
+use code 
+use net 
+
+-- nuevo comentario
+
+
+trace_start("MONITOREO")
+
+host = ["google.com", "github.com"]
+
+for h in host {
+  info = net.pulse(h)
+  if info.alive {
+    show("${h} está activo con latencia ${info.latency_ms}ms")
+  } else {
+    show("${h} no responde")
+  }
+}
+
+trace_end("MONITOREO COMPLETO")

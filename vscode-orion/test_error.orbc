@@ -1,0 +1,37 @@
+{
+  "main": [
+    {
+      "LoadInt": 10
+    },
+    {
+      "StoreVar": "x"
+    },
+    {
+      "LoadVar": "x"
+    },
+    "Show",
+    {
+      "LoadVar": "variable_que_no_existe"
+    },
+    "Show",
+    {
+      "LoadStr": "fin"
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    1,
+    1,
+    2,
+    2,
+    3,
+    3,
+    4,
+    4,
+    4
+  ],
+  "functions": {}
+}

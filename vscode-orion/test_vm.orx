@@ -1,0 +1,31 @@
+-- Prueba VM Rust — sin funciones de usuario aún
+nombre = "Angel"
+edad   = 25
+precio = 9.99
+activo = yes
+lista  = [1, 2, 3]
+
+show("=== Inferencia de tipos ===")
+show("nombre: " + nombre)
+show("edad:   " + str(edad))
+show("precio: " + str(precio))
+
+const VERSION = "1.0.0"
+const APP     = "Orion Language"
+
+show("=== Constantes ===")
+show(APP + " v" + VERSION)
+
+show("=== Condicionales ===")
+if edad >= 18 {
+    show("Adulto")
+} or if edad >= 13 {
+    show("Adolescente")
+} else {
+    show("Nino")
+}
+
+show("=== Loops ===")
+for i in 0..3 {
+    show("Item: " + str(i))
+}

@@ -1,0 +1,240 @@
+{
+  "main": [
+    {
+      "LoadStr": "=== range() ==="
+    },
+    "Show",
+    {
+      "LoadInt": 1
+    },
+    {
+      "LoadInt": 6
+    },
+    {
+      "Call": [
+        "range",
+        2
+      ]
+    },
+    {
+      "StoreVar": "nums"
+    },
+    {
+      "LoadStr": "=== String methods ==="
+    },
+    "Show",
+    {
+      "LoadStr": "  Orion Language  "
+    },
+    {
+      "StoreVar": "nombre"
+    },
+    "Show",
+    "Show",
+    "Show",
+    {
+      "LoadStr": "uno,dos,tres"
+    },
+    {
+      "StoreVar": "partes"
+    },
+    {
+      "LoadStr": "=== Funciones como valores ==="
+    },
+    "Show",
+    {
+      "LoadVar": "doble"
+    },
+    {
+      "LoadInt": 5
+    },
+    {
+      "Call": [
+        "aplicar",
+        2
+      ]
+    },
+    {
+      "StoreVar": "resultado"
+    },
+    {
+      "LoadVar": "resultado"
+    },
+    "Show",
+    {
+      "LoadStr": "=== Lambda callback ==="
+    },
+    "Show",
+    {
+      "LoadInt": 1
+    },
+    {
+      "LoadInt": 2
+    },
+    {
+      "LoadInt": 3
+    },
+    {
+      "LoadInt": 4
+    },
+    {
+      "LoadInt": 5
+    },
+    {
+      "MakeList": 5
+    },
+    {
+      "StoreVar": "nums2"
+    },
+    {
+      "StoreVar": "duplicados"
+    },
+    {
+      "LoadVar": "duplicados"
+    },
+    "Show",
+    {
+      "LoadVar": "siguiente"
+    },
+    "Return",
+    {
+      "LoadInt": 10
+    },
+    {
+      "Call": [
+        "hacer_contador",
+        1
+      ]
+    },
+    {
+      "StoreVar": "contador"
+    },
+    {
+      "Call": [
+        "contador",
+        0
+      ]
+    },
+    "Show",
+    {
+      "Call": [
+        "contador",
+        0
+      ]
+    },
+    "Show",
+    {
+      "Call": [
+        "contador",
+        0
+      ]
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    4,
+    4,
+    5,
+    5,
+    5,
+    5,
+    11,
+    11,
+    12,
+    12,
+    13,
+    14,
+    15,
+    17,
+    17,
+    36,
+    36,
+    45,
+    45,
+    45,
+    45,
+    46,
+    46,
+    49,
+    49,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    51,
+    52,
+    52,
+    64,
+    64,
+    67,
+    67,
+    67,
+    68,
+    68,
+    69,
+    69,
+    70,
+    70,
+    70
+  ],
+  "functions": {
+    "doble": {
+      "params": [
+        "x"
+      ],
+      "body": [
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadInt": 2
+        },
+        "Mul",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        38,
+        38,
+        38,
+        38,
+        38,
+        38
+      ]
+    },
+    "aplicar": {
+      "params": [
+        "f",
+        "valor"
+      ],
+      "body": [
+        {
+          "LoadVar": "valor"
+        },
+        {
+          "Call": [
+            "f",
+            1
+          ]
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        42,
+        42,
+        42,
+        42,
+        42
+      ]
+    }
+  }
+}

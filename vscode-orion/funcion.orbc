@@ -1,0 +1,35 @@
+{
+  "main": [
+    {
+      "LoadStr": "Orion"
+    },
+    {
+      "Call": [
+        "saludar",
+        1
+      ]
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "functions": {
+    "saludar": {
+      "params": [
+        "nombre"
+      ],
+      "body": [
+        {
+          "LoadStr": "Hola "
+        },
+        {
+          "LoadVar": "nombre"
+        },
+        "Add",
+        "Return",
+        "Return"
+      ]
+    }
+  }
+}

@@ -36,7 +36,7 @@ fn main() {
 
     // Ejecutar VM
     let t0 = Instant::now();
-    let mut machine = vm::VM::new(instructions.main, instructions.functions);
+    let mut machine = vm::VM::new(instructions.main, instructions.lines, instructions.functions);
     match machine.run() {
         Ok(_) => {}
         Err(e) => {
@@ -48,9 +48,9 @@ fn main() {
     let t_total = t_total.elapsed();
 
     eprintln!();
-    eprintln!("──────────────────────────────────────────────────");
+    eprintln!("                                                  ");
     eprintln!("  Carga   : {:.3} ms", t_load.as_secs_f64() * 1000.0);
     eprintln!("  Exec    : {:.3} ms", t_exec.as_secs_f64() * 1000.0);
     eprintln!("  Total   : {:.3} ms", t_total.as_secs_f64() * 1000.0);
-    eprintln!("──────────────────────────────────────────────────");
+    eprintln!("                                                  ");
 }

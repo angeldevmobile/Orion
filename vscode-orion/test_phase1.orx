@@ -1,0 +1,70 @@
+-- Test Phase 1: builtins, string methods, attempt/handle, functions as values, closures
+
+-- 1. range() como lista
+show "=== range() ==="
+nums = range(1, 6)
+for n in nums {
+    show n
+}
+
+-- 2. String methods
+show "=== String methods ==="
+nombre = "  Orion Language  "
+show nombre.trim()
+show nombre.trim().lower()
+show nombre.trim().upper()
+
+partes = "uno,dos,tres".split(",")
+show partes
+
+show "hola mundo".contains("mundo")
+show "orion".starts_with("ori")
+show "orion".ends_with("ion")
+show "orion".replace("ion", "XXX")
+
+-- 3. attempt / handle
+show "=== attempt/handle ==="
+attempt {
+    x = int("no_es_numero")
+    show x
+} handle err {
+    show "Error capturado:"
+    show err
+}
+
+-- 4. Funciones como valores
+show "=== Funciones como valores ==="
+fn doble(x) {
+    return x * 2
+}
+
+fn aplicar(f, valor) {
+    return f(valor)
+}
+
+resultado = aplicar(doble, 5)
+show resultado
+
+-- 5. Lambda como callback
+show "=== Lambda callback ==="
+nums2 = [1, 2, 3, 4, 5]
+duplicados = nums2.map(x => x * 2)
+show duplicados
+
+pares = nums2.filter(x => x % 2 == 0)
+show pares
+
+-- 6. Closures
+show "=== Closures ==="
+fn hacer_contador(inicio) {
+    fn siguiente() {
+        inicio = inicio + 1
+        return inicio
+    }
+    return siguiente
+}
+
+contador = hacer_contador(10)
+show contador()
+show contador()
+show contador()

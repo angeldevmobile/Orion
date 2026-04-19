@@ -5,18 +5,19 @@ use crate::bytecode::FunctionDef;
 
 struct CallFrame {
     instructions: Vec<Instruction>,
+    lines: Vec<u32>,
     ip: usize,
     vars: HashMap<String, Value>,
     consts: HashSet<String>,
 }
 
 impl CallFrame {
-    fn new(instructions: Vec<Instruction>) -> Self {
-        CallFrame { instructions, ip: 0, vars: HashMap::new(), consts: HashSet::new() }
+    fn new(instructions: Vec<Instruction>, lines: Vec<u32>) -> Self {
+        CallFrame { instructions, lines, ip: 0, vars: HashMap::new(), consts: HashSet::new() }
     }
 
-    fn with_args(instructions: Vec<Instruction>, params: &[String], args: Vec<Value>) -> Self {
-        let mut frame = Self::new(instructions);
+    fn with_args(instructions: Vec<Instruction>, lines: Vec<u32>, params: &[String], args: Vec<Value>) -> Self {
+        let mut frame = Self::new(instructions, lines);
         for (param, val) in params.iter().zip(args.into_iter()) {
             frame.vars.insert(param.clone(), val);
         }
@@ -28,18 +29,30 @@ pub struct VM {
     value_stack: Vec<Value>,
     call_stack: Vec<CallFrame>,
     functions: HashMap<String, FunctionDef>,
+    current_line: u32,
 }
 
 impl VM {
-    pub fn new(main: Vec<Instruction>, functions: HashMap<String, FunctionDef>) -> Self {
+    pub fn new(main: Vec<Instruction>, main_lines: Vec<u32>, functions: HashMap<String, FunctionDef>) -> Self {
         VM {
             value_stack: Vec::new(),
-            call_stack: vec![CallFrame::new(main)],
+            call_stack: vec![CallFrame::new(main, main_lines)],
             functions,
+            current_line: 0,
         }
     }
 
     pub fn run(&mut self) -> Result<(), String> {
+        self.run_inner().map_err(|e| {
+            if self.current_line > 0 {
+                format!("[línea {}] {}", self.current_line, e)
+            } else {
+                e
+            }
+        })
+    }
+
+    fn run_inner(&mut self) -> Result<(), String> {
         loop {
             let instr = {
                 let frame = match self.call_stack.last_mut() {
@@ -50,20 +63,22 @@ impl VM {
                     self.call_stack.pop();
                     continue;
                 }
+                let line = frame.lines.get(frame.ip).copied().unwrap_or(0);
                 let instr = frame.instructions[frame.ip].clone();
                 frame.ip += 1;
+                if line > 0 { self.current_line = line; }
                 instr
             };
 
             match instr {
-                // ── Constantes ──────────────────────────────
+                //    Constantes                               
                 Instruction::LoadInt(n)   => self.value_stack.push(Value::Int(n)),
                 Instruction::LoadFloat(f) => self.value_stack.push(Value::Float(f)),
                 Instruction::LoadStr(s)   => self.value_stack.push(Value::Str(s)),
                 Instruction::LoadBool(b)  => self.value_stack.push(Value::Bool(b)),
                 Instruction::LoadNull     => self.value_stack.push(Value::Null),
 
-                // ── Variables ───────────────────────────────
+                //    Variables                                
                 Instruction::LoadVar(name) => {
                     let frame = self.call_stack.last().ok_or("Sin frame activo")?;
                     let val = frame.vars.get(&name).cloned()
@@ -85,7 +100,7 @@ impl VM {
                     frame.vars.insert(name, val);
                 }
 
-                // ── Aritmética ──────────────────────────────
+                //    Aritmética                               
                 Instruction::Add => {
                     let b = self.pop()?; let a = self.pop()?;
                     self.value_stack.push(a.add(&b)?);
@@ -127,7 +142,7 @@ impl VM {
                     }
                 }
 
-                // ── Comparación ─────────────────────────────
+                //    Comparación                              
                 Instruction::Eq => {
                     let b = self.pop()?; let a = self.pop()?;
                     self.value_stack.push(Value::Bool(a.compare_eq(&b)));
@@ -153,7 +168,7 @@ impl VM {
                     self.value_stack.push(Value::Bool(!a.compare_lt(&b)?));
                 }
 
-                // ── Lógica ──────────────────────────────────
+                //    Lógica                                   
                 Instruction::And => {
                     let b = self.pop()?; let a = self.pop()?;
                     self.value_stack.push(Value::Bool(a.is_truthy() && b.is_truthy()));
@@ -167,7 +182,7 @@ impl VM {
                     self.value_stack.push(Value::Bool(!a.is_truthy()));
                 }
 
-                // ── Control de flujo ────────────────────────
+                //    Control de flujo                         
                 Instruction::Jump(addr) => {
                     self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
                 }
@@ -184,7 +199,7 @@ impl VM {
                     }
                 }
 
-                // ── Funciones ───────────────────────────────
+                //    Funciones                                
                 Instruction::Call(name, argc) => {
                     let mut args: Vec<Value> = (0..argc)
                         .map(|_| self.pop())
@@ -198,7 +213,7 @@ impl VM {
                                 name, func.params.len(), args.len()
                             ));
                         }
-                        let frame = CallFrame::with_args(func.body, &func.params, args);
+                        let frame = CallFrame::with_args(func.body, func.lines, &func.params, args);
                         self.call_stack.push(frame);
                     } else {
                         let result = self.call_builtin(&name, args)?;
@@ -215,7 +230,7 @@ impl VM {
                 }
                 Instruction::Halt => break,
 
-                // ── Colecciones ─────────────────────────────
+                //    Colecciones                              
                 Instruction::MakeList(n) => {
                     let mut items: Vec<Value> = (0..n).map(|_| self.pop()).collect::<Result<Vec<_>, _>>()?;
                     items.reverse();
@@ -251,13 +266,13 @@ impl VM {
                     }
                 }
 
-                // ── I/O nativo ──────────────────────────────
+                //    I/O nativo                               
                 Instruction::Show => {
                     let val = self.pop()?;
                     println!("{}", val);
                 }
 
-                // ── Stack ────────────────────────────────────
+                //    Stack                                     
                 Instruction::Pop => { self.pop()?; }
                 Instruction::Dup => {
                     let top = self.value_stack.last().cloned().ok_or("Stack vacío en Dup")?;

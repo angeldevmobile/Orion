@@ -112,7 +112,7 @@ def parse_primary(tokens, i):
     if i >= len(tokens):
         raise OrionSyntaxError("Fin inesperado de entrada")
 
-    kind, value = tokens[i]
+    kind, value = tokens[i][0], tokens[i][1]
 
     if kind == "NUMBER":
         return value, i + 1
@@ -386,10 +386,19 @@ def parse_expression(tokens, i):
     expr, j = parse_or(tokens, i)
     return expr, j
 def parse_statement(tokens, i):
-    """Parsea una declaración individual con mejor manejo de errores."""
+    """Parsea una declaración individual e inyecta el número de línea como último elemento."""
+    line = tokens[i][2] if len(tokens[i]) > 2 else 0
+    node, j = _parse_statement(tokens, i)
+    if isinstance(node, tuple):
+        node = node + (line,)
+    return node, j
+
+
+def _parse_statement(tokens, i):
+    """Lógica interna de parsing de una declaración."""
     if i >= len(tokens):
         raise OrionSyntaxError("Se esperaba una declaración")
-        
+
     kind = tokens[i][0]
     value = tokens[i][1] if len(tokens[i]) > 1 else None
 

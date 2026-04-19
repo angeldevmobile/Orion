@@ -58,28 +58,28 @@ def banner():
 
 
 def run_script(path: str):
-    """Ejecuta un archivo Orion .orx"""
+    """Ejecuta un archivo Orion .orx vía compilador + VM Rust"""
+    import subprocess
     if not os.path.exists(path):
         console.print(f"[red]Archivo no encontrado:[/red] {path}")
         sys.exit(1)
 
     console.print(f"[blue]Ejecutando:[/blue] {path}\n")
-    with open(path, "r", encoding="utf-8") as f:
-        source = f.read()
-    
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    orbc_path = os.path.splitext(path)[0] + ".orbc"
+    vm_exe = os.path.join(project_root, "orion-vm", "target", "release", "orion.exe")
+
     try:
-        tokens = lex(source)
-        ast = parse(tokens)
-        # Agregar variables y funciones
-        variables = {}
-        functions = {}
-        result = evaluate(ast, variables, functions)
-        if result is not None:
-            console.print(Panel(str(result), title="Resultado", border_style="green"))
-        console.print("\n[green]Ejecución completada[/green]")
+        from compiler.bytecode_compiler import compile_file
+        compile_file(path, orbc_path)
     except Exception as e:
-        console.print(f"\n[bold red]Error durante la ejecución:[/bold red] {e}")
+        console.print(f"[bold red]Error de compilación:[/bold red] {e}")
         sys.exit(1)
+
+    result = subprocess.run([vm_exe, orbc_path])
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 
 def repl():

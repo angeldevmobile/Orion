@@ -1,0 +1,56 @@
+-- ============================================
+-- PRUEBA DE NUEVA SINTAXIS ORION
+-- Inferencia de tipos, const, or if, yes/no
+-- ============================================
+
+-- Inferencia de tipos automática
+nombre = "Angel"
+edad   = 25
+precio = 9.99
+activo = yes
+lista  = [1, 2, 3]
+
+show("=== Inferencia de tipos ===")
+show("nombre: " + nombre)
+show("edad:   " + str(edad))
+show("precio: " + str(precio))
+show("activo: " + str(activo))
+
+-- Constantes (no se pueden reasignar)
+const VERSION = "1.0.0"
+const APP     = "Orion Language"
+
+show("=== Constantes ===")
+show(APP + " v" + VERSION)
+
+-- or if (reemplaza elsif)
+show("=== Condicionales ===")
+if edad >= 18 {
+    show("Adulto")
+} or if edad >= 13 {
+    show("Adolescente")
+} else {
+    show("Niño")
+}
+
+-- Booleans con yes/no
+show("=== Booleans ===")
+if activo {
+    show("Sistema activo")
+} else {
+    show("Sistema inactivo")
+}
+
+-- Función con tipo inferido en retorno
+fn saludar(nombre) {
+    return "Hola, " + nombre + "!"
+}
+
+show("=== Funciones ===")
+show(saludar("Orion"))
+
+-- Loop con lista
+show("=== Loops ===")
+for item in lista {
+    show("Item: " + str(item))
+}

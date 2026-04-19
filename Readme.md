@@ -1,92 +1,173 @@
-Historia de Orion 
+# Orion Language
 
-Orion nace en 2025 con una idea clara:
+Orion es un lenguaje de programación diseñado para ser simple, rápido y moderno.
+Sintaxis limpia inspirada en Python y Rust, compilado a bytecode y ejecutado por una VM en Rust.
 
-Un lenguaje que combine la simplicidad de la programación moderna con la velocidad y el poder de la ejecución eficiente, pensado para la nueva generación de desarrolladores que quieren construir más rápido y mejor.
+---
 
-El nombre viene de la constelación Orion, símbolo de guía y exploración. La idea es que tu lenguaje sea una “estrella” que guíe a los programadores hacia un estilo de código más legible, conciso y futurista.
+## Filosofía
 
-Filosofía de Orion
+- **Simple** — sin ruido, sin boilerplate. El código se lee como pseudocódigo.
+- **Rápido** — VM compilada en Rust. No un intérprete Python lento.
+- **Moderno** — funciones de primera clase, interpolación de strings, tipos opcionales.
+- **Accesible** — cualquiera puede aprenderlo en minutos.
 
-Legibilidad primero → código que parece pseudocódigo, fácil de enseñar y entender.
+---
 
-Rapidez → diseñado para ser compilado y correr veloz, como Go o Rust.
+## Sintaxis actual
 
-Modernidad → incluye features que otros lenguajes no traen listos (async, match, interpolación de strings).
+```orion
+-- Variables
+nombre = "Orion"
+edad   = 25
+activo = yes
 
-Universalidad → sirve tanto para scripts simples como para proyectos grandes.
+-- Constantes
+const PI = 3.14159
 
-Accesible → cualquiera puede instalarlo, aprenderlo y usarlo en minutos.
+-- Mostrar valores
+show(nombre)
+show("Hola " + nombre)
 
-Desarrollo de Orion (Roadmap)
-Fase 1 – Prototipo (2025)
+-- Condicionales
+if edad >= 18 {
+  show("Mayor de edad")
+} else {
+  show("Menor de edad")
+}
 
-Objetivo: Demostrar que funciona.
+-- Bucle while
+i = 0
+while i < 5 {
+  show(i)
+  i = i + 1
+}
 
-Escribir un intérprete en Python que entienda lo básico:
+-- Bucle for
+for x in 1..10 {
+  show(x)
+}
 
-let para variables.
+-- Funciones
+fn saludar(nombre) {
+  return "Hola " + nombre
+}
 
-print para mostrar resultados.
+show(saludar("Orion"))
 
-if/else y for/each.
+-- Funciones recursivas
+fn factorial(n) {
+  if n <= 1 {
+    return 1
+  }
+  return n * factorial(n - 1)
+}
 
-Extensión .orx funcionando.
+show(factorial(10))
 
-Subir a GitHub con ejemplos.
+-- Listas y diccionarios
+numeros = [1, 2, 3, 4, 5]
+persona = {"nombre": "Gabriel", "edad": 25}
+```
 
-Resultado esperado: un “Hola Mundo” oficial en Orion.
+**Tipos:** `int`, `float`, `string`, `bool` (`yes`/`no`), `null`, `list`, `dict`  
+**Comentarios:** `-- comentario`  
+**Bloques:** `{ }` con indentación opcional
 
-Fase 2 – Herramientas iniciales (2025 – 2026)
+---
 
-Objetivo: Hacerlo usable para otros devs.
+## Arquitectura
 
-Crear un CLI oficial (orion run archivo.orx).
+```
+archivo.orx
+    │
+    ▼
+core/lexer.py       ← tokeniza el código fuente
+core/parser.py      ← genera el AST
+    │
+    ▼
+compiler/bytecode_compiler.py   ← compila AST → instrucciones JSON
+    │
+    ▼
+archivo.orbc        ← bytecode (JSON)
+    │
+    ▼
+orion-vm/           ← VM en Rust con call frames
+    └── target/release/orion.exe
+```
 
-Extensión de VS Code con:
+---
 
-Resaltado de sintaxis.
+## Cómo ejecutar
 
-Ejecución directa desde el editor.
+**Desde el CLI:**
+```bash
+python orion/cli.py archivo.orx
+```
 
-Documentación inicial: tutoriales y ejemplos.
+**Manual (dos pasos):**
+```bash
+python compiler/bytecode_compiler.py archivo.orx archivo.orbc
+.\orion-vm\target\release\orion.exe archivo.orbc
+```
 
-Resultado esperado: la gente puede escribir y correr Orion en su laptop.
+**Desde VSCode:**  
+Abre un archivo `.orx` y pulsa el botón `⚡ Orion` en la barra de estado.
 
-Fase 3 – Crecimiento (2026 – 2027)
+---
 
-Objetivo: Escalar Orion a producción.
+## Roadmap
 
-Reescribir el intérprete en Go o Rust para darle velocidad real.
+### ✅ Fase 1 — Prototipo (2025)
+- [x] Intérprete Python funcional
+- [x] Sintaxis básica: variables, if/else, while, for, funciones
+- [x] Extensión VSCode con resaltado de sintaxis
+- [x] CLI oficial
 
-Añadir más features:
+### ✅ Fase 2 — VM Rust (2025–2026)
+- [x] Compilador de bytecode (Python → `.orbc`)
+- [x] VM en Rust con stack de valores
+- [x] Call frames para funciones de usuario
+- [x] Tabla de funciones separada del main
+- [x] Integración extensión VSCode → compilador → VM Rust
 
-Tipado opcional.
+### 🔄 Fase 3 — Lenguaje robusto (2026)
+- [ ] Errores con número de línea
+- [ ] String interpolation: `"Hola ${nombre}"`
+- [ ] Builtins: `input()`, `range()`, `len()`, métodos de string
+- [ ] Manejo de errores: `attempt / handle`
+- [ ] Funciones como valores (first-class)
+- [ ] Closures
 
-Concurrencia (async).
+### 📋 Fase 4 — Ecosistema (2026–2027)
+- [ ] Sistema de módulos: `use math`
+- [ ] Clases y OOP: `class Persona { }`
+- [ ] Tipado opcional: `fn suma(a: int, b: int) -> int`
+- [ ] Concurrencia: `async / await`
+- [ ] Gestor de paquetes: `orion add paquete`
+- [ ] Lexer y parser reescritos en Rust (eliminar dependencia de Python)
 
-Librerías estándar (archivos, red, JSON).
+### 🚀 Fase 5 — Producción (2027+)
+- [ ] Compilación a binario nativo
+- [ ] Librerías estándar (archivos, red, JSON, HTTP)
+- [ ] Comunidad: documentación, foros, Discord
+- [ ] Frameworks: web, IA, bases de datos
 
-Primeros proyectos reales en Orion (ej. scripts de automatización, APIs pequeñas).
+---
 
-Resultado esperado: Orion ya no es un juguete, es un lenguaje serio.
+## Estado actual
 
-Fase 4 – Comunidad y Ecosistema (2027 en adelante)
+| Componente | Estado |
+|---|---|
+| Lexer | ✅ Python |
+| Parser | ✅ Python |
+| Compilador bytecode | ✅ Python |
+| VM (ejecutor) | ✅ Rust |
+| Extensión VSCode | ✅ Activa |
+| CLI | ✅ Funcional |
+| Errores con línea | ⏳ Próximo |
+| String interpolation | ⏳ Próximo |
 
-Objetivo: Construir una comunidad activa.
+---
 
-Lanzar gestor de paquetes (orion add paquete).
-
-Crear frameworks y librerías (web, IA, bases de datos).
-
-Generar comunidad global: Discord, foros, conferencias.
-
-Recibir contribuciones de otros programadores.
-
-Resultado esperado: Orion tiene su propio ecosistema como hoy lo tienen Python o Rust.
-
-Visión a futuro
-
-La historia que puedes contar es algo así:
-
-✨ “Orion nació como un experimento personal, un lenguaje creado para ser simple como Python, moderno como Rust y rápido como Go. Lo que empezó como un prototipo, poco a poco se convirtió en una comunidad de desarrolladores que creen en escribir código claro, eficiente y preparado para el futuro. Orion es un lenguaje joven, pero con una meta ambiciosa: ser la constelación que guíe a los programadores hacia nuevas fronteras.”
+*Orion — construido por Angel Zapata · 2025–2026*

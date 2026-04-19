@@ -8,16 +8,19 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from core.lexer import lex
-from core.parser import parse
+from core.parser import parse, parse_expression
 
 
 class FunctionCompiler:
     """Compilador dedicado para el cuerpo de una función."""
     def __init__(self):
         self.instructions = []
+        self.line_table = []
+        self.current_line = 0
 
     def emit(self, instr):
         self.instructions.append(instr)
+        self.line_table.append(self.current_line)
         return len(self.instructions) - 1
 
     def patch(self, idx, new_instr):
@@ -35,10 +38,13 @@ class FunctionCompiler:
 class Compiler:
     def __init__(self):
         self.instructions = []
+        self.line_table = []
+        self.current_line = 0
         self.functions = {}  # nombre -> {params, body}
 
     def emit(self, instr):
         self.instructions.append(instr)
+        self.line_table.append(self.current_line)
         return len(self.instructions) - 1
 
     def patch(self, idx, new_instr):
@@ -49,8 +55,24 @@ class Compiler:
         return len(self.instructions)
 
     def compile_program(self, ast):
+        # Primero compilar funciones de usuario en tabla separada
         for node in ast:
-            self.compile_node(node)
+            if isinstance(node, tuple) and node[0] == "FN":
+                fn_name, params, body = node[1], node[2], node[3]
+                fc = FunctionCompiler()
+                for stmt in body:
+                    compile_node_into(fc, stmt)
+                fc.emit("LoadNull")
+                fc.emit("Return")
+                self.functions[fn_name] = {
+                    "params": params,
+                    "body": fc.instructions,
+                    "lines": fc.line_table,
+                }
+        # Luego compilar el código principal (ignorando FN)
+        for node in ast:
+            if not (isinstance(node, tuple) and node[0] == "FN"):
+                self.compile_node(node)
         self.emit({"Halt": None})
         return self.instructions
 
@@ -62,6 +84,10 @@ class Compiler:
 def compile_node_into(ctx, node):
     if not isinstance(node, tuple):
         return
+    # Extraer número de línea si está presente como último elemento entero
+    if len(node) >= 2 and isinstance(node[-1], int) and not isinstance(node[-1], bool):
+        ctx.current_line = node[-1]
+        node = node[:-1]
     tag = node[0]
 
     if tag == "ASSIGN":
@@ -165,28 +191,58 @@ def compile_node_into(ctx, node):
             compile_expr_into(ctx, expr)
         ctx.emit("Return")
 
-    def compile_expr(self, expr):
-        compile_expr_into(self, expr)
 
-    def compile_program(self, ast):
-        # Primero compilar funciones de usuario
-        for node in ast:
-            if isinstance(node, tuple) and node[0] == "FN":
-                _, fn_name, params, body = node
-                fc = FunctionCompiler()
-                for stmt in body:
-                    compile_node_into(fc, stmt)
-                fc.emit("Return")
-                self.functions[fn_name] = {
-                    "params": params,
-                    "body": fc.instructions,
-                }
-        # Luego compilar el código principal
-        for node in ast:
-            if not (isinstance(node, tuple) and node[0] == "FN"):
-                compile_node_into(self, node)
-        self.emit({"Halt": None})
-        return self.instructions
+def _split_interpolation(s):
+    """Divide una string en partes literales y expresiones ${...}."""
+    parts = []
+    i = 0
+    current_text = ""
+    while i < len(s):
+        if s[i] == '$' and i + 1 < len(s) and s[i + 1] == '{':
+            if current_text:
+                parts.append(('text', current_text))
+            current_text = ""
+            i += 2
+            depth = 1
+            expr_start = i
+            while i < len(s) and depth > 0:
+                if s[i] == '{':
+                    depth += 1
+                elif s[i] == '}':
+                    depth -= 1
+                i += 1
+            parts.append(('expr', s[expr_start:i - 1]))
+        else:
+            current_text += s[i]
+            i += 1
+    if current_text:
+        parts.append(('text', current_text))
+    return parts
+
+
+def _compile_interpolated_str(ctx, raw):
+    """Compila una string interpolada como secuencia de Add."""
+    parts = _split_interpolation(raw)
+    if not parts:
+        ctx.emit({"LoadStr": ""})
+        return
+    # Emitir primera parte
+    kind, content = parts[0]
+    if kind == 'text':
+        ctx.emit({"LoadStr": content})
+    else:
+        tokens = lex(content)
+        expr, _ = parse_expression(tokens, 0)
+        compile_expr_into(ctx, expr)
+    # Emitir el resto con Add después de cada una
+    for kind, content in parts[1:]:
+        if kind == 'text':
+            ctx.emit({"LoadStr": content})
+        else:
+            tokens = lex(content)
+            expr, _ = parse_expression(tokens, 0)
+            compile_expr_into(ctx, expr)
+        ctx.emit("Add")
 
 
 # Función libre para compilar expresiones en cualquier contexto
@@ -204,10 +260,11 @@ def compile_expr_into(ctx, expr):
         ctx.emit({"LoadFloat": expr})
         return
     if isinstance(expr, str):
-        if expr.startswith('"') and expr.endswith('"'):
-            ctx.emit({"LoadStr": expr[1:-1]})
+        inner = expr[1:-1] if (expr.startswith('"') and expr.endswith('"')) else expr
+        if '${' in inner:
+            _compile_interpolated_str(ctx, inner)
         else:
-            ctx.emit({"LoadStr": expr})
+            ctx.emit({"LoadStr": inner})
         return
     if not isinstance(expr, tuple):
         return
@@ -285,6 +342,7 @@ def compile_file(source_path: str, output_path: str = None):
 
     bytecode = {
         "main": compiler.instructions,
+        "lines": compiler.line_table,
         "functions": compiler.functions,
     }
 

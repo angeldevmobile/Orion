@@ -1,0 +1,137 @@
+{
+  "main": [
+    {
+      "LoadFloat": 99.5
+    },
+    {
+      "StoreVar": "precio"
+    },
+    {
+      "LoadInt": 10
+    },
+    {
+      "StoreVar": "descuento"
+    },
+    {
+      "LoadStr": "Precio: "
+    },
+    {
+      "LoadVar": "precio"
+    },
+    "Add",
+    {
+      "LoadStr": " con descuento de "
+    },
+    "Add",
+    {
+      "LoadVar": "descuento"
+    },
+    "Add",
+    {
+      "LoadStr": "%"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "Maria"
+    },
+    {
+      "LoadInt": 30
+    },
+    {
+      "Call": [
+        "saludar",
+        2
+      ]
+    },
+    "Pop",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    6,
+    6,
+    7,
+    7,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    9,
+    9,
+    9,
+    9,
+    9
+  ],
+  "functions": {
+    "saludar": {
+      "params": [
+        "nombre",
+        "edad"
+      ],
+      "body": [
+        {
+          "LoadStr": "Hola "
+        },
+        {
+          "LoadVar": "nombre"
+        },
+        "Add",
+        {
+          "LoadStr": ", tienes "
+        },
+        "Add",
+        {
+          "LoadVar": "edad"
+        },
+        "Add",
+        {
+          "LoadStr": " a\u00f1os"
+        },
+        "Add",
+        "Show",
+        {
+          "LoadStr": "El doble de tu edad es "
+        },
+        {
+          "LoadVar": "edad"
+        },
+        {
+          "LoadInt": 2
+        },
+        "Mul",
+        "Add",
+        "Show",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3,
+        3
+      ]
+    }
+  }
+}

@@ -1,0 +1,72 @@
+use code
+use fs
+use json
+use net
+use ai
+use vision
+use insight
+use datetime
+
+trace_start("ANÁLISIS VISUAL DE DOCUMENTOS", pulse=yes, depth="full")
+
+-- 1. Cargar documento escaneado (puede ser PNG o JPG)
+doc_path = "documento_bancario.png"
+show("Documento cargado:", doc_path, level="info")
+
+-- 2. Obtener resumen estructurado usando el motor heurístico de Insight
+resumen = insight.summarize(doc_path)
+show("Resumen inicial Insight:", resumen, level="debug")
+
+-- 3. Analizar metadatos visuales
+meta = resumen["metadata"]
+show("Orientación:", meta["orientation"], 
+     " | Densidad:", meta["density"], 
+     " | Contraste:", meta["contrast"], level="proc")
+
+-- 4. Verificar si contiene tablas y firmas
+if resumen["tables"]["detected"] {
+    show("Tabla detectada (confianza=" + str(resumen["tables"]["confidence"]) + ")", level="ok")
+} else {
+    show("No se detectaron tablas", level="warn")
+}
+
+if resumen["signatures"]["detected"] {
+    show("Firma/sello detectado (confianza=" + str(resumen["signatures"]["confidence"]) + ")", level="ok")
+} else {
+    show("No se detectaron firmas ni sellos", level="info")
+}
+
+-- 5. Generar análisis cognitivo extendido con AI
+tmp = ai.think(json.stringify(resumen), 
+               focus="document_structures", 
+               style="symbolic", 
+               tone="analytical")
+
+descripcion = tmp["summary"]
+
+show("Análisis cognitivo del documento:", descripcion, level="trace")
+
+-- 6. Visualización cognitiva (mapa de texto y firmas)
+vision.overlay(doc_path, 
+               caption="Mapa Insight: bloques=" + str(resumen["text_blocks"]), 
+               highlights=resumen["text_blocks"])
+
+-- 7. Exportar resultados y metadatos a servidor Orion Cloud
+payload = {
+    "filename": doc_path,
+    "metadata": resumen["metadata"],
+    "tables": resumen["tables"],
+    "signatures": resumen["signatures"],
+    "timestamp": datetime.now(),
+    "summary": descripcion
+}
+
+res = net.transmit("https://jsonplaceholder.typicode.com/posts", json_data=payload)
+
+if res.status == 201 {
+    show("Orion Cloud confirmó el análisis Insight", level="ok", pulse=yes)
+} else {
+    show("Error al sincronizar con Orion Cloud:", res.status, level="error")
+}
+
+trace_end("ANÁLISIS VISUAL COMPLETO", elapsed=yes)

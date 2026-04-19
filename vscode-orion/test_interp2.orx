@@ -1,0 +1,9 @@
+fn saludar(nombre, edad) {
+    show "Hola ${nombre}, tienes ${edad} años"
+    show "El doble de tu edad es ${edad * 2}"
+}
+
+precio = 99.5
+descuento = 10
+show "Precio: ${precio} con descuento de ${descuento}%"
+saludar("Maria", 30)

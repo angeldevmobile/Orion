@@ -1,0 +1,105 @@
+{
+  "main": [
+    {
+      "LoadStr": "Angel"
+    },
+    {
+      "StoreVar": "nombre"
+    },
+    {
+      "LoadInt": 25
+    },
+    {
+      "StoreVar": "edad"
+    },
+    {
+      "LoadStr": "Hola "
+    },
+    {
+      "LoadVar": "nombre"
+    },
+    "Add",
+    {
+      "LoadStr": "!"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "Tienes "
+    },
+    {
+      "LoadVar": "edad"
+    },
+    "Add",
+    {
+      "LoadStr": " a\u00f1os"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadVar": "nombre"
+    },
+    {
+      "LoadStr": " tiene "
+    },
+    "Add",
+    {
+      "LoadVar": "edad"
+    },
+    "Add",
+    {
+      "LoadStr": " a\u00f1os y "
+    },
+    "Add",
+    {
+      "LoadVar": "edad"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    "Add",
+    {
+      "LoadStr": " el proximo"
+    },
+    "Add",
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    1,
+    1,
+    2,
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5
+  ],
+  "functions": {}
+}
