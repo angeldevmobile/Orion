@@ -6,7 +6,7 @@ import types
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from core.control import eval_match
 from core.functions import register_function, get_function, register_native_function
-from core.types import OrionDict, OrionList, OrionString, OrionNumber, OrionBool, OrionDate, null_safe
+from core.types import OrionDict, OrionList, OrionString, OrionNumber, OrionBool, OrionDate, null_safe, OrionShape, OrionInstance
 from core.errors import (
     OrionRuntimeError,
     OrionTypeError,
@@ -623,6 +623,53 @@ def _call_fn_value(fn_val, pos_args, kw_args, variables, functions):
     raise OrionFunctionError(f"El valor no es una función: {type(fn_val).__name__}")
 
 
+def _instantiate_shape(shape, args, variables, functions):
+    """Crea y retorna una OrionInstance a partir de un OrionShape."""
+    from copy import deepcopy
+
+    # Recopilar campos y acts de shapes 'using' + propios
+    all_fields = {}
+    all_acts   = {}
+    for using_name in shape.using_list:
+        using_shape = variables.get(using_name)
+        if isinstance(using_shape, OrionShape):
+            all_fields.update(using_shape.fields)
+            all_acts.update(using_shape.acts)
+    all_fields.update(shape.fields)
+    all_acts.update(shape.acts)
+
+    # Copiar valores por defecto
+    instance_fields = {}
+    for k, v in all_fields.items():
+        try:
+            instance_fields[k] = deepcopy(v)
+        except Exception:
+            instance_fields[k] = v
+
+    instance = OrionInstance(shape.name, instance_fields, acts=all_acts)
+
+    if shape.on_create:
+        # on_create puede ser (params, body) o (params, body, param_types)
+        oc = shape.on_create
+        params, body = oc[0], oc[1]
+        local_vars = variables.copy()
+        local_vars.update(instance_fields)
+        local_vars["me"] = instance
+        for p, a in zip(params, args):
+            local_vars[p] = a
+        evaluate(body, local_vars, functions, inside_fn=True)
+        # Escribir de vuelta cambios en campos
+        for k in instance_fields:
+            if k in local_vars:
+                instance._fields[k] = local_vars[k]
+    elif args:
+        # Auto-asignación posicional si no hay on_create (incluye campos de 'using')
+        for (k, _), a in zip(list(all_fields.items()), args):
+            instance._fields[k] = a
+
+    return instance
+
+
 def eval_call_args(args, variables, functions):
     pos_args = []
     kw_args = {}
@@ -1046,9 +1093,13 @@ def eval_expr(expr, variables, functions):
                     "type": "NATIVE_FN",
                     "impl": NATIVE_FUNCTIONS[fn_name]
                 }
-            # Si no se encontró en functions, buscar en variables (funciones como valores)
+            # Si no se encontró en functions, buscar en variables (funciones como valores o shapes)
             if fn_def is None and fn_name in variables:
                 fn_val = variables[fn_name]
+                # === Instanciación de shape ===
+                if isinstance(fn_val, OrionShape):
+                    pos_args, _ = eval_call_args(args, variables, functions)
+                    return _instantiate_shape(fn_val, pos_args, variables, functions)
                 pos_args, kw_args = eval_call_args(args, variables, functions)
                 if kwargs:
                     for k, v in kwargs.items():
@@ -1217,7 +1268,6 @@ def eval_expr(expr, variables, functions):
                 _merged_fns = {**_mod_fns, **functions} if _mod_fns else functions
                 _r = evaluate(body, local_vars, _merged_fns, inside_fn=True)
                 return _r.val if isinstance(_r, _ReturnValue) else _r
-            
             else:
                 raise OrionFunctionError(f"Tipo de función desconocido: {fn_def.get('type', 'UNKNOWN')}")
 
@@ -1237,6 +1287,30 @@ def eval_expr(expr, variables, functions):
             if kwargs:
                 for k, v in kwargs.items():
                     kw_args[k] = to_native(eval_expr(v, variables, functions))
+
+            # === DISPATCH PARA OrionInstance (shape acts) ===
+            if isinstance(obj_val, OrionInstance):
+                acts = object.__getattribute__(obj_val, '_acts')
+                if method_name in acts:
+                    params, body = acts[method_name]
+                    local_vars = variables.copy()
+                    local_vars.update(object.__getattribute__(obj_val, '_fields'))
+                    local_vars["me"] = obj_val
+                    # Exponer sibling acts como FN_DEF para que se puedan llamar directamente
+                    for act_n, (act_p, act_b) in acts.items():
+                        local_vars[act_n] = {"type": "FN_DEF", "params": act_p, "body": act_b}
+                    for p, a in zip(params, pos_args):
+                        local_vars[p] = a
+                    result = evaluate(body, local_vars, functions, inside_fn=True)
+                    # Escribir de vuelta cambios en campos de la instancia
+                    fields = object.__getattribute__(obj_val, '_fields')
+                    for k in fields:
+                        if k in local_vars:
+                            fields[k] = local_vars[k]
+                    return result.val if isinstance(result, _ReturnValue) else result
+                raise OrionRuntimeError(
+                    f"'{object.__getattribute__(obj_val, '_shape_name')}' no tiene acto '{method_name}'"
+                )
 
             # === DISPATCH TEMPRANO PARA OBJETOS MÓDULO/NAMESPACE ===
             # Antes de los handlers de string/list, despachar objetos que no son tipos primitivos
@@ -1677,14 +1751,29 @@ def eval_expr(expr, variables, functions):
                     f"Método '{method_name}' no definido para objeto de tipo {type(obj_val).__name__}"
                 )
 
+        # --- IS_CHECK ---
+        elif tag == "IS_CHECK":
+            _, obj_expr, shape_name = expr
+            obj_val = eval_expr(obj_expr, variables, functions)
+            if isinstance(obj_val, OrionInstance):
+                return OrionBool(object.__getattribute__(obj_val, '_shape_name') == shape_name)
+            return OrionBool(False)
+
         # --- ATTR_ACCESS ---
         elif tag == "ATTR_ACCESS":
             _, obj_expr, attr_name = expr
             obj_val = eval_expr(obj_expr, variables, functions)
+            # OrionInstance: acceso directo a campos
+            if isinstance(obj_val, OrionInstance):
+                fields = object.__getattribute__(obj_val, '_fields')
+                if attr_name in fields:
+                    return fields[attr_name]
+                raise OrionRuntimeError(
+                    f"'{object.__getattribute__(obj_val, '_shape_name')}' no tiene campo '{attr_name}'"
+                )
             # Si es una instancia de clase, accede al atributo directamente
             if hasattr(obj_val, attr_name):
                 val = getattr(obj_val, attr_name)
-                # Si el valor es una propiedad o método, evalúalo si es necesario
                 if callable(val):
                     return val()
                 return val
@@ -2319,6 +2408,26 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             i += 1
             continue
 
+        elif tag == "SHAPE_DEF":
+            _, shape_name, field_defs, on_create_def, acts_list, using_list = node
+            # Evaluar valores por defecto de campos (soporta 2-tupla y 3-tupla con type hint)
+            evaluated_fields = {}
+            for field_item in field_defs:
+                if len(field_item) == 3:
+                    field_name, _type_hint, default_expr = field_item
+                else:
+                    field_name, default_expr = field_item
+                evaluated_fields[field_name] = eval_expr(default_expr, variables, functions) if default_expr is not None else None
+            # Acts: soporta 3-tupla (nombre, params, body) y 5-tupla (nombre, params, body, ret_type, param_types)
+            acts_dict = {}
+            for act_item in acts_list:
+                a_name, a_params, a_body = act_item[0], act_item[1], act_item[2]
+                acts_dict[a_name] = (a_params, a_body)
+            shape = OrionShape(shape_name, evaluated_fields, on_create_def, acts_dict, using_list)
+            variables[shape_name] = shape
+            i += 1
+            continue
+
         elif tag == "FN":
             # Si estamos dentro de una función, crear closure con el scope actual
             # Esto permite que funciones anidadas capturen variables del scope externo
@@ -2373,12 +2482,23 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             _, obj_expr, attr_name, value_expr = node
             obj = eval_expr(obj_expr, variables, functions)
             value = eval_expr(value_expr, variables, functions)
-            if hasattr(obj, attr_name):
+            if isinstance(obj, OrionInstance):
+                object.__getattribute__(obj, '_fields')[attr_name] = value
+            elif hasattr(obj, attr_name):
                 setattr(obj, attr_name, value)
             elif isinstance(obj, dict):
                 obj[attr_name] = value
             else:
                 raise OrionRuntimeError(f"No se puede asignar atributo '{attr_name}' al tipo {type(obj).__name__}")
+
+        elif tag == "TYPED_ASSIGN":
+            # nombre: tipo = valor  — el tipo es metadata, no se valida en runtime
+            _, name, _type_hint, value = node
+            if name in variables.get("__consts__", set()):
+                raise OrionRuntimeError(f"No se puede reasignar '{name}': es una constante")
+            val = eval_expr(value, variables, functions)
+            val = _wrap_orion_type(val)
+            variables[name] = val
 
         elif tag == "ASSIGN":
             _, name, value = node

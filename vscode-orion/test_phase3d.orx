@@ -1,0 +1,235 @@
+-- test_phase3d.orx — Edge cases type hints + interacción con OOP
+
+-- =========================================
+-- 1. Variable tipada reasignada (mismo tipo)
+-- =========================================
+show "=== Reasignación de variable tipada ==="
+
+x: int = 10
+show str(x)       -- esperado: 10
+x = 20
+show str(x)       -- esperado: 20
+
+-- =========================================
+-- 2. Type hints en parámetros — valores default
+-- =========================================
+show "=== Función tipada con lógica condicional ==="
+
+fn clamp(val: int, lo: int, hi: int) -> int {
+    if val < lo {
+        return lo
+    }
+    if val > hi {
+        return hi
+    }
+    return val
+}
+
+show str(clamp(5, 0, 10))    -- esperado: 5
+show str(clamp(-3, 0, 10))   -- esperado: 0
+show str(clamp(15, 0, 10))   -- esperado: 10
+
+-- =========================================
+-- 3. Función tipada -> bool usada en if
+-- =========================================
+show "=== Resultado de función tipada en condicional ==="
+
+fn is_even(n: int) -> bool {
+    return n % 2 == 0
+}
+
+if is_even(4) {
+    show "4 es par — correcto"
+}
+
+if is_even(7) {
+    show "ERROR"
+} else {
+    show "7 es impar — correcto"
+}
+
+-- =========================================
+-- 4. Función tipada -> string en concatenación
+-- =========================================
+show "=== Return string tipado en concat ==="
+
+fn greet(name: string, times: int) -> string {
+    result: string = ""
+    i: int = 0
+    while i < times {
+        result = result + "Hola " + name + "! "
+        i = i + 1
+    }
+    return result
+}
+
+show greet("Orion", 3)
+-- esperado: Hola Orion! Hola Orion! Hola Orion!
+
+-- =========================================
+-- 5. Shape con typed acts que retornan valores
+-- =========================================
+show "=== Shape con typed acts ==="
+
+shape Temperature {
+    celsius: float = 0.0
+
+    on_create(c: float) {
+        celsius = c
+    }
+
+    act to_fahrenheit() -> float {
+        return celsius * 1.8 + 32.0
+    }
+
+    act to_kelvin() -> float {
+        return celsius + 273.15
+    }
+
+    act describe() {
+        show str(celsius) + "C = " + str(to_fahrenheit()) + "F = " + str(to_kelvin()) + "K"
+    }
+}
+
+t = Temperature(100.0)
+t.describe()
+-- esperado: 100.0C = 212.0F = 373.15K
+
+t2 = Temperature(0.0)
+show str(t2.to_fahrenheit())   -- esperado: 32.0
+show str(t2.to_kelvin())       -- esperado: 273.15
+
+-- =========================================
+-- 6. Variables tipadas dentro de funciones
+-- =========================================
+show "=== Variables tipadas locales ==="
+
+fn factorial(n: int) -> int {
+    result: int = 1
+    i: int = 2
+    while i <= n {
+        result = result * i
+        i = i + 1
+    }
+    return result
+}
+
+show str(factorial(5))    -- esperado: 120
+show str(factorial(10))   -- esperado: 3628800
+
+-- =========================================
+-- 7. Shape tipado + using + typed acts
+-- =========================================
+show "=== Shape tipado con using ==="
+
+shape Named {
+    name: string = ""
+}
+
+shape Scored {
+    using Named
+    score: int = 0
+
+    on_create(n: string, s: int) {
+        name  = n
+        score = s
+    }
+
+    act rank() -> string {
+        if score >= 90 {
+            return "A"
+        }
+        if score >= 75 {
+            return "B"
+        }
+        if score >= 60 {
+            return "C"
+        }
+        return "F"
+    }
+
+    act report() {
+        show name + ": " + str(score) + " (" + rank() + ")"
+    }
+}
+
+s1 = Scored("Alice", 95)
+s2 = Scored("Bob", 78)
+s3 = Scored("Charlie", 55)
+
+s1.report()    -- esperado: Alice: 95 (A)
+s2.report()    -- esperado: Bob: 78 (B)
+s3.report()    -- esperado: Charlie: 55 (F)
+
+-- =========================================
+-- 8. Mezcla: función tipada recibe shape instance
+-- =========================================
+show "=== Función tipada recibe instancia ==="
+
+shape Vector2 {
+    x: float = 0.0
+    y: float = 0.0
+
+    on_create(vx: float, vy: float) {
+        x = vx
+        y = vy
+    }
+}
+
+fn dot_product(a, b) -> float {
+    return a.x * b.x + a.y * b.y
+}
+
+fn magnitude_sq(v) -> float {
+    return v.x * v.x + v.y * v.y
+}
+
+v1 = Vector2(3.0, 4.0)
+v2 = Vector2(1.0, 2.0)
+
+show str(dot_product(v1, v2))    -- esperado: 11.0
+show str(magnitude_sq(v1))       -- esperado: 25.0
+
+-- =========================================
+-- 9. is check con variable de tipo incorrecto
+-- =========================================
+show "=== is con no-instancia ==="
+
+val: int = 42
+
+if val is int {
+    show "ERROR: is no aplica a primitivos"
+} else {
+    show "is en primitivo retorna false — correcto"
+}
+
+-- =========================================
+-- 10. Múltiples shapes, is en loop
+-- =========================================
+show "=== is en colección mixta ==="
+
+shape Apple  { kind: "" }
+shape Orange { kind: "" }
+
+a = Apple()
+o = Orange()
+a.kind = "fruta"
+o.kind = "fruta"
+
+collection = [a, o, a]
+
+i = 0
+apples: int = 0
+oranges: int = 0
+while i < 3 {
+    if collection[i] is Apple {
+        apples = apples + 1
+    }
+    if collection[i] is Orange {
+        oranges = oranges + 1
+    }
+    i = i + 1
+}
+
+show str(apples)    -- esperado: 2
+show str(oranges)   -- esperado: 1

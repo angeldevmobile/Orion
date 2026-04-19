@@ -1,0 +1,93 @@
+-- test_phase3.orx — Prueba del sistema shape (OOP de Orion)
+
+-- =========================================
+-- 1. Shape básico con on_create y actos
+-- =========================================
+show "=== Shape básico ==="
+
+shape Person {
+    name: ""
+    age:  0
+
+    on_create(n, a) {
+        name = n
+        age  = a
+    }
+
+    act greet() {
+        show "Hola, soy " + name + " y tengo " + str(age) + " años"
+    }
+
+    act birthday() {
+        age = age + 1
+    }
+}
+
+p = Person("Gabriel", 25)
+p.greet()
+p.birthday()
+p.greet()
+
+-- =========================================
+-- 2. Verificar tipo con 'is'
+-- =========================================
+show "=== Verificación de tipo ==="
+
+if p is Person {
+    show "p es una Person — correcto"
+}
+
+-- =========================================
+-- 3. Acceso y modificación de campos
+-- =========================================
+show "=== Campos ==="
+show p.name
+show p.age
+
+-- =========================================
+-- 4. Composición con 'using'
+-- =========================================
+show "=== Composición con using ==="
+
+shape Animal {
+    name:  ""
+    sound: ""
+
+    act speak() {
+        show name + " dice: " + sound
+    }
+}
+
+shape Dog {
+    using Animal
+    breed: ""
+
+    act fetch() {
+        show name + " busca la pelota!"
+    }
+}
+
+d = Dog("Rex", "Guau", "Labrador")
+d.speak()
+d.fetch()
+
+if d is Dog {
+    show "d es un Dog — correcto"
+}
+
+-- =========================================
+-- 5. Shape sin on_create (auto-asignación posicional)
+-- =========================================
+show "=== Auto-asignación posicional ==="
+
+shape Point {
+    x: 0
+    y: 0
+
+    act describe() {
+        show "Punto en (" + str(x) + ", " + str(y) + ")"
+    }
+}
+
+pt = Point(10, 20)
+pt.describe()

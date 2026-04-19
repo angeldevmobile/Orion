@@ -1,0 +1,551 @@
+{
+  "main": [
+    {
+      "LoadStr": "=== Shape b\u00e1sico ==="
+    },
+    "Show",
+    {
+      "LoadStr": "Gabriel"
+    },
+    {
+      "LoadInt": 25
+    },
+    {
+      "Call": [
+        "Person",
+        2
+      ]
+    },
+    {
+      "StoreVar": "p"
+    },
+    {
+      "LoadVar": "p"
+    },
+    {
+      "CallMethod": [
+        "greet",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "p"
+    },
+    {
+      "CallMethod": [
+        "birthday",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "p"
+    },
+    {
+      "CallMethod": [
+        "greet",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadStr": "=== Verificaci\u00f3n de tipo ==="
+    },
+    "Show",
+    {
+      "LoadVar": "p"
+    },
+    {
+      "IsInstance": "Person"
+    },
+    {
+      "JumpIfFalse": 22
+    },
+    {
+      "LoadStr": "p es una Person \u2014 correcto"
+    },
+    "Show",
+    {
+      "LoadStr": "=== Campos ==="
+    },
+    "Show",
+    {
+      "LoadVar": "p"
+    },
+    {
+      "GetAttr": "name"
+    },
+    "Show",
+    {
+      "LoadVar": "p"
+    },
+    {
+      "GetAttr": "age"
+    },
+    "Show",
+    {
+      "LoadStr": "=== Composici\u00f3n con using ==="
+    },
+    "Show",
+    {
+      "LoadStr": "Rex"
+    },
+    {
+      "LoadStr": "Guau"
+    },
+    {
+      "LoadStr": "Labrador"
+    },
+    {
+      "Call": [
+        "Dog",
+        3
+      ]
+    },
+    {
+      "StoreVar": "d"
+    },
+    {
+      "LoadVar": "d"
+    },
+    {
+      "CallMethod": [
+        "speak",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "d"
+    },
+    {
+      "CallMethod": [
+        "fetch",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "d"
+    },
+    {
+      "IsInstance": "Dog"
+    },
+    {
+      "JumpIfFalse": 48
+    },
+    {
+      "LoadStr": "d es un Dog \u2014 correcto"
+    },
+    "Show",
+    {
+      "LoadStr": "=== Auto-asignaci\u00f3n posicional ==="
+    },
+    "Show",
+    {
+      "LoadInt": 10
+    },
+    {
+      "LoadInt": 20
+    },
+    {
+      "Call": [
+        "Point",
+        2
+      ]
+    },
+    {
+      "StoreVar": "pt"
+    },
+    {
+      "LoadVar": "pt"
+    },
+    {
+      "CallMethod": [
+        "describe",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    6,
+    6,
+    26,
+    26,
+    26,
+    26,
+    27,
+    27,
+    27,
+    28,
+    28,
+    28,
+    29,
+    29,
+    29,
+    34,
+    34,
+    36,
+    36,
+    36,
+    37,
+    37,
+    43,
+    43,
+    44,
+    44,
+    44,
+    45,
+    45,
+    45,
+    50,
+    50,
+    70,
+    70,
+    70,
+    70,
+    70,
+    71,
+    71,
+    71,
+    72,
+    72,
+    72,
+    74,
+    74,
+    74,
+    75,
+    75,
+    81,
+    81,
+    92,
+    92,
+    92,
+    92,
+    93,
+    93,
+    93,
+    93
+  ],
+  "functions": {},
+  "shapes": {
+    "Person": {
+      "fields": [
+        {
+          "name": "name",
+          "type": null,
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "age",
+          "type": null,
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "n",
+          "a"
+        ],
+        "body": [
+          {
+            "LoadVar": "n"
+          },
+          {
+            "StoreVar": "name"
+          },
+          {
+            "LoadVar": "a"
+          },
+          {
+            "StoreVar": "age"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          13,
+          13,
+          14,
+          14,
+          14,
+          14
+        ]
+      },
+      "acts": {
+        "greet": {
+          "params": [],
+          "body": [
+            {
+              "LoadStr": "Hola, soy "
+            },
+            {
+              "LoadVar": "name"
+            },
+            "Add",
+            {
+              "LoadStr": " y tengo "
+            },
+            "Add",
+            {
+              "LoadVar": "age"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": " a\u00f1os"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18,
+            18
+          ]
+        },
+        "birthday": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "age"
+            },
+            {
+              "LoadInt": 1
+            },
+            "Add",
+            {
+              "StoreVar": "age"
+            },
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            22,
+            22,
+            22,
+            22,
+            22,
+            22
+          ]
+        }
+      },
+      "using": []
+    },
+    "Animal": {
+      "fields": [
+        {
+          "name": "name",
+          "type": null,
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "sound",
+          "type": null,
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": null,
+      "acts": {
+        "speak": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "name"
+            },
+            {
+              "LoadStr": " dice: "
+            },
+            "Add",
+            {
+              "LoadVar": "sound"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            57,
+            57,
+            57,
+            57,
+            57,
+            57,
+            57,
+            57
+          ]
+        }
+      },
+      "using": []
+    },
+    "Dog": {
+      "fields": [
+        {
+          "name": "breed",
+          "type": null,
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": null,
+      "acts": {
+        "fetch": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "name"
+            },
+            {
+              "LoadStr": " busca la pelota!"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            66,
+            66,
+            66,
+            66,
+            66,
+            66
+          ]
+        }
+      },
+      "using": [
+        "Animal"
+      ]
+    },
+    "Point": {
+      "fields": [
+        {
+          "name": "x",
+          "type": null,
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "y",
+          "type": null,
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": null,
+      "acts": {
+        "describe": {
+          "params": [],
+          "body": [
+            {
+              "LoadStr": "Punto en ("
+            },
+            {
+              "LoadVar": "x"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": ", "
+            },
+            "Add",
+            {
+              "LoadVar": "y"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": ")"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            88,
+            88,
+            88,
+            88,
+            88,
+            88,
+            88,
+            88,
+            88,
+            88,
+            88,
+            88,
+            88,
+            88
+          ]
+        }
+      },
+      "using": []
+    }
+  }
+}

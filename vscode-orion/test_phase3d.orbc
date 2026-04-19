@@ -1,0 +1,1620 @@
+{
+  "main": [
+    {
+      "LoadStr": "=== Reasignaci\u00f3n de variable tipada ==="
+    },
+    "Show",
+    {
+      "LoadInt": 10
+    },
+    {
+      "StoreVar": "x"
+    },
+    {
+      "LoadVar": "x"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 20
+    },
+    {
+      "StoreVar": "x"
+    },
+    {
+      "LoadVar": "x"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== Funci\u00f3n tipada con l\u00f3gica condicional ==="
+    },
+    "Show",
+    {
+      "LoadInt": 5
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "LoadInt": 10
+    },
+    {
+      "Call": [
+        "clamp",
+        3
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 3
+    },
+    "Neg",
+    {
+      "LoadInt": 0
+    },
+    {
+      "LoadInt": 10
+    },
+    {
+      "Call": [
+        "clamp",
+        3
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 15
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "LoadInt": 10
+    },
+    {
+      "Call": [
+        "clamp",
+        3
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== Resultado de funci\u00f3n tipada en condicional ==="
+    },
+    "Show",
+    {
+      "LoadInt": 4
+    },
+    {
+      "Call": [
+        "is_even",
+        1
+      ]
+    },
+    {
+      "JumpIfFalse": 40
+    },
+    {
+      "LoadStr": "4 es par \u2014 correcto"
+    },
+    "Show",
+    {
+      "LoadInt": 7
+    },
+    {
+      "Call": [
+        "is_even",
+        1
+      ]
+    },
+    {
+      "JumpIfFalse": 46
+    },
+    {
+      "LoadStr": "ERROR"
+    },
+    "Show",
+    {
+      "Jump": 48
+    },
+    {
+      "LoadStr": "7 es impar \u2014 correcto"
+    },
+    "Show",
+    {
+      "LoadStr": "=== Return string tipado en concat ==="
+    },
+    "Show",
+    {
+      "LoadStr": "Orion"
+    },
+    {
+      "LoadInt": 3
+    },
+    {
+      "Call": [
+        "greet",
+        2
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== Shape con typed acts ==="
+    },
+    "Show",
+    {
+      "LoadFloat": 100.0
+    },
+    {
+      "Call": [
+        "Temperature",
+        1
+      ]
+    },
+    {
+      "StoreVar": "t"
+    },
+    {
+      "LoadVar": "t"
+    },
+    {
+      "CallMethod": [
+        "describe",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadFloat": 0.0
+    },
+    {
+      "Call": [
+        "Temperature",
+        1
+      ]
+    },
+    {
+      "StoreVar": "t2"
+    },
+    {
+      "LoadVar": "t2"
+    },
+    {
+      "CallMethod": [
+        "to_fahrenheit",
+        0
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "t2"
+    },
+    {
+      "CallMethod": [
+        "to_kelvin",
+        0
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== Variables tipadas locales ==="
+    },
+    "Show",
+    {
+      "LoadInt": 5
+    },
+    {
+      "Call": [
+        "factorial",
+        1
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 10
+    },
+    {
+      "Call": [
+        "factorial",
+        1
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== Shape tipado con using ==="
+    },
+    "Show",
+    {
+      "LoadStr": "Alice"
+    },
+    {
+      "LoadInt": 95
+    },
+    {
+      "Call": [
+        "Scored",
+        2
+      ]
+    },
+    {
+      "StoreVar": "s1"
+    },
+    {
+      "LoadStr": "Bob"
+    },
+    {
+      "LoadInt": 78
+    },
+    {
+      "Call": [
+        "Scored",
+        2
+      ]
+    },
+    {
+      "StoreVar": "s2"
+    },
+    {
+      "LoadStr": "Charlie"
+    },
+    {
+      "LoadInt": 55
+    },
+    {
+      "Call": [
+        "Scored",
+        2
+      ]
+    },
+    {
+      "StoreVar": "s3"
+    },
+    {
+      "LoadVar": "s1"
+    },
+    {
+      "CallMethod": [
+        "report",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "s2"
+    },
+    {
+      "CallMethod": [
+        "report",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "s3"
+    },
+    {
+      "CallMethod": [
+        "report",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadStr": "=== Funci\u00f3n tipada recibe instancia ==="
+    },
+    "Show",
+    {
+      "LoadFloat": 3.0
+    },
+    {
+      "LoadFloat": 4.0
+    },
+    {
+      "Call": [
+        "Vector2",
+        2
+      ]
+    },
+    {
+      "StoreVar": "v1"
+    },
+    {
+      "LoadFloat": 1.0
+    },
+    {
+      "LoadFloat": 2.0
+    },
+    {
+      "Call": [
+        "Vector2",
+        2
+      ]
+    },
+    {
+      "StoreVar": "v2"
+    },
+    {
+      "LoadVar": "v1"
+    },
+    {
+      "LoadVar": "v2"
+    },
+    {
+      "Call": [
+        "dot_product",
+        2
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "v1"
+    },
+    {
+      "Call": [
+        "magnitude_sq",
+        1
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== is con no-instancia ==="
+    },
+    "Show",
+    {
+      "LoadInt": 42
+    },
+    {
+      "StoreVar": "val"
+    },
+    {
+      "LoadStr": "=== is en colecci\u00f3n mixta ==="
+    },
+    "Show",
+    {
+      "Call": [
+        "Apple",
+        0
+      ]
+    },
+    {
+      "StoreVar": "a"
+    },
+    {
+      "Call": [
+        "Orange",
+        0
+      ]
+    },
+    {
+      "StoreVar": "o"
+    },
+    {
+      "LoadVar": "a"
+    },
+    {
+      "LoadStr": "fruta"
+    },
+    {
+      "SetAttr": "kind"
+    },
+    {
+      "LoadVar": "o"
+    },
+    {
+      "LoadStr": "fruta"
+    },
+    {
+      "SetAttr": "kind"
+    },
+    {
+      "LoadVar": "a"
+    },
+    {
+      "LoadVar": "o"
+    },
+    {
+      "LoadVar": "a"
+    },
+    {
+      "MakeList": 3
+    },
+    {
+      "StoreVar": "collection"
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "StoreVar": "i"
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "StoreVar": "apples"
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "StoreVar": "oranges"
+    },
+    {
+      "LoadVar": "i"
+    },
+    {
+      "LoadInt": 3
+    },
+    "Lt",
+    {
+      "JumpIfFalse": 179
+    },
+    {
+      "LoadVar": "collection"
+    },
+    {
+      "LoadVar": "i"
+    },
+    "GetIndex",
+    {
+      "IsInstance": "Apple"
+    },
+    {
+      "JumpIfFalse": 165
+    },
+    {
+      "LoadVar": "apples"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    {
+      "StoreVar": "apples"
+    },
+    {
+      "LoadVar": "collection"
+    },
+    {
+      "LoadVar": "i"
+    },
+    "GetIndex",
+    {
+      "IsInstance": "Orange"
+    },
+    {
+      "JumpIfFalse": 174
+    },
+    {
+      "LoadVar": "oranges"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    {
+      "StoreVar": "oranges"
+    },
+    {
+      "LoadVar": "i"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    {
+      "StoreVar": "i"
+    },
+    {
+      "Jump": 152
+    },
+    {
+      "LoadVar": "apples"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "oranges"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    6,
+    6,
+    8,
+    8,
+    9,
+    9,
+    9,
+    10,
+    10,
+    11,
+    11,
+    11,
+    16,
+    16,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    29,
+    29,
+    29,
+    29,
+    29,
+    29,
+    29,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    35,
+    35,
+    41,
+    41,
+    41,
+    42,
+    42,
+    45,
+    45,
+    45,
+    46,
+    46,
+    46,
+    48,
+    48,
+    54,
+    54,
+    66,
+    66,
+    66,
+    66,
+    72,
+    72,
+    94,
+    94,
+    94,
+    95,
+    95,
+    95,
+    98,
+    98,
+    98,
+    99,
+    99,
+    99,
+    99,
+    100,
+    100,
+    100,
+    100,
+    105,
+    105,
+    117,
+    117,
+    117,
+    117,
+    118,
+    118,
+    118,
+    118,
+    123,
+    123,
+    156,
+    156,
+    156,
+    156,
+    157,
+    157,
+    157,
+    157,
+    158,
+    158,
+    158,
+    158,
+    160,
+    160,
+    160,
+    161,
+    161,
+    161,
+    162,
+    162,
+    162,
+    167,
+    167,
+    187,
+    187,
+    187,
+    187,
+    188,
+    188,
+    188,
+    188,
+    190,
+    190,
+    190,
+    190,
+    190,
+    191,
+    191,
+    191,
+    191,
+    196,
+    196,
+    198,
+    198,
+    209,
+    209,
+    214,
+    214,
+    215,
+    215,
+    216,
+    216,
+    216,
+    217,
+    217,
+    217,
+    219,
+    219,
+    219,
+    219,
+    219,
+    221,
+    221,
+    222,
+    222,
+    223,
+    223,
+    224,
+    224,
+    224,
+    224,
+    225,
+    225,
+    225,
+    225,
+    225,
+    226,
+    226,
+    226,
+    226,
+    228,
+    228,
+    228,
+    228,
+    228,
+    229,
+    229,
+    229,
+    229,
+    231,
+    231,
+    231,
+    231,
+    231,
+    234,
+    234,
+    234,
+    235,
+    235,
+    235,
+    235
+  ],
+  "functions": {
+    "clamp": {
+      "params": [
+        "val",
+        "lo",
+        "hi"
+      ],
+      "body": [
+        {
+          "LoadVar": "val"
+        },
+        {
+          "LoadVar": "lo"
+        },
+        "Lt",
+        {
+          "JumpIfFalse": 6
+        },
+        {
+          "LoadVar": "lo"
+        },
+        "Return",
+        {
+          "LoadVar": "val"
+        },
+        {
+          "LoadVar": "hi"
+        },
+        "Gt",
+        {
+          "JumpIfFalse": 12
+        },
+        {
+          "LoadVar": "hi"
+        },
+        "Return",
+        {
+          "LoadVar": "val"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        19,
+        19,
+        19,
+        19,
+        20,
+        20,
+        22,
+        22,
+        22,
+        22,
+        23,
+        23,
+        25,
+        25,
+        25,
+        25
+      ]
+    },
+    "is_even": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 2
+        },
+        "Mod",
+        {
+          "LoadInt": 0
+        },
+        "Eq",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38,
+        38
+      ]
+    },
+    "greet": {
+      "params": [
+        "name",
+        "times"
+      ],
+      "body": [
+        {
+          "LoadStr": ""
+        },
+        {
+          "StoreVar": "result"
+        },
+        {
+          "LoadInt": 0
+        },
+        {
+          "StoreVar": "i"
+        },
+        {
+          "LoadVar": "i"
+        },
+        {
+          "LoadVar": "times"
+        },
+        "Lt",
+        {
+          "JumpIfFalse": 21
+        },
+        {
+          "LoadVar": "result"
+        },
+        {
+          "LoadStr": "Hola "
+        },
+        "Add",
+        {
+          "LoadVar": "name"
+        },
+        "Add",
+        {
+          "LoadStr": "! "
+        },
+        "Add",
+        {
+          "StoreVar": "result"
+        },
+        {
+          "LoadVar": "i"
+        },
+        {
+          "LoadInt": 1
+        },
+        "Add",
+        {
+          "StoreVar": "i"
+        },
+        {
+          "Jump": 4
+        },
+        {
+          "LoadVar": "result"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        57,
+        57,
+        58,
+        58,
+        59,
+        59,
+        59,
+        59,
+        60,
+        60,
+        60,
+        60,
+        60,
+        60,
+        60,
+        60,
+        61,
+        61,
+        61,
+        61,
+        61,
+        63,
+        63,
+        63,
+        63
+      ]
+    },
+    "factorial": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadInt": 1
+        },
+        {
+          "StoreVar": "result"
+        },
+        {
+          "LoadInt": 2
+        },
+        {
+          "StoreVar": "i"
+        },
+        {
+          "LoadVar": "i"
+        },
+        {
+          "LoadVar": "n"
+        },
+        "LtEq",
+        {
+          "JumpIfFalse": 17
+        },
+        {
+          "LoadVar": "result"
+        },
+        {
+          "LoadVar": "i"
+        },
+        "Mul",
+        {
+          "StoreVar": "result"
+        },
+        {
+          "LoadVar": "i"
+        },
+        {
+          "LoadInt": 1
+        },
+        "Add",
+        {
+          "StoreVar": "i"
+        },
+        {
+          "Jump": 4
+        },
+        {
+          "LoadVar": "result"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        108,
+        108,
+        109,
+        109,
+        110,
+        110,
+        110,
+        110,
+        111,
+        111,
+        111,
+        111,
+        112,
+        112,
+        112,
+        112,
+        112,
+        114,
+        114,
+        114,
+        114
+      ]
+    },
+    "dot_product": {
+      "params": [
+        "a",
+        "b"
+      ],
+      "body": [
+        {
+          "LoadVar": "a"
+        },
+        {
+          "GetAttr": "x"
+        },
+        {
+          "LoadVar": "b"
+        },
+        {
+          "GetAttr": "x"
+        },
+        "Mul",
+        {
+          "LoadVar": "a"
+        },
+        {
+          "GetAttr": "y"
+        },
+        {
+          "LoadVar": "b"
+        },
+        {
+          "GetAttr": "y"
+        },
+        "Mul",
+        "Add",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180,
+        180
+      ]
+    },
+    "magnitude_sq": {
+      "params": [
+        "v"
+      ],
+      "body": [
+        {
+          "LoadVar": "v"
+        },
+        {
+          "GetAttr": "x"
+        },
+        {
+          "LoadVar": "v"
+        },
+        {
+          "GetAttr": "x"
+        },
+        "Mul",
+        {
+          "LoadVar": "v"
+        },
+        {
+          "GetAttr": "y"
+        },
+        {
+          "LoadVar": "v"
+        },
+        {
+          "GetAttr": "y"
+        },
+        "Mul",
+        "Add",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        184,
+        184,
+        184,
+        184,
+        184,
+        184,
+        184,
+        184,
+        184,
+        184,
+        184,
+        184,
+        184,
+        184
+      ]
+    }
+  },
+  "shapes": {
+    "Temperature": {
+      "fields": [
+        {
+          "name": "celsius",
+          "type": "float",
+          "default": [
+            {
+              "LoadFloat": 0.0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "c"
+        ],
+        "body": [
+          {
+            "LoadVar": "c"
+          },
+          {
+            "StoreVar": "celsius"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          78,
+          78,
+          78,
+          78
+        ]
+      },
+      "acts": {
+        "to_fahrenheit": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "celsius"
+            },
+            {
+              "LoadFloat": 1.8
+            },
+            "Mul",
+            {
+              "LoadFloat": 32.0
+            },
+            "Add",
+            "Return",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            82,
+            82,
+            82,
+            82,
+            82,
+            82,
+            82,
+            82
+          ]
+        },
+        "to_kelvin": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "celsius"
+            },
+            {
+              "LoadFloat": 273.15
+            },
+            "Add",
+            "Return",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            86,
+            86,
+            86,
+            86,
+            86,
+            86
+          ]
+        },
+        "describe": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "celsius"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            {
+              "LoadStr": "C = "
+            },
+            "Add",
+            {
+              "Call": [
+                "to_fahrenheit",
+                0
+              ]
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": "F = "
+            },
+            "Add",
+            {
+              "Call": [
+                "to_kelvin",
+                0
+              ]
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": "K"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90,
+            90
+          ]
+        }
+      },
+      "using": []
+    },
+    "Named": {
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": null,
+      "acts": {},
+      "using": []
+    },
+    "Scored": {
+      "fields": [
+        {
+          "name": "score",
+          "type": "int",
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "n",
+          "s"
+        ],
+        "body": [
+          {
+            "LoadVar": "n"
+          },
+          {
+            "StoreVar": "name"
+          },
+          {
+            "LoadVar": "s"
+          },
+          {
+            "StoreVar": "score"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          134,
+          134,
+          135,
+          135,
+          135,
+          135
+        ]
+      },
+      "acts": {
+        "rank": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "score"
+            },
+            {
+              "LoadInt": 90
+            },
+            "GtEq",
+            {
+              "JumpIfFalse": 6
+            },
+            {
+              "LoadStr": "A"
+            },
+            "Return",
+            {
+              "LoadVar": "score"
+            },
+            {
+              "LoadInt": 75
+            },
+            "GtEq",
+            {
+              "JumpIfFalse": 12
+            },
+            {
+              "LoadStr": "B"
+            },
+            "Return",
+            {
+              "LoadVar": "score"
+            },
+            {
+              "LoadInt": 60
+            },
+            "GtEq",
+            {
+              "JumpIfFalse": 18
+            },
+            {
+              "LoadStr": "C"
+            },
+            "Return",
+            {
+              "LoadStr": "F"
+            },
+            "Return",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            139,
+            139,
+            139,
+            139,
+            140,
+            140,
+            142,
+            142,
+            142,
+            142,
+            143,
+            143,
+            145,
+            145,
+            145,
+            145,
+            146,
+            146,
+            148,
+            148,
+            148,
+            148
+          ]
+        },
+        "report": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "name"
+            },
+            {
+              "LoadStr": ": "
+            },
+            "Add",
+            {
+              "LoadVar": "score"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": " ("
+            },
+            "Add",
+            {
+              "Call": [
+                "rank",
+                0
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": ")"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152,
+            152
+          ]
+        }
+      },
+      "using": [
+        "Named"
+      ]
+    },
+    "Vector2": {
+      "fields": [
+        {
+          "name": "x",
+          "type": "float",
+          "default": [
+            {
+              "LoadFloat": 0.0
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "y",
+          "type": "float",
+          "default": [
+            {
+              "LoadFloat": 0.0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "vx",
+          "vy"
+        ],
+        "body": [
+          {
+            "LoadVar": "vx"
+          },
+          {
+            "StoreVar": "x"
+          },
+          {
+            "LoadVar": "vy"
+          },
+          {
+            "StoreVar": "y"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          174,
+          174,
+          175,
+          175,
+          175,
+          175
+        ]
+      },
+      "acts": {},
+      "using": []
+    },
+    "Apple": {
+      "fields": [
+        {
+          "name": "kind",
+          "type": null,
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": null,
+      "acts": {},
+      "using": []
+    },
+    "Orange": {
+      "fields": [
+        {
+          "name": "kind",
+          "type": null,
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": null,
+      "acts": {},
+      "using": []
+    }
+  }
+}

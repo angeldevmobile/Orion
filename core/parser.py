@@ -132,6 +132,8 @@ def parse_primary(tokens, i):
             else:
                 expr = ("ATTR_ACCESS", expr, attr_name)
         return expr, i
+    elif kind == "NULL":
+        return None, i + 1
     elif kind == "BOOL":
         return value.value, i + 1
     elif kind == "TYPE":
@@ -407,6 +409,15 @@ def parse_expression(tokens, i):
     
     # No es lambda, usar parsing normal
     expr, j = parse_or(tokens, i)
+
+    # Verificar IS_CHECK: expr is ShapeName
+    if j < len(tokens) and tokens[j][0] == "IS":
+        j += 1
+        if j >= len(tokens) or tokens[j][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de shape después de 'is'")
+        shape_name = tokens[j][1]
+        return ("IS_CHECK", expr, shape_name), j + 1
+
     return expr, j
 def parse_statement(tokens, i):
     """Parsea una declaración individual e inyecta el número de línea como último elemento."""
@@ -665,6 +676,104 @@ def _parse_statement(tokens, i):
             var_spec = var_names if len(var_names) > 1 else var_names[0]
             return ("FOR_IN", var_spec, expr, body), j
 
+    # --- SHAPE statement ---
+    elif kind == "SHAPE":
+        if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre después de 'shape'")
+        shape_name = tokens[i+1][1]
+        j = i + 2
+        while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+            j += 1
+        if j >= len(tokens) or tokens[j][0] != "LBRACE":
+            raise OrionSyntaxError("Se esperaba '{' después del nombre del shape")
+        j += 1  # skip {
+
+        fields    = []  # [(name, default_expr)]
+        on_create = None
+        acts      = []  # [(name, params, body)]
+        using_list = []
+
+        while j < len(tokens) and tokens[j][0] != "RBRACE":
+            while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+                j += 1
+            if j >= len(tokens) or tokens[j][0] == "RBRACE":
+                break
+
+            tok_kind = tokens[j][0]
+
+            if tok_kind == "USING":
+                j += 1
+                while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+                    j += 1
+                if j >= len(tokens) or tokens[j][0] != "IDENT":
+                    raise OrionSyntaxError("Se esperaba un nombre de shape después de 'using'")
+                using_list.append(tokens[j][1])
+                j += 1
+
+            elif tok_kind == "ON_CREATE":
+                j += 1
+                if j >= len(tokens) or tokens[j][0] != "LPAREN":
+                    raise OrionSyntaxError("Se esperaba '(' después de 'on_create'")
+                params, param_types, j = parse_fn_params(tokens, j)
+                while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+                    j += 1
+                if j >= len(tokens) or tokens[j][0] != "LBRACE":
+                    raise OrionSyntaxError("Se esperaba '{' en el cuerpo de on_create")
+                body, j = parse_block(tokens, j)
+                on_create = (params, body, param_types)
+
+            elif tok_kind == "ACT":
+                j += 1
+                if j >= len(tokens) or tokens[j][0] != "IDENT":
+                    raise OrionSyntaxError("Se esperaba un nombre después de 'act'")
+                act_name = tokens[j][1]
+                j += 1
+                if j >= len(tokens) or tokens[j][0] != "LPAREN":
+                    raise OrionSyntaxError("Se esperaba '(' después del nombre del acto")
+                params, param_types, j = parse_fn_params(tokens, j)
+                # Return type opcional: -> tipo
+                return_type = None
+                while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+                    j += 1
+                if j < len(tokens) and tokens[j][0] == "THIN_ARROW":
+                    j += 1
+                    if j < len(tokens) and tokens[j][0] in ("TYPE", "IDENT"):
+                        return_type = tokens[j][1]
+                        j += 1
+                while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+                    j += 1
+                if j >= len(tokens) or tokens[j][0] != "LBRACE":
+                    raise OrionSyntaxError("Se esperaba '{' en el cuerpo del acto")
+                body, j = parse_block(tokens, j)
+                acts.append((act_name, params, body, return_type, param_types))
+
+            elif tok_kind == "IDENT":
+                field_name = tokens[j][1]
+                j += 1
+                if j < len(tokens) and tokens[j][0] == "COLON":
+                    j += 1
+                    # Detectar: field: TYPE = default  vs  field: default
+                    type_hint = None
+                    if j < len(tokens) and tokens[j][0] == "TYPE":
+                        type_hint = tokens[j][1]
+                        j += 1
+                        if j < len(tokens) and tokens[j][0] == "ASSIGN":
+                            j += 1
+                            default_expr, j = parse_expression(tokens, j)
+                        else:
+                            default_expr = None
+                    else:
+                        default_expr, j = parse_expression(tokens, j)
+                    fields.append((field_name, type_hint, default_expr))
+                else:
+                    raise OrionSyntaxError(f"Se esperaba ':' después del campo '{field_name}'")
+            else:
+                raise OrionSyntaxError(f"Token inesperado dentro de shape: '{tokens[j][1]}'")
+
+        if j >= len(tokens) or tokens[j][0] != "RBRACE":
+            raise OrionSyntaxError("Se esperaba '}' para cerrar el shape")
+        return ("SHAPE_DEF", shape_name, fields, on_create, acts, using_list), j + 1
+
     # --- FN statement ---
     elif kind == "FN" or (kind == "IDENT" and value == "fn"):
         if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
@@ -673,17 +782,25 @@ def _parse_statement(tokens, i):
 
         if i+2 >= len(tokens) or tokens[i+2][0] != "LPAREN":
             raise OrionSyntaxError("Se esperaba '(' después del nombre de función")
-        params, j = parse_fn_params(tokens, i+2)
+        params, param_types, j = parse_fn_params(tokens, i+2)
 
-        # Saltar cualquier NEWLINE o SEMICOLON antes de la llave
+        # Return type opcional: -> tipo
+        return_type = None
         while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
             j += 1
+        if j < len(tokens) and tokens[j][0] == "THIN_ARROW":
+            j += 1
+            if j < len(tokens) and tokens[j][0] in ("TYPE", "IDENT"):
+                return_type = tokens[j][1]
+                j += 1
 
+        while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+            j += 1
         if j >= len(tokens) or tokens[j][0] != "LBRACE":
             raise OrionSyntaxError("Se esperaba '{' al inicio del cuerpo de la función")
         body, j = parse_block(tokens, j)
 
-        return ("FN", fn_name, params, body), j
+        return ("FN", fn_name, params, body, return_type, param_types), j
 
     # --- MATCH statement ---
     elif kind == "MATCH":
@@ -763,6 +880,15 @@ def _parse_statement(tokens, i):
                 expr, i = parse_expression(tokens, i)
                 return ("EXPR", expr), i
         
+        # PASO 1.5: Variable tipada: nombre: tipo = valor
+        elif (i+1 < len(tokens) and tokens[i+1][0] == "COLON" and
+              i+2 < len(tokens) and tokens[i+2][0] == "TYPE" and
+              i+3 < len(tokens) and tokens[i+3][0] == "ASSIGN"):
+            var_name  = tokens[i][1]
+            type_hint = tokens[i+2][1]
+            expr_value, j = parse_expression(tokens, i+4)
+            return ("TYPED_ASSIGN", var_name, type_hint, expr_value), j
+
         # PASO 2: Verificar asignación simple (IDENT = ...)
         elif i+1 < len(tokens) and tokens[i+1][0] == "ASSIGN":
             var_name = tokens[i][1]
@@ -782,8 +908,13 @@ def _parse_statement(tokens, i):
         
         # PASO 3: NO es asignación - parsear como expresión completa
         else:
-            # CAMBIO CRÍTICO: Siempre usar parse_expression para toda la línea
             expr, final_i = parse_expression(tokens, i)
+            # Detectar obj.field = value → ATTR_SET
+            if final_i < len(tokens) and tokens[final_i][0] == "ASSIGN":
+                if isinstance(expr, tuple) and expr[0] == "ATTR_ACCESS":
+                    _, obj_expr, attr_name = expr
+                    value_expr, final_i = parse_expression(tokens, final_i + 1)
+                    return ("ATTR_ASSIGN", obj_expr, attr_name, value_expr), final_i
             return ("EXPR", expr), final_i
     # --- DEFAULT: Manejar como expresión solo si no es un token de bloque ---
     else:
@@ -886,25 +1017,35 @@ def parse(tokens):
     return ast
 
 def parse_fn_params(tokens, i):
-    """Parsea los parámetros de una función."""
+    """Parsea los parámetros de una función con type hints opcionales.
+    Retorna (params, param_types, j) donde:
+      params      = [nombre, ...]
+      param_types = {nombre: tipo, ...}  — solo los que tienen anotación
+    """
     if tokens[i][0] != "LPAREN":
         raise OrionSyntaxError("Se esperaba '(' al inicio de los parámetros")
     i += 1
     params = []
-    
+    param_types = {}
+
     while i < len(tokens) and tokens[i][0] != "RPAREN":
-        if tokens[i][0] == "IDENT":
-            params.append(tokens[i][1])
-            i += 1
-            # Coma opcional entre parámetros
-            if i < len(tokens) and tokens[i][0] == "COMMA":
-                i += 1
-        else:
+        if tokens[i][0] != "IDENT":
             raise OrionSyntaxError("Se esperaba un identificador de parámetro")
-            
+        param_name = tokens[i][1]
+        i += 1
+        # Type hint opcional: param: tipo
+        if i < len(tokens) and tokens[i][0] == "COLON":
+            i += 1
+            if i < len(tokens) and tokens[i][0] in ("TYPE", "IDENT"):
+                param_types[param_name] = tokens[i][1]
+                i += 1
+        params.append(param_name)
+        if i < len(tokens) and tokens[i][0] == "COMMA":
+            i += 1
+
     if i >= len(tokens) or tokens[i][0] != "RPAREN":
         raise OrionSyntaxError("Se esperaba ')' al final de los parámetros")
-    return params, i + 1
+    return params, param_types, i + 1
 
 def parse_lambda(tokens, i):
     """Parsea expresiones lambda: param => expr o (param1, param2) => expr"""

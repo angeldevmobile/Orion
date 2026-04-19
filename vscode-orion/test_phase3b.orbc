@@ -1,0 +1,784 @@
+{
+  "main": [
+    {
+      "LoadStr": "=== Variables tipadas ==="
+    },
+    "Show",
+    {
+      "LoadStr": "Gabriel"
+    },
+    {
+      "StoreVar": "nombre"
+    },
+    {
+      "LoadInt": 25
+    },
+    {
+      "StoreVar": "edad"
+    },
+    {
+      "LoadFloat": 9.99
+    },
+    {
+      "StoreVar": "precio"
+    },
+    {
+      "LoadBool": true
+    },
+    {
+      "StoreVar": "activo"
+    },
+    {
+      "LoadVar": "nombre"
+    },
+    "Show",
+    {
+      "LoadVar": "edad"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "precio"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "Monterrey"
+    },
+    {
+      "StoreVar": "ciudad"
+    },
+    {
+      "LoadVar": "ciudad"
+    },
+    "Show",
+    {
+      "LoadStr": "=== Funciones tipadas ==="
+    },
+    "Show",
+    {
+      "LoadInt": 10
+    },
+    {
+      "LoadInt": 20
+    },
+    {
+      "Call": [
+        "suma",
+        2
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "Orion"
+    },
+    {
+      "Call": [
+        "saludar",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 25
+    },
+    {
+      "Call": [
+        "es_mayor",
+        1
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 15
+    },
+    {
+      "Call": [
+        "es_mayor",
+        1
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 7
+    },
+    {
+      "Call": [
+        "doble",
+        1
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== Shapes tipados ==="
+    },
+    "Show",
+    {
+      "LoadStr": "Laptop"
+    },
+    {
+      "LoadFloat": 999.99
+    },
+    {
+      "LoadInt": 50
+    },
+    {
+      "Call": [
+        "Producto",
+        3
+      ]
+    },
+    {
+      "StoreVar": "prod"
+    },
+    {
+      "LoadVar": "prod"
+    },
+    {
+      "CallMethod": [
+        "describir",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "prod"
+    },
+    {
+      "LoadFloat": 10.0
+    },
+    {
+      "CallMethod": [
+        "aplicar_descuento",
+        1
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "prod"
+    },
+    {
+      "CallMethod": [
+        "describir",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadStr": "=== Composici\u00f3n tipada ==="
+    },
+    "Show",
+    {
+      "LoadInt": 1
+    },
+    {
+      "LoadStr": "Angel"
+    },
+    {
+      "LoadStr": "angel@orion.dev"
+    },
+    {
+      "LoadInt": 22
+    },
+    {
+      "Call": [
+        "Usuario",
+        4
+      ]
+    },
+    {
+      "StoreVar": "u"
+    },
+    {
+      "LoadVar": "u"
+    },
+    {
+      "CallMethod": [
+        "info",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "u"
+    },
+    {
+      "IsInstance": "Usuario"
+    },
+    {
+      "JumpIfFalse": 77
+    },
+    {
+      "LoadStr": "Verificaci\u00f3n de tipo correcta"
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    6,
+    6,
+    8,
+    8,
+    9,
+    9,
+    10,
+    10,
+    11,
+    11,
+    13,
+    13,
+    14,
+    14,
+    14,
+    15,
+    15,
+    15,
+    18,
+    18,
+    19,
+    19,
+    24,
+    24,
+    38,
+    38,
+    38,
+    38,
+    38,
+    39,
+    39,
+    39,
+    40,
+    40,
+    40,
+    40,
+    41,
+    41,
+    41,
+    41,
+    47,
+    47,
+    47,
+    47,
+    52,
+    52,
+    74,
+    74,
+    74,
+    74,
+    74,
+    75,
+    75,
+    75,
+    76,
+    76,
+    76,
+    76,
+    77,
+    77,
+    77,
+    82,
+    82,
+    106,
+    106,
+    106,
+    106,
+    106,
+    106,
+    107,
+    107,
+    107,
+    109,
+    109,
+    109,
+    110,
+    110,
+    110
+  ],
+  "functions": {
+    "suma": {
+      "params": [
+        "a",
+        "b"
+      ],
+      "body": [
+        {
+          "LoadVar": "a"
+        },
+        {
+          "LoadVar": "b"
+        },
+        "Add",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        27,
+        27,
+        27,
+        27,
+        27,
+        27
+      ]
+    },
+    "saludar": {
+      "params": [
+        "nombre"
+      ],
+      "body": [
+        {
+          "LoadStr": "Hola, "
+        },
+        {
+          "LoadVar": "nombre"
+        },
+        "Add",
+        {
+          "LoadStr": "!"
+        },
+        "Add",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31
+      ]
+    },
+    "es_mayor": {
+      "params": [
+        "edad"
+      ],
+      "body": [
+        {
+          "LoadVar": "edad"
+        },
+        {
+          "LoadInt": 18
+        },
+        "GtEq",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        35,
+        35,
+        35,
+        35,
+        35,
+        35
+      ]
+    },
+    "doble": {
+      "params": [
+        "x"
+      ],
+      "body": [
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadInt": 2
+        },
+        "Mul",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        45,
+        45,
+        45,
+        45,
+        45,
+        45
+      ]
+    }
+  },
+  "shapes": {
+    "Producto": {
+      "fields": [
+        {
+          "name": "nombre",
+          "type": "string",
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "precio",
+          "type": "float",
+          "default": [
+            {
+              "LoadFloat": 0.0
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "stock",
+          "type": "int",
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "n",
+          "p",
+          "s"
+        ],
+        "body": [
+          {
+            "LoadVar": "n"
+          },
+          {
+            "StoreVar": "nombre"
+          },
+          {
+            "LoadVar": "p"
+          },
+          {
+            "StoreVar": "precio"
+          },
+          {
+            "LoadVar": "s"
+          },
+          {
+            "StoreVar": "stock"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          60,
+          60,
+          61,
+          61,
+          62,
+          62,
+          62,
+          62
+        ]
+      },
+      "acts": {
+        "describir": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "nombre"
+            },
+            {
+              "LoadStr": " \u2014 $"
+            },
+            "Add",
+            {
+              "LoadVar": "precio"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": " ("
+            },
+            "Add",
+            {
+              "LoadVar": "stock"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": " unidades)"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66,
+            66
+          ]
+        },
+        "aplicar_descuento": {
+          "params": [
+            "pct"
+          ],
+          "body": [
+            {
+              "LoadVar": "precio"
+            },
+            {
+              "LoadVar": "precio"
+            },
+            {
+              "LoadVar": "pct"
+            },
+            "Mul",
+            {
+              "LoadInt": 100
+            },
+            "Div",
+            "Sub",
+            {
+              "StoreVar": "precio"
+            },
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70,
+            70
+          ]
+        }
+      },
+      "using": []
+    },
+    "Entidad": {
+      "fields": [
+        {
+          "name": "id",
+          "type": "int",
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": null,
+      "acts": {},
+      "using": []
+    },
+    "Usuario": {
+      "fields": [
+        {
+          "name": "email",
+          "type": "string",
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "age",
+          "type": "int",
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "i",
+          "n",
+          "e",
+          "a"
+        ],
+        "body": [
+          {
+            "LoadVar": "i"
+          },
+          {
+            "StoreVar": "id"
+          },
+          {
+            "LoadVar": "n"
+          },
+          {
+            "StoreVar": "name"
+          },
+          {
+            "LoadVar": "e"
+          },
+          {
+            "StoreVar": "email"
+          },
+          {
+            "LoadVar": "a"
+          },
+          {
+            "StoreVar": "age"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          95,
+          95,
+          96,
+          96,
+          97,
+          97,
+          98,
+          98,
+          98,
+          98
+        ]
+      },
+      "acts": {
+        "info": {
+          "params": [],
+          "body": [
+            {
+              "LoadStr": "Usuario #"
+            },
+            {
+              "LoadVar": "id"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            {
+              "LoadStr": ": "
+            },
+            "Add",
+            {
+              "LoadVar": "name"
+            },
+            "Add",
+            {
+              "LoadStr": " <"
+            },
+            "Add",
+            {
+              "LoadVar": "email"
+            },
+            "Add",
+            {
+              "LoadStr": ">"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102,
+            102
+          ]
+        }
+      },
+      "using": [
+        "Entidad"
+      ]
+    }
+  }
+}

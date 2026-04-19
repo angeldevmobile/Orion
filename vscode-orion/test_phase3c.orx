@@ -1,0 +1,282 @@
+-- test_phase3c.orx — Edge cases OOP (Fase 3)
+-- Casos no cubiertos en test_phase3.orx
+
+-- =========================================
+-- 1. Múltiples instancias son independientes
+-- =========================================
+show "=== Independencia de instancias ==="
+
+shape Counter {
+    count: 0
+
+    act increment() {
+        count = count + 1
+    }
+
+    act value() {
+        show str(count)
+    }
+}
+
+c1 = Counter()
+c2 = Counter()
+
+c1.increment()
+c1.increment()
+c1.increment()
+c2.increment()
+
+c1.value()   -- esperado: 3
+c2.value()   -- esperado: 1
+
+-- =========================================
+-- 2. Act que retorna un valor usado en expr
+-- =========================================
+show "=== Act con return ==="
+
+shape Math {
+    base: 0
+
+    on_create(b) {
+        base = b
+    }
+
+    act double() {
+        return base * 2
+    }
+
+    act add(x) {
+        return base + x
+    }
+}
+
+m = Math(10)
+show str(m.double())      -- esperado: 20
+show str(m.add(5))        -- esperado: 15
+result = m.double() + m.add(3)
+show str(result)          -- esperado: 33
+
+-- =========================================
+-- 3. Act que llama a otra act (self-reference)
+-- =========================================
+show "=== Act llama a otra act ==="
+
+shape Rectangle {
+    w: 0
+    h: 0
+
+    on_create(width, height) {
+        w = width
+        h = height
+    }
+
+    act area() {
+        return w * h
+    }
+
+    act perimeter() {
+        return (w + h) * 2
+    }
+
+    act describe() {
+        show "Area: " + str(area()) + ", Perimetro: " + str(perimeter())
+    }
+}
+
+r = Rectangle(4, 6)
+r.describe()              -- esperado: Area: 24, Perimetro: 20
+
+-- =========================================
+-- 4. Shape como campo de otro shape
+-- =========================================
+show "=== Shape anidado ==="
+
+shape Address {
+    city:    ""
+    country: ""
+
+    on_create(c, co) {
+        city    = c
+        country = co
+    }
+
+    act display() {
+        show city + ", " + country
+    }
+}
+
+shape Employee {
+    name:    ""
+    address: null
+
+    on_create(n, addr) {
+        name    = n
+        address = addr
+    }
+
+    act info() {
+        show "Empleado: " + name
+        address.display()
+    }
+}
+
+addr = Address("Monterrey", "Mexico")
+emp  = Employee("Angel", addr)
+emp.info()
+-- esperado:
+-- Empleado: Angel
+-- Monterrey, Mexico
+
+-- =========================================
+-- 5. Lista de instancias
+-- =========================================
+show "=== Lista de instancias ==="
+
+shape Item {
+    label: ""
+    price: 0.0
+
+    on_create(l, p) {
+        label = l
+        price = p
+    }
+}
+
+items = [Item("Manzana", 1.5), Item("Pan", 2.0), Item("Leche", 3.5)]
+
+total = 0.0
+i = 0
+while i < 3 {
+    total = total + items[i].price
+    i = i + 1
+}
+show str(total)           -- esperado: 7.0
+
+-- =========================================
+-- 6. Reasignación de campos desde fuera
+-- =========================================
+show "=== Reasignación externa de campos ==="
+
+shape Box {
+    value: 0
+}
+
+b = Box()
+show str(b.value)         -- esperado: 0
+b.value = 99
+show str(b.value)         -- esperado: 99
+
+-- =========================================
+-- 7. is con instancia de shape incorrecto
+-- =========================================
+show "=== is con tipo incorrecto ==="
+
+shape Cat {}
+shape Dog2 {}
+
+cat = Cat()
+
+if cat is Cat {
+    show "es Cat — correcto"
+}
+
+if cat is Dog2 {
+    show "ERROR: no deberia llegar aqui"
+} else {
+    show "no es Dog2 — correcto"
+}
+
+-- =========================================
+-- 8. using hereda campos Y acts
+-- =========================================
+show "=== using hereda campos y acts ==="
+
+shape Vehicle {
+    speed:  0
+    brand: ""
+
+    act describe() {
+        show brand + " a " + str(speed) + " km/h"
+    }
+}
+
+shape Car {
+    using Vehicle
+    doors: 4
+
+    on_create(b, s, d) {
+        brand = b
+        speed = s
+        doors = d
+    }
+
+    act full_info() {
+        describe()
+        show "Puertas: " + str(doors)
+    }
+}
+
+car = Car("Toyota", 120, 4)
+car.describe()            -- esperado: Toyota a 120 km/h
+car.full_info()           -- esperado: Toyota a 120 km/h \n Puertas: 4
+
+if car is Car {
+    show "es Car — correcto"
+}
+
+-- =========================================
+-- 9. Función que recibe y retorna una instancia
+-- =========================================
+show "=== Instancia como argumento de función ==="
+
+shape Circle {
+    radius: 0
+
+    on_create(r) {
+        radius = r
+    }
+
+    act area() {
+        return 3.14159 * radius * radius
+    }
+}
+
+fn bigger_circle(c) {
+    return Circle(c.radius * 2)
+}
+
+small = Circle(5)
+big   = bigger_circle(small)
+
+show str(small.area())    -- esperado: ~78.53
+show str(big.area())      -- esperado: ~314.15
+
+-- =========================================
+-- 10. Shape con on_create que usa campo propio
+-- =========================================
+show "=== on_create con lógica interna ==="
+
+shape Account {
+    owner:   ""
+    balance: 0.0
+    active:  no
+
+    on_create(o, initial) {
+        owner   = o
+        balance = initial
+        active  = initial > 0
+    }
+
+    act status() {
+        if active {
+            show owner + " activo con $" + str(balance)
+        } else {
+            show owner + " inactivo"
+        }
+    }
+}
+
+a1 = Account("Gabriel", 500.0)
+a2 = Account("Anonimo", 0.0)
+a1.status()               -- esperado: Gabriel activo con $500.0
+a2.status()               -- esperado: Anonimo inactivo

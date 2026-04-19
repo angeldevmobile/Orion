@@ -561,3 +561,56 @@ def null_safe(obj, attr):
     if obj is None:
         return None
     return getattr(obj, attr, None)
+
+
+# ===============================
+# Shape System (OOP de Orion)
+# ===============================
+
+class OrionShape:
+    """Blueprint de un shape — molde para crear instancias."""
+    def __init__(self, name, fields, on_create, acts, using_list):
+        self.name       = name         # str
+        self.fields     = fields       # {field_name: default_value}
+        self.on_create  = on_create    # (params, body) | None
+        self.acts       = acts         # {act_name: (params, body)}
+        self.using_list = using_list   # [shape_name, ...]
+
+    def __repr__(self):
+        return f"<shape {self.name}>"
+
+    def __str__(self):
+        return f"<shape {self.name}>"
+
+
+class OrionInstance:
+    """Instancia de un shape."""
+    def __init__(self, shape_name, fields, acts=None):
+        object.__setattr__(self, '_shape_name', shape_name)
+        object.__setattr__(self, '_fields', fields)   # {field_name: value}
+        object.__setattr__(self, '_acts', acts or {}) # {act_name: (params, body)}
+
+    # Acceso a campos por nombre: instance.field
+    def __getattr__(self, name):
+        fields = object.__getattribute__(self, '_fields')
+        if name in fields:
+            return fields[name]
+        raise AttributeError(
+            f"'{object.__getattribute__(self, '_shape_name')}' no tiene campo '{name}'"
+        )
+
+    # Asignación de campos: instance.field = value
+    def __setattr__(self, name, value):
+        if name.startswith('_'):
+            object.__setattr__(self, name, value)
+        else:
+            object.__getattribute__(self, '_fields')[name] = value
+
+    def __repr__(self):
+        sn = object.__getattribute__(self, '_shape_name')
+        fd = object.__getattribute__(self, '_fields')
+        parts = ", ".join(f"{k}: {v!r}" for k, v in fd.items())
+        return f"{sn} {{ {parts} }}"
+
+    def __str__(self):
+        return self.__repr__()

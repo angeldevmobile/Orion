@@ -1,0 +1,111 @@
+-- test_phase3b.orx — Prueba de type hints opcionales (Fase 3B)
+
+-- =========================================
+-- 1. Variables tipadas
+-- =========================================
+show "=== Variables tipadas ==="
+
+nombre: string = "Gabriel"
+edad:   int    = 25
+precio: float  = 9.99
+activo: bool   = yes
+
+show nombre
+show str(edad)
+show str(precio)
+
+-- Variables sin tipo siguen funcionando
+ciudad = "Monterrey"
+show ciudad
+
+-- =========================================
+-- 2. Funciones con type hints
+-- =========================================
+show "=== Funciones tipadas ==="
+
+fn suma(a: int, b: int) -> int {
+    return a + b
+}
+
+fn saludar(nombre: string) -> string {
+    return "Hola, " + nombre + "!"
+}
+
+fn es_mayor(edad: int) -> bool {
+    return edad >= 18
+}
+
+show str(suma(10, 20))
+show saludar("Orion")
+show str(es_mayor(25))
+show str(es_mayor(15))
+
+-- Funciones sin tipos siguen funcionando
+fn doble(x) {
+    return x * 2
+}
+show str(doble(7))
+
+-- =========================================
+-- 3. Shapes con typed fields y typed acts
+-- =========================================
+show "=== Shapes tipados ==="
+
+shape Producto {
+    nombre: string = ""
+    precio: float  = 0.0
+    stock:  int    = 0
+
+    on_create(n: string, p: float, s: int) {
+        nombre = n
+        precio = p
+        stock  = s
+    }
+
+    act describir() -> string {
+        show nombre + " — $" + str(precio) + " (" + str(stock) + " unidades)"
+    }
+
+    act aplicar_descuento(pct: float) {
+        precio = precio - (precio * pct / 100)
+    }
+}
+
+prod = Producto("Laptop", 999.99, 50)
+prod.describir()
+prod.aplicar_descuento(10.0)
+prod.describir()
+
+-- =========================================
+-- 4. Shape con using + tipos
+-- =========================================
+show "=== Composición tipada ==="
+
+shape Entidad {
+    id:   int    = 0
+    name: string = ""
+}
+
+shape Usuario {
+    using Entidad
+    email: string = ""
+    age:   int    = 0
+
+    on_create(i: int, n: string, e: string, a: int) {
+        id    = i
+        name  = n
+        email = e
+        age   = a
+    }
+
+    act info() {
+        show "Usuario #" + str(id) + ": " + name + " <" + email + ">"
+    }
+}
+
+u = Usuario(1, "Angel", "angel@orion.dev", 22)
+u.info()
+
+if u is Usuario {
+    show "Verificación de tipo correcta"
+}

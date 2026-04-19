@@ -59,11 +59,15 @@ _TOKEN_SPECIFICATION = [
     ("TYPE",     r"\b(int|float|bool|string|list|dict|any|auto)\b"),
 
     # --- Programación Orientada a Objetos ---
+    ("SHAPE",     r"\bshape\b"),
+    ("ACT",       r"\bact\b"),
+    ("USING",     r"\busing\b"),
+    ("IS",        r"\bis\b"),
     ("ON_CREATE", r"\bon_create\b"),
     ("ON_EVENT",  r"\bon_event\b"),
     ("ON_ERROR",  r"\bon_error\b"),
     ("ME",        r"\bme\b"),
-    ("SUPER",     r"\bsuper\b"),     
+    ("SUPER",     r"\bsuper\b"),
 
     # --- Concurrencia / procesos asíncronos ---
     ("SPAWN",     r"\bspawn\b"),
@@ -230,7 +234,8 @@ def lex(code, track_position=False):
             "PIPE_OP", "DOUBLE_COLON", "ELLIPSIS", "EXP", "MOD", "QUESTION", "SPAWN",
             "ASYNC", "AWAIT", "CHANNEL", "PARALLEL", "LOCK", "THINK", "LEARN", "SENSE",
             "ADAPT", "EMBED", "PREDICT", "TRAIN", "SYNC", "SEND", "RECEIVE", "PIPE",
-            "TASK", "STREAM", "ON_CREATE", "ON_EVENT", "ON_ERROR", "ME", "SUPER",
+            "TASK", "STREAM", "SHAPE", "ACT", "USING", "IS",
+            "ON_CREATE", "ON_EVENT", "ON_ERROR", "ME", "SUPER",
             "NULL", "UNDEFINED", "AUTO", "ANY", "AMPERSAND", "AT",
             "AS", "TAKE"
         ):
