@@ -1,4 +1,3 @@
-import importlib.util
 import inspect
 import sys
 import os
@@ -176,7 +175,6 @@ NATIVE_FUNCTIONS = {
     "trace": code.trace,
 }
 
-# Agregar funciones AI a las funciones nativas si están disponibles
 if AI_ENABLED:
     NATIVE_FUNCTIONS.update({
         # Funciones principales AI
@@ -299,11 +297,26 @@ if VISION_ENABLED:
         "seam_carve": VISION_FUNCTIONS.get("seam_carve")
     })
 
+def _wrap_orion_type(val):
+    """Inferencia de tipos: envuelve valores Python en tipos Orion automáticamente."""
+    if isinstance(val, bool) and not isinstance(val, OrionBool):
+        return OrionBool(val)
+    elif isinstance(val, str) and not isinstance(val, OrionString):
+        return OrionString(val)
+    elif isinstance(val, int) and not isinstance(val, OrionNumber):
+        return OrionNumber(val)
+    elif isinstance(val, float) and not isinstance(val, OrionNumber):
+        return OrionNumber(val)
+    elif isinstance(val, list) and not isinstance(val, OrionList):
+        return OrionList(val)
+    elif isinstance(val, dict) and not isinstance(val, OrionDict):
+        return OrionDict(val)
+    return val
+
 def lookup_variable(name, variables):
     """Busca una variable en el scope actual."""
-    if name in variables:
+    if name in variables and name != "__consts__":
         return variables[name]
-    # Usa el error personalizado de Orion
     raise OrionNameError(name)
 
 def substring(s, start, end=None):
@@ -361,13 +374,12 @@ def _register_builtin_functions(functions):
     register_native_function(functions, "str", str)
     register_native_function(functions, "int", int)
     register_native_function(functions, "float", float)
-    register_native_function(functions, "type", handle_builtin_type)  # Función type() mejorada
+    register_native_function(functions, "type", handle_builtin_type) 
     register_native_function(functions, "auto", lambda *args, **kwargs: args[0] if args else None)
     register_native_function(functions, "substring", substring)
     register_native_function(functions, "to_native", to_native)
     register_native_function(functions, "list", orion_list)
     
-    # Asegurar que type() esté disponible también como función standalone
     functions["type"] = {
         "type": "NATIVE_FN", 
         "impl": handle_builtin_type
@@ -506,7 +518,6 @@ def eval_call_args(args, variables, functions):
     return pos_args, kw_args
 
 def eval_expr(expr, variables, functions):
-    print("DEBUG EXPR:", expr)
     # 1. Caso nulo
     if expr is None:
         return None
@@ -518,8 +529,7 @@ def eval_expr(expr, variables, functions):
         if name in ("str", "int", "bool", "float"):
             return name  # Retorna el nombre del tipo como string
         if name in variables:
-            print(f"DEBUG IDENT: {name} = {variables[name]} ({type(variables[name])})")
-            return variables[name] 
+            return variables[name]
         else:
             raise OrionRuntimeError(f"Variable '{name}' no definida")
 
@@ -637,10 +647,6 @@ def eval_expr(expr, variables, functions):
             _, op, left, right = expr
             left_val = eval_expr(left, variables, functions)
             right_val = eval_expr(right, variables, functions)
-            print(f"DEBUG BINARY_OP: {op} | left={left_val} ({type(left_val)}) | right={right_val} ({type(right_val)})")
-
-            # DEBUG: Mostrar qué estamos comparando
-            # print(f"DEBUG BINARY_OP: {op} entre {type(left_val).__name__}({left_val}) y {type(right_val).__name__}({right_val})")
 
             # if hasattr(left_val, "value"):
             #     left_val = left_val.value
@@ -721,15 +727,17 @@ def eval_expr(expr, variables, functions):
                     left_type = normalize_type_name(left_val)
                     right_type = normalize_type_name(right_val)
                     
-                    # print(f"DEBUG TYPE COMPARISON: '{left_type}' {op} '{right_type}'")
-                    
                     if (left_type in ["list", "string", "number", "bool", "dict"] or 
                         right_type in ["list", "string", "number", "bool", "dict"]):
                         result = (left_type == right_type) if op == "==" else (left_type != right_type)
-                        # print(f"DEBUG TYPE RESULT: {result}")
                         return result
 
-                # FIXED: Comparaciones de caracteres/strings - MOVER ANTES de try_cast_numeric
+                # === FIX: Extraer valores de wrappers ANTES de cualquier comparación ===
+                if hasattr(left_val, "value"):
+                    left_val = left_val.value
+                if hasattr(right_val, "value"):
+                    right_val = right_val.value
+
                 if isinstance(left_val, str) and isinstance(right_val, str):
                     # Para caracteres individuales, usar comparación ASCII
                     if len(left_val) == 1 and len(right_val) == 1:
@@ -750,7 +758,7 @@ def eval_expr(expr, variables, functions):
                         if op == "==": return left_val == right_val
                         if op == "!=": return left_val != right_val
 
-                # Intentar normalizar tipos antes de comparar (solo si no es comparación de tipos y no son strings)
+                # Intentar normalizar tipos antes de comparar
                 left_val = try_cast_numeric(left_val)
                 right_val = try_cast_numeric(right_val)
 
@@ -771,7 +779,6 @@ def eval_expr(expr, variables, functions):
                     right_val = float(right_val) if '.' in right_val else int(right_val)
                     return eval_expr(("BINARY_OP", op, left_val, right_val), variables, functions)
 
-                # --- FIX: Si uno es string no numérico y otro es número, retorna False para comparación de orden ---
                 if (isinstance(left_val, (int, float)) and isinstance(right_val, str)) or (isinstance(right_val, (int, float)) and isinstance(left_val, str)):
                     if op in [">", "<", ">=", "<="]:
                         return False
@@ -780,12 +787,10 @@ def eval_expr(expr, variables, functions):
                     if op == "!=":
                         return str(left_val) != str(right_val)
 
-                print(f"DEBUG FALLBACK: No se puede comparar {type(left_val).__name__} con {type(right_val).__name__}")
                 raise OrionRuntimeError(
                     f"No se puede comparar {type(left_val).__name__} con {type(right_val).__name__}"
                 )
 
-            # --- FIX DEFINITIVO: operadores lógicos (&& y ||) ---
             elif op in ["&&", "||"]:
                 # Extrae el valor interno de OrionBool, OrionNumber, etc.
                 if hasattr(left_val, "value"):
@@ -1091,7 +1096,6 @@ def eval_expr(expr, variables, functions):
                     return str_val.upper() if len(str_val) > 0 else ""
             
             elif method_name == "items":
-                # ✅ ORION ADVANCED ITERATOR SAFETY SYSTEM - FINAL FIX
                 cache_key = f"_items_cache_{id(obj_val)}"
 
                 # 1. Global cache (más importante)
@@ -1470,8 +1474,7 @@ def eval_expr(expr, variables, functions):
 
     if isinstance(expr, str):
         if expr.startswith('"') and expr.endswith('"'):
-            content = expr[1:-1]  # Quitar comillas
-            # Interpolación de variables ${variable}
+            content = expr[1:-1] 
             import re
             def replace_var(match):
                 var_name = match.group(1)
@@ -1480,7 +1483,7 @@ def eval_expr(expr, variables, functions):
                     if hasattr(val, 'value'):
                         return str(val.value)
                     return str(val)
-                return match.group(0)  # Si no existe la variable, dejar como está
+                return match.group(0)  
             
             interpolated = re.sub(r'\$\{(\w+)\}', replace_var, content)
             return interpolated
@@ -1510,6 +1513,12 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         variables = {}
     if functions is None:
         functions = {}
+    
+    for node in ast:
+        if isinstance(node, tuple) and len(node) >= 4 and node[0] == "FN":
+            _, fn_name, params, body = node
+            register_function(functions, fn_name, params, body)
+            code.debug(f"Function '{fn_name}' registered with {len(params)} params", module="fn-registry")
 
     # Solo inicializar el motor visual si NO estamos dentro de una función Y es la primera llamada
     if not inside_fn and not hasattr(evaluate, '_initialized'):
@@ -1638,8 +1647,6 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         _register_builtin_functions(functions)
         functions["_variables"] = variables
 
-        # Registrar funciones FN antes de ejecutar el resto
-        # code.progress("orion-core", "Registering user functions", 25)
         for node in ast:
             if node[0] == "FN":
                 _, fn_name, params, body = node
@@ -1647,9 +1654,6 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         # Marcar como inicializado
         evaluate._initialized = True  
 
-        # code.progress("orion-core", "Executing AST nodes", 50)
-        # code.progress("orion-core", "Execution completed", 100)
-    # 3. Si estamos en nivel superior
     if not inside_fn:
         if "main" in functions:
             code.trace("Executing main function", module="orion-runtime")
@@ -1668,6 +1672,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 raise OrionRuntimeError("Función 'main' no encontrada o mal formateada")
                 
             return evaluate(body, variables, functions, inside_fn=True)
+        else:
+            code.trace("No main function to execute", module="orion-runtime")
           
     i = 0
     while i < len(ast):
@@ -1976,21 +1982,14 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             if len(node) > 1:
                 result = eval_expr(node[1], variables, functions)
             else:
-                # Si no hay segundo elemento, probablemente es una expresión directa
                 result = eval_expr(node, variables, functions)
             if inside_fn:
                 return result
-            # Si no está en función, mostrar el resultado (útil para REPL)
-            return result
         
-        # --- NUEVO: Manejar expresiones directas que no están envueltas en EXPR ---
         elif tag in ["BINARY_OP", "UNARY_OP", "CALL", "CALL_METHOD", "INDEX", "IDENT", "LIST", "DICT", "LAMBDA"]:
-            # Es una expresión directa, evaluarla
             result = eval_expr(node, variables, functions)
             if inside_fn:
                 return result
-            # Si no está en función, mostrar el resultado (útil para REPL)
-            return result
         
         # --- MANEJO DE CONTROL DE FLUJO ---
         elif tag == "IDENT":
@@ -2021,18 +2020,19 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
 
         elif tag == "ASSIGN":
             _, name, value = node
+            if name in variables.get("__consts__", set()):
+                raise OrionRuntimeError(f"No se puede reasignar '{name}': es una constante")
             val = eval_expr(value, variables, functions)
-            # Envolver valores en tipos Orion si corresponde
-            if isinstance(val, str) and not isinstance(val, OrionString):
-                val = OrionString(val)
-            elif isinstance(val, bool) and not isinstance(val, OrionBool):
-                val = OrionBool(val)
-            elif isinstance(val, int) and not isinstance(val, OrionNumber):
-                val = OrionNumber(val)
-            elif isinstance(val, float) and not isinstance(val, OrionNumber):
-                val = OrionNumber(val)
-            elif isinstance(val, list) and not isinstance(val, OrionList):
-                val = OrionList(val)
+            val = _wrap_orion_type(val)
+            variables[name] = val
+
+        elif tag == "CONST":
+            _, name, value = node
+            val = eval_expr(value, variables, functions)
+            val = _wrap_orion_type(val)
+            if "__consts__" not in variables:
+                variables["__consts__"] = set()
+            variables["__consts__"].add(name)
             variables[name] = val
             
         elif tag == "INDEX_ASSIGN":
@@ -2231,27 +2231,21 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 # Ejecutar cuerpo del bucle
                 result = evaluate(body, variables, functions, inside_fn=True)
 
-                # Si el cuerpo devuelve algo (por ejemplo, un return), propágalo
                 if inside_fn and result is not None:
                     return result
 
-            # Limpieza del scope (restaurar o eliminar variable)
             if prev_value is not None:
                 variables[var_name] = prev_value
             elif var_name in variables:
                 del variables[var_name]
 
         elif tag == "FOR_IN":
-            # FOR_IN puede tener diferentes formatos:
-            # - ('FOR_IN', var_name, collection_expr, body) - una variable
-            # - ('FOR_IN', [var1, var2], collection_expr, body) - múltiples variables
 
             if len(node) == 4:
                 _, var_spec, collection_expr, body = node
             else:
                 raise OrionRuntimeError(f"Formato de FOR_IN no soportado: {node}")
-
-            # Evaluar la colección
+            
             collection = eval_expr(collection_expr, variables, functions)
 
             # print(f"DEBUG: FOR_IN iterando sobre {type(collection)} - {collection}")
@@ -2287,43 +2281,19 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                     for item in iterator:
                         try:
                             if isinstance(collection, dict):
-                                if len(var_names) == 2:
-                                    variables[var_names[0]] = item[0]
-                                    variables[var_names[1]] = item[1]
-                                elif len(var_names) == 1:
-                                    variables[var_names[0]] = item
-                                else:
-                                    if len(item) >= len(var_names):
-                                        for i, var_name in enumerate(var_names):
-                                            variables[var_name] = item[i] if i < len(item) else None
-                                    else:
-                                        for i, var_name in enumerate(var_names):
-                                            variables[var_name] = item[i] if i < len(item) else None
+                                variables[var_name] = (item[0], item[1])
                             else:
-                                if len(var_names) == 1:
-                                    variables[var_names[0]] = item
-                                elif isinstance(item, (list, tuple)) and len(item) >= len(var_names):
-                                    for i, var_name in enumerate(var_names):
-                                        variables[var_name] = item[i] if i < len(item) else None
-                                else:
-                                    variables[var_names[0]] = item
-                                    for i in range(1, len(var_names)):
-                                        variables[var_names[i]] = None
-                            
-                            # Execute body and handle control flow exceptions
+                                variables[var_name] = item
                             try:
                                 result = evaluate(body, variables, functions, inside_fn=True)
                                 if inside_fn and result is not None:
                                     return result
                             except ContinueException:
-                                continue  # Continue to next iteration
+                                continue
                             except BreakException:
-                                break     # Exit the loop completely
-                                
-                        except ContinueException:
-                            continue
-                        except BreakException:
-                            break
+                                break
+                        except Exception as e:
+                            raise
 
                 except BreakException:
                     pass  # Break caught at outer level

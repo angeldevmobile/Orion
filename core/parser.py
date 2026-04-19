@@ -393,7 +393,17 @@ def parse_statement(tokens, i):
     kind = tokens[i][0]
     value = tokens[i][1] if len(tokens[i]) > 1 else None
 
-    # --- VAR statement ---
+    # --- CONST statement: const x = valor (inmutable, tipo inferido) ---
+    if kind == "CONST":
+        if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre después de 'const'")
+        var_name = tokens[i+1][1]
+        if i+2 >= len(tokens) or tokens[i+2][0] != "ASSIGN":
+            raise OrionSyntaxError("Se esperaba '=' después del nombre en const")
+        expr_value, j = parse_expression(tokens, i+3)
+        return ("CONST", var_name, expr_value), j
+
+    # --- VAR (compatibilidad legacy) → trata como asignación normal ---
     if kind == "IDENT" and value == "var":
         if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
             raise OrionSyntaxError("Se esperaba un nombre de variable después de 'var'")
@@ -401,7 +411,7 @@ def parse_statement(tokens, i):
         if i+2 >= len(tokens) or tokens[i+2][0] != "ASSIGN":
             raise OrionSyntaxError("Se esperaba '=' después del nombre de variable")
         expr_value, j = parse_expression(tokens, i+3)
-        return ("VAR", var_name, expr_value), j
+        return ("ASSIGN", var_name, expr_value), j
     
     # --- ATTEMPT/HANDLE statement ---
     elif kind == "ATTEMPT":  # Cambio aquí: usar ATTEMPT directamente
@@ -441,10 +451,10 @@ def parse_statement(tokens, i):
         
         return ("ATTEMPT", body_attempt, handler), i
 
-    # --- USE statement ---
+    # --- USE statement (import eliminado, usar solo 'use') ---
     elif kind == "USE":
         if i+1 >= len(tokens) or tokens[i+1][0] not in ("STRING", "IDENT"):
-            raise OrionSyntaxError("Se esperaba una cadena o identificador después de 'use'")
+            raise OrionSyntaxError("Se esperaba un módulo después de 'use'")
         module_path = tokens[i+1][1]
         return ("USE", module_path), i + 2
 
@@ -504,15 +514,17 @@ def parse_statement(tokens, i):
             raise OrionSyntaxError("Se esperaba '{' después de la condición del if")
         body_true, i = parse_block(tokens, i)
 
-        # Manejar múltiples elsif
+        # Manejar múltiples "or if" (reemplaza elsif)
         elsif_parts = []
-        while i < len(tokens) and tokens[i][0] == "ELSIF":
-            i += 1  # consumir ELSIF
+        while (i + 1 < len(tokens)
+               and tokens[i][0] == "IDENT" and tokens[i][1] == "or"
+               and tokens[i + 1][0] == "IF"):
+            i += 2  # consumir "or" + "if"
             elsif_condition, i = parse_expression_until(tokens, i, {"LBRACE"})
             while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
                 i += 1
             if i >= len(tokens) or tokens[i][0] != "LBRACE":
-                raise OrionSyntaxError("Se esperaba '{' después de la condición del elsif")
+                raise OrionSyntaxError("Se esperaba '{' después de 'or if'")
             elsif_body, i = parse_block(tokens, i)
             elsif_parts.append((elsif_condition, elsif_body))
 
@@ -780,28 +792,38 @@ def parse(tokens):
     """Función principal de parsing con mejor manejo de errores y avance seguro."""
     ast = []
     i = 0
+    
+    function_nodes = []
+    statement_nodes = []
+    
     while i < len(tokens):
         try:
             stmt, next_i = parse_statement(tokens, i)
             if next_i == i:
-                # Previene bucles infinitos si el parser no avanza
                 raise OrionSyntaxError(f"El parser no avanzó en el índice en parse() cerca de '{tokens[i]}'")
-            ast.append(stmt)
+            
+            if isinstance(stmt, tuple) and stmt[0] == "FN":
+                function_nodes.append(stmt)
+            else:
+                statement_nodes.append(stmt)
+            
             i = next_i
-            # --- AGREGADO: Si ya consumiste todos los tokens, sal del bucle ---
+            
             if i >= len(tokens):
                 break
-            # --- AGREGADO: Si el siguiente token es NEWLINE o SEMICOLON, sáltalo ---
+            
             while i < len(tokens) and tokens[i][0] in ("NEWLINE", "SEMICOLON"):
                 i += 1
         except OrionSyntaxError as e:
             current_token = tokens[i] if i < len(tokens) else ("EOF", "")
             print(f"[ORION PARSER WARNING] {str(e)} en línea cerca del token '{current_token[1]}'")
-            # Sincroniza: avanza hasta el siguiente NEWLINE, SEMICOLON o RBRACE para evitar loops
             sync_tokens = {"NEWLINE", "SEMICOLON", "RBRACE", "RBRACEE", "RBRACES", "RBRACE2"}
             while i < len(tokens) and tokens[i][0] not in sync_tokens:
                 i += 1
-            i += 1  # Salta el token de sincronización
+            i += 1
+    
+    ast = function_nodes + statement_nodes
+    
     print("AST generado:", ast)
     return ast
 
