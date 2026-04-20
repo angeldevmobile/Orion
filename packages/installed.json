@@ -1,0 +1,32 @@
+{
+  "math": {
+    "version": "1.0.0",
+    "description": "Funciones matemáticas: abs, sqrt, max, min, pow, floor, ceil, round, clamp, average",
+    "file": "math.orx",
+    "source": "builtin"
+  },
+  "strings": {
+    "version": "1.0.0",
+    "description": "Utilidades de cadenas: pad_left, pad_right, repeat, count, reverse, title_case",
+    "file": "strings.orx",
+    "source": "builtin"
+  },
+  "colors": {
+    "version": "1.0.0",
+    "description": "Paleta de colores ANSI para terminal: red, green, blue, bold, reset",
+    "file": "colors.orx",
+    "source": "community"
+  },
+  "validate": {
+    "version": "1.0.0",
+    "description": "Validación de datos: is_email, is_url, is_number, is_empty, in_range",
+    "file": "validate.orx",
+    "source": "community"
+  },
+  "uuid": {
+    "version": "1.0.0",
+    "description": "Generación de UUIDs v4 únicos sin dependencias externas",
+    "file": "uuid.orx",
+    "source": "community"
+  }
+}

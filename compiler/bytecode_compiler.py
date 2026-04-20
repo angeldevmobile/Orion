@@ -10,6 +10,68 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from core.lexer import lex
 from core.parser import parse, parse_expression
 
+# Compilador raíz activo (para que compile_node_into dentro de funciones
+# pueda registrar funciones de módulos importados)
+_current_compiler = None
+
+
+def _compile_use_module(module_path, alias, selective):
+    """Carga un .orx, compila sus funciones y las inserta en _current_compiler.functions."""
+    global _current_compiler
+    if _current_compiler is None:
+        return
+
+    # Resolver ruta del módulo
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        module_path,
+        module_path + ".orx",
+        os.path.join(base_dir, module_path),
+        os.path.join(base_dir, module_path + ".orx"),
+        os.path.join(base_dir, "packages", os.path.basename(module_path) + ".orx"),
+        os.path.join(base_dir, "lib", os.path.basename(module_path) + ".orx"),
+        os.path.join(base_dir, "stdlib", os.path.basename(module_path) + ".orx"),
+    ]
+    found = None
+    for p in candidates:
+        if os.path.exists(p):
+            found = p
+            break
+    if not found:
+        return  # silencioso — el intérprete lo maneja en runtime
+
+    with open(found, "r", encoding="utf-8") as f:
+        source = f.read()
+
+    mod_tokens = lex(source)
+    mod_ast = parse(mod_tokens)
+
+    for n in mod_ast:
+        if not isinstance(n, tuple):
+            continue
+        if n[0] != "FN":
+            continue
+        fn_name, params, body = n[1], n[2], n[3]
+
+        # Filtrar si hay imports selectivos
+        if selective and fn_name not in selective:
+            continue
+
+        fc = FunctionCompiler()
+        fc._root_compiler = _current_compiler
+        for stmt in body:
+            compile_node_into(fc, stmt)
+        fc.emit("LoadNull")
+        fc.emit("Return")
+
+        # Nombre calificado: alias.fn_name  o solo fn_name si no hay alias
+        qualified = f"{alias}.{fn_name}" if alias else fn_name
+        _current_compiler.functions[qualified] = {
+            "params": params,
+            "body":   fc.instructions,
+            "lines":  fc.line_table,
+        }
+
 class FunctionCompiler:
     """Compilador dedicado para el cuerpo de una función o act."""
     def __init__(self):
@@ -54,13 +116,17 @@ class Compiler:
         return len(self.instructions)
 
     def compile_program(self, ast):
-        # Primer pase: compilar funciones y shapes en sus tablas
+        global _current_compiler
+        _current_compiler = self  # permite que _compile_use_module acceda a self.functions
+
+        # Primer pase: compilar funciones, shapes y módulos USE
         for node in ast:
             if not isinstance(node, tuple):
                 continue
             if node[0] == "FN":
                 fn_name, params, body = node[1], node[2], node[3]
                 fc = FunctionCompiler()
+                fc._root_compiler = self
                 for stmt in body:
                     compile_node_into(fc, stmt)
                 fc.emit("LoadNull")
@@ -72,10 +138,14 @@ class Compiler:
                 }
             elif node[0] == "SHAPE_DEF":
                 _compile_shape_def(self, node)
+            elif node[0] == "USE":
+                # Inlining en compile-time: ningún cambio en la VM necesario
+                _, module_path, alias, selective = node
+                _compile_use_module(module_path, alias, selective)
 
-        # Segundo pase: compilar código principal (ignorando FN y SHAPE_DEF)
+        # Segundo pase: compilar código principal (ignorando FN, SHAPE_DEF y USE)
         for node in ast:
-            if isinstance(node, tuple) and node[0] in ("FN", "SHAPE_DEF"):
+            if isinstance(node, tuple) and node[0] in ("FN", "SHAPE_DEF", "USE"):
                 continue
             self.compile_node(node)
         self.emit({"Halt": None})
@@ -266,12 +336,158 @@ def compile_node_into(ctx, node):
         ctx.emit({"Jump": loop_start})
         ctx.patch(jump_end, {"JumpIfFalse": ctx.current_addr()})
 
+    elif tag == "FOR_IN":
+        # for item in expr { body }  — compila como bucle con índice
+        _, var_spec, iterable_expr, body = node
+        # Soporte para un solo var (string) o destructuring (lista)
+        var_name = var_spec if isinstance(var_spec, str) else var_spec[0]
+
+        # Contadores únicos para variables temporales
+        counter = getattr(ctx, "_for_counter", 0)
+        ctx._for_counter = counter + 1
+        list_var = f"__list_{counter}__"
+        len_var  = f"__len_{counter}__"
+        idx_var  = f"__idx_{counter}__"
+
+        # Evaluar iterable y almacenar
+        compile_expr_into(ctx, iterable_expr)
+        ctx.emit({"StoreVar": list_var})
+        # Obtener longitud usando builtin len()
+        ctx.emit({"LoadVar": list_var})
+        ctx.emit({"Call": ["len", 1]})
+        ctx.emit({"StoreVar": len_var})
+        # Índice = 0
+        ctx.emit({"LoadInt": 0})
+        ctx.emit({"StoreVar": idx_var})
+
+        loop_start = ctx.current_addr()
+        ctx.emit({"LoadVar": idx_var})
+        ctx.emit({"LoadVar": len_var})
+        ctx.emit("Lt")
+        jump_end = ctx.emit({"JumpIfFalse": 0})
+
+        # Obtener elemento actual
+        ctx.emit({"LoadVar": list_var})
+        ctx.emit({"LoadVar": idx_var})
+        ctx.emit("GetIndex")
+        ctx.emit({"StoreVar": var_name})
+
+        # Cuerpo del bucle
+        for stmt in body:
+            compile_node_into(ctx, stmt)
+
+        # Incrementar índice
+        ctx.emit({"LoadVar": idx_var})
+        ctx.emit({"LoadInt": 1})
+        ctx.emit("Add")
+        ctx.emit({"StoreVar": idx_var})
+        ctx.emit({"Jump": loop_start})
+        ctx.patch(jump_end, {"JumpIfFalse": ctx.current_addr()})
+
+    elif tag == "ATTEMPT":
+        # attempt { body } handle err { handler }
+        try_body = node[1]
+        handler_node = node[2] if len(node) > 2 else None
+
+        begin_patch = ctx.emit({"BeginAttempt": 0})  # handler_addr a parchear
+        for stmt in try_body:
+            compile_node_into(ctx, stmt)
+        end_patch = ctx.emit({"EndAttempt": 0})       # end_addr a parchear
+
+        handler_addr = ctx.current_addr()
+        ctx.patch(begin_patch, {"BeginAttempt": handler_addr})
+
+        if handler_node:
+            # handler_node = ("HANDLE", err_name, body)
+            err_name = handler_node[1] if len(handler_node) > 1 else "_error"
+            handler_body = handler_node[2] if len(handler_node) > 2 else []
+            # El error ya está en el stack — lo almacenamos
+            ctx.emit({"StoreVar": err_name})
+            for stmt in handler_body:
+                compile_node_into(ctx, stmt)
+        else:
+            ctx.emit("Pop")  # descartar error si no hay handler
+
+        end_addr = ctx.current_addr()
+        ctx.patch(end_patch, {"EndAttempt": end_addr})
+
     elif tag == "EXPR":
-        compile_expr_into(ctx, node[1])
+        inner = node[1]
+        # Artefacto del parser: 'let x = ...' genera ('EXPR', ('IDENT','let'))
+        # seguido de ('ASSIGN', ...). Ignorar referencias a keywords sueltas.
+        _KEYWORDS = {"let", "const", "fn", "if", "else", "while", "for", "return",
+                     "attempt", "handle", "think", "learn", "sense", "use", "shape", "act",
+                     "async", "await", "spawn", "serve", "route", "with"}
+        if isinstance(inner, tuple) and inner[0] == "IDENT" and inner[1] in _KEYWORDS:
+            return
+        compile_expr_into(ctx, inner)
         ctx.emit("Pop")
+
+    elif tag == "SERVE_STMT":
+        # serve <port> <handler>
+        # Instrucción: ServeHTTP(port, fn_name)
+        _, port_expr, handler_node = node
+        # Extraer el nombre del handler
+        if isinstance(handler_node, tuple) and handler_node[0] == "FN":
+            fn_name = handler_node[1]
+            # Compilar la función inline si aún no está registrada
+            if fn_name not in (getattr(ctx, 'functions', None) or {}):
+                compile_node_into(ctx, handler_node)
+        elif isinstance(handler_node, tuple) and handler_node[0] == "IDENT":
+            fn_name = handler_node[1]
+        elif isinstance(handler_node, str):
+            fn_name = handler_node
+        else:
+            fn_name = "__serve_handler__"
+            compile_node_into(ctx, handler_node)
+
+        # Evaluar el puerto y emitir la instrucción
+        compile_expr_into(ctx, port_expr)
+        ctx.emit({"ServeHTTP": fn_name})
+
+    elif tag == "USE":
+        # Inlining de módulos en compile-time — no emite instrucciones en el cuerpo
+        _, module_path, alias, selective = node
+        _compile_use_module(module_path, alias, selective)
 
     elif tag == "FN":
         pass  # compilado en primer pase
+
+    elif tag == "ASYNC_FN":
+        pass  # el intérprete maneja async fn; el bytecode VM no lo soporta aún
+
+    elif tag == "AWAIT_STMT":
+        # await <expr> — evaluar la expresión (si es Future, ya se resuelve en runtime)
+        _, inner_expr = node
+        compile_expr_into(ctx, inner_expr)
+        ctx.emit("Pop")  # descarta el resultado (es un statement)
+
+    elif tag == "SPAWN":
+        # spawn <expr> — lanzar sin esperar
+        _, inner_expr = node
+        compile_expr_into(ctx, inner_expr)
+        ctx.emit("Pop")
+
+    elif tag == "THINK":
+        # think <expr>  →  eval expr, call AI, push result, print
+        _, expr = node
+        compile_expr_into(ctx, expr)
+        ctx.emit("AiAsk")
+        ctx.emit("Show")
+
+    elif tag == "LEARN":
+        # learn <expr>  →  embed en memoria AI, push confirmación, print
+        _, expr = node
+        compile_expr_into(ctx, expr)
+        ctx.emit("AiLearn")
+        ctx.emit("Show")
+
+    elif tag == "SENSE":
+        # sense <expr>  →  recall de memoria AI, push respuesta, print
+        _, expr = node
+        compile_expr_into(ctx, expr)
+        ctx.emit("AiSense")
+        ctx.emit("Show")
 
     elif tag == "RETURN":
         _, expr = node

@@ -1,0 +1,36 @@
+use "ai" as ai
+
+show "=== Estado del módulo AI ==="
+show ai.status()
+
+show ""
+show "=== Pregunta simple ==="
+resp = ai.ask("¿Qué es Rust en una oración?")
+show resp
+
+show ""
+show "=== Sentimiento ==="
+show ai.sentiment("Este lenguaje es increíble, me encanta!")
+
+show ""
+show "=== Resumen ==="
+texto = "Orion es un lenguaje de programación moderno con VM en Rust, OOP nativa con shapes, type hints opcionales y módulos integrados. Está diseñado para ser simple, real y extensible."
+show ai.summarize(texto)
+
+show ""
+show "=== Clasificar ==="
+show ai.classify("El Real Madrid ganó la Champions League", ["deportes", "tecnología", "política", "entretenimiento"])
+
+show ""
+show "=== Traducir ==="
+show ai.translate("Hola, soy Orion", "english")
+
+show ""
+show "=== Generar código ==="
+show ai.code("función en Orion que calcula el factorial de un número")
+
+show ""
+show "=== Chat con contexto ==="
+c = ai.chat("Eres un experto en lenguajes de programación. Respuestas cortas.")
+show c.ask("¿Qué ventaja tiene compilar a bytecode?")
+show c.ask("¿Y ejecutarlo en una VM en Rust?")

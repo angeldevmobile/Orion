@@ -1,8 +1,17 @@
 use std::fmt;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
+
+/// Datos internos de una instancia de shape
+#[derive(Debug, Clone)]
+pub struct InstanceData {
+    pub shape_name: String,
+    pub fields: HashMap<String, Value>,
+}
 
 /// Tipos de valor nativos de Orion
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -10,7 +19,24 @@ pub enum Value {
     Bool(bool),
     List(Vec<Value>),
     Dict(HashMap<String, Value>),
+    Instance(Rc<RefCell<InstanceData>>),
     Null,
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b))       => a == b,
+            (Value::Float(a), Value::Float(b))   => a == b,
+            (Value::Str(a), Value::Str(b))       => a == b,
+            (Value::Bool(a), Value::Bool(b))     => a == b,
+            (Value::Null, Value::Null)           => true,
+            (Value::List(a), Value::List(b))     => a == b,
+            (Value::Dict(a), Value::Dict(b))     => a == b,
+            (Value::Instance(a), Value::Instance(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -31,25 +57,27 @@ impl fmt::Display for Value {
                     .collect();
                 write!(f, "{{{}}}", parts.join(", "))
             }
+            Value::Instance(inst) => {
+                write!(f, "<{} instance>", inst.borrow().shape_name)
+            }
         }
     }
 }
 
 impl Value {
-    /// Inferencia de tipo — devuelve el nombre del tipo como string
-    pub fn type_name(&self) -> &'static str {
+    pub fn type_name(&self) -> String {
         match self {
-            Value::Int(_)   => "int",
-            Value::Float(_) => "float",
-            Value::Str(_)   => "string",
-            Value::Bool(_)  => "bool",
-            Value::List(_)  => "list",
-            Value::Dict(_)  => "dict",
-            Value::Null     => "null",
+            Value::Int(_)      => "int".to_string(),
+            Value::Float(_)    => "float".to_string(),
+            Value::Str(_)      => "string".to_string(),
+            Value::Bool(_)     => "bool".to_string(),
+            Value::List(_)     => "list".to_string(),
+            Value::Dict(_)     => "dict".to_string(),
+            Value::Null        => "null".to_string(),
+            Value::Instance(i) => i.borrow().shape_name.clone(),
         }
     }
 
-    /// Convierte a bool para condicionales
     pub fn is_truthy(&self) -> bool {
         match self {
             Value::Bool(b)   => *b,
@@ -58,11 +86,11 @@ impl Value {
             Value::Str(s)    => !s.is_empty(),
             Value::List(v)   => !v.is_empty(),
             Value::Dict(m)   => !m.is_empty(),
+            Value::Instance(_) => true,
             Value::Null      => false,
         }
     }
 
-    /// Suma: int+int, float+float, string+string
     pub fn add(&self, other: &Value) -> Result<Value, String> {
         match (self, other) {
             (Value::Int(a), Value::Int(b))     => Ok(Value::Int(a + b)),
@@ -109,14 +137,7 @@ impl Value {
     }
 
     pub fn compare_eq(&self, other: &Value) -> bool {
-        match (self, other) {
-            (Value::Int(a), Value::Int(b))     => a == b,
-            (Value::Float(a), Value::Float(b)) => a == b,
-            (Value::Str(a), Value::Str(b))     => a == b,
-            (Value::Bool(a), Value::Bool(b))   => a == b,
-            (Value::Null, Value::Null)         => true,
-            _ => false,
-        }
+        self == other
     }
 
     pub fn compare_lt(&self, other: &Value) -> Result<bool, String> {

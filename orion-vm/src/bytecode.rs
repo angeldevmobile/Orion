@@ -12,6 +12,34 @@ pub struct FunctionDef {
     pub lines: Vec<u32>,
 }
 
+/// Valor por defecto de un campo de shape (mini-bytecode que evalúa al default)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldDef {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub type_hint: Option<String>,
+    pub default: Vec<Instruction>,
+}
+
+/// Definición de un act (método) de un shape
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActDef {
+    pub params: Vec<String>,
+    pub body: Vec<Instruction>,
+    #[serde(default)]
+    pub lines: Vec<u32>,
+}
+
+/// Definición completa de un shape
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShapeDef {
+    pub fields: Vec<FieldDef>,
+    pub on_create: Option<ActDef>,
+    pub acts: HashMap<String, ActDef>,
+    #[serde(default)]
+    pub using: Vec<String>,
+}
+
 /// Formato completo del archivo .orbc
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OrionBytecode {
@@ -19,6 +47,8 @@ pub struct OrionBytecode {
     #[serde(default)]
     pub lines: Vec<u32>,
     pub functions: HashMap<String, FunctionDef>,
+    #[serde(default)]
+    pub shapes: HashMap<String, ShapeDef>,
 }
 
 pub fn load(path: &str) -> Result<OrionBytecode, String> {

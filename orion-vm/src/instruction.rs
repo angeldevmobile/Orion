@@ -53,17 +53,34 @@ pub enum Instruction {
     GetIndex,            // lista[índice]
     SetIndex,            // lista[índice] = valor
 
-    //   Atributos                 
+    //   Atributos
     GetAttr(String),     // obj.attr
     SetAttr(String),     // obj.attr = valor
 
-    //   Stack                   
+    //   OOP
+    DefineShape(String),     // registrar shape (no-op, ya cargado desde bytecode)
+    CallMethod(String, u8),  // obj.method(args) — nombre del método, num args
+    IsInstance(String),      // obj is ShapeName → bool
+
+    //   Stack
     Pop,                 // descarta el top del stack
     Dup,                 // duplica el top del stack
 
-    //   I/O nativo                
+    //   Manejo de errores
+    BeginAttempt(usize), // push handler — si hay error, salta a usize (error en stack)
+    EndAttempt(usize),   // pop handler (bloque attempt ok), salta a usize (fin del handle)
+
+    //   I/O nativo
     Show,                // muestra el top del stack
 
-    //   Fin                    
+    //   IA nativa (Fase 4)
+    AiAsk,               // pop prompt → llama AI → push String respuesta
+    AiLearn,             // pop texto  → guarda en memoria AI de sesión → push String confirmación
+    AiSense,             // pop query  → busca en memoria + llama AI → push String respuesta
+
+    //   Servidor HTTP nativo (Fase 7)
+    ServeHTTP(String),   // pop puerto (int) → levanta servidor HTTP, handler = String fn_name
+
+    //   Fin
     Halt,
 }

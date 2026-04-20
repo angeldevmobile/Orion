@@ -294,7 +294,12 @@ def parse_primary(tokens, i):
         return ("DICT", items), i
 
     # --- CORRECCIÓN: Manejar tokens no válidos para expresiones primarias ---
-        
+
+    # --- await como expresión: result = await future ---
+    elif kind == "AWAIT":
+        inner_expr, j = parse_primary(tokens, i + 1)
+        return ("AWAIT_EXPR", inner_expr), j
+
     else:
         print("DEBUG: tokens[i-2:i+3]", tokens[max(0, i-2):i+3])
         raise OrionSyntaxError(f"Token inesperado en expresión primaria: '{kind}' ('{value}')")
@@ -494,6 +499,24 @@ def _parse_statement(tokens, i):
         
         return ("ATTEMPT", body_attempt, handler), i
 
+    # --- THINK statement: think <expr>  →  llamada nativa a IA ---
+    elif kind == "THINK":
+        i += 1  # consumir 'think'
+        expr, i = parse_expression(tokens, i)
+        return ("THINK", expr), i
+
+    # --- LEARN statement: learn <expr>  →  almacena texto en memoria AI ---
+    elif kind == "LEARN":
+        i += 1  # consumir 'learn'
+        expr, i = parse_expression(tokens, i)
+        return ("LEARN", expr), i
+
+    # --- SENSE statement: sense <expr>  →  consulta memoria AI con la query ---
+    elif kind == "SENSE":
+        i += 1  # consumir 'sense'
+        expr, i = parse_expression(tokens, i)
+        return ("SENSE", expr), i
+
     # --- USE statement con alias (as) e imports selectivos (take) ---
     elif kind == "USE":
         if i+1 >= len(tokens) or tokens[i+1][0] not in ("STRING", "IDENT"):
@@ -526,6 +549,27 @@ def _parse_statement(tokens, i):
                 raise OrionSyntaxError("Se esperaba ']' para cerrar 'take'")
             j += 1  # skip ]
         return ("USE", module_path, alias, selective), j
+
+    # --- SERVE statement: serve <port> <fn_name> ---
+    # Sintaxis: serve 8080 handler_fn
+    #       o:  serve 8080 fn handle(req) { ... }
+    elif kind == "SERVE":
+        j = i + 1
+        # puerto
+        if j >= len(tokens):
+            raise OrionSyntaxError("Se esperaba el puerto después de 'serve'")
+        port_expr, j = parse_expression(tokens, j)
+        # función handler
+        if j >= len(tokens):
+            raise OrionSyntaxError("Se esperaba el nombre del handler después del puerto")
+        if tokens[j][0] == "FN":
+            # serve 8080 fn handle(req) { ... }
+            fn_node, j = parse_statement(tokens, j)
+            return ("SERVE_STMT", port_expr, fn_node), j
+        else:
+            # serve 8080 mifuncion
+            fn_expr, j = parse_expression(tokens, j)
+            return ("SERVE_STMT", port_expr, fn_expr), j
 
     # --- PRINT/SHOW statement ---
     elif kind == "PRINT":
@@ -774,6 +818,51 @@ def _parse_statement(tokens, i):
             raise OrionSyntaxError("Se esperaba '}' para cerrar el shape")
         return ("SHAPE_DEF", shape_name, fields, on_create, acts, using_list), j + 1
 
+    # --- ASYNC FN statement ---
+    elif kind == "ASYNC":
+        # async fn nombre(...) { ... }
+        j = i + 1
+        while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+            j += 1
+        if j >= len(tokens) or tokens[j][0] not in ("FN", "IDENT"):
+            raise OrionSyntaxError("Se esperaba 'fn' después de 'async'")
+        j += 1  # consumir 'fn'
+        if j >= len(tokens) or tokens[j][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de función después de 'async fn'")
+        fn_name = tokens[j][1]
+        j += 1
+        if j >= len(tokens) or tokens[j][0] != "LPAREN":
+            raise OrionSyntaxError("Se esperaba '(' después del nombre de función async")
+        params, param_types, j = parse_fn_params(tokens, j)
+
+        # Return type opcional: -> tipo
+        return_type = None
+        while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+            j += 1
+        if j < len(tokens) and tokens[j][0] == "THIN_ARROW":
+            j += 1
+            if j < len(tokens) and tokens[j][0] in ("TYPE", "IDENT"):
+                return_type = tokens[j][1]
+                j += 1
+
+        while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+            j += 1
+        if j >= len(tokens) or tokens[j][0] != "LBRACE":
+            raise OrionSyntaxError("Se esperaba '{' al inicio del cuerpo de la función async")
+        body, j = parse_block(tokens, j)
+
+        return ("ASYNC_FN", fn_name, params, body, return_type, param_types), j
+
+    # --- AWAIT expression statement ---
+    elif kind == "AWAIT":
+        expr, j = parse_expression(tokens, i + 1)
+        return ("AWAIT_STMT", expr), j
+
+    # --- SPAWN statement (fire-and-forget async) ---
+    elif kind == "SPAWN":
+        expr, j = parse_expression(tokens, i + 1)
+        return ("SPAWN", expr), j
+
     # --- FN statement ---
     elif kind == "FN" or (kind == "IDENT" and value == "fn"):
         if i+1 >= len(tokens) or tokens[i+1][0] != "IDENT":
@@ -991,7 +1080,7 @@ def parse(tokens):
             if next_i == i:
                 raise OrionSyntaxError(f"El parser no avanzó en el índice en parse() cerca de '{tokens[i]}'")
             
-            if isinstance(stmt, tuple) and stmt[0] == "FN":
+            if isinstance(stmt, tuple) and stmt[0] in ("FN", "ASYNC_FN"):
                 function_nodes.append(stmt)
             else:
                 statement_nodes.append(stmt)

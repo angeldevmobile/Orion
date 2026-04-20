@@ -1,0 +1,71 @@
+-- test_phase6.orx — Fase 6: async / await / spawn
+-- Ejecutar: python src/main.py vscode-orion/test_phase6.orx
+
+show "=== Fase 6: async / await ==="
+
+-- 1. async fn simple: retorna un valor después de un cálculo
+async fn suma_async(a, b) {
+    return a + b
+}
+
+-- Llamada normal: retorna OrionFuture inmediatamente
+tarea = suma_async(10, 20)
+show "Tipo de tarea:"
+show tarea
+
+-- await resuelve el Future y entrega el valor
+resultado = await tarea
+show "Resultado:"
+show resultado
+
+-- 2. await inline (sin variable intermedia)
+resultado2 = await suma_async(100, 200)
+show "Resultado2:"
+show resultado2
+
+-- 3. async fn con lógica interna
+async fn calcular_factorial(n) {
+    acc = 1
+    i = 1
+    while i <= n {
+        acc = acc * i
+        i = i + 1
+    }
+    return acc
+}
+
+fact = await calcular_factorial(10)
+show "10! ="
+show fact
+
+-- 4. múltiples async simultáneos
+t1 = calcular_factorial(5)
+t2 = calcular_factorial(6)
+t3 = calcular_factorial(7)
+
+r1 = await t1
+r2 = await t2
+r3 = await t3
+
+show "5! 6! 7!:"
+show r1
+show r2
+show r3
+
+-- 5. spawn: fire-and-forget (no bloquea)
+async fn tarea_background(msg) {
+    show msg
+    return yes
+}
+
+spawn tarea_background("hola desde background")
+
+-- 6. async fn que retorna string
+async fn saludar(nombre) {
+    return "Hola, " + nombre + "!"
+}
+
+saludo = await saludar("Orion")
+show saludo
+
+show "=== Fase 6 completada ==="

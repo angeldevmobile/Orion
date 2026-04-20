@@ -1,0 +1,105 @@
+-- validate.orx — Validación de datos en Orion
+-- Uso: use "packages/validate"
+--      use "packages/validate" as v
+
+-- Verificar si un texto es un email válido (básico)
+fn is_email(text) {
+    t = "" + text
+    if not t.contains("@") {
+        return no
+    }
+    parts = t.split("@")
+    if len(parts) != 2 {
+        return no
+    }
+    local = parts[0]
+    domain = parts[1]
+    if len(local) == 0 {
+        return no
+    }
+    if not domain.contains(".") {
+        return no
+    }
+    return yes
+}
+
+-- Verificar si un texto es una URL válida (básico)
+fn is_url(text) {
+    t = "" + text
+    if t.starts_with("http://") {
+        return yes
+    }
+    if t.starts_with("https://") {
+        return yes
+    }
+    if t.starts_with("ftp://") {
+        return yes
+    }
+    return no
+}
+
+-- Verificar si un valor es un número
+fn is_number(value) {
+    attempt {
+        n = int(value)
+        return yes
+    } handle err {
+        attempt {
+            n = float(value)
+            return yes
+        } handle err2 {
+            return no
+        }
+    }
+}
+
+-- Verificar si un texto está vacío
+fn is_empty(text) {
+    t = "" + text
+    trimmed = t.trim()
+    return len(trimmed) == 0
+}
+
+-- Verificar si un número está en un rango [min, max]
+fn in_range(value, min_val, max_val) {
+    n = int(value)
+    return n >= min_val and n <= max_val
+}
+
+-- Verificar si un texto tiene longitud dentro de un rango
+fn len_between(text, min_len, max_len) {
+    l = len("" + text)
+    return l >= min_len and l <= max_len
+}
+
+-- Verificar si un texto solo contiene dígitos
+fn is_digits(text) {
+    t = "" + text
+    if len(t) == 0 {
+        return no
+    }
+    digits = ["0","1","2","3","4","5","6","7","8","9"]
+    chars = t.split("")
+    i = 0
+    while i < len(chars) {
+        found = no
+        j = 0
+        while j < len(digits) {
+            if chars[i] == digits[j] {
+                found = yes
+            }
+            j = j + 1
+        }
+        if not found {
+            return no
+        }
+        i = i + 1
+    }
+    return yes
+}
+
+-- Verificar si un texto no está vacío y tiene longitud mínima
+fn is_required(text, min_len) {
+    t = "" + text
+    return len(t.trim()) >= min_len
+}

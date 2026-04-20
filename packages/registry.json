@@ -1,0 +1,73 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "registry": "https://raw.githubusercontent.com/angeldevmobile/Orion/master/packages",
+    "description": "Orion Package Registry — paquetes oficiales y de comunidad"
+  },
+  "packages": {
+    "math": {
+      "version": "1.0.0",
+      "description": "Funciones matemáticas: abs, sqrt, max, min, pow, floor, ceil, round, clamp, average",
+      "author": "orion-core",
+      "type": "builtin",
+      "file": "math.orx",
+      "tags": ["math", "numbers", "stdlib"]
+    },
+    "strings": {
+      "version": "1.0.0",
+      "description": "Utilidades de cadenas: pad_left, pad_right, repeat, count, reverse, title_case",
+      "author": "orion-core",
+      "type": "builtin",
+      "file": "strings.orx",
+      "tags": ["strings", "text", "stdlib"]
+    },
+    "list": {
+      "version": "1.0.0",
+      "description": "Operaciones sobre listas: sum, contains, first, last, flatten, zip, range_of",
+      "author": "orion-core",
+      "type": "builtin",
+      "file": "list.orx",
+      "tags": ["list", "collections", "stdlib"]
+    },
+    "http": {
+      "version": "0.9.0",
+      "description": "Cliente HTTP: get, post, put, delete, headers — sin dependencias externas",
+      "author": "orion-core",
+      "type": "community",
+      "file": "http.orx",
+      "tags": ["http", "network", "web"]
+    },
+    "colors": {
+      "version": "1.0.0",
+      "description": "Paleta de colores ANSI para terminal: red, green, blue, bold, reset",
+      "author": "orion-core",
+      "type": "community",
+      "file": "colors.orx",
+      "tags": ["colors", "terminal", "ui"]
+    },
+    "dates": {
+      "version": "0.9.0",
+      "description": "Utilidades de fechas: today, format, diff_days, is_weekend, add_days",
+      "author": "orion-core",
+      "type": "community",
+      "file": "dates.orx",
+      "tags": ["dates", "time", "datetime"]
+    },
+    "validate": {
+      "version": "1.0.0",
+      "description": "Validación de datos: is_email, is_url, is_number, is_empty, in_range",
+      "author": "orion-core",
+      "type": "community",
+      "file": "validate.orx",
+      "tags": ["validation", "forms", "data"]
+    },
+    "uuid": {
+      "version": "1.0.0",
+      "description": "Generación de UUIDs v4 únicos sin dependencias externas",
+      "author": "orion-core",
+      "type": "community",
+      "file": "uuid.orx",
+      "tags": ["uuid", "id", "unique"]
+    }
+  }
+}

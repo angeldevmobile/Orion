@@ -129,17 +129,101 @@ def show_help():
         border_style="blue",
     )
 
-    help_table.add_column("Comando", style="cyan", width=25)
+    help_table.add_column("Comando", style="cyan", width=30)
     help_table.add_column("Descripción", style="white")
     help_table.add_column("Ejemplo", style="green")
 
     help_table.add_row("orion <archivo.orx>", "Ejecuta un archivo Orion", "orion programa.orx")
     help_table.add_row("orion repl", "Inicia el entorno interactivo REPL", "orion repl")
+    help_table.add_row("", "", "")
+    help_table.add_row("orion add <paquete>", "Instala un paquete", "orion add math")
+    help_table.add_row("orion remove <paquete>", "Desinstala un paquete", "orion remove math")
+    help_table.add_row("orion list", "Lista los paquetes instalados", "orion list")
+    help_table.add_row("orion search <query>", "Busca en el registry", "orion search strings")
+    help_table.add_row("orion update [paquete]", "Actualiza uno o todos los paquetes", "orion update")
+    help_table.add_row("", "", "")
     help_table.add_row("--visual", "Inicia el modo visual animado", "orion --visual")
     help_table.add_row("--version", "Muestra la versión de Orion", "orion --version")
     help_table.add_row("--help", "Muestra esta ayuda", "orion --help")
 
     console.print(help_table)
+
+
+# ╔══════════════════════════════════════════════════════╗
+# ║              SECCIÓN: PACKAGE MANAGER                ║
+# ╚══════════════════════════════════════════════════════╝
+def cmd_add(pkg_name: str, force: bool = False):
+    """orion add <pkg>"""
+    from orion.pkg import add as _add
+    msg = _add(pkg_name, force=force)
+    color = "green" if msg.startswith("[ok]") else "yellow" if "ya instalado" in msg else "red"
+    console.print(f"[{color}]{msg}[/{color}]")
+
+
+def cmd_remove(pkg_name: str):
+    """orion remove <pkg>"""
+    from orion.pkg import remove as _remove
+    msg = _remove(pkg_name)
+    color = "green" if msg.startswith("[ok]") else "red"
+    console.print(f"[{color}]{msg}[/{color}]")
+
+
+def cmd_list():
+    """orion list"""
+    from orion.pkg import list_installed
+    pkgs = list_installed()
+    if not pkgs:
+        console.print("[yellow]No hay paquetes instalados. Usa 'orion add <paquete>'[/yellow]")
+        return
+
+    t = Table(
+        title="[bold cyan]Paquetes instalados[/bold cyan]",
+        show_header=True,
+        header_style="bold cyan",
+        border_style="blue",
+    )
+    t.add_column("Paquete",     style="cyan",   width=16)
+    t.add_column("Versión",     style="white",  width=10)
+    t.add_column("Fuente",      style="dim",    width=10)
+    t.add_column("Descripción", style="white")
+    for p in pkgs:
+        t.add_row(p["name"], p.get("version", "?"), p.get("source", "?"), p.get("description", ""))
+    console.print(t)
+
+
+def cmd_search(query: str):
+    """orion search <query>"""
+    from orion.pkg import search as _search
+    results = _search(query)
+    if not results:
+        console.print(f"[yellow]Sin resultados para '{query}'[/yellow]")
+        return
+
+    t = Table(
+        title=f"[bold cyan]Resultados para '{query}'[/bold cyan]",
+        show_header=True,
+        header_style="bold cyan",
+        border_style="blue",
+    )
+    t.add_column("Paquete",     style="cyan",   width=14)
+    t.add_column("Versión",     style="white",  width=8)
+    t.add_column("Tipo",        style="dim",    width=10)
+    t.add_column("Tags",        style="green",  width=22)
+    t.add_column("Descripción", style="white")
+    for r in results:
+        tags = ", ".join(r.get("tags", []))
+        t.add_row(r["name"], r.get("version", "?"), r.get("type", "?"), tags, r.get("description", ""))
+    console.print(t)
+    console.print(f"\n[dim]Instala con:[/dim] [cyan]orion add <paquete>[/cyan]")
+
+
+def cmd_update(pkg_name: str | None = None):
+    """orion update [pkg]"""
+    from orion.pkg import update as _update
+    messages = _update(pkg_name)
+    for msg in messages:
+        color = "green" if msg.startswith("[ok]") else "yellow" if "info" in msg else "red"
+        console.print(f"[{color}]{msg}[/{color}]")
 
 
 # ╔══════════════════════════════════════════════════════╗
@@ -218,6 +302,38 @@ except ImportError:
 # ║                    FUNCIÓN MAIN                      ║
 # ╚══════════════════════════════════════════════════════╝
 def main():
+    # Interceptar subcomandos del gestor de paquetes antes de argparse
+    _raw = sys.argv[1:]
+    if _raw:
+        sub = _raw[0].lower()
+
+        if sub == "add" and len(_raw) >= 2:
+            force = "--force" in _raw
+            banner()
+            cmd_add(_raw[1], force=force)
+            return
+
+        if sub == "remove" and len(_raw) >= 2:
+            banner()
+            cmd_remove(_raw[1])
+            return
+
+        if sub == "list":
+            banner()
+            cmd_list()
+            return
+
+        if sub == "search" and len(_raw) >= 2:
+            banner()
+            cmd_search(" ".join(_raw[1:]))
+            return
+
+        if sub == "update":
+            banner()
+            target = _raw[1] if len(_raw) >= 2 and not _raw[1].startswith("--") else None
+            cmd_update(target)
+            return
+
     parser = argparse.ArgumentParser(description="Orion Language CLI", add_help=False)
     parser.add_argument("file", nargs="?", help="Archivo Orion .orx o comando 'repl'")
     parser.add_argument("--version", action="store_true", help="Versión de Orion")
@@ -247,10 +363,12 @@ def main():
         run_script(args.file)
     else:
         console.print("\n💡 [yellow]Uso recomendado:[/yellow]")
-        console.print("   orion <archivo.orx>  - Ejecutar un programa")
-        console.print("   orion repl           - Modo interactivo")
-        console.print("   orion --visual       - Modo visual animado")
-        console.print("   orion --help         - Mostrar ayuda completa\n")
+        console.print("   orion <archivo.orx>       - Ejecutar un programa")
+        console.print("   orion repl                - Modo interactivo")
+        console.print("   orion add <paquete>       - Instalar un paquete")
+        console.print("   orion list                - Paquetes instalados")
+        console.print("   orion search <query>      - Buscar paquetes")
+        console.print("   orion --help              - Ayuda completa\n")
 
         if args.file:
             console.print(f"[red]Archivo no válido o no encontrado: {args.file}[/red]")

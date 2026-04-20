@@ -164,6 +164,16 @@ attempt {
 }
 ```
 
+### IA nativa — `think`
+
+```orion
+-- Sin módulos, sin imports: IA directa como statement
+think "Resume el siguiente texto en 3 puntos: " + contenido
+
+-- Equivalente a ai.ask(), pero nativo al lenguaje
+think "¿Cuál es la capital de Francia?"
+```
+
 ### Módulos
 
 ```orion
@@ -250,13 +260,16 @@ packages/   → math.orx, strings.orx, list.orx  (escritos en Orion)
 ## Cómo ejecutar
 
 ```bash
-# Intérprete directo (modo actual)
+# REPL interactivo (sin argumentos)
+python src/main.py
+
+# Intérprete directo
 python src/main.py archivo.orx
 
 # Compilar a bytecode
 python compiler/bytecode_compiler.py archivo.orx
 
-# Compilar + ejecutar con VM Rust (cuando esté lista)
+# Compilar + ejecutar con VM Rust
 python compiler/bytecode_compiler.py archivo.orx
 .\orion-vm\target\release\orion.exe archivo.orbc
 ```
@@ -296,17 +309,26 @@ python compiler/bytecode_compiler.py archivo.orx
 - [x] Language server VSCode con syntax highlighting de `shape`, `act`, `using`, `is`
 - [x] Snippets VSCode para OOP
 
-### 🔄 Fase 3C — VM Rust para OOP *(en progreso)*
-- [ ] VM Rust soporta instrucciones `DefineShape`, `CallMethod`, `GetAttr`, `SetAttr`, `IsInstance`
-- [ ] Instanciación de shapes en Rust
-- [ ] Ejecución completa de test_phase3.orx y test_phase3b.orx vía VM Rust
-- [ ] Benchmark: intérprete Python vs VM Rust
+### ✅ Fase 3C — VM Rust completa
+- [x] VM Rust soporta `DefineShape`, `CallMethod`, `GetAttr`, `SetAttr`, `IsInstance`
+- [x] Instanciación de shapes, herencia `using`, `on_create` en Rust
+- [x] **`attempt/handle`** en Rust — opcode `BeginAttempt`/`EndAttempt`, pila de handlers, unwinding automático
+- [x] **`for..in` sobre listas** en bytecode — bucle con índice compilado, sin opcode extra
+- [x] **REPL interactivo** — `python src/main.py` sin args abre shell interactivo
+- [x] Benchmark: intérprete Python vs VM Rust (~137x más rápido)
 
-### 📋 Fase 4 — IA nativa
-- [ ] Módulos `ai`, `vision`, `insight` como ciudadanos de primera clase
-- [ ] Sintaxis nativa para prompts y modelos: `think`, `learn`, `sense`
-- [ ] Pipeline de datos integrado en el lenguaje
-- [ ] Soporte para modelos locales y remotos
+### 🔄 Fase 4 — IA nativa *(en progreso)*
+- [x] Módulo `ai` conectado a APIs reales (Claude / OpenAI) vía `.env`
+- [x] `ai.ask()`, `ai.summarize()`, `ai.classify()`, `ai.extract()`, `ai.code()`
+- [x] `ai.fix()`, `ai.translate()`, `ai.sentiment()`, `ai.improve()`, `ai.explain()`
+- [x] `ai.qa()`, `ai.complete()`, `ai.search_in()`
+- [x] `ai.chat()` — sesión con historial y contexto persistente
+- [x] Auto-detección de proveedor: Claude primero, OpenAI como fallback
+- [x] **Sintaxis nativa `think`** — statement directo sin `use ai`, funciona en intérprete y bytecode
+- [x] **`net.reach()` real** — HTTP sin dependencias externas (usa `urllib`), `requests` como upgrade opcional
+- [ ] `learn` y `sense` como statements nativos
+- [ ] Módulos `vision` e `insight` con APIs reales
+- [ ] `AiAsk` como instrucción nativa en VM Rust (HTTP directo en Rust sin Python)
 
 ### 🚀 Fase 5 — Producción y comunidad
 - [ ] Lexer y Parser reescritos en Rust

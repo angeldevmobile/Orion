@@ -1,0 +1,88 @@
+-- colors.orx — Colores ANSI para terminal
+-- Uso: use "packages/colors"
+--      use "packages/colors" as clr
+
+-- Resetear color
+fn reset() {
+    return "\u001b[0m"
+}
+
+-- Colores de texto
+fn red(text) {
+    return "\u001b[31m" + text + "\u001b[0m"
+}
+
+fn green(text) {
+    return "\u001b[32m" + text + "\u001b[0m"
+}
+
+fn yellow(text) {
+    return "\u001b[33m" + text + "\u001b[0m"
+}
+
+fn blue(text) {
+    return "\u001b[34m" + text + "\u001b[0m"
+}
+
+fn magenta(text) {
+    return "\u001b[35m" + text + "\u001b[0m"
+}
+
+fn cyan(text) {
+    return "\u001b[36m" + text + "\u001b[0m"
+}
+
+fn white(text) {
+    return "\u001b[37m" + text + "\u001b[0m"
+}
+
+-- Fondo de color
+fn bg_red(text) {
+    return "\u001b[41m" + text + "\u001b[0m"
+}
+
+fn bg_green(text) {
+    return "\u001b[42m" + text + "\u001b[0m"
+}
+
+fn bg_blue(text) {
+    return "\u001b[44m" + text + "\u001b[0m"
+}
+
+fn bg_yellow(text) {
+    return "\u001b[43m" + text + "\u001b[0m"
+}
+
+-- Estilos
+fn bold(text) {
+    return "\u001b[1m" + text + "\u001b[0m"
+}
+
+fn italic(text) {
+    return "\u001b[3m" + text + "\u001b[0m"
+}
+
+fn underline(text) {
+    return "\u001b[4m" + text + "\u001b[0m"
+}
+
+fn dim(text) {
+    return "\u001b[2m" + text + "\u001b[0m"
+}
+
+-- Combinado
+fn success(text) {
+    return "\u001b[1m\u001b[32m" + text + "\u001b[0m"
+}
+
+fn error(text) {
+    return "\u001b[1m\u001b[31m" + text + "\u001b[0m"
+}
+
+fn warn(text) {
+    return "\u001b[1m\u001b[33m" + text + "\u001b[0m"
+}
+
+fn info(text) {
+    return "\u001b[1m\u001b[36m" + text + "\u001b[0m"
+}

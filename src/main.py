@@ -62,9 +62,13 @@ def run_orion(filename, verbose=False):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if not args:
+    if not args or args == ["--repl"]:
+        from src.repl import start_repl
+        start_repl()
+        sys.exit(0)
+    verbose = "--verbose" in args
+    filename = next((a for a in args if not a.startswith("--")), None)
+    if not filename:
         print("Uso: python main.py archivo.orx [--verbose]")
         sys.exit(1)
-    verbose = "--verbose" in args
-    filename = next(a for a in args if not a.startswith("--"))
     run_orion(filename, verbose=verbose)

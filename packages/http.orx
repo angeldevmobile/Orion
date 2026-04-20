@@ -1,0 +1,43 @@
+-- http.orx — Cliente HTTP ligero para Orion
+-- Usa el módulo net del runtime
+-- Uso: use "packages/http"
+--      use "packages/http" as http
+
+use "net" as _net
+
+-- GET request — retorna el body como string
+fn get(url) {
+    return _net.get(url)
+}
+
+-- POST request con body JSON — retorna string
+fn post(url, body) {
+    return _net.post(url, body)
+}
+
+-- GET con headers personalizados
+fn get_with_headers(url, headers) {
+    return _net.get(url, headers)
+}
+
+-- POST con headers personalizados
+fn post_with_headers(url, body, headers) {
+    return _net.post(url, body, headers)
+}
+
+-- Parsear respuesta JSON de un GET
+fn get_json(url) {
+    use "json" as _json
+    raw = _net.get(url)
+    return _json.parse(raw)
+}
+
+-- Verificar si una URL responde (status 200)
+fn ping(url) {
+    attempt {
+        resp = _net.get(url)
+        return yes
+    } handle err {
+        return no
+    }
+}

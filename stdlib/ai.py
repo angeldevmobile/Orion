@@ -1,302 +1,459 @@
 """
-Orion Cognitive Engine
-────────────────────────────────────────────
-Sistema cognitivo híbrido para Orion.
-Fusiona heurística, vectorización y aprendizaje ligero.
-
-Principios:
-- Usa numpy si está disponible, pero no depende de él.
-- Embeddings cuánticos deterministas.
-- Red neural-lite integrada (sin frameworks).
-- Modo “think” adaptativo con razonamiento contextual.
-- Memoria cognitiva para inferir patrones entre llamadas.
+Orion AI Module — Fase 4
+Real AI via Claude (Anthropic) or OpenAI.
+Auto-detects provider from .env or environment variables.
+No external dependencies — solo stdlib Python.
 """
 
-import math, random, time
-from collections import deque, Counter
-from typing import List, Tuple, Optional, Any
-
-# ------------------------------------------
-# Backend opcional (aceleración con numpy)
-# ------------------------------------------
-try:
-    import numpy as _np  # type: ignore
-except Exception:
-    _np = None
+import json
+import os
+import urllib.request
+import urllib.error
+from pathlib import Path
 
 
-# ------------------------------------------
-# Núcleo de memoria y contexto Orion
-# ------------------------------------------
-_MEMORY = deque(maxlen=32)  # Últimas 32 operaciones
+# ---------------------------------------------------------------------------
+# .env loader — seguro, sin eval/exec
+# ---------------------------------------------------------------------------
 
-def recall() -> List[dict]:
-    """Retorna el contexto cognitivo actual."""
-    return list(_MEMORY)
+def _load_env():
+    """Carga variables de un archivo .env buscando desde el directorio actual hacia arriba."""
+    search_paths = [Path(".env")]
+    for level in range(1, 4):
+        search_paths.append(Path(*[".."] * level) / ".env")
 
-def _remember(action: str, data: Any):
-    _MEMORY.append({"t": round(time.time(), 2), "action": action, "data": data})
+    for env_path in search_paths:
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, _, value = line.partition("=")
+                        key   = key.strip()
+                        value = value.strip().strip('"').strip("'")
+                        if key and key not in os.environ:
+                            os.environ[key] = value
+            return
+        except FileNotFoundError:
+            continue
 
+_load_env()
 
-# ------------------------------------------
-# Embeddings cuánticos Orion
-# ------------------------------------------
-def quantum_embed(text, dim=128):  # Cambiar None por 128
-    """
-    Genera un embedding cuántico simulado para texto.
-    Convierte texto en un vector de alta dimensión usando técnicas cuánticas simuladas.
-    """
-    # Asegurar que dim es un entero válido
-    if dim is None or not isinstance(dim, int):
-        dim = 128
-    
-    vec = [0.0] * dim
-    for i, ch in enumerate(text):
-        h = math.sin((ord(ch) * 0.137 + i) * 3.1415)
-        for j in range(dim):
-            vec[j] += math.sin(h * (j + 1) * 0.0317)
-    norm = math.sqrt(sum(v*v for v in vec)) or 1
-    res = [v / norm for v in vec]
-    _remember("quantum_embed", {"len": len(text), "dim": dim})
-    return res
+# Modelo activo en runtime (puede cambiarse desde Orion con ai.set_model())
+_active_model: str | None = None
 
-
-# ------------------------------------------
-# Utilidades matemáticas básicas
-# ------------------------------------------
-def euclidean_distance(a: List[float], b: List[float]) -> float:
-    if _np:
-        return float(_np.linalg.norm(_np.asarray(a) - _np.asarray(b)))
-    return math.sqrt(sum((x - y)**2 for x, y in zip(a, b)))
+# ---------------------------------------------------------------------------
+# Memoria de sesión  — usada por learn / sense
+# ---------------------------------------------------------------------------
+_session_memory: list[str] = []
 
 
-def cosine_similarity(a: List[float], b: List[float]) -> float:
-    if _np:
-        a_n, b_n = _np.asarray(a), _np.asarray(b)
-        na, nb = _np.linalg.norm(a_n), _np.linalg.norm(b_n)
-        if na == 0 or nb == 0:
-            return 0.0
-        return float(_np.dot(a_n, b_n) / (na * nb))
-    dot = sum(x*y for x, y in zip(a, b))
-    na = math.sqrt(sum(x*x for x in a))
-    nb = math.sqrt(sum(y*y for y in b))
-    return 0.0 if na == 0 or nb == 0 else dot / (na * nb)
+def embed(text: str) -> str:
+    """Guarda texto en la memoria de sesión (usado por el statement 'learn')."""
+    _session_memory.append(str(text))
+    return f"[aprendido: {len(_session_memory)} entradas en memoria]"
 
 
-def normalize(vec: List[float]) -> List[float]:
-    s = math.sqrt(sum(x*x for x in vec)) or 1
-    return [x/s for x in vec]
+def recall(query: str) -> str:
+    """Busca en la memoria de sesión y responde usando AI (usado por 'sense')."""
+    if not _session_memory:
+        return "[sense: memoria vacía — usa 'learn' primero]"
+    context = "\n---\n".join(_session_memory)
+    return _call(
+        [{"role": "user", "content": str(query)}],
+        system=(
+            "Responde usando ÚNICAMENTE la siguiente información almacenada:\n\n"
+            f"{context}\n\n"
+            "Si la respuesta no está en la información, dilo claramente."
+        ),
+        max_tokens=512,
+    )
 
 
-def top_k_frequent(items: List, k: int = 5) -> List:
-    c = Counter(items)
-    return [item for item, _ in c.most_common(k)]
+def memory_size() -> int:
+    """Retorna cuántas entradas hay en memoria de sesión."""
+    return len(_session_memory)
 
 
-# ------------------------------------------
-# Neural-lite (red neuronal simple)
-# ------------------------------------------
-def neural_lite_fit(X: List[List[float]], y: List[float],
-                    hidden: int = 8, lr: float = 0.01, epochs: int = 200):
-    """Entrena una red neuronal ligera de 1 capa oculta con learning rate adaptativo."""
-    if not X:
-        return None
-    n, m = len(X), len(X[0])
-    if isinstance(hidden, str) and hidden == "auto":
-        hidden = m if m > 0 else 8
-
-    # Lógica adaptativa para lr
-    adaptive_lr = False
-    if isinstance(lr, str):
-        if lr == "adaptive":
-            lr = 0.05  # Valor inicial alto
-            adaptive_lr = True
-        else:
-            try:
-                lr = float(lr)
-            except Exception:
-                lr = 0.01
-
-    for xi in X:
-        if not all(isinstance(x, (int, float)) for x in xi):
-            raise ValueError("Cada elemento de X debe ser una lista de números (no listas anidadas)")
-
-    W1 = [[random.uniform(-0.1, 0.1) for _ in range(m)] for _ in range(hidden)]
-    b1 = [0.0] * hidden
-    W2 = [random.uniform(-0.1, 0.1) for _ in range(hidden)]
-    b2 = 0.0
-
-    def relu(x): return max(0.0, x)
-    def d_relu(x): return 1.0 if x > 0 else 0.0
-
-    prev_loss = None
-    for epoch in range(epochs):
-        total_loss = 0.0
-        for xi, yi in zip(X, y):
-            h = [relu(sum(w*x for w, x in zip(wr, xi)) + b) for wr, b in zip(W1, b1)]
-            y_pred = sum(w*h_i for w, h_i in zip(W2, h)) + b2
-            err = y_pred - yi
-            total_loss += err**2
-
-            grad_W2 = [err * h_i for h_i in h]
-            grad_b2 = err
-            grad_W1, grad_b1 = [], []
-            for j in range(hidden):
-                dh = err * W2[j] * d_relu(h[j])
-                grad_W1.append([dh * x for x in xi])
-                grad_b1.append(dh)
-
-            for j in range(hidden):
-                for k in range(m):
-                    W1[j][k] -= lr * grad_W1[j][k]
-                b1[j] -= lr * grad_b1[j]
-                W2[j] -= lr * grad_W2[j]
-            b2 -= lr * grad_b2
-
-        # Ajuste adaptativo del learning rate
-        if adaptive_lr:
-            avg_loss = total_loss / n
-            if prev_loss is not None:
-                if avg_loss > prev_loss:
-                    lr *= 0.7  # Reduce si el error sube
-                else:
-                    lr *= 1.05  # Aumenta ligeramente si el error baja
-                lr = max(min(lr, 0.1), 0.0001)  # Limita el rango
-            prev_loss = avg_loss
-
-    _remember("neural_fit", {"samples": n, "hidden": hidden, "lr_final": lr})
-    return {"W1": W1, "b1": b1, "W2": W2, "b2": b2}
-
-def neural_lite_predict(X: List[List[float]], model, explain=False):
-    """Predice con una red neural-lite entrenada. Si explain=True, retorna explicación."""
-    def relu(x): return max(0.0, x)
-    W1, b1, W2, b2 = model["W1"], model["b1"], model["W2"], model["b2"]
-    preds = []
-    explanations = []
-    for xi in X:
-        h = [relu(sum(w*x for w, x in zip(wr, xi)) + b) for wr, b in zip(W1, b1)]
-        pred = sum(w*h_i for w, h_i in zip(W2, h)) + b2
-        preds.append(pred)
-        if explain:
-            # Explicación simple: pesos y entrada
-            explanations.append(
-                f"Entrada: {xi}, activación oculta: {[round(hh,3) for hh in h]}, predicción: {round(pred,3)}"
-            )
-    if explain:
-        return {
-            "value": preds[0] if preds else None,
-            "why": explanations[0] if explanations else "Sin explicación"
-        }
-    return {"value": preds[0] if preds else None}
-
-# ------------------------------------------
-# Clustering (K-means Orion)
-# ------------------------------------------
-def kmeans(points: List[List[float]], k: int = 2, iterations: int = 20, seed: Optional[int] = None, **kwargs):
-    if not points:
-        return [], []
-    # Soporte para k="auto" o k como string
-    if isinstance(k, str):
-        if k == "auto":
-            k = min(2, len(points))  # O elige otro valor automático
-        else:
-            try:
-                k = int(k)
-            except Exception:
-                k = 2
-    if seed is not None:
-        random.seed(seed)
-    centers = [list(p) for p in random.sample(points, min(k, len(points)))]
-    labels = [0] * len(points)
-    for _ in range(iterations):
-        changed = False
-        for i, p in enumerate(points):
-            j = min(range(len(centers)), key=lambda c: euclidean_distance(p, centers[c]))
-            if labels[i] != j:
-                labels[i] = j
-                changed = True
-        for j in range(len(centers)):
-            cluster = [p for i, p in enumerate(points) if labels[i] == j]
-            if cluster:
-                centers[j] = [sum(col)/len(cluster) for col in zip(*cluster)]
-        if not changed:
-            break
-    _remember("cluster", {"k": k, "iters": iterations})
-    return centers, labels
+def memory_clear() -> str:
+    """Limpia la memoria de sesión."""
+    _session_memory.clear()
+    return "[memoria borrada]"
 
 
-# ------------------------------------------
-# Métricas Orion
-# ------------------------------------------
-def mean_squared_error(y_true: List[float], y_pred: List[float]) -> float:
-    n = len(y_true)
-    return 0.0 if n == 0 else sum((a - b)**2 for a, b in zip(y_true, y_pred)) / n
+# ---------------------------------------------------------------------------
+# Detección de proveedor
+# ---------------------------------------------------------------------------
+
+def _get_provider() -> str | None:
+    pref       = os.environ.get("AI_MODEL", "auto").lower()
+    has_claude = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+
+    if pref == "claude"  and has_claude: return "anthropic"
+    if pref == "openai"  and has_openai: return "openai"
+    if has_claude: return "anthropic"
+    if has_openai: return "openai"
+    return None
 
 
-def accuracy(y_true: List, y_pred: List) -> float:
-    return 0.0 if not y_true else sum(1 for a, b in zip(y_true, y_pred) if a == b) / len(y_true)
+def _require_provider():
+    p = _get_provider()
+    if not p:
+        raise RuntimeError(
+            "No hay API key configurada.\n"
+            "Agrega en tu .env:\n"
+            "  ANTHROPIC_API_KEY=sk-ant-...\n"
+            "o\n"
+            "  OPENAI_API_KEY=sk-..."
+        )
+    return p
 
 
-# ------------------------------------------
-# THINK — modo de intuición Orion
-# ------------------------------------------
-def think(data, mode: str = "auto"):
-    """Modo cognitivo Orion: genera resumen semántico o analiza patrones."""
-    _remember("think", {"input_type": str(type(data))})
+# ---------------------------------------------------------------------------
+# HTTP helpers — sin requests, solo urllib
+# ---------------------------------------------------------------------------
 
-    # --- Caso 1: texto o lista de títulos ---
-    if isinstance(data, list):
-        data = " ".join([str(x) for x in data])
-    if isinstance(data, str):
-        emb = quantum_embed(data)
-        words = [w for w in data.split() if len(w) > 3]
-        if not words:
-            return {"type": "text", "summary": "(sin contenido)", "embedding": emb}
-
-        from collections import Counter
-        freq = Counter(words)
-        key_terms = [w for w, _ in freq.most_common(5)]
-        summary = f"Resumen cognitivo: este grupo trata sobre {', '.join(key_terms)}."
-        return {"type": "text", "summary": summary, "embedding": emb}
-
-    # --- Caso 2: lista numérica ---
-    elif isinstance(data, list) and all(isinstance(x, (int, float)) for x in data):
-        trend = "creciente" if data[-1] > sum(data)/len(data) else "decreciente"
-        return {"type": "series", "trend": trend, "avg": sum(data)/len(data)}
-
-    # --- Caso 3: matriz ---
-    elif isinstance(data, list) and all(isinstance(x, list) for x in data):
-        centers, labels = kmeans(data)
-        return {"type": "matrix", "clusters": len(centers), "labels": labels}
-
-    return {"type": "unknown", "summary": "(no interpretable)"}
-
-# ------------------------------------------
-# Alias Orion (comandos cortos)
-# ------------------------------------------
-ALIASES = {
-    "fit": neural_lite_fit,
-    "predict": neural_lite_predict,
-    "sim": cosine_similarity,
-    "dist": euclidean_distance,
-    "cluster": kmeans,
-    "embed": quantum_embed,
-    "recall": recall
-}
+def _http_post(url: str, headers: dict, body: dict, timeout: int = 30) -> dict:
+    data = json.dumps(body).encode("utf-8")
+    req  = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.loads(raw).get("error", {}).get("message", raw[:300])
+        except Exception:
+            detail = raw[:300]
+        raise RuntimeError(f"API error ({e.code}): {detail}")
 
 
-# ------------------------------------------
-# Exportador Orion Runtime
-# ------------------------------------------
-def orion_export():
-    exports = {
-        "think": think,
-        "normalize": normalize,
-        "accuracy": accuracy,
-        "mse": mean_squared_error,
+def _resolve_model(provider: str, override: str = None) -> str:
+    """Retorna el modelo a usar: override > set_model() > .env
+    Si ninguno está configurado, lanza error claro."""
+    if override:
+        return override
+    if _active_model:
+        return _active_model
+    env_key = "ANTHROPIC_MODEL" if provider == "anthropic" else "OPENAI_MODEL"
+    m = os.environ.get(env_key)
+    if not m:
+        raise RuntimeError(
+            f"Modelo no configurado. Usa ai.set_model('nombre-del-modelo') "
+            f"o agrega {env_key}=... en tu .env"
+        )
+    return m
+
+
+def _call_anthropic(messages: list, system: str = None, max_tokens: int = 1024, model: str = None) -> str:
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise RuntimeError("ANTHROPIC_API_KEY no configurada en .env")
+
+    body = {
+        "model":      _resolve_model("anthropic", model),
+        "max_tokens": max_tokens,
+        "messages":   messages,
     }
-    exports.update(ALIASES)
-    return exports
+    if system:
+        body["system"] = system
+
+    result = _http_post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "Content-Type":    "application/json",
+            "x-api-key":       key,
+            "anthropic-version": "2023-06-01",
+        },
+        body=body,
+    )
+    return result["content"][0]["text"]
+
+
+def _call_openai(messages: list, system: str = None, max_tokens: int = 1024, model: str = None) -> str:
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("OPENAI_API_KEY no configurada en .env")
+
+    msgs = []
+    if system:
+        msgs.append({"role": "system", "content": system})
+    msgs.extend(messages)
+
+    result = _http_post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Content-Type":  "application/json",
+            "Authorization": f"Bearer {key}",
+        },
+        body={
+            "model":      _resolve_model("openai", model),
+            "max_tokens": max_tokens,
+            "messages":   msgs,
+        },
+    )
+    return result["choices"][0]["message"]["content"]
+
+
+def _call(messages: list, system: str = None, max_tokens: int = 1024, model: str = None) -> str:
+    p = _require_provider()
+    if p == "anthropic":
+        return _call_anthropic(messages, system, max_tokens, model)
+    return _call_openai(messages, system, max_tokens, model)
+
+
+def _clean_json(raw: str) -> str:
+    """Elimina bloques de código markdown si el modelo los incluyó."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        lines = lines[1:]  # quitar ```json o ```
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw = "\n".join(lines).strip()
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# API pública
+# ---------------------------------------------------------------------------
+
+def set_model(name: str) -> str:
+    """Cambia el modelo activo en runtime. Ej: ai.set_model('claude-sonnet-4-6')"""
+    global _active_model
+    _active_model = str(name)
+    return _active_model
+
+
+def ask(prompt: str, model: str = None, max_tokens: int = 1024) -> str:
+    """Pregunta algo al modelo y retorna la respuesta."""
+    return _call([{"role": "user", "content": str(prompt)}], max_tokens=max_tokens, model=model)
+
+
+def summarize(text: str, lang: str = "español", length: str = "corto") -> str:
+    """Resume un texto. length: 'corto' | 'medio' | 'largo'"""
+    sizes = {"corto": 256, "medio": 512, "largo": 1024}
+    max_t = sizes.get(length, 256)
+    return _call(
+        [{"role": "user", "content": f"Resume este texto de forma {length}:\n\n{text}"}],
+        system=f"Eres un asistente que resume textos en {lang}. Sé conciso y claro.",
+        max_tokens=max_t,
+    )
+
+
+def classify(text: str, categories: list) -> str:
+    """Clasifica texto en una de las categorías dadas. Retorna el nombre exacto."""
+    cats = ", ".join(str(c) for c in categories)
+    result = _call(
+        [{"role": "user", "content": str(text)}],
+        system=f"Clasifica el texto en UNA de estas categorías: {cats}. Responde SOLO con el nombre de la categoría, sin explicación ni puntuación extra.",
+        max_tokens=32,
+    )
+    return result.strip()
+
+
+def extract(text: str, fields: list) -> dict:
+    """Extrae campos estructurados de un texto. Retorna un dict."""
+    result = _call(
+        [{"role": "user", "content": str(text)}],
+        system=f"Extrae los campos {json.dumps(fields)} del texto. Responde SOLO con JSON válido. Si un campo no existe usa null.",
+        max_tokens=512,
+    )
+    try:
+        return json.loads(_clean_json(result))
+    except json.JSONDecodeError:
+        return {"raw": result}
+
+
+def code(description: str, lang: str = "orion") -> str:
+    """Genera código según la descripción. Retorna solo el código."""
+    return _call(
+        [{"role": "user", "content": str(description)}],
+        system=f"Genera código en {lang}. Responde SOLO con el código, sin explicaciones ni bloques markdown.",
+        max_tokens=1024,
+    )
+
+
+def fix(code_text: str, error: str = "", lang: str = "auto") -> str:
+    """Corrige errores en código."""
+    content = f"Código:\n{code_text}"
+    if error:
+        content += f"\n\nError:\n{error}"
+    return _call(
+        [{"role": "user", "content": content}],
+        system="Corrige el código. Responde SOLO con el código corregido, sin explicaciones.",
+        max_tokens=1024,
+    )
+
+
+def translate(text: str, to: str = "english") -> str:
+    """Traduce texto a otro idioma."""
+    return _call(
+        [{"role": "user", "content": str(text)}],
+        system=f"Traduce al {to}. Responde SOLO con la traducción.",
+        max_tokens=1024,
+    )
+
+
+def sentiment(text: str) -> str:
+    """Analiza el sentimiento. Retorna: 'positivo', 'negativo' o 'neutro'."""
+    result = _call(
+        [{"role": "user", "content": str(text)}],
+        system="Analiza el sentimiento. Responde SOLO con una palabra: positivo, negativo, o neutro.",
+        max_tokens=8,
+    )
+    return result.strip().lower()
+
+
+def complete(text: str, max_tokens: int = 256) -> str:
+    """Completa un texto o fragmento de código de forma natural."""
+    return _call(
+        [{"role": "user", "content": str(text)}],
+        system="Continúa el texto o código de forma natural y coherente. Responde SOLO con la continuación.",
+        max_tokens=max_tokens,
+    )
+
+
+def improve(text: str) -> str:
+    """Mejora la redacción o calidad de un texto."""
+    return _call(
+        [{"role": "user", "content": str(text)}],
+        system="Mejora la redacción, claridad y calidad del texto. Responde SOLO con el texto mejorado.",
+        max_tokens=1024,
+    )
+
+
+def explain(code_text: str, lang: str = "español") -> str:
+    """Explica qué hace un fragmento de código."""
+    return _call(
+        [{"role": "user", "content": f"Explica este código:\n\n{code_text}"}],
+        system=f"Eres un experto programador. Explica el código en {lang} de forma clara y concisa.",
+        max_tokens=512,
+    )
+
+
+def qa(context: str, question: str) -> str:
+    """Responde una pregunta basándose en un contexto dado."""
+    return _call(
+        [{"role": "user", "content": f"Contexto:\n{context}\n\nPregunta: {question}"}],
+        system="Responde SOLO con base en el contexto dado. Si la respuesta no está en el contexto, dilo.",
+        max_tokens=512,
+    )
+
+
+def search_in(text: str, query: str) -> str:
+    """Busca información específica dentro de un texto largo."""
+    return _call(
+        [{"role": "user", "content": f"Texto:\n{text}\n\nBusca: {query}"}],
+        system="Encuentra y extrae la información solicitada del texto. Sé directo y preciso.",
+        max_tokens=256,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Chat session — mantiene historial de conversación
+# ---------------------------------------------------------------------------
+
+class Chat:
+    """Sesión de chat con memoria de contexto."""
+
+    def __init__(self, system_prompt: str = ""):
+        self._system  = system_prompt
+        self._history = []
+
+    def say(self, message: str) -> "Chat":
+        """Define el rol del asistente (system prompt)."""
+        self._system = str(message)
+        return self
+
+    def ask(self, prompt: str, max_tokens: int = 1024) -> str:
+        """Envía un mensaje y retorna la respuesta. Recuerda el historial."""
+        self._history.append({"role": "user", "content": str(prompt)})
+        response = _call(
+            self._history,
+            system=self._system or None,
+            max_tokens=max_tokens,
+        )
+        self._history.append({"role": "assistant", "content": response})
+        return response
+
+    def reset(self) -> "Chat":
+        """Limpia el historial manteniendo el system prompt."""
+        self._history = []
+        return self
+
+    def history(self) -> list:
+        """Retorna el historial completo de la conversación."""
+        return list(self._history)
+
+    def messages(self) -> int:
+        """Retorna el número de mensajes en el historial."""
+        return len(self._history)
+
+
+def chat(system_prompt: str = "") -> Chat:
+    """Crea una nueva sesión de chat con contexto persistente."""
+    return Chat(system_prompt)
+
+
+# ---------------------------------------------------------------------------
+# Info del proveedor activo
+# ---------------------------------------------------------------------------
+
+def provider() -> str:
+    """Retorna el proveedor activo: 'anthropic', 'openai', o 'none'."""
+    return _get_provider() or "none"
+
+
+def model() -> str:
+    """Retorna el modelo activo (runtime > .env > default)."""
+    p = _get_provider()
+    if p:
+        return _resolve_model(p)
+    return "none"
+
+
+def status() -> str:
+    """Muestra el estado de la configuración AI."""
+    p = _get_provider()
+    if p:
+        return f"AI activo — proveedor: {p}, modelo: {model()}"
+    return "AI no configurado. Agrega ANTHROPIC_API_KEY o OPENAI_API_KEY en tu .env"
+
+
+# ---------------------------------------------------------------------------
+# Exportar al intérprete Orion
+# ---------------------------------------------------------------------------
+
+def orion_export() -> dict:
+    return {
+        "ask":          ask,
+        "summarize":    summarize,
+        "classify":     classify,
+        "extract":      extract,
+        "code":         code,
+        "fix":          fix,
+        "translate":    translate,
+        "sentiment":    sentiment,
+        "complete":     complete,
+        "improve":      improve,
+        "explain":      explain,
+        "qa":           qa,
+        "search_in":    search_in,
+        "chat":         chat,
+        "set_model":    set_model,
+        "provider":     provider,
+        "model":        model,
+        "status":       status,
+        # memoria de sesión
+        "embed":        embed,
+        "recall":       recall,
+        "memory_size":  memory_size,
+        "memory_clear": memory_clear,
+    }
 
 
 __all__ = list(orion_export().keys())

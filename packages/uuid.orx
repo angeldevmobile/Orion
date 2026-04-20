@@ -1,0 +1,66 @@
+-- uuid.orx — Generación de identificadores únicos en Orion
+-- Sin dependencias externas — basado en números aleatorios
+-- Uso: use "packages/uuid"
+--      use "packages/uuid" as uuid
+
+-- Tabla de caracteres hexadecimales
+fn _hex_chars() {
+    return ["0","1","2","3","4","5","6","7","8","9","a","b","c","d","e","f"]
+}
+
+-- Genera un segmento hexadecimal de N caracteres
+fn _hex_segment(n) {
+    chars = _hex_chars()
+    result = ""
+    i = 0
+    while i < n {
+        idx = random_int(0, 15)
+        result = result + chars[idx]
+        i = i + 1
+    }
+    return result
+}
+
+-- Genera un UUID v4 (formato: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx)
+fn v4() {
+    p1 = _hex_segment(8)
+    p2 = _hex_segment(4)
+    p3 = "4" + _hex_segment(3)
+    -- variant bits: 8, 9, a, o b
+    variants = ["8","9","a","b"]
+    v_idx = random_int(0, 3)
+    p4 = variants[v_idx] + _hex_segment(3)
+    p5 = _hex_segment(12)
+    return p1 + "-" + p2 + "-" + p3 + "-" + p4 + "-" + p5
+}
+
+-- Genera un ID corto (8 caracteres hex)
+fn short() {
+    return _hex_segment(8)
+}
+
+-- Genera N UUIDs y los retorna como lista
+fn batch(n) {
+    result = []
+    i = 0
+    while i < n {
+        result = result + [v4()]
+        i = i + 1
+    }
+    return result
+}
+
+-- Verifica si un string tiene formato UUID v4
+fn is_valid(text) {
+    t = "" + text
+    if len(t) != 36 {
+        return no
+    }
+    -- posiciones 8, 13, 18, 23 deben ser '-'
+    chars = t.split("")
+    if chars[8] != "-" { return no }
+    if chars[13] != "-" { return no }
+    if chars[18] != "-" { return no }
+    if chars[23] != "-" { return no }
+    return yes
+}

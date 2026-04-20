@@ -1,0 +1,101 @@
+-- ============================================================
+-- Test Fase 7: VM Gap cerrado
+-- for loops, builtins nuevos, use modules
+-- ============================================================
+
+show "=== FASE 7: VM Gap ==="
+
+-- 1. FOR_RANGE loop (ya compilaba, confirmar)
+show "--- for range ---"
+suma = 0
+for i in 1..5 {
+    suma = suma + i
+}
+show suma          -- 15
+
+-- 2. FOR_IN loop con lista
+show "--- for in list ---"
+nombres = ["Ana", "Luis", "Pedro"]
+for n in nombres {
+    show n
+}
+
+-- 3. Builtin: range()
+show "--- range() ---"
+nums = range(5)
+show nums          -- [0, 1, 2, 3, 4]
+
+-- 4. Builtin: push/append
+show "--- push ---"
+lista = [1, 2, 3]
+lista = push(lista, 4)
+lista = push(lista, 5)
+show lista         -- [1, 2, 3, 4, 5]
+show len(lista)    -- 5
+
+-- 5. Builtin: contains
+show "--- contains ---"
+show contains(lista, 3)         -- yes
+show contains(lista, 99)        -- no
+show contains("hola mundo", "mundo")  -- yes
+
+-- 6. Builtin: split/join
+show "--- split / join ---"
+partes = split("uno,dos,tres", ",")
+show partes        -- [uno, dos, tres]
+show join(partes, "-")   -- uno-dos-tres
+
+-- 7. Builtin: upper/lower/trim
+show "--- strings ---"
+show upper("orion")     -- ORION
+show lower("HOLA")      -- hola
+show trim("  espacios  ")  -- espacios
+
+-- 8. Builtin: keys/values en dict
+show "--- dict builtins ---"
+datos = { "nombre": "Ana", "edad": 30, "ciudad": "Lima" }
+show len(datos)           -- 3
+
+-- 9. Builtin: starts_with / ends_with
+show "--- starts/ends ---"
+show starts_with("hola mundo", "hola")   -- yes
+show ends_with("archivo.orx", ".orx")    -- yes
+show starts_with("hola", "adios")        -- no
+
+-- 10. Builtin: replace
+show "--- replace ---"
+show replace("Hola Mundo", "Mundo", "Orion")  -- Hola Orion
+
+-- 11. Builtin: abs / sqrt / floor / ceil
+show "--- math ---"
+show abs(-42)       -- 42
+show floor(3.9)     -- 3
+show ceil(3.1)      -- 4
+show sqrt(16.0)     -- 4.0 (aprox)
+
+-- 12. Función que usa for + range + push
+show "--- fibonacci via VM ---"
+fn fibonacci(n) {
+    result = [0, 1]
+    i = 2
+    while i < n {
+        a = result[i - 2]
+        b = result[i - 1]
+        result = push(result, a + b)
+        i = i + 1
+    }
+    return result
+}
+
+fibs = fibonacci(8)
+show fibs     -- [0, 1, 1, 2, 3, 5, 8, 13]
+
+-- 13. FOR_IN con range()
+show "--- for in range ---"
+cuadrados = []
+for x in range(5) {
+    cuadrados = push(cuadrados, x * x)
+}
+show cuadrados    -- [0, 1, 4, 9, 16]
+
+show "=== TODOS LOS TESTS PASARON ==="

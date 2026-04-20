@@ -2,11 +2,12 @@ import inspect
 import sys
 import os
 import types
+import concurrent.futures
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from core.control import eval_match
 from core.functions import register_function, get_function, register_native_function
-from core.types import OrionDict, OrionList, OrionString, OrionNumber, OrionBool, OrionDate, null_safe, OrionShape, OrionInstance
+from core.types import OrionDict, OrionList, OrionString, OrionNumber, OrionBool, OrionDate, null_safe, OrionShape, OrionInstance, OrionFuture
 from core.errors import (
     OrionRuntimeError,
     OrionTypeError,
@@ -69,7 +70,7 @@ except ImportError as e:
 
 # === INTEGRACIÓN DEL MÓDULO AI ===
 try:
-    from stdlib.ai import orion_export, think, quantum_embed, recall
+    from stdlib.ai import orion_export
     AI_ENABLED = True
     AI_FUNCTIONS = orion_export()
     code.info("Módulo AI Orion cargado exitosamente", module="ai-core")
@@ -176,22 +177,7 @@ NATIVE_FUNCTIONS = {
 }
 
 if AI_ENABLED:
-    NATIVE_FUNCTIONS.update({
-        # Funciones principales AI
-        "think": think,
-        "embed": quantum_embed,
-        "recall": recall,
-        
-        # Aliases cortos del módulo AI
-        "fit": AI_FUNCTIONS.get("fit"),
-        "predict": AI_FUNCTIONS.get("predict"),
-        "sim": AI_FUNCTIONS.get("sim"),
-        "dist": AI_FUNCTIONS.get("dist"),
-        "cluster": AI_FUNCTIONS.get("cluster"),
-        "normalize": AI_FUNCTIONS.get("normalize"),
-        "accuracy": AI_FUNCTIONS.get("accuracy"),
-        "mse": AI_FUNCTIONS.get("mse"),
-    })
+    NATIVE_FUNCTIONS.update({k: v for k, v in AI_FUNCTIONS.items() if callable(v)})
 
 if COSMOS_ENABLED:
     NATIVE_FUNCTIONS.update({
@@ -296,6 +282,43 @@ if VISION_ENABLED:
         "scan_text": VISION_FUNCTIONS.get("scan_text"),
         "seam_carve": VISION_FUNCTIONS.get("seam_carve")
     })
+
+# ── Builtins de listas / strings / math (Fase 7) ─────────────────────────────
+import math as _math
+
+NATIVE_FUNCTIONS.update({
+    # Listas
+    "push":     lambda lst, val: (lst + [val]) if isinstance(lst, list) else lst,
+    "append":   lambda lst, val: (lst + [val]) if isinstance(lst, list) else lst,
+    "first":    lambda lst: lst[0] if lst else None,
+    "last":     lambda lst: lst[-1] if lst else None,
+    "reverse":  lambda x: x[::-1] if isinstance(x, (list, str)) else x,
+    "range":    lambda *a: list(range(*[int(x) for x in a])),
+    "contains": lambda container, item: (
+        item in container if isinstance(container, (list, str))
+        else (str(item) in container if isinstance(container, dict) else False)
+    ),
+    # Dicts
+    "keys":     lambda d: list(d.keys()) if isinstance(d, dict) else [],
+    "values":   lambda d: list(d.values()) if isinstance(d, dict) else [],
+    "has_key":  lambda d, k: (str(k) in d) if isinstance(d, dict) else False,
+    # Strings
+    "upper":        lambda s: str(s).upper(),
+    "lower":        lambda s: str(s).lower(),
+    "trim":         lambda s: str(s).strip(),
+    "split":        lambda s, sep="": str(s).split(str(sep)),
+    "join":         lambda sep, lst: str(sep).join(str(x) for x in lst),
+    "starts_with":  lambda s, prefix: str(s).startswith(str(prefix)),
+    "ends_with":    lambda s, suffix: str(s).endswith(str(suffix)),
+    "replace":      lambda s, old, new: str(s).replace(str(old), str(new)),
+    # Matemáticas
+    "abs":   lambda x: abs(x),
+    "floor": lambda x: int(_math.floor(x)),
+    "ceil":  lambda x: int(_math.ceil(x)),
+    "sqrt":  lambda x: _math.sqrt(float(x)),
+    "round": lambda x, n=0: round(x, int(n)),
+    "pow":   lambda x, y: x ** y,
+})
 
 def _wrap_orion_type(val):
     """Inferencia de tipos: envuelve valores Python en tipos Orion automáticamente."""
@@ -475,11 +498,6 @@ def _register_builtin_functions(functions):
             if callable(ai_func):
                 register_native_function(functions, ai_func_name, ai_func)
         
-        # Registrar funciones AI con prefijo para evitar colisiones
-        register_native_function(functions, "ai_think", think)
-        register_native_function(functions, "ai_embed", quantum_embed)
-        register_native_function(functions, "ai_recall", recall)
-        
         code.ok(f"{len(AI_FUNCTIONS)} funciones AI registradas como built-ins", module="ai-registry")
         
     if COSMOS_ENABLED:
@@ -567,6 +585,120 @@ def _register_builtin_functions(functions):
         code.ok(f"{len(VISION_FUNCTIONS)} funciones Vision registradas como built-ins", module="vision-registry")
 
 
+# ============================================================
+# Thread pool compartido para async fn (Fase 6)
+# ============================================================
+_THREAD_POOL = None
+
+def _get_thread_pool():
+    global _THREAD_POOL
+    if _THREAD_POOL is None:
+        _THREAD_POOL = concurrent.futures.ThreadPoolExecutor(
+            max_workers=16, thread_name_prefix="orion-async"
+        )
+    return _THREAD_POOL
+
+
+def _run_async_body(body, local_vars, functions, fn_val):
+    """Ejecuta el cuerpo de una async fn en un thread separado."""
+    result = evaluate(body, local_vars, functions, inside_fn=True)
+    # Write back closure mutations
+    closure = fn_val.get("closure", {})
+    if closure:
+        for k in list(closure.keys()):
+            if k in local_vars:
+                fn_val["closure"][k] = local_vars[k]
+    return result.val if isinstance(result, _ReturnValue) else result
+
+
+def _resolve_awaitable(value):
+    """Desempaqueta un OrionFuture bloqueando hasta su resolución."""
+    if isinstance(value, OrionFuture):
+        return value.resolve()
+    return value
+
+
+def _serve_http(port: int, handler_fn, variables: dict, functions: dict):
+    """
+    Levanta un servidor HTTP en el puerto dado.
+    handler_fn debe ser un valor Orion (dict FN_DEF o nombre de función).
+    Cada petición recibe un dict req {path, method, body, params} y
+    debe retornar un dict {status, body}.
+    Bloquea hasta Ctrl+C.
+    """
+    import http.server
+    import urllib.parse
+    import threading
+
+    # Resolver handler si es string (nombre de función)
+    def call_handler(req_dict):
+        if isinstance(handler_fn, str):
+            fn = variables.get(handler_fn) or functions.get(handler_fn)
+        else:
+            fn = handler_fn
+        result = _call_fn_value(fn, [req_dict], {}, variables, functions)
+        if isinstance(result, _ReturnValue):
+            result = result.val
+        return result
+
+    class OrionHTTPHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass  # silenciar logs por defecto
+
+        def _handle(self):
+            parsed = urllib.parse.urlparse(self.path)
+            params = {}
+            for k, v in urllib.parse.parse_qsl(parsed.query):
+                params[k] = v
+
+            length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(length) if length > 0 else b""
+            body_str = body_bytes.decode("utf-8", errors="replace")
+
+            req_dict = {
+                "path":   parsed.path,
+                "method": self.command,
+                "body":   body_str,
+                "params": params,
+            }
+
+            try:
+                result = call_handler(req_dict)
+            except Exception as e:
+                result = {"status": 500, "body": str(e)}
+
+            if isinstance(result, dict):
+                status = int(result.get("status", 200))
+                resp_body = str(result.get("body", ""))
+                content_type = result.get("content_type", "text/plain; charset=utf-8")
+            else:
+                status = 200
+                resp_body = str(result) if result is not None else ""
+                content_type = "text/plain; charset=utf-8"
+
+            encoded = resp_body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def do_GET(self):    self._handle()
+        def do_POST(self):   self._handle()
+        def do_PUT(self):    self._handle()
+        def do_DELETE(self): self._handle()
+        def do_PATCH(self):  self._handle()
+
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", port), OrionHTTPHandler)
+    print(f"[Orion] Servidor escuchando en http://0.0.0.0:{port}  (Ctrl+C para detener)")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[Orion] Servidor detenido.")
+    finally:
+        server.server_close()
+
+
 def _call_fn_value(fn_val, pos_args, kw_args, variables, functions):
     """
     Llama un valor que representa una función: dict FN_DEF/ANON_FN, lambda AST,
@@ -577,6 +709,8 @@ def _call_fn_value(fn_val, pos_args, kw_args, variables, functions):
         params = fn_val.get("params", [])
         body = fn_val.get("body", [])
         closure = fn_val.get("closure", {})
+        is_async = fn_val.get("async", False)
+
         if len(pos_args) != len(params):
             raise OrionFunctionError(
                 f"Argumentos esperados: {len(params)}, recibidos: {len(pos_args)}"
@@ -589,6 +723,15 @@ def _call_fn_value(fn_val, pos_args, kw_args, variables, functions):
         local_vars.update(kw_args)
         _mod_fns = fn_val.get("module_fns", {})
         _fn_functions = {**_mod_fns, **functions} if _mod_fns else functions
+
+        if is_async:
+            # Ejecutar en thread pool — retorna OrionFuture inmediatamente
+            _pool = _get_thread_pool()
+            future = _pool.submit(
+                _run_async_body, body, local_vars, _fn_functions, fn_val
+            )
+            return OrionFuture(future, fn_val.get("name", "<async>"))
+
         result = evaluate(body, local_vars, _fn_functions, inside_fn=True)
         # Write back mutations to captured closure variables so state persists
         if closure:
@@ -713,8 +856,13 @@ def eval_expr(expr, variables, functions):
     if isinstance(expr, tuple):
         tag = expr[0]
 
+        # --- AWAIT_EXPR: result = await future  (Fase 6) ---
+        if tag == "AWAIT_EXPR":
+            awaitable = eval_expr(expr[1], variables, functions)
+            return _resolve_awaitable(awaitable)
+
         # --- INDEX ---
-        if tag == "INDEX":
+        elif tag == "INDEX":
             _, list_expr, index_expr = expr
             list_val = eval_expr(list_expr, variables, functions)
             index_val = eval_expr(index_expr, variables, functions)
@@ -1682,50 +1830,15 @@ def eval_expr(expr, variables, functions):
                     raise OrionRuntimeError(f"Error en método Spreadsheet '{method_name}': {str(e)}")
 
             # === MÉTODOS ESPECÍFICOS DE MÓDULOS AI/OTROS ===
-            elif AI_ENABLED and method_name in ["embed", "think", "fit", "predict", "cluster", "sim", "dist", "normalize", "accuracy", "mse"]:
+            elif AI_ENABLED and method_name in AI_FUNCTIONS:
                 try:
-                    if method_name == "embed":
-                        # Para ai.embed(), obj_val es el objeto ai, pos_args[0] es el texto
-                        if len(pos_args) >= 1: 
-                            text = pos_args[0]
-                            dim = pos_args[1] if len(pos_args) > 1 else 128
-                            return quantum_embed(text, dim)
-                        else:
-                            raise OrionFunctionError("embed() requiere al menos un argumento (texto)")
-                            
-                    elif method_name == "cluster":
-                        ai_func = AI_FUNCTIONS.get("cluster")
-                        if ai_func:
-                            # Filtrar kwargs para que solo pasen los soportados por la función
-                            sig = inspect.signature(ai_func)
-                            supported = {k: v for k, v in kw_args.items() if k in sig.parameters}
-                            centers, labels = ai_func(*pos_args, **supported)
-                            if isinstance(labels, OrionList):
-                                labels = [int(x) for x in labels.items]
-                            else:
-                                labels = [int(x) for x in labels]
-                            return [centers, labels]
-                        else:
-                            raise OrionFunctionError(f"Método AI 'cluster' no encontrado")
-
-                    elif method_name in ["think", "fit", "predict", "cluster", "embed"]:
-                        ai_func = get_function(functions, method_name)
-                        # --- FIX: Si ai_func es dict con 'impl', extraer la función ---
-                        if isinstance(ai_func, dict) and "impl" in ai_func:
-                            ai_func = ai_func["impl"]
-                        if ai_func:
-                            sig = inspect.signature(ai_func)
-                            supported = {k: v for k, v in kw_args.items() if k in sig.parameters}
-                            return ai_func(*pos_args, **supported)
-                        else:
-                            raise OrionFunctionError(f"Método AI '{method_name}' no encontrado")
+                    ai_func = AI_FUNCTIONS.get(method_name)
+                    if callable(ai_func):
+                        sig = inspect.signature(ai_func)
+                        supported = {k: v for k, v in kw_args.items() if k in sig.parameters}
+                        return ai_func(*pos_args, **supported)
                     else:
-                        # Para otros métodos AI
-                        ai_func = AI_FUNCTIONS.get(method_name)
-                        if ai_func:
-                            return ai_func(*pos_args, **kw_args)
-                        else:
-                            raise OrionFunctionError(f"Método AI '{method_name}' no encontrado")
+                        raise OrionFunctionError(f"Método AI '{method_name}' no encontrado")
                 except Exception as e:
                     raise OrionRuntimeError(f"Error en método AI '{method_name}': {str(e)}")
 
@@ -2447,7 +2560,68 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 variables[fn_name_inner] = fn_as_value
             i += 1
             continue
-        
+
+        # --- ASYNC FN statement (Fase 6) ---
+        elif tag == "ASYNC_FN":
+            fn_name_a  = node[1]
+            fn_params_a = node[2]
+            fn_body_a   = node[3]
+            if inside_fn:
+                captured = {k: v for k, v in variables.items()
+                            if k not in ("__consts__", "_variables")}
+                register_function(functions, fn_name_a, fn_params_a, fn_body_a,
+                                  closure=captured, is_async=True)
+                from core.functions import create_anonymous_function
+                fn_as_value = create_anonymous_function(fn_params_a, fn_body_a, closure=captured)
+                fn_as_value["type"] = "FN_DEF"
+                fn_as_value["async"] = True
+                fn_as_value["name"] = fn_name_a
+                variables[fn_name_a] = fn_as_value
+            else:
+                register_function(functions, fn_name_a, fn_params_a, fn_body_a, is_async=True)
+                from core.functions import create_anonymous_function
+                fn_as_value = create_anonymous_function(fn_params_a, fn_body_a)
+                fn_as_value["type"] = "FN_DEF"
+                fn_as_value["async"] = True
+                fn_as_value["name"] = fn_name_a
+                variables[fn_name_a] = fn_as_value
+            i += 1
+            continue
+
+        # --- AWAIT statement: await <expr> (Fase 6) ---
+        elif tag == "AWAIT_STMT":
+            awaitable = eval_expr(node[1], variables, functions)
+            _resolve_awaitable(awaitable)   # bloquea; resultado descartado si no se asigna
+            i += 1
+            continue
+
+        # --- SPAWN statement: spawn <expr> (fire-and-forget, Fase 6) ---
+        elif tag == "SPAWN":
+            awaitable = eval_expr(node[1], variables, functions)
+            # Si es una función llamable, lanzarla en thread sin esperar
+            if callable(awaitable):
+                _get_thread_pool().submit(awaitable)
+            # Si ya es un Future, no hay nada extra que hacer
+            i += 1
+            continue
+
+        # --- SERVE statement: serve <port> <handler> (Fase 7) ---
+        elif tag == "SERVE_STMT":
+            _, port_expr, handler_node = node
+            port = int(eval_expr(port_expr, variables, functions))
+
+            # Resolver el handler — puede ser un FN node o una expresión con el nombre
+            if isinstance(handler_node, tuple) and handler_node[0] == "FN":
+                evaluate([handler_node], variables, functions)
+                fn_name = handler_node[1]
+                handler_fn = variables.get(fn_name) or functions.get(fn_name)
+            else:
+                handler_fn = eval_expr(handler_node, variables, functions)
+
+            _serve_http(port, handler_fn, variables, functions)
+            i += 1
+            continue
+
         elif tag == "EXPR":
             # Evalúa la expresión y retorna el resultado
             if len(node) > 1:
@@ -2456,7 +2630,7 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 result = eval_expr(node, variables, functions)
             if isinstance(result, _ReturnValue):
                 return result
-        
+
         elif tag in ["BINARY_OP", "UNARY_OP", "CALL", "CALL_METHOD", "INDEX", "IDENT", "LIST", "DICT", "LAMBDA"]:
             result = eval_expr(node, variables, functions)
             if isinstance(result, _ReturnValue):
@@ -2909,6 +3083,54 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             if inside_fn and result is not None:
                 return result
         
+        elif tag == "THINK":
+            # think <expr>  →  llama a la IA directamente sin módulo
+            think_expr = node[1]
+            prompt_val = eval_expr(think_expr, variables, functions)
+            prompt_str = str(prompt_val) if not isinstance(prompt_val, str) else prompt_val
+            think_fn = functions.get("__think__")
+            if think_fn and callable(think_fn.get("impl")):
+                result = think_fn["impl"](prompt_str)
+            else:
+                # Fallback: intentar cargar ai.ask
+                try:
+                    import sys, os
+                    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+                    from stdlib.ai import ask as _ai_ask
+                    result = _ai_ask(prompt_str)
+                except Exception:
+                    result = f"[think: AI no disponible] {prompt_str}"
+            if result is not None:
+                print(result)
+
+        elif tag == "LEARN":
+            # learn <expr>  →  almacena texto en memoria AI de sesión
+            learn_val = eval_expr(node[1], variables, functions)
+            learn_str = str(learn_val) if not isinstance(learn_val, str) else learn_val
+            try:
+                import sys, os
+                sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+                from stdlib.ai import embed as _ai_embed
+                result = _ai_embed(learn_str)
+            except Exception:
+                result = f"[learn: AI no disponible]"
+            if result is not None:
+                print(result)
+
+        elif tag == "SENSE":
+            # sense <expr>  →  consulta la memoria AI con una query
+            sense_val = eval_expr(node[1], variables, functions)
+            sense_str = str(sense_val) if not isinstance(sense_val, str) else sense_val
+            try:
+                import sys, os
+                sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+                from stdlib.ai import recall as _ai_recall
+                result = _ai_recall(sense_str)
+            except Exception:
+                result = f"[sense: AI no disponible] {sense_str}"
+            if result is not None:
+                print(result)
+
         elif tag == "ATTEMPT":
             try_body = node[1]
             handler = node[2] if len(node) > 2 else None
@@ -2940,7 +3162,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         for cluster_id in sorted(set(labels)):
             tasks_in = [t for j, t in enumerate(local) if labels[j] == cluster_id]
             if tasks_in:
-                summary = think([t["title"] for t in tasks_in])["summary"]
+                _think_fn = AI_FUNCTIONS.get("ask")
+                summary = _think_fn(" ".join([t["title"] for t in tasks_in])) if _think_fn else "(sin contenido)"
             else:
                 summary = "(sin contenido)"
             clusters[f"Cluster_{cluster_id}"] = summary

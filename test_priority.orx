@@ -1,0 +1,24 @@
+-- Test 1: for..in sobre lista
+let numeros = [10, 20, 30, 40, 50]
+for n in numeros {
+    show n
+}
+
+-- Test 2: attempt/handle con error
+attempt {
+    show "intentando..."
+    let x = 1 / 0
+} handle err {
+    show "Error capturado!"
+}
+
+-- Test 3: attempt sin error
+attempt {
+    show "este bloque no falla"
+    let y = 42
+    show y
+} handle e {
+    show "esto no deberia verse"
+}
+
+show "fin del test"

@@ -1,26 +1,31 @@
 """
 Orion NET Module
 ────────────────────────────────────────────
-Minimalist, modern and futuristic: HTTP + sockets.
-Born to connect. Speaks in pulses, resolves in clarity.
+HTTP real usando urllib (sin dependencias externas).
+requests / httpx son opcionales y se usan si están disponibles.
 
-Core principles:
-- Clear verbs: reach, transmit, stream, pulse, beacon
-- Human-like semantics: not "request", but "reach"
-- Designed for cosmic simplicity and expressive power
+Verbos: reach, transmit, stream, pulse, beacon
 """
 
-import requests
 import socket
 import time
+import json as _json
+import urllib.request
+import urllib.error
+import urllib.parse
 
-# Opcional: importa httpx si está disponible
+# Intentar importar requests/httpx como opcional
 try:
-    import httpx
+    import requests as _requests
 except ImportError:
-    httpx = None
+    _requests = None
 
-# OrionResponse: respuesta envolvente
+try:
+    import httpx as _httpx
+except ImportError:
+    _httpx = None
+
+
 class OrionResponse:
     def __init__(self, status, body=None, json=None, headers=None):
         self.status = status
@@ -35,108 +40,126 @@ class OrionResponse:
     def __getitem__(self, key):
         return getattr(self, key, None)
 
-# Dummy trace/progress (debes implementar en tu core)
-def trace_start(msg): print(f"[TRACE START] {msg}")
-def trace_end(msg): print(f"[TRACE END] {msg}")
-def progress(tag, msg, percent): print(f"[{tag}] {msg}: {percent}%")
+    def __repr__(self):
+        return f"<OrionResponse {self.status}>"
+
 
 # =========================================================
-# HTTP — Orion way
+# HTTP — implementación urllib (sin dependencias)
+# =========================================================
+
+def _urllib_get(url, params=None, headers=None, timeout=5):
+    if params:
+        url = url + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            status = resp.status
+            hdrs = dict(resp.headers)
+            json_data = None
+            try:
+                json_data = _json.loads(body)
+            except Exception:
+                pass
+            return OrionResponse(status=status, body=body, json=json_data, headers=hdrs)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        return OrionResponse(status=e.code, body=body, json=None, headers=dict(e.headers))
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"net.reach error: {e.reason}")
+
+
+def _urllib_post(url, data=None, json_data=None, headers=None, timeout=5):
+    hdrs = headers or {}
+    if json_data is not None:
+        payload = _json.dumps(json_data).encode("utf-8")
+        hdrs.setdefault("Content-Type", "application/json")
+    elif data is not None:
+        payload = urllib.parse.urlencode(data).encode("utf-8") if isinstance(data, dict) else data.encode("utf-8")
+    else:
+        payload = b""
+    req = urllib.request.Request(url, data=payload, headers=hdrs, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            status = resp.status
+            resp_hdrs = dict(resp.headers)
+            json_body = None
+            try:
+                json_body = _json.loads(body)
+            except Exception:
+                pass
+            return OrionResponse(status=status, body=body, json=json_body, headers=resp_hdrs)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        return OrionResponse(status=e.code, body=body, json=None, headers=dict(e.headers))
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"net.transmit error: {e.reason}")
+
+
+# =========================================================
+# API pública
 # =========================================================
 
 def reach(url, params=None, headers=None, timeout=5):
-    trace_start("NET REACH")
-    progress("net", "Connecting", 20)
-    resp = requests.get(url, params=params, headers=headers, timeout=timeout)
-    trace_end("NET REACH")
-    return _pack_response(resp)
+    """GET a url. Devuelve OrionResponse."""
+    if _requests:
+        resp = _requests.get(url, params=params, headers=headers, timeout=timeout)
+        return _pack_requests(resp)
+    return _urllib_get(url, params=params, headers=headers, timeout=timeout)
+
 
 def transmit(url, data=None, json_data=None, headers=None, timeout=5):
-    trace_start("NET TRANSMIT")
-    progress("net", "Transmitting", 20)
-    # Solo para pruebas: ignorar verificación SSL
-    resp = requests.post(url, data=data, json=json_data, headers=headers, timeout=timeout, verify=False)
-    trace_end("NET TRANSMIT")
-    return _pack_response(resp)
+    """POST a url. Devuelve OrionResponse."""
+    if _requests:
+        resp = _requests.post(url, data=data, json=json_data, headers=headers, timeout=timeout)
+        return _pack_requests(resp)
+    return _urllib_post(url, data=data, json_data=json_data, headers=headers, timeout=timeout)
 
-def stream(url, headers=None, chunk_size=1024, timeout=5): 
-    with requests.get(url, headers=headers, stream=True, timeout=timeout) as r:
-        for chunk in r.iter_content(chunk_size=chunk_size):
-            if chunk:
-                yield chunk
-
-def progressive_stream(url, headers=None, chunk_size=1024, timeout=5, progress_fn=None):
-    with requests.get(url, headers=headers, stream=True, timeout=timeout) as r:
-        total = int(r.headers.get("content-length", 0))
-        downloaded = 0
-        for chunk in r.iter_content(chunk_size=chunk_size):
-            if chunk:
-                downloaded += len(chunk)
-                if progress_fn:
-                    progress_fn(downloaded, total)
-                yield chunk
-
-def download(url, path, headers=None, timeout=5):
-    with requests.get(url, headers=headers, stream=True, timeout=timeout) as r:
-        with open(path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-    return OrionResponse(status=200, body=None, json=None, headers={"saved": path})
 
 def status(url, timeout=5):
-    resp = requests.head(url, timeout=timeout)
-    return OrionResponse(status=resp.status_code, body=None, json=None, headers=dict(resp.headers))
-
-def _pack_response(resp):
-    return OrionResponse(
-        status=resp.status_code,
-        body=resp.text,
-        json=_transmute_json(resp),
-        headers=dict(resp.headers)
-    )
-
-def _transmute_json(resp):
+    """HEAD request — solo código de estado."""
+    if _requests:
+        resp = _requests.head(url, timeout=timeout)
+        return OrionResponse(status=resp.status_code, headers=dict(resp.headers))
+    req = urllib.request.Request(url, method="HEAD")
     try:
-        return resp.json()
-    except Exception:
-        return None
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return OrionResponse(status=resp.status, headers=dict(resp.headers))
+    except urllib.error.HTTPError as e:
+        return OrionResponse(status=e.code)
+
+
+def download(url, path, headers=None, timeout=5):
+    """Descarga un archivo y lo guarda en path."""
+    if _requests:
+        with _requests.get(url, headers=headers, stream=True, timeout=timeout) as r:
+            with open(path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+    else:
+        req = urllib.request.Request(url, headers=headers or {})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with open(path, "wb") as f:
+                while True:
+                    chunk = resp.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+    return OrionResponse(status=200, headers={"saved": path})
+
 
 # =========================================================
-# ASYNC — Futuristic Orion
-# =========================================================
-
-async def reach_async(url, params=None, headers=None, timeout=5):
-    if not httpx:
-        raise ImportError("httpx is required for async operations")
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.get(url, params=params, headers=headers)
-        return OrionResponse(
-            status=resp.status_code,
-            body=resp.text,
-            json=resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None,
-            headers=dict(resp.headers)
-        )
-
-async def transmit_async(url, data=None, json_data=None, headers=None, timeout=5):
-    if not httpx:
-        raise ImportError("httpx is required for async operations")
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(url, data=data, json=json_data, headers=headers)
-        return OrionResponse(
-            status=resp.status_code,
-            body=resp.text,
-            json=resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None,
-            headers=dict(resp.headers)
-        )
-
-# =========================================================
-# SOCKETS — Raw Power
+# Sockets — raw power
 # =========================================================
 
 def resolve(host):
     return socket.gethostbyname(host)
 
+
 def pulse(host, port=80, timeout=1):
+    """Comprueba si host:port está vivo y mide latencia."""
     try:
         start = time.time()
         with socket.create_connection((host, port), timeout=timeout):
@@ -144,6 +167,7 @@ def pulse(host, port=80, timeout=1):
             return {"alive": True, "latency_ms": round(latency, 2)}
     except Exception:
         return {"alive": False}
+
 
 def beacon(host, port=80, msg="orion-signal", timeout=1):
     try:
@@ -154,13 +178,50 @@ def beacon(host, port=80, msg="orion-signal", timeout=1):
     except Exception as e:
         return {"error": str(e)}
 
-def broadcast(host, port=9999, msg="orion-broadcast"):
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        s.sendto(msg.encode("utf-8"), (host, port))
-        s.close()
-        return {"sent": msg, "to": f"{host}:{port}"}
-    except Exception as e:
-        return {"error": str(e)}
 
+# =========================================================
+# Async (requiere httpx)
+# =========================================================
+
+async def reach_async(url, params=None, headers=None, timeout=5):
+    if not _httpx:
+        raise ImportError("httpx requerido para operaciones async: pip install httpx")
+    async with _httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.get(url, params=params, headers=headers)
+        return OrionResponse(
+            status=resp.status_code,
+            body=resp.text,
+            json=resp.json() if "application/json" in resp.headers.get("content-type", "") else None,
+            headers=dict(resp.headers),
+        )
+
+
+async def transmit_async(url, data=None, json_data=None, headers=None, timeout=5):
+    if not _httpx:
+        raise ImportError("httpx requerido para operaciones async: pip install httpx")
+    async with _httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(url, data=data, json=json_data, headers=headers)
+        return OrionResponse(
+            status=resp.status_code,
+            body=resp.text,
+            json=resp.json() if "application/json" in resp.headers.get("content-type", "") else None,
+            headers=dict(resp.headers),
+        )
+
+
+# =========================================================
+# Helper interno
+# =========================================================
+
+def _pack_requests(resp):
+    json_data = None
+    try:
+        json_data = resp.json()
+    except Exception:
+        pass
+    return OrionResponse(
+        status=resp.status_code,
+        body=resp.text,
+        json=json_data,
+        headers=dict(resp.headers),
+    )

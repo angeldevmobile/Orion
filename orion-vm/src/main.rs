@@ -3,6 +3,8 @@ mod value;
 mod vm;
 mod bytecode;
 
+extern crate tiny_http;
+
 use std::env;
 use std::time::Instant;
 
@@ -36,7 +38,7 @@ fn main() {
 
     // Ejecutar VM
     let t0 = Instant::now();
-    let mut machine = vm::VM::new(instructions.main, instructions.lines, instructions.functions);
+    let mut machine = vm::VM::new(instructions.main, instructions.lines, instructions.functions, instructions.shapes);
     match machine.run() {
         Ok(_) => {}
         Err(e) => {

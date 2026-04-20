@@ -1,0 +1,40 @@
+-- ============================================================
+-- Fase 4 — think / learn / sense como statements nativos
+-- ============================================================
+
+use "ai" as ai
+
+show "=== Estado AI ==="
+show ai.status()
+
+show ""
+show "=== think (pregunta directa) ==="
+think "Di 'Orion Fase4 OK' exactamente, sin más texto."
+
+show ""
+show "=== learn (almacenar en memoria) ==="
+learn "Orion es un lenguaje con VM en Rust, sintaxis limpia y OOP nativa."
+learn "La Fase 4 añade think, learn y sense como statements nativos de IA."
+learn "El gestor de paquetes se llama 'orion add' y está en Fase 5."
+
+show ""
+show "=== sense (recuperar de memoria) ==="
+sense "¿Qué es Orion en una oración?"
+
+show ""
+sense "¿Qué tiene la Fase 4?"
+
+show ""
+sense "¿Cómo se instalan paquetes en Orion?"
+
+show ""
+show "=== ai.memory_size() ==="
+show ai.memory_size()
+
+show ""
+show "=== ai.memory_clear() ==="
+show ai.memory_clear()
+show ai.memory_size()
+
+show ""
+show "=== Fase 4 completa ==="

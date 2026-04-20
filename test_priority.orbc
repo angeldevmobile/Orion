@@ -1,0 +1,205 @@
+{
+  "main": [
+    {
+      "LoadInt": 10
+    },
+    {
+      "LoadInt": 20
+    },
+    {
+      "LoadInt": 30
+    },
+    {
+      "LoadInt": 40
+    },
+    {
+      "LoadInt": 50
+    },
+    {
+      "MakeList": 5
+    },
+    {
+      "StoreVar": "numeros"
+    },
+    {
+      "LoadVar": "numeros"
+    },
+    {
+      "StoreVar": "__list_0__"
+    },
+    {
+      "LoadVar": "__list_0__"
+    },
+    {
+      "Call": [
+        "len",
+        1
+      ]
+    },
+    {
+      "StoreVar": "__len_0__"
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "StoreVar": "__idx_0__"
+    },
+    {
+      "LoadVar": "__idx_0__"
+    },
+    {
+      "LoadVar": "__len_0__"
+    },
+    "Lt",
+    {
+      "JumpIfFalse": 29
+    },
+    {
+      "LoadVar": "__list_0__"
+    },
+    {
+      "LoadVar": "__idx_0__"
+    },
+    "GetIndex",
+    {
+      "StoreVar": "n"
+    },
+    {
+      "LoadVar": "n"
+    },
+    "Show",
+    {
+      "LoadVar": "__idx_0__"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    {
+      "StoreVar": "__idx_0__"
+    },
+    {
+      "Jump": 14
+    },
+    {
+      "BeginAttempt": 37
+    },
+    {
+      "LoadStr": "intentando..."
+    },
+    "Show",
+    {
+      "LoadInt": 1
+    },
+    {
+      "LoadInt": 0
+    },
+    "Div",
+    {
+      "StoreVar": "x"
+    },
+    {
+      "EndAttempt": 40
+    },
+    {
+      "StoreVar": "err"
+    },
+    {
+      "LoadStr": "Error capturado!"
+    },
+    "Show",
+    {
+      "BeginAttempt": 48
+    },
+    {
+      "LoadStr": "este bloque no falla"
+    },
+    "Show",
+    {
+      "LoadInt": 42
+    },
+    {
+      "StoreVar": "y"
+    },
+    {
+      "LoadVar": "y"
+    },
+    "Show",
+    {
+      "EndAttempt": 51
+    },
+    {
+      "StoreVar": "e"
+    },
+    {
+      "LoadStr": "esto no deberia verse"
+    },
+    "Show",
+    {
+      "LoadStr": "fin del test"
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    8,
+    9,
+    9,
+    10,
+    10,
+    10,
+    10,
+    10,
+    10,
+    12,
+    12,
+    16,
+    17,
+    17,
+    18,
+    18,
+    19,
+    19,
+    19,
+    19,
+    21,
+    21,
+    24,
+    24,
+    24
+  ],
+  "functions": {},
+  "shapes": {}
+}

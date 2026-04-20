@@ -75,7 +75,12 @@ _TOKEN_SPECIFICATION = [
     ("AWAIT",     r"\bawait\b"),
     ("CHANNEL",   r"\bchannel\b"),
     ("PARALLEL",  r"\bparallel\b"),   
-    ("LOCK",      r"\block\b"),       
+    ("LOCK",      r"\block\b"),
+
+    # --- Servidor / red nativa ---
+    ("SERVE",     r"\bserve\b"),
+    ("ROUTE",     r"\broute\b"),
+    ("WITH",      r"\bwith\b"),
 
     # --- Inteligencia Artificial / simbiótico ---
     ("THINK",     r"\bthink\b"),

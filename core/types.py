@@ -614,3 +614,40 @@ class OrionInstance:
 
     def __str__(self):
         return self.__repr__()
+
+
+# ===============================
+# OrionFuture  (Fase 6 — async/await)
+# ===============================
+class OrionFuture:
+    """
+    Representa el resultado pendiente de una llamada async fn.
+    Internamente envuelve un concurrent.futures.Future.
+    """
+    def __init__(self, future, fn_name="<async>"):
+        self._future  = future     # concurrent.futures.Future
+        self._name    = fn_name
+        self._resolved = False
+        self._value    = None
+
+    # --- Resolución ---
+    def resolve(self):
+        """Bloquea hasta que el futuro termine y retorna el valor."""
+        if not self._resolved:
+            self._value   = self._future.result()  # blocks
+            self._resolved = True
+        return self._value
+
+    def is_done(self):
+        return self._future.done()
+
+    def cancel(self):
+        return self._future.cancel()
+
+    # --- Representación ---
+    def __repr__(self):
+        state = "done" if self.is_done() else "pending"
+        return f"<Future:{self._name} [{state}]>"
+
+    def __str__(self):
+        return self.__repr__()
