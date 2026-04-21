@@ -21,6 +21,9 @@ def _compile_use_module(module_path, alias, selective):
     if _current_compiler is None:
         return
 
+    # Quitar comillas si las tiene
+    module_path = module_path.strip('"\'')
+
     # Resolver ruta del módulo
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates = [
@@ -49,6 +52,19 @@ def _compile_use_module(module_path, alias, selective):
     for n in mod_ast:
         if not isinstance(n, tuple):
             continue
+
+        # Constantes de módulo: ASSIGN de nivel top con valores literales
+        if n[0] in ("ASSIGN", "CONST"):
+            var_name = n[1]
+            val_expr = n[2] if len(n) > 2 else None
+            # Solo literales simples
+            if isinstance(val_expr, (int, float, str, bool)):
+                qualified = f"{alias}.{var_name}" if alias else var_name
+                if not hasattr(_current_compiler, "module_consts"):
+                    _current_compiler.module_consts = {}
+                _current_compiler.module_consts[qualified] = val_expr
+            continue
+
         if n[0] != "FN":
             continue
         fn_name, params, body = n[1], n[2], n[3]
@@ -140,7 +156,10 @@ class Compiler:
                 _compile_shape_def(self, node)
             elif node[0] == "USE":
                 # Inlining en compile-time: ningún cambio en la VM necesario
-                _, module_path, alias, selective = node
+                # node puede ser (USE, path, alias, selective) o (USE, path, alias, selective, line)
+                module_path = node[1]
+                alias       = node[2]
+                selective   = node[3]
                 _compile_use_module(module_path, alias, selective)
 
         # Segundo pase: compilar código principal (ignorando FN, SHAPE_DEF y USE)
@@ -621,6 +640,17 @@ def compile_expr_into(ctx, expr):
         method_name = expr[1]
         obj_expr    = expr[2]
         args        = expr[3] if len(expr) > 3 else []
+
+        # Si obj es un IDENT y hay una función qualified "alias.method" registrada
+        # → es una llamada a módulo, no a un método de instancia OOP
+        if (obj_expr[0] == "IDENT" and _current_compiler is not None):
+            qualified = f"{obj_expr[1]}.{method_name}"
+            if qualified in _current_compiler.functions:
+                for arg in args:
+                    compile_expr_into(ctx, arg)
+                ctx.emit({"Call": [qualified, len(args)]})
+                return
+
         compile_expr_into(ctx, obj_expr)
         for arg in args:
             compile_expr_into(ctx, arg)
@@ -628,6 +658,21 @@ def compile_expr_into(ctx, expr):
 
     elif tag == "ATTR_ACCESS":
         _, obj_expr, attr_name = expr
+        # Si obj es un IDENT y hay una constante de módulo "alias.attr" registrada
+        if (obj_expr[0] == "IDENT" and _current_compiler is not None):
+            qualified = f"{obj_expr[1]}.{attr_name}"
+            consts = getattr(_current_compiler, "module_consts", {})
+            if qualified in consts:
+                val = consts[qualified]
+                if isinstance(val, bool):
+                    ctx.emit({"LoadBool": val})
+                elif isinstance(val, int):
+                    ctx.emit({"LoadInt": val})
+                elif isinstance(val, float):
+                    ctx.emit({"LoadFloat": val})
+                elif isinstance(val, str):
+                    ctx.emit({"LoadStr": val.strip('"')})
+                return
         compile_expr_into(ctx, obj_expr)
         ctx.emit({"GetAttr": attr_name})
 

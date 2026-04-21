@@ -1,0 +1,1151 @@
+{
+  "main": [
+    {
+      "LoadStr": "=== Phase 9+10: OOP + m\u00f3dulos en Rust VM ==="
+    },
+    "Show",
+    {
+      "LoadStr": "--- math.sqrt(25) ---"
+    },
+    "Show",
+    {
+      "LoadInt": 25
+    },
+    {
+      "Call": [
+        "math.sqrt",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "--- math.pow(2, 10) ---"
+    },
+    "Show",
+    {
+      "LoadInt": 2
+    },
+    {
+      "LoadInt": 10
+    },
+    {
+      "Call": [
+        "math.pow",
+        2
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "--- Shape b\u00e1sico ---"
+    },
+    "Show",
+    {
+      "LoadStr": "Rex"
+    },
+    {
+      "LoadStr": "Guau"
+    },
+    {
+      "Call": [
+        "Perro",
+        2
+      ]
+    },
+    {
+      "StoreVar": "rex"
+    },
+    {
+      "LoadVar": "rex"
+    },
+    {
+      "CallMethod": [
+        "hablar",
+        0
+      ]
+    },
+    "Pop",
+    {
+      "LoadVar": "rex"
+    },
+    {
+      "LoadStr": "la pelota"
+    },
+    {
+      "CallMethod": [
+        "buscar",
+        1
+      ]
+    },
+    "Pop",
+    {
+      "LoadStr": "--- is check ---"
+    },
+    "Show",
+    {
+      "LoadVar": "rex"
+    },
+    {
+      "IsInstance": "Perro"
+    },
+    {
+      "JumpIfFalse": 33
+    },
+    {
+      "LoadStr": "rex es Perro \u2014 ok"
+    },
+    "Show",
+    {
+      "LoadVar": "rex"
+    },
+    {
+      "IsInstance": "Animal"
+    },
+    {
+      "JumpIfFalse": 38
+    },
+    {
+      "LoadStr": "rex tambi\u00e9n es Animal (using) \u2014 ok"
+    },
+    "Show",
+    {
+      "LoadStr": "--- Shape con m\u00f3dulo ---"
+    },
+    "Show",
+    {
+      "LoadInt": 5
+    },
+    {
+      "Call": [
+        "Circulo",
+        1
+      ]
+    },
+    {
+      "StoreVar": "c"
+    },
+    {
+      "LoadStr": "Area: "
+    },
+    {
+      "LoadVar": "c"
+    },
+    {
+      "CallMethod": [
+        "area",
+        0
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "Perimetro: "
+    },
+    {
+      "LoadVar": "c"
+    },
+    {
+      "CallMethod": [
+        "perimetro",
+        0
+      ]
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "=== PHASE 9+10 COMPLETADAS ==="
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    1,
+    1,
+    6,
+    6,
+    7,
+    7,
+    7,
+    9,
+    9,
+    10,
+    10,
+    10,
+    10,
+    13,
+    13,
+    37,
+    37,
+    37,
+    37,
+    38,
+    38,
+    38,
+    39,
+    39,
+    39,
+    39,
+    41,
+    41,
+    42,
+    42,
+    42,
+    43,
+    43,
+    45,
+    45,
+    45,
+    46,
+    46,
+    50,
+    50,
+    68,
+    68,
+    68,
+    69,
+    69,
+    69,
+    69,
+    69,
+    69,
+    70,
+    70,
+    70,
+    70,
+    70,
+    70,
+    72,
+    72,
+    72
+  ],
+  "functions": {
+    "math.sqrt": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 0
+        },
+        "Lt",
+        {
+          "JumpIfFalse": 7
+        },
+        {
+          "LoadInt": 1
+        },
+        "Neg",
+        "Return",
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 0
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 13
+        },
+        {
+          "LoadInt": 0
+        },
+        "Return",
+        {
+          "LoadVar": "n"
+        },
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "x"
+        },
+        "Div",
+        "Add",
+        {
+          "LoadInt": 2
+        },
+        "Div",
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "x"
+        },
+        "Div",
+        "Add",
+        {
+          "LoadInt": 2
+        },
+        "Div",
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "x"
+        },
+        "Div",
+        "Add",
+        {
+          "LoadInt": 2
+        },
+        "Div",
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "x"
+        },
+        "Div",
+        "Add",
+        {
+          "LoadInt": 2
+        },
+        "Div",
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "x"
+        },
+        "Div",
+        "Add",
+        {
+          "LoadInt": 2
+        },
+        "Div",
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "x"
+        },
+        "Div",
+        "Add",
+        {
+          "LoadInt": 2
+        },
+        "Div",
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadVar": "x"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        13,
+        13,
+        13,
+        13,
+        13,
+        13,
+        13,
+        14,
+        14,
+        14,
+        14,
+        14,
+        14,
+        15,
+        15,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        17,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        18,
+        19,
+        19,
+        19,
+        19,
+        19,
+        19,
+        19,
+        19,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        20,
+        21,
+        21,
+        21,
+        21,
+        21,
+        21,
+        21,
+        21,
+        22,
+        22,
+        22,
+        22
+      ]
+    },
+    "math.abs": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 0
+        },
+        "Lt",
+        {
+          "JumpIfFalse": 9
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 1
+        },
+        "Neg",
+        "Mul",
+        "Return",
+        {
+          "LoadVar": "n"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        27,
+        27,
+        27,
+        27,
+        27,
+        27,
+        27,
+        27,
+        27,
+        28,
+        28,
+        28,
+        28
+      ]
+    },
+    "math.max": {
+      "params": [
+        "a",
+        "b"
+      ],
+      "body": [
+        {
+          "LoadVar": "a"
+        },
+        {
+          "LoadVar": "b"
+        },
+        "Gt",
+        {
+          "JumpIfFalse": 6
+        },
+        {
+          "LoadVar": "a"
+        },
+        "Return",
+        {
+          "LoadVar": "b"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        33,
+        33,
+        33,
+        33,
+        33,
+        33,
+        34,
+        34,
+        34,
+        34
+      ]
+    },
+    "math.min": {
+      "params": [
+        "a",
+        "b"
+      ],
+      "body": [
+        {
+          "LoadVar": "a"
+        },
+        {
+          "LoadVar": "b"
+        },
+        "Lt",
+        {
+          "JumpIfFalse": 6
+        },
+        {
+          "LoadVar": "a"
+        },
+        "Return",
+        {
+          "LoadVar": "b"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        39,
+        39,
+        39,
+        39,
+        39,
+        39,
+        40,
+        40,
+        40,
+        40
+      ]
+    },
+    "math.pow": {
+      "params": [
+        "base",
+        "exp"
+      ],
+      "body": [
+        {
+          "LoadInt": 1
+        },
+        {
+          "StoreVar": "result"
+        },
+        {
+          "LoadInt": 0
+        },
+        {
+          "StoreVar": "i"
+        },
+        {
+          "LoadVar": "i"
+        },
+        {
+          "LoadVar": "exp"
+        },
+        "Lt",
+        {
+          "JumpIfFalse": 17
+        },
+        {
+          "LoadVar": "result"
+        },
+        {
+          "LoadVar": "base"
+        },
+        "Mul",
+        {
+          "StoreVar": "result"
+        },
+        {
+          "LoadVar": "i"
+        },
+        {
+          "LoadInt": 1
+        },
+        "Add",
+        {
+          "StoreVar": "i"
+        },
+        {
+          "Jump": 4
+        },
+        {
+          "LoadVar": "result"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        45,
+        45,
+        46,
+        46,
+        47,
+        47,
+        47,
+        47,
+        48,
+        48,
+        48,
+        48,
+        49,
+        49,
+        49,
+        49,
+        49,
+        51,
+        51,
+        51,
+        51
+      ]
+    },
+    "math.factorial": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 1
+        },
+        "LtEq",
+        {
+          "JumpIfFalse": 6
+        },
+        {
+          "LoadInt": 1
+        },
+        "Return",
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 1
+        },
+        "Sub",
+        {
+          "Call": [
+            "factorial",
+            1
+          ]
+        },
+        "Mul",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        56,
+        56,
+        56,
+        56,
+        56,
+        56,
+        57,
+        57,
+        57,
+        57,
+        57,
+        57,
+        57,
+        57,
+        57
+      ]
+    },
+    "math.floor": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadVar": "n"
+        },
+        {
+          "Call": [
+            "int",
+            1
+          ]
+        },
+        {
+          "StoreVar": "i"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 0
+        },
+        "Lt",
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "i"
+        },
+        "NotEq",
+        "And",
+        {
+          "JumpIfFalse": 15
+        },
+        {
+          "LoadVar": "i"
+        },
+        {
+          "LoadInt": 1
+        },
+        "Sub",
+        "Return",
+        {
+          "LoadVar": "i"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        62,
+        62,
+        62,
+        63,
+        63,
+        63,
+        63,
+        63,
+        63,
+        63,
+        63,
+        63,
+        63,
+        63,
+        63,
+        64,
+        64,
+        64,
+        64
+      ]
+    },
+    "math.ceil": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadVar": "n"
+        },
+        {
+          "Call": [
+            "int",
+            1
+          ]
+        },
+        {
+          "StoreVar": "i"
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "i"
+        },
+        "Gt",
+        {
+          "JumpIfFalse": 11
+        },
+        {
+          "LoadVar": "i"
+        },
+        {
+          "LoadInt": 1
+        },
+        "Add",
+        "Return",
+        {
+          "LoadVar": "i"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        69,
+        69,
+        69,
+        70,
+        70,
+        70,
+        70,
+        70,
+        70,
+        70,
+        70,
+        71,
+        71,
+        71,
+        71
+      ]
+    },
+    "math.clamp": {
+      "params": [
+        "val",
+        "lo",
+        "hi"
+      ],
+      "body": [
+        {
+          "LoadVar": "val"
+        },
+        {
+          "LoadVar": "lo"
+        },
+        "Lt",
+        {
+          "JumpIfFalse": 6
+        },
+        {
+          "LoadVar": "lo"
+        },
+        "Return",
+        {
+          "LoadVar": "val"
+        },
+        {
+          "LoadVar": "hi"
+        },
+        "Gt",
+        {
+          "JumpIfFalse": 12
+        },
+        {
+          "LoadVar": "hi"
+        },
+        "Return",
+        {
+          "LoadVar": "val"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        76,
+        76,
+        76,
+        76,
+        76,
+        76,
+        77,
+        77,
+        77,
+        77,
+        77,
+        77,
+        78,
+        78,
+        78,
+        78
+      ]
+    }
+  },
+  "shapes": {
+    "Animal": {
+      "fields": [
+        {
+          "name": "nombre",
+          "type": null,
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        },
+        {
+          "name": "sonido",
+          "type": null,
+          "default": [
+            {
+              "LoadStr": ""
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "n",
+          "s"
+        ],
+        "body": [
+          {
+            "LoadVar": "n"
+          },
+          {
+            "StoreVar": "nombre"
+          },
+          {
+            "LoadVar": "s"
+          },
+          {
+            "StoreVar": "sonido"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          20,
+          20,
+          21,
+          21,
+          21,
+          21
+        ]
+      },
+      "acts": {
+        "hablar": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "nombre"
+            },
+            {
+              "LoadStr": " dice: "
+            },
+            "Add",
+            {
+              "LoadVar": "sonido"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25,
+            25
+          ]
+        }
+      },
+      "using": []
+    },
+    "Perro": {
+      "fields": [],
+      "on_create": null,
+      "acts": {
+        "buscar": {
+          "params": [
+            "objeto"
+          ],
+          "body": [
+            {
+              "LoadVar": "nombre"
+            },
+            {
+              "LoadStr": " busca "
+            },
+            "Add",
+            {
+              "LoadVar": "objeto"
+            },
+            "Add",
+            {
+              "LoadStr": "!"
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            33,
+            33,
+            33,
+            33,
+            33,
+            33,
+            33,
+            33,
+            33,
+            33
+          ]
+        }
+      },
+      "using": [
+        "Animal"
+      ]
+    },
+    "Circulo": {
+      "fields": [
+        {
+          "name": "radio",
+          "type": null,
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "r"
+        ],
+        "body": [
+          {
+            "LoadVar": "r"
+          },
+          {
+            "StoreVar": "radio"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          56,
+          56,
+          56,
+          56
+        ]
+      },
+      "acts": {
+        "area": {
+          "params": [],
+          "body": [
+            {
+              "LoadFloat": 3.141592653589793
+            },
+            {
+              "LoadVar": "radio"
+            },
+            "Mul",
+            {
+              "LoadVar": "radio"
+            },
+            "Mul",
+            "Return",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            60,
+            60,
+            60,
+            60,
+            60,
+            60,
+            60,
+            60
+          ]
+        },
+        "perimetro": {
+          "params": [],
+          "body": [
+            {
+              "LoadInt": 2
+            },
+            {
+              "LoadFloat": 3.141592653589793
+            },
+            "Mul",
+            {
+              "LoadVar": "radio"
+            },
+            "Mul",
+            "Return",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64,
+            64
+          ]
+        }
+      },
+      "using": []
+    }
+  }
+}

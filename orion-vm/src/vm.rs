@@ -687,7 +687,6 @@ impl VM {
 
             let mut body_str = String::new();
             {
-                use std::io::Read;
                 request.as_reader().read_to_string(&mut body_str).ok();
             }
 
@@ -924,14 +923,14 @@ impl VM {
             }
             "join" => {
                 let mut it = args.into_iter();
-                let sep  = it.next().ok_or("join() requiere 2 argumentos")?;
                 let list = it.next().ok_or("join() requiere 2 argumentos")?;
-                match (sep, list) {
-                    (Value::Str(s), Value::List(v)) => {
+                let sep  = it.next().unwrap_or(Value::Str(" ".to_string()));
+                match (list, sep) {
+                    (Value::List(v), Value::Str(s)) => {
                         let parts: Vec<String> = v.iter().map(|x| x.to_string()).collect();
                         Ok(Some(Value::Str(parts.join(&s))))
                     }
-                    _ => Err("join(): join(sep, lista)".to_string()),
+                    _ => Err("join(): join(lista, sep)".to_string()),
                 }
             }
             "starts_with" => {

@@ -242,7 +242,7 @@ def lex(code, track_position=False):
             "TASK", "STREAM", "SHAPE", "ACT", "USING", "IS",
             "ON_CREATE", "ON_EVENT", "ON_ERROR", "ME", "SUPER",
             "NULL", "UNDEFINED", "AUTO", "ANY", "AMPERSAND", "AT",
-            "AS", "TAKE"
+            "AS", "TAKE", "SERVE", "ROUTE", "WITH"
         ):
             tokens.append(Token(kind, value, line, column) if track_position
                          else (kind, value, line))

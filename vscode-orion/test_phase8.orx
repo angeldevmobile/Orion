@@ -1,0 +1,47 @@
+show "=== FASE 8: attempt/handle ==="
+
+-- Test 1: captura de error básico
+show "--- Test 1: error capturado ---"
+attempt {
+    x = int("no-es-numero")
+    show x
+} handle err {
+    show "Error capturado: " + err
+}
+show "Continúa después del error"
+
+-- Test 2: sin error, handle no se ejecuta
+show "--- Test 2: sin error ---"
+attempt {
+    y = int("42")
+    show y
+} handle err {
+    show "Esto NO debería ejecutarse"
+}
+show "Fin test 2"
+
+-- Test 3: error en función anidada
+show "--- Test 3: función con error ---"
+
+fn parse_numero(s) {
+    return int(s)
+}
+
+attempt {
+    resultado = parse_numero("abc")
+    show resultado
+} handle err {
+    show "Capturado en parse_numero: " + err
+}
+show "Continúa después de parse_numero"
+
+-- Test 4: attempt sin handle (error termina programa controlado)
+show "--- Test 4: attempt ok sin error ---"
+attempt {
+    suma = 100 + 200
+    show suma
+} handle err {
+    show "Error inesperado"
+}
+
+show "=== FASE 8 COMPLETADA ==="

@@ -1,0 +1,37 @@
+-- test_serve.orx — Test del servidor HTTP nativo en Rust
+-- Compila con: python compiler/bytecode_compiler.py vscode-orion/test_serve.orx
+-- Corre con:   .\orion-vm\target\debug\orion vscode-orion/test_serve.orbc
+
+fn router(req) {
+    path = req["path"]
+    method = req["method"]
+
+    if path == "/ping" {
+        return { "status": 200, "body": "pong" }
+    }
+
+    if path == "/hola" {
+        return { "status": 200, "body": "Hola desde Orion VM en Rust!" }
+    }
+
+    if path == "/eco" {
+        body = req["body"]
+        return { "status": 200, "body": body }
+    }
+
+    if path == "/suma" {
+        params = req["params"]
+        a = int(params["a"])
+        b = int(params["b"])
+        resultado = a + b
+        return { "status": 200, "body": str(resultado) }
+    }
+
+    return { "status": 404, "body": "No encontrado" }
+}
+
+show "Servidor Orion iniciando en puerto 9090..."
+show "Prueba: curl http://localhost:9090/ping"
+show "Prueba: curl http://localhost:9090/hola"
+show "Prueba: curl http://localhost:9090/suma?a=3&b=7"
+serve 9090 router

@@ -1,0 +1,343 @@
+{
+  "main": [
+    {
+      "LoadStr": "Servidor Orion iniciando en puerto 9090..."
+    },
+    "Show",
+    {
+      "LoadStr": "Prueba: curl http://localhost:9090/ping"
+    },
+    "Show",
+    {
+      "LoadStr": "Prueba: curl http://localhost:9090/hola"
+    },
+    "Show",
+    {
+      "LoadStr": "Prueba: curl http://localhost:9090/suma?a=3&b=7"
+    },
+    "Show",
+    {
+      "LoadInt": 9090
+    },
+    {
+      "ServeHTTP": "router"
+    },
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    33,
+    33,
+    34,
+    34,
+    35,
+    35,
+    36,
+    36,
+    37,
+    37,
+    37
+  ],
+  "functions": {
+    "router": {
+      "params": [
+        "req"
+      ],
+      "body": [
+        {
+          "LoadVar": "req"
+        },
+        {
+          "LoadStr": "path"
+        },
+        "GetIndex",
+        {
+          "StoreVar": "path"
+        },
+        {
+          "LoadVar": "req"
+        },
+        {
+          "LoadStr": "method"
+        },
+        "GetIndex",
+        {
+          "StoreVar": "method"
+        },
+        {
+          "LoadVar": "path"
+        },
+        {
+          "LoadStr": "/ping"
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 18
+        },
+        {
+          "LoadStr": "status"
+        },
+        {
+          "LoadInt": 200
+        },
+        {
+          "LoadStr": "body"
+        },
+        {
+          "LoadStr": "pong"
+        },
+        {
+          "MakeDict": 2
+        },
+        "Return",
+        {
+          "LoadVar": "path"
+        },
+        {
+          "LoadStr": "/hola"
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 28
+        },
+        {
+          "LoadStr": "status"
+        },
+        {
+          "LoadInt": 200
+        },
+        {
+          "LoadStr": "body"
+        },
+        {
+          "LoadStr": "Hola desde Orion VM en Rust!"
+        },
+        {
+          "MakeDict": 2
+        },
+        "Return",
+        {
+          "LoadVar": "path"
+        },
+        {
+          "LoadStr": "/eco"
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 42
+        },
+        {
+          "LoadVar": "req"
+        },
+        {
+          "LoadStr": "body"
+        },
+        "GetIndex",
+        {
+          "StoreVar": "body"
+        },
+        {
+          "LoadStr": "status"
+        },
+        {
+          "LoadInt": 200
+        },
+        {
+          "LoadStr": "body"
+        },
+        {
+          "LoadVar": "body"
+        },
+        {
+          "MakeDict": 2
+        },
+        "Return",
+        {
+          "LoadVar": "path"
+        },
+        {
+          "LoadStr": "/suma"
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 71
+        },
+        {
+          "LoadVar": "req"
+        },
+        {
+          "LoadStr": "params"
+        },
+        "GetIndex",
+        {
+          "StoreVar": "params"
+        },
+        {
+          "LoadVar": "params"
+        },
+        {
+          "LoadStr": "a"
+        },
+        "GetIndex",
+        {
+          "Call": [
+            "int",
+            1
+          ]
+        },
+        {
+          "StoreVar": "a"
+        },
+        {
+          "LoadVar": "params"
+        },
+        {
+          "LoadStr": "b"
+        },
+        "GetIndex",
+        {
+          "Call": [
+            "int",
+            1
+          ]
+        },
+        {
+          "StoreVar": "b"
+        },
+        {
+          "LoadVar": "a"
+        },
+        {
+          "LoadVar": "b"
+        },
+        "Add",
+        {
+          "StoreVar": "resultado"
+        },
+        {
+          "LoadStr": "status"
+        },
+        {
+          "LoadInt": 200
+        },
+        {
+          "LoadStr": "body"
+        },
+        {
+          "LoadVar": "resultado"
+        },
+        {
+          "Call": [
+            "str",
+            1
+          ]
+        },
+        {
+          "MakeDict": 2
+        },
+        "Return",
+        {
+          "LoadStr": "status"
+        },
+        {
+          "LoadInt": 404
+        },
+        {
+          "LoadStr": "body"
+        },
+        {
+          "LoadStr": "No encontrado"
+        },
+        {
+          "MakeDict": 2
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        6,
+        6,
+        6,
+        6,
+        7,
+        7,
+        7,
+        7,
+        9,
+        9,
+        9,
+        9,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        13,
+        13,
+        13,
+        13,
+        14,
+        14,
+        14,
+        14,
+        14,
+        14,
+        17,
+        17,
+        17,
+        17,
+        18,
+        18,
+        18,
+        18,
+        19,
+        19,
+        19,
+        19,
+        19,
+        19,
+        22,
+        22,
+        22,
+        22,
+        23,
+        23,
+        23,
+        23,
+        24,
+        24,
+        24,
+        24,
+        24,
+        25,
+        25,
+        25,
+        25,
+        25,
+        26,
+        26,
+        26,
+        26,
+        27,
+        27,
+        27,
+        27,
+        27,
+        27,
+        27,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30,
+        30
+      ]
+    }
+  },
+  "shapes": {}
+}

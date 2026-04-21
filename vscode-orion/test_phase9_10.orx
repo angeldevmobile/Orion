@@ -1,0 +1,72 @@
+show "=== Phase 9+10: OOP + módulos en Rust VM ==="
+
+-- Phase 10: use módulo
+use "packages/math" as math
+
+show "--- math.sqrt(25) ---"
+show math.sqrt(25)
+
+show "--- math.pow(2, 10) ---"
+show math.pow(2, 10)
+
+-- Phase 9: OOP completo
+show "--- Shape básico ---"
+
+shape Animal {
+    nombre: ""
+    sonido: ""
+
+    on_create(n, s) {
+        nombre = n
+        sonido = s
+    }
+
+    act hablar() {
+        show nombre + " dice: " + sonido
+    }
+}
+
+shape Perro {
+    using Animal
+
+    act buscar(objeto) {
+        show nombre + " busca " + objeto + "!"
+    }
+}
+
+rex = Perro("Rex", "Guau")
+rex.hablar()
+rex.buscar("la pelota")
+
+show "--- is check ---"
+if rex is Perro {
+    show "rex es Perro — ok"
+}
+if rex is Animal {
+    show "rex también es Animal (using) — ok"
+}
+
+-- Shape con math
+show "--- Shape con módulo ---"
+
+shape Circulo {
+    radio: 0
+
+    on_create(r) {
+        radio = r
+    }
+
+    act area() {
+        return math.PI * radio * radio
+    }
+
+    act perimetro() {
+        return 2 * math.PI * radio
+    }
+}
+
+c = Circulo(5)
+show "Area: " + str(c.area())
+show "Perimetro: " + str(c.perimetro())
+
+show "=== PHASE 9+10 COMPLETADAS ==="

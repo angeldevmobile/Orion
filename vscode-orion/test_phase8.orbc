@@ -1,0 +1,260 @@
+{
+  "main": [
+    {
+      "LoadStr": "=== FASE 8: attempt/handle ==="
+    },
+    "Show",
+    {
+      "LoadStr": "--- Test 1: error capturado ---"
+    },
+    "Show",
+    {
+      "BeginAttempt": 11
+    },
+    {
+      "LoadStr": "no-es-numero"
+    },
+    {
+      "Call": [
+        "int",
+        1
+      ]
+    },
+    {
+      "StoreVar": "x"
+    },
+    {
+      "LoadVar": "x"
+    },
+    "Show",
+    {
+      "EndAttempt": 16
+    },
+    {
+      "StoreVar": "err"
+    },
+    {
+      "LoadStr": "Error capturado: "
+    },
+    {
+      "LoadVar": "err"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "Contin\u00faa despu\u00e9s del error"
+    },
+    "Show",
+    {
+      "LoadStr": "--- Test 2: sin error ---"
+    },
+    "Show",
+    {
+      "BeginAttempt": 27
+    },
+    {
+      "LoadStr": "42"
+    },
+    {
+      "Call": [
+        "int",
+        1
+      ]
+    },
+    {
+      "StoreVar": "y"
+    },
+    {
+      "LoadVar": "y"
+    },
+    "Show",
+    {
+      "EndAttempt": 30
+    },
+    {
+      "StoreVar": "err"
+    },
+    {
+      "LoadStr": "Esto NO deber\u00eda ejecutarse"
+    },
+    "Show",
+    {
+      "LoadStr": "Fin test 2"
+    },
+    "Show",
+    {
+      "LoadStr": "--- Test 3: funci\u00f3n con error ---"
+    },
+    "Show",
+    {
+      "BeginAttempt": 41
+    },
+    {
+      "LoadStr": "abc"
+    },
+    {
+      "Call": [
+        "parse_numero",
+        1
+      ]
+    },
+    {
+      "StoreVar": "resultado"
+    },
+    {
+      "LoadVar": "resultado"
+    },
+    "Show",
+    {
+      "EndAttempt": 46
+    },
+    {
+      "StoreVar": "err"
+    },
+    {
+      "LoadStr": "Capturado en parse_numero: "
+    },
+    {
+      "LoadVar": "err"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "Contin\u00faa despu\u00e9s de parse_numero"
+    },
+    "Show",
+    {
+      "LoadStr": "--- Test 4: attempt ok sin error ---"
+    },
+    "Show",
+    {
+      "BeginAttempt": 58
+    },
+    {
+      "LoadInt": 100
+    },
+    {
+      "LoadInt": 200
+    },
+    "Add",
+    {
+      "StoreVar": "suma"
+    },
+    {
+      "LoadVar": "suma"
+    },
+    "Show",
+    {
+      "EndAttempt": 61
+    },
+    {
+      "StoreVar": "err"
+    },
+    {
+      "LoadStr": "Error inesperado"
+    },
+    "Show",
+    {
+      "LoadStr": "=== FASE 8 COMPLETADA ==="
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    1,
+    1,
+    4,
+    4,
+    5,
+    6,
+    6,
+    6,
+    7,
+    7,
+    7,
+    7,
+    9,
+    9,
+    9,
+    9,
+    11,
+    11,
+    14,
+    14,
+    15,
+    16,
+    16,
+    16,
+    17,
+    17,
+    17,
+    17,
+    19,
+    19,
+    21,
+    21,
+    24,
+    24,
+    30,
+    31,
+    31,
+    31,
+    32,
+    32,
+    32,
+    32,
+    34,
+    34,
+    34,
+    34,
+    36,
+    36,
+    39,
+    39,
+    40,
+    41,
+    41,
+    41,
+    41,
+    42,
+    42,
+    42,
+    42,
+    44,
+    44,
+    47,
+    47,
+    47
+  ],
+  "functions": {
+    "parse_numero": {
+      "params": [
+        "s"
+      ],
+      "body": [
+        {
+          "LoadVar": "s"
+        },
+        {
+          "Call": [
+            "int",
+            1
+          ]
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        27,
+        27,
+        27,
+        27,
+        27
+      ]
+    }
+  },
+  "shapes": {}
+}

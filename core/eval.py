@@ -307,7 +307,7 @@ NATIVE_FUNCTIONS.update({
     "lower":        lambda s: str(s).lower(),
     "trim":         lambda s: str(s).strip(),
     "split":        lambda s, sep="": str(s).split(str(sep)),
-    "join":         lambda sep, lst: str(sep).join(str(x) for x in lst),
+    "join":         lambda lst, sep=" ": str(sep).join(str(x) for x in (lst if isinstance(lst, list) else [])),  # join(lista, sep)
     "starts_with":  lambda s, prefix: str(s).startswith(str(prefix)),
     "ends_with":    lambda s, suffix: str(s).endswith(str(suffix)),
     "replace":      lambda s, old, new: str(s).replace(str(old), str(new)),
