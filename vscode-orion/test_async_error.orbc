@@ -1,0 +1,88 @@
+{
+  "main": [
+    {
+      "LoadInt": 10
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "CallAsync": [
+        "dividir",
+        2
+      ]
+    },
+    {
+      "StoreVar": "tarea"
+    },
+    {
+      "LoadStr": "tarea lanzada"
+    },
+    "Show",
+    {
+      "LoadVar": "tarea"
+    },
+    "Await",
+    {
+      "StoreVar": "resultado"
+    },
+    {
+      "LoadVar": "resultado"
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    8,
+    8,
+    8,
+    8,
+    9,
+    9,
+    10,
+    10,
+    10,
+    11,
+    11,
+    11
+  ],
+  "functions": {
+    "dividir": {
+      "params": [
+        "a",
+        "b"
+      ],
+      "body": [
+        {
+          "LoadVar": "a"
+        },
+        {
+          "LoadVar": "b"
+        },
+        "Div",
+        {
+          "StoreVar": "resultado"
+        },
+        {
+          "LoadVar": "resultado"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        4,
+        4,
+        4,
+        4,
+        5,
+        5,
+        5,
+        5
+      ]
+    }
+  },
+  "shapes": {}
+}

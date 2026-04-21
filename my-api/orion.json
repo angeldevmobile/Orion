@@ -1,0 +1,9 @@
+{
+  "name": "my-api",
+  "version": "0.1.0",
+  "description": "An Orion backend project",
+  "main": "main.orx",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {}
+}

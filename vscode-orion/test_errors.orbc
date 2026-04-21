@@ -1,0 +1,107 @@
+{
+  "main": [
+    {
+      "LoadStr": "Iniciando..."
+    },
+    "Show",
+    {
+      "LoadInt": 42
+    },
+    {
+      "Call": [
+        "procesar",
+        1
+      ]
+    },
+    {
+      "StoreVar": "resultado"
+    },
+    {
+      "LoadVar": "resultado"
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    12,
+    12,
+    13,
+    13,
+    13,
+    14,
+    14,
+    14
+  ],
+  "functions": {
+    "calcular": {
+      "params": [
+        "x"
+      ],
+      "body": [
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadInt": 0
+        },
+        "Div",
+        {
+          "StoreVar": "resultado"
+        },
+        {
+          "LoadVar": "resultado"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        3,
+        3,
+        3,
+        3,
+        4,
+        4,
+        4,
+        4
+      ]
+    },
+    "procesar": {
+      "params": [
+        "datos"
+      ],
+      "body": [
+        {
+          "LoadVar": "datos"
+        },
+        {
+          "Call": [
+            "calcular",
+            1
+          ]
+        },
+        {
+          "StoreVar": "valor"
+        },
+        {
+          "LoadVar": "valor"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        8,
+        8,
+        8,
+        9,
+        9,
+        9,
+        9
+      ]
+    }
+  },
+  "shapes": {}
+}

@@ -42,7 +42,10 @@ fn main() {
     match machine.run() {
         Ok(_) => {}
         Err(e) => {
-            eprintln!("[ORION RUNTIME ERROR] {}", e);
+            eprintln!();
+            eprintln!("  [!] Error de Orion");
+            eprintln!("  {}", e.replace('\n', "\n  "));
+            eprintln!();
             std::process::exit(1);
         }
     }

@@ -2,12 +2,38 @@ use std::fmt;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 /// Datos internos de una instancia de shape
 #[derive(Debug, Clone)]
 pub struct InstanceData {
     pub shape_name: String,
     pub fields: HashMap<String, Value>,
+}
+
+/// Versión thread-safe de Value (sin Rc) para paso entre tareas async
+#[derive(Debug, Clone)]
+pub enum SendValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+    List(Vec<SendValue>),
+    Dict(HashMap<String, SendValue>),
+}
+
+/// Convierte un SendValue de vuelta a Value
+pub fn from_send(sv: SendValue) -> Value {
+    match sv {
+        SendValue::Null        => Value::Null,
+        SendValue::Bool(b)     => Value::Bool(b),
+        SendValue::Int(n)      => Value::Int(n),
+        SendValue::Float(f)    => Value::Float(f),
+        SendValue::Str(s)      => Value::Str(s),
+        SendValue::List(items) => Value::List(items.into_iter().map(from_send).collect()),
+        SendValue::Dict(map)   => Value::Dict(map.into_iter().map(|(k, v)| (k, from_send(v))).collect()),
+    }
 }
 
 /// Tipos de valor nativos de Orion
@@ -20,6 +46,8 @@ pub enum Value {
     List(Vec<Value>),
     Dict(HashMap<String, Value>),
     Instance(Rc<RefCell<InstanceData>>),
+    /// Handle a una tarea asíncrona en curso
+    Task(Arc<Mutex<Option<Result<SendValue, String>>>>),
     Null,
 }
 
@@ -34,6 +62,7 @@ impl PartialEq for Value {
             (Value::List(a), Value::List(b))     => a == b,
             (Value::Dict(a), Value::Dict(b))     => a == b,
             (Value::Instance(a), Value::Instance(b)) => Rc::ptr_eq(a, b),
+            (Value::Task(a), Value::Task(b))           => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -60,6 +89,7 @@ impl fmt::Display for Value {
             Value::Instance(inst) => {
                 write!(f, "<{} instance>", inst.borrow().shape_name)
             }
+            Value::Task(_) => write!(f, "<tarea>"),
         }
     }
 }
@@ -75,6 +105,7 @@ impl Value {
             Value::Dict(_)     => "dict".to_string(),
             Value::Null        => "null".to_string(),
             Value::Instance(i) => i.borrow().shape_name.clone(),
+            Value::Task(_)     => "tarea".to_string(),
         }
     }
 
@@ -87,7 +118,35 @@ impl Value {
             Value::List(v)   => !v.is_empty(),
             Value::Dict(m)   => !m.is_empty(),
             Value::Instance(_) => true,
+            Value::Task(_)   => true,
             Value::Null      => false,
+        }
+    }
+
+    /// Convierte este valor a SendValue para pasar a una tarea async.
+    /// Falla si el valor contiene tipos no thread-safe (Instance, Task).
+    pub fn to_send(&self) -> Result<SendValue, String> {
+        match self {
+            Value::Null        => Ok(SendValue::Null),
+            Value::Bool(b)     => Ok(SendValue::Bool(*b)),
+            Value::Int(n)      => Ok(SendValue::Int(*n)),
+            Value::Float(f)    => Ok(SendValue::Float(*f)),
+            Value::Str(s)      => Ok(SendValue::Str(s.clone())),
+            Value::List(items) => {
+                let sv: Result<Vec<_>, _> = items.iter().map(|v| v.to_send()).collect();
+                Ok(SendValue::List(sv?))
+            }
+            Value::Dict(map) => {
+                let mut m = HashMap::new();
+                for (k, v) in map {
+                    m.insert(k.clone(), v.to_send()?);
+                }
+                Ok(SendValue::Dict(m))
+            }
+            Value::Instance(_) =>
+                Err("No se puede pasar una instancia a una función async".to_string()),
+            Value::Task(_) =>
+                Err("No se puede pasar una tarea como argumento async".to_string()),
         }
     }
 

@@ -1,0 +1,11 @@
+-- my-api/test/test_routes.orx — basic route tests
+
+use net
+
+BASE = "http://localhost:8080"
+
+res = net.reach(BASE + "/ping")
+show "ping: " + str(res.status)
+
+res = net.reach(BASE + "/users")
+show "users: " + str(res.status)

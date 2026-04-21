@@ -1,0 +1,31 @@
+-- Test async con IO: lectura paralela de archivos
+
+async fn leer_archivo(ruta) {
+    read ruta -> contenido
+    return contenido
+}
+
+async fn procesar(texto, etiqueta) {
+    let resultado = etiqueta + ": " + texto
+    return resultado
+}
+
+-- Lanzar dos lecturas en paralelo
+tarea_a = leer_archivo("usuarios_a.json")
+tarea_b = leer_archivo("usuarios_b.json")
+
+show "Leyendo archivos en paralelo..."
+
+-- Esperar ambos resultados
+datos_a = await tarea_a
+datos_b = await tarea_b
+
+show "Archivo A:"
+show datos_a
+
+show "Archivo B:"
+show datos_b
+
+-- Encadenar: procesar el resultado de un await
+resultado = await procesar(datos_a, "procesado")
+show resultado

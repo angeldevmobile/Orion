@@ -47,6 +47,10 @@ pub enum Instruction {
     Return,
     MakeFunction(String, Vec<String>, usize), // nombre, params, índice del cuerpo
 
+    //   Async
+    CallAsync(String, u8), // llama fn async en nuevo hilo → push Task
+    Await,                  // pop Task → bloquea hasta completar → push resultado
+
     //   Colecciones                
     MakeList(u8),        // construye lista con N elementos del stack
     MakeDict(u8),        // construye dict con N pares clave-valor

@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
 use crate::instruction::Instruction;
-use crate::value::{Value, InstanceData};
+use crate::value::{Value, InstanceData, SendValue, from_send};
 use crate::bytecode::{FunctionDef, ShapeDef};
 
 struct CallFrame {
@@ -16,6 +17,8 @@ struct CallFrame {
     self_instance: Option<Rc<RefCell<InstanceData>>>,
     /// Nombres de los campos de la instancia (para sincronizar al salir del frame)
     instance_fields: Vec<String>,
+    /// Nombre del contexto de ejecución (función, act, etc.)
+    name: String,
 }
 
 impl CallFrame {
@@ -26,7 +29,14 @@ impl CallFrame {
             consts: HashSet::new(),
             self_instance: None,
             instance_fields: Vec::new(),
+            name: String::from("<main>"),
         }
+    }
+
+    fn named(instructions: Vec<Instruction>, lines: Vec<u32>, name: &str) -> Self {
+        let mut frame = Self::new(instructions, lines);
+        frame.name = name.to_string();
+        frame
     }
 
     fn with_args(instructions: Vec<Instruction>, lines: Vec<u32>, params: &[String], args: Vec<Value>) -> Self {
@@ -35,6 +45,16 @@ impl CallFrame {
             frame.vars.insert(param.clone(), val);
         }
         frame
+    }
+
+    fn with_args_named(instructions: Vec<Instruction>, lines: Vec<u32>, name: &str, params: &[String], args: Vec<Value>) -> Self {
+        let mut frame = Self::with_args(instructions, lines, params, args);
+        frame.name = name.to_string();
+        frame
+    }
+
+    fn current_line(&self) -> u32 {
+        self.lines.get(self.ip.saturating_sub(1)).copied().unwrap_or(0)
     }
 
     fn sync_to_instance(&self) {
@@ -83,14 +103,38 @@ impl VM {
         }
     }
 
+    /// Construye una cadena de stack trace con todos los frames activos.
+    pub fn stack_trace(&self) -> String {
+        let frames: Vec<String> = self.call_stack.iter().rev().map(|f| {
+            let line = f.current_line();
+            if line > 0 {
+                format!("    en {} (linea {})", f.name, line)
+            } else {
+                format!("    en {}", f.name)
+            }
+        }).collect();
+        frames.join("\n")
+    }
+
     pub fn run(&mut self) -> Result<(), String> {
         self.run_inner().map_err(|e| {
-            if self.current_line > 0 {
-                format!("[línea {}] {}", self.current_line, e)
+            let trace = self.stack_trace();
+            let line_info = if self.current_line > 0 {
+                format!("Linea {} | ", self.current_line)
             } else {
-                e
+                String::new()
+            };
+            if trace.is_empty() {
+                format!("{}{}", line_info, e)
+            } else {
+                format!("{}{}\n{}", line_info, e, trace)
             }
         })
+    }
+
+    /// Ejecuta sin formatear errores — usar en subtareas async para evitar doble-prefijo
+    pub fn run_raw(&mut self) -> Result<(), String> {
+        self.run_inner()
     }
 
     fn run_inner(&mut self) -> Result<(), String> {
@@ -269,7 +313,7 @@ impl VM {
                             name, func.params.len(), args.len()
                         ));
                     }
-                    let frame = CallFrame::with_args(func.body, func.lines, &func.params, args);
+                    let frame = CallFrame::with_args_named(func.body, func.lines, &name, &func.params, args);
                     self.call_stack.push(frame);
                 } else {
                     let result = self.call_builtin(&name, args)?;
@@ -435,6 +479,92 @@ impl VM {
             Instruction::Dup => {
                 let top = self.value_stack.last().cloned().ok_or("Stack vacío en Dup")?;
                 self.value_stack.push(top);
+            }
+
+            // ── Async ────────────────────────────────────────────────────────
+            Instruction::CallAsync(fn_name, argc) => {
+                let argc = argc as usize;
+                let mut args: Vec<Value> = (0..argc)
+                    .map(|_| self.pop())
+                    .collect::<Result<Vec<_>, _>>()?;
+                args.reverse();
+
+                let func = self.functions.get(&fn_name).cloned()
+                    .ok_or_else(|| format!("función async '{}' no existe", fn_name))?;
+
+                // Convertir args a SendValue (thread-safe)
+                let send_args: Vec<SendValue> = args.iter()
+                    .map(|v| v.to_send())
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("Error en argumentos async '{}': {}", fn_name, e))?;
+
+                let functions_clone = self.functions.clone();
+                let shapes_clone    = self.shapes.clone();
+                let fn_name_clone   = fn_name.clone();
+
+                let slot: Arc<Mutex<Option<Result<SendValue, String>>>> =
+                    Arc::new(Mutex::new(None));
+                let slot_clone = Arc::clone(&slot);
+
+                std::thread::spawn(move || {
+                    let mut sub_vm = VM::new(
+                        func.body.clone(),
+                        func.lines.clone(),
+                        functions_clone,
+                        shapes_clone,
+                    );
+                    // Inyectar argumentos como vars del frame principal
+                    for (param, val) in func.params.iter()
+                        .zip(send_args.into_iter().map(from_send))
+                    {
+                        if let Some(frame) = sub_vm.call_stack.first_mut() {
+                            frame.vars.insert(param.clone(), val);
+                        }
+                    }
+                    if let Some(frame) = sub_vm.call_stack.first_mut() {
+                        frame.name = fn_name_clone.clone();
+                    }
+                    let result = match sub_vm.run_raw() {
+                        Ok(_) => {
+                            let ret = sub_vm.value_stack.pop().unwrap_or(Value::Null);
+                            match ret.to_send() {
+                                Ok(sv)  => Ok(sv),
+                                Err(_)  => Ok(SendValue::Null),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    };
+                    *slot_clone.lock().unwrap() = Some(result);
+                });
+
+                self.value_stack.push(Value::Task(slot));
+            }
+
+            Instruction::Await => {
+                let val = self.pop()?;
+                match val {
+                    Value::Task(slot) => {
+                        // Espera activa hasta que la tarea termine
+                        let result = loop {
+                            let guard = slot.lock().unwrap();
+                            if let Some(ref r) = *guard {
+                                let r = r.clone();
+                                drop(guard);
+                                break r;
+                            }
+                            drop(guard);
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        };
+                        match result {
+                            Ok(sv)  => self.value_stack.push(from_send(sv)),
+                            Err(e)  => return Err(e),
+                        }
+                    }
+                    other => {
+                        // await en un valor no-Task → lo devuelve tal cual
+                        self.value_stack.push(other);
+                    }
+                }
             }
 
             // ── I/O ──────────────────────────────────────────────────────────

@@ -1,0 +1,191 @@
+{
+  "main": [
+    {
+      "LoadStr": "usuarios_a.json"
+    },
+    {
+      "CallAsync": [
+        "leer_archivo",
+        1
+      ]
+    },
+    {
+      "StoreVar": "tarea_a"
+    },
+    {
+      "LoadStr": "usuarios_b.json"
+    },
+    {
+      "CallAsync": [
+        "leer_archivo",
+        1
+      ]
+    },
+    {
+      "StoreVar": "tarea_b"
+    },
+    {
+      "LoadStr": "Leyendo archivos en paralelo..."
+    },
+    "Show",
+    {
+      "LoadVar": "tarea_a"
+    },
+    "Await",
+    {
+      "StoreVar": "datos_a"
+    },
+    {
+      "LoadVar": "tarea_b"
+    },
+    "Await",
+    {
+      "StoreVar": "datos_b"
+    },
+    {
+      "LoadStr": "Archivo A:"
+    },
+    "Show",
+    {
+      "LoadVar": "datos_a"
+    },
+    "Show",
+    {
+      "LoadStr": "Archivo B:"
+    },
+    "Show",
+    {
+      "LoadVar": "datos_b"
+    },
+    "Show",
+    {
+      "LoadVar": "datos_a"
+    },
+    {
+      "LoadStr": "procesado"
+    },
+    {
+      "CallAsync": [
+        "procesar",
+        2
+      ]
+    },
+    "Await",
+    {
+      "StoreVar": "resultado"
+    },
+    {
+      "LoadVar": "resultado"
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    14,
+    14,
+    14,
+    15,
+    15,
+    15,
+    17,
+    17,
+    20,
+    20,
+    20,
+    21,
+    21,
+    21,
+    23,
+    23,
+    24,
+    24,
+    26,
+    26,
+    27,
+    27,
+    30,
+    30,
+    30,
+    30,
+    30,
+    31,
+    31,
+    31
+  ],
+  "functions": {
+    "leer_archivo": {
+      "params": [
+        "ruta"
+      ],
+      "body": [
+        {
+          "LoadVar": "ruta"
+        },
+        {
+          "ReadFile": "text"
+        },
+        {
+          "StoreVar": "contenido"
+        },
+        {
+          "LoadVar": "contenido"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        4,
+        4,
+        4,
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    "procesar": {
+      "params": [
+        "texto",
+        "etiqueta"
+      ],
+      "body": [
+        {
+          "LoadVar": "etiqueta"
+        },
+        {
+          "LoadStr": ": "
+        },
+        "Add",
+        {
+          "LoadVar": "texto"
+        },
+        "Add",
+        {
+          "StoreVar": "resultado"
+        },
+        {
+          "LoadVar": "resultado"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        10,
+        10,
+        10,
+        10
+      ]
+    }
+  },
+  "shapes": {}
+}

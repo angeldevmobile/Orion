@@ -1,0 +1,14 @@
+-- Test stack trace: error dentro de función anidada
+fn calcular(x) {
+    resultado = x / 0
+    return resultado
+}
+
+fn procesar(datos) {
+    valor = calcular(datos)
+    return valor
+}
+
+show "Iniciando..."
+resultado = procesar(42)
+show resultado

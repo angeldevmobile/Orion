@@ -1,0 +1,201 @@
+{
+  "main": [
+    {
+      "LoadInt": 10
+    },
+    {
+      "CallAsync": [
+        "calcular",
+        1
+      ]
+    },
+    {
+      "StoreVar": "tarea1"
+    },
+    {
+      "LoadStr": "usuario"
+    },
+    {
+      "CallAsync": [
+        "leer_dato",
+        1
+      ]
+    },
+    {
+      "StoreVar": "tarea2"
+    },
+    {
+      "LoadStr": "Tareas lanzadas, esperando resultados..."
+    },
+    "Show",
+    {
+      "LoadVar": "tarea1"
+    },
+    "Await",
+    {
+      "StoreVar": "resultado1"
+    },
+    {
+      "LoadVar": "tarea2"
+    },
+    "Await",
+    {
+      "StoreVar": "resultado2"
+    },
+    {
+      "LoadVar": "resultado1"
+    },
+    "Show",
+    {
+      "LoadVar": "resultado2"
+    },
+    "Show",
+    {
+      "LoadInt": 99
+    },
+    {
+      "CallAsync": [
+        "calcular",
+        1
+      ]
+    },
+    "Pop",
+    {
+      "LoadStr": "Spawn lanzado sin esperar"
+    },
+    "Show",
+    {
+      "LoadInt": 5
+    },
+    {
+      "CallAsync": [
+        "calcular",
+        1
+      ]
+    },
+    "Await",
+    {
+      "StoreVar": "val"
+    },
+    {
+      "LoadVar": "val"
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    15,
+    15,
+    15,
+    16,
+    16,
+    16,
+    18,
+    18,
+    21,
+    21,
+    21,
+    22,
+    22,
+    22,
+    24,
+    24,
+    25,
+    25,
+    28,
+    28,
+    28,
+    29,
+    29,
+    32,
+    32,
+    32,
+    32,
+    33,
+    33,
+    33
+  ],
+  "functions": {
+    "calcular": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadVar": "n"
+        },
+        "Mul",
+        {
+          "LoadInt": 42
+        },
+        "Add",
+        {
+          "StoreVar": "resultado"
+        },
+        {
+          "LoadVar": "resultado"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        6,
+        6,
+        6,
+        6
+      ]
+    },
+    "leer_dato": {
+      "params": [
+        "nombre"
+      ],
+      "body": [
+        {
+          "LoadStr": "Dato de "
+        },
+        {
+          "LoadVar": "nombre"
+        },
+        "Add",
+        {
+          "LoadStr": " procesado"
+        },
+        "Add",
+        {
+          "StoreVar": "msg"
+        },
+        {
+          "LoadVar": "msg"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        11,
+        11,
+        11,
+        11
+      ]
+    }
+  },
+  "shapes": {}
+}

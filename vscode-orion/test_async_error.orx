@@ -1,0 +1,11 @@
+-- Test error en async task
+
+async fn dividir(a, b) {
+    let resultado = a / b
+    return resultado
+}
+
+tarea = dividir(10, 0)
+show "tarea lanzada"
+resultado = await tarea
+show resultado

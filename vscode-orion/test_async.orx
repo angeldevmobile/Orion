@@ -1,0 +1,33 @@
+-- Test async/await en Orion
+
+async fn calcular(n) {
+    -- simula trabajo pesado
+    let resultado = n * n + 42
+    return resultado
+}
+
+async fn leer_dato(nombre) {
+    let msg = "Dato de " + nombre + " procesado"
+    return msg
+}
+
+-- Llamar función async → retorna Task inmediatamente
+tarea1 = calcular(10)
+tarea2 = leer_dato("usuario")
+
+show "Tareas lanzadas, esperando resultados..."
+
+-- Esperar resultados
+resultado1 = await tarea1
+resultado2 = await tarea2
+
+show resultado1
+show resultado2
+
+-- Spawn: fire-and-forget (no esperar)
+spawn calcular(99)
+show "Spawn lanzado sin esperar"
+
+-- await inline como expresión
+val = await calcular(5)
+show val

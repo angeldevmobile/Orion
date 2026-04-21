@@ -14,6 +14,10 @@ from core.parser import parse, parse_expression
 # pueda registrar funciones de módulos importados)
 _current_compiler = None
 
+# Conjunto de nombres de funciones declaradas como async fn
+# (se rellena en el primer pase de compile_program)
+async_functions: set = set()
+
 
 def _compile_use_module(module_path, alias, selective):
     """Carga un .orx, compila sus funciones y las inserta en _current_compiler.functions."""
@@ -132,8 +136,9 @@ class Compiler:
         return len(self.instructions)
 
     def compile_program(self, ast):
-        global _current_compiler
+        global _current_compiler, async_functions
         _current_compiler = self  # permite que _compile_use_module acceda a self.functions
+        async_functions = set()   # resetear para cada compilación
 
         # Primer pase: compilar funciones, shapes y módulos USE
         for node in ast:
@@ -152,6 +157,21 @@ class Compiler:
                     "body": fc.instructions,
                     "lines": fc.line_table,
                 }
+            elif node[0] == "ASYNC_FN":
+                # Compilar igual que FN, pero registrar el nombre en async_functions
+                fn_name, params, body = node[1], node[2], node[3]
+                fc = FunctionCompiler()
+                fc._root_compiler = self
+                for stmt in body:
+                    compile_node_into(fc, stmt)
+                fc.emit("LoadNull")
+                fc.emit("Return")
+                self.functions[fn_name] = {
+                    "params": params,
+                    "body": fc.instructions,
+                    "lines": fc.line_table,
+                }
+                async_functions.add(fn_name)
             elif node[0] == "SHAPE_DEF":
                 _compile_shape_def(self, node)
             elif node[0] == "USE":
@@ -162,9 +182,9 @@ class Compiler:
                 selective   = node[3]
                 _compile_use_module(module_path, alias, selective)
 
-        # Segundo pase: compilar código principal (ignorando FN, SHAPE_DEF y USE)
+        # Segundo pase: compilar código principal (ignorando FN, ASYNC_FN, SHAPE_DEF y USE)
         for node in ast:
-            if isinstance(node, tuple) and node[0] in ("FN", "SHAPE_DEF", "USE"):
+            if isinstance(node, tuple) and node[0] in ("FN", "ASYNC_FN", "SHAPE_DEF", "USE"):
                 continue
             self.compile_node(node)
         self.emit({"Halt": None})
@@ -553,19 +573,27 @@ def compile_node_into(ctx, node):
         pass  # compilado en primer pase
 
     elif tag == "ASYNC_FN":
-        pass  # el intérprete maneja async fn; el bytecode VM no lo soporta aún
+        pass  # compilado en primer pase (también registrado en async_functions)
 
     elif tag == "AWAIT_STMT":
-        # await <expr> — evaluar la expresión (si es Future, ya se resuelve en runtime)
+        # await <expr>  →  evaluar expr (Task), bloquear, descartar resultado
         _, inner_expr = node
-        compile_expr_into(ctx, inner_expr)
-        ctx.emit("Pop")  # descarta el resultado (es un statement)
+        compile_expr_into(ctx, inner_expr)  # empuja Task
+        ctx.emit("Await")                   # bloquea, empuja resultado
+        ctx.emit("Pop")                     # descartar (es statement, no asignación)
 
     elif tag == "SPAWN":
-        # spawn <expr> — lanzar sin esperar
+        # spawn fn(args)  →  lanzar async sin esperar resultado
         _, inner_expr = node
-        compile_expr_into(ctx, inner_expr)
-        ctx.emit("Pop")
+        if isinstance(inner_expr, tuple) and inner_expr[0] == "CALL":
+            _, name, args, _ = inner_expr
+            fn_name = name[1] if isinstance(name, tuple) else name
+            for arg in args:
+                compile_expr_into(ctx, arg)
+            ctx.emit({"CallAsync": [fn_name, len(args)]})
+        else:
+            compile_expr_into(ctx, inner_expr)
+        ctx.emit("Pop")  # fire-and-forget: descartar el Task
 
     elif tag == "THINK":
         # think <expr>  →  eval expr, call AI, push result, print
@@ -769,10 +797,21 @@ def compile_expr_into(ctx, expr):
             for arg in args:
                 compile_expr_into(ctx, arg)
             ctx.emit("Show")
+        elif fn_name in async_functions:
+            # Llamada a función async → lanza hilo, empuja Task
+            for arg in args:
+                compile_expr_into(ctx, arg)
+            ctx.emit({"CallAsync": [fn_name, len(args)]})
         else:
             for arg in args:
                 compile_expr_into(ctx, arg)
             ctx.emit({"Call": [fn_name, len(args)]})
+
+    elif tag == "AWAIT_EXPR":
+        # await <expr> como expresión → empuja resultado en el stack
+        _, inner_expr = expr
+        compile_expr_into(ctx, inner_expr)  # empuja Task
+        ctx.emit("Await")                   # bloquea, empuja resultado
 
     elif tag == "CALL_METHOD":
         # obj.method(args) — formato: (CALL_METHOD, method_name, obj_expr, args, kwargs?)
@@ -895,4 +934,11 @@ if __name__ == "__main__":
         sys.exit(1)
     src = sys.argv[1]
     out = sys.argv[2] if len(sys.argv) > 2 else None
-    compile_file(src, out)
+    try:
+        compile_file(src, out)
+    except Exception as exc:
+        # Formato limpio para errores de compilación
+        print(f"\n  [!] Error de compilacion en '{src}'")
+        print(f"  {exc}")
+        print()
+        sys.exit(1)
