@@ -1,0 +1,138 @@
+{
+  "main": [
+    {
+      "LoadStr": "test_io_out.txt"
+    },
+    {
+      "LoadStr": "Hola desde Orion IO!"
+    },
+    {
+      "WriteFile": "write"
+    },
+    {
+      "LoadStr": "test_io_out.txt"
+    },
+    {
+      "ReadFile": "text"
+    },
+    {
+      "StoreVar": "contenido"
+    },
+    {
+      "LoadStr": "Leido: "
+    },
+    {
+      "LoadVar": "contenido"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "test_log.txt"
+    },
+    {
+      "LoadStr": "entrada 1"
+    },
+    {
+      "WriteFile": "write"
+    },
+    {
+      "LoadStr": "test_log.txt"
+    },
+    {
+      "LoadStr": "entrada 2"
+    },
+    {
+      "WriteFile": "append"
+    },
+    {
+      "LoadStr": "test_log.txt"
+    },
+    {
+      "LoadStr": "entrada 3"
+    },
+    {
+      "WriteFile": "append"
+    },
+    {
+      "LoadStr": "test_log.txt"
+    },
+    {
+      "ReadFile": "text"
+    },
+    {
+      "StoreVar": "log_data"
+    },
+    {
+      "LoadStr": "Log:"
+    },
+    "Show",
+    {
+      "LoadVar": "log_data"
+    },
+    "Show",
+    {
+      "LoadStr": "PATH"
+    },
+    {
+      "ReadEnv": "text"
+    },
+    {
+      "StoreVar": "ruta"
+    },
+    {
+      "LoadStr": "PATH empieza con: "
+    },
+    {
+      "LoadVar": "ruta"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "=== IO OK ==="
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    5,
+    5,
+    5,
+    6,
+    6,
+    6,
+    7,
+    7,
+    7,
+    7,
+    10,
+    10,
+    10,
+    11,
+    11,
+    11,
+    12,
+    12,
+    12,
+    13,
+    13,
+    13,
+    14,
+    14,
+    15,
+    15,
+    18,
+    18,
+    18,
+    19,
+    19,
+    19,
+    19,
+    22,
+    22,
+    22
+  ],
+  "functions": {},
+  "shapes": {}
+}

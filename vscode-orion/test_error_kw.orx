@@ -1,0 +1,27 @@
+-- Test: keyword 'error' para lanzar errores explícitos
+
+-- 1) error capturado por attempt/handle
+attempt {
+    error "algo salió mal"
+} handle err {
+    show "Capturado: " + err
+}
+
+-- 2) error en función con validación
+fn validar(n) {
+    if n < 0 {
+        error "número negativo: " + str(n)
+    }
+    return n * 2
+}
+
+attempt {
+    resultado = validar(-5)
+} handle err {
+    show "Validación falló: " + err
+}
+
+resultado_ok = validar(10)
+show "Resultado válido: " + str(resultado_ok)
+
+show "=== error keyword OK ==="

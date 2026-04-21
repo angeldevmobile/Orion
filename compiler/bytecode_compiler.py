@@ -358,50 +358,98 @@ def compile_node_into(ctx, node):
     elif tag == "FOR_IN":
         # for item in expr { body }  — compila como bucle con índice
         _, var_spec, iterable_expr, body = node
-        # Soporte para un solo var (string) o destructuring (lista)
-        var_name = var_spec if isinstance(var_spec, str) else var_spec[0]
 
-        # Contadores únicos para variables temporales
         counter = getattr(ctx, "_for_counter", 0)
         ctx._for_counter = counter + 1
-        list_var = f"__list_{counter}__"
-        len_var  = f"__len_{counter}__"
-        idx_var  = f"__idx_{counter}__"
 
-        # Evaluar iterable y almacenar
-        compile_expr_into(ctx, iterable_expr)
-        ctx.emit({"StoreVar": list_var})
-        # Obtener longitud usando builtin len()
-        ctx.emit({"LoadVar": list_var})
-        ctx.emit({"Call": ["len", 1]})
-        ctx.emit({"StoreVar": len_var})
-        # Índice = 0
-        ctx.emit({"LoadInt": 0})
-        ctx.emit({"StoreVar": idx_var})
+        # --- for k, v in dict --- (destructuring de diccionario)
+        if isinstance(var_spec, list) and len(var_spec) == 2:
+            key_var, val_var = var_spec
+            dict_var  = f"__dict_{counter}__"
+            keys_var  = f"__keys_{counter}__"
+            len_var   = f"__dlen_{counter}__"
+            idx_var   = f"__didx_{counter}__"
 
-        loop_start = ctx.current_addr()
-        ctx.emit({"LoadVar": idx_var})
-        ctx.emit({"LoadVar": len_var})
-        ctx.emit("Lt")
-        jump_end = ctx.emit({"JumpIfFalse": 0})
+            compile_expr_into(ctx, iterable_expr)
+            ctx.emit({"StoreVar": dict_var})
+            # keys(__dict__) → lista de claves
+            ctx.emit({"LoadVar": dict_var})
+            ctx.emit({"Call": ["keys", 1]})
+            ctx.emit({"StoreVar": keys_var})
+            ctx.emit({"LoadVar": keys_var})
+            ctx.emit({"Call": ["len", 1]})
+            ctx.emit({"StoreVar": len_var})
+            ctx.emit({"LoadInt": 0})
+            ctx.emit({"StoreVar": idx_var})
 
-        # Obtener elemento actual
-        ctx.emit({"LoadVar": list_var})
-        ctx.emit({"LoadVar": idx_var})
-        ctx.emit("GetIndex")
-        ctx.emit({"StoreVar": var_name})
+            loop_start = ctx.current_addr()
+            ctx.emit({"LoadVar": idx_var})
+            ctx.emit({"LoadVar": len_var})
+            ctx.emit("Lt")
+            jump_end = ctx.emit({"JumpIfFalse": 0})
 
-        # Cuerpo del bucle
-        for stmt in body:
-            compile_node_into(ctx, stmt)
+            # k = keys[idx]
+            ctx.emit({"LoadVar": keys_var})
+            ctx.emit({"LoadVar": idx_var})
+            ctx.emit("GetIndex")
+            ctx.emit({"StoreVar": key_var})
+            # v = dict[k]
+            ctx.emit({"LoadVar": dict_var})
+            ctx.emit({"LoadVar": key_var})
+            ctx.emit("GetIndex")
+            ctx.emit({"StoreVar": val_var})
 
-        # Incrementar índice
-        ctx.emit({"LoadVar": idx_var})
-        ctx.emit({"LoadInt": 1})
-        ctx.emit("Add")
-        ctx.emit({"StoreVar": idx_var})
-        ctx.emit({"Jump": loop_start})
-        ctx.patch(jump_end, {"JumpIfFalse": ctx.current_addr()})
+            for stmt in body:
+                compile_node_into(ctx, stmt)
+
+            ctx.emit({"LoadVar": idx_var})
+            ctx.emit({"LoadInt": 1})
+            ctx.emit("Add")
+            ctx.emit({"StoreVar": idx_var})
+            ctx.emit({"Jump": loop_start})
+            ctx.patch(jump_end, {"JumpIfFalse": ctx.current_addr()})
+
+        else:
+            # --- for item in list --- (iteración estándar por índice)
+            var_name = var_spec if isinstance(var_spec, str) else var_spec[0]
+            list_var = f"__list_{counter}__"
+            len_var  = f"__len_{counter}__"
+            idx_var  = f"__idx_{counter}__"
+
+            compile_expr_into(ctx, iterable_expr)
+            ctx.emit({"StoreVar": list_var})
+            ctx.emit({"LoadVar": list_var})
+            ctx.emit({"Call": ["len", 1]})
+            ctx.emit({"StoreVar": len_var})
+            ctx.emit({"LoadInt": 0})
+            ctx.emit({"StoreVar": idx_var})
+
+            loop_start = ctx.current_addr()
+            ctx.emit({"LoadVar": idx_var})
+            ctx.emit({"LoadVar": len_var})
+            ctx.emit("Lt")
+            jump_end = ctx.emit({"JumpIfFalse": 0})
+
+            ctx.emit({"LoadVar": list_var})
+            ctx.emit({"LoadVar": idx_var})
+            ctx.emit("GetIndex")
+            ctx.emit({"StoreVar": var_name})
+
+            for stmt in body:
+                compile_node_into(ctx, stmt)
+
+            ctx.emit({"LoadVar": idx_var})
+            ctx.emit({"LoadInt": 1})
+            ctx.emit("Add")
+            ctx.emit({"StoreVar": idx_var})
+            ctx.emit({"Jump": loop_start})
+            ctx.patch(jump_end, {"JumpIfFalse": ctx.current_addr()})
+
+    elif tag == "ERROR_STMT":
+        # error <expr>  →  lanza un error explícito (capturado por attempt/handle)
+        _, msg_expr = node
+        compile_expr_into(ctx, msg_expr)
+        ctx.emit("Raise")
 
     elif tag == "ATTEMPT":
         # attempt { body } handle err { handler }
@@ -441,6 +489,38 @@ def compile_node_into(ctx, node):
             return
         compile_expr_into(ctx, inner)
         ctx.emit("Pop")
+
+    elif tag == "ASK_STMT":
+        # ask "msg" as <type> choices [...] -> var
+        _, prompt_expr, cast_type, choices_expr, var_name = node
+        compile_expr_into(ctx, prompt_expr)
+        if choices_expr is not None:
+            compile_expr_into(ctx, choices_expr)
+            ctx.emit({"ReadInput": {"cast": cast_type, "choices": True}})
+        else:
+            ctx.emit({"ReadInput": {"cast": cast_type, "choices": False}})
+        ctx.emit({"StoreVar": var_name})
+
+    elif tag == "READ_STMT":
+        # read "path" as <fmt> -> var
+        _, path_expr, cast_type, var_name = node
+        compile_expr_into(ctx, path_expr)
+        ctx.emit({"ReadFile": cast_type or "text"})
+        ctx.emit({"StoreVar": var_name})
+
+    elif tag == "WRITE_STMT":
+        # write "path" with/append data
+        _, path_expr, data_expr, mode = node
+        compile_expr_into(ctx, path_expr)
+        compile_expr_into(ctx, data_expr)
+        ctx.emit({"WriteFile": mode})
+
+    elif tag == "ENV_STMT":
+        # env "KEY" as <type> -> var
+        _, key_expr, cast_type, var_name = node
+        compile_expr_into(ctx, key_expr)
+        ctx.emit({"ReadEnv": cast_type or "text"})
+        ctx.emit({"StoreVar": var_name})
 
     elif tag == "SERVE_STMT":
         # serve <port> <handler>
@@ -508,6 +588,36 @@ def compile_node_into(ctx, node):
         ctx.emit("AiSense")
         ctx.emit("Show")
 
+    elif tag == "MATCH":
+        # match expr { pat: { body } ... else: { body } }
+        _, subject_expr, cases = node
+        counter = getattr(ctx, "_match_counter", 0)
+        ctx._match_counter = counter + 1
+        subj_var = f"__match_{counter}__"
+
+        compile_expr_into(ctx, subject_expr)
+        ctx.emit({"StoreVar": subj_var})
+
+        end_jumps = []
+        for pattern, body in cases:
+            if pattern == "else":
+                for stmt in body:
+                    compile_node_into(ctx, stmt)
+                end_jumps.append(ctx.emit({"Jump": 0}))
+            else:
+                ctx.emit({"LoadVar": subj_var})
+                _load_match_pattern(ctx, pattern)
+                ctx.emit("Eq")
+                skip = ctx.emit({"JumpIfFalse": 0})
+                for stmt in body:
+                    compile_node_into(ctx, stmt)
+                end_jumps.append(ctx.emit({"Jump": 0}))
+                ctx.patch(skip, {"JumpIfFalse": ctx.current_addr()})
+
+        end_addr = ctx.current_addr()
+        for jmp in end_jumps:
+            ctx.patch(jmp, {"Jump": end_addr})
+
     elif tag == "RETURN":
         _, expr = node
         if expr is not None:
@@ -515,6 +625,35 @@ def compile_node_into(ctx, node):
         else:
             ctx.emit("LoadNull")
         ctx.emit("Return")
+
+
+# ---------------------------------------------------------------------------
+# Match pattern literal loader
+# ---------------------------------------------------------------------------
+
+def _load_match_pattern(ctx, pattern):
+    """Emite la instrucción LoadXxx apropiada para un patrón de match."""
+    if pattern == "yes" or pattern is True:
+        ctx.emit({"LoadBool": True})
+    elif pattern == "no" or pattern is False:
+        ctx.emit({"LoadBool": False})
+    elif pattern in ("null", None):
+        ctx.emit("LoadNull")
+    elif isinstance(pattern, str) and (pattern.startswith('"') or pattern.startswith("'")):
+        ctx.emit({"LoadStr": pattern.strip('"\'')})
+    elif isinstance(pattern, int):
+        ctx.emit({"LoadInt": pattern})
+    elif isinstance(pattern, float):
+        ctx.emit({"LoadFloat": pattern})
+    else:
+        # Intento numérico; si no, string literal (no variable)
+        try:
+            ctx.emit({"LoadInt": int(str(pattern))})
+        except (ValueError, TypeError):
+            try:
+                ctx.emit({"LoadFloat": float(str(pattern))})
+            except (ValueError, TypeError):
+                ctx.emit({"LoadStr": str(pattern)})
 
 
 # ---------------------------------------------------------------------------

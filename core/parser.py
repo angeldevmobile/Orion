@@ -461,6 +461,18 @@ def _parse_statement(tokens, i):
         expr_value, j = parse_expression(tokens, i+3)
         return ("ASSIGN", var_name, expr_value), j
     
+    # --- ERROR statement: error <expr>  →  lanza un error explícito ---
+    elif kind == "ERROR_KW":
+        i += 1  # consumir 'error'
+        msg_expr, i = parse_expression(tokens, i)
+        return ("ERROR_STMT", msg_expr), i
+
+    # --- ERROR statement: error <expr>  →  lanza un error explícito ---
+    elif kind == "ERROR_KW":
+        i += 1  # consumir 'error'
+        msg_expr, i = parse_expression(tokens, i)
+        return ("ERROR_STMT", msg_expr), i
+
     # --- ATTEMPT/HANDLE statement ---
     elif kind == "ATTEMPT":  # Cambio aquí: usar ATTEMPT directamente
         i += 1  # consumir 'attempt'
@@ -549,6 +561,172 @@ def _parse_statement(tokens, i):
                 raise OrionSyntaxError("Se esperaba ']' para cerrar 'take'")
             j += 1  # skip ]
         return ("USE", module_path, alias, selective), j
+
+    # --- IO nativos: ask / read / write / env ---
+
+    elif kind == "ASK":
+        # ask "msg" -> var
+        # ask "msg" as int -> var
+        # ask "msg" choices [...] -> var
+        j = i + 1
+        prompt_expr, j = parse_expression(tokens, j)
+        cast_type = None
+        choices_expr = None
+        # opcionales: as <type>  |  choices [...]
+        while j < len(tokens) and tokens[j][0] in ("AS", "CHOICES"):
+            if tokens[j][0] == "AS":
+                j += 1
+                cast_type = tokens[j][1]   # "int", "float", etc.
+                j += 1
+            elif tokens[j][0] == "CHOICES":
+                j += 1
+                choices_expr, j = parse_expression(tokens, j)
+        # obligatorio: -> var
+        if j >= len(tokens) or tokens[j][0] != "THIN_ARROW":
+            raise OrionSyntaxError("Se esperaba '->' después de ask")
+        j += 1
+        if j >= len(tokens) or tokens[j][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de variable después de '->'")
+        var_name = tokens[j][1]
+        j += 1
+        return ("ASK_STMT", prompt_expr, cast_type, choices_expr, var_name), j
+
+    elif kind == "READ_KW":
+        # read "archivo" -> var
+        # read "archivo" as json -> var
+        j = i + 1
+        path_expr, j = parse_expression(tokens, j)
+        cast_type = None
+        if j < len(tokens) and tokens[j][0] == "AS":
+            j += 1
+            cast_type = tokens[j][1]   # "json", "lines", etc.
+            j += 1
+        if j >= len(tokens) or tokens[j][0] != "THIN_ARROW":
+            raise OrionSyntaxError("Se esperaba '->' después de read")
+        j += 1
+        if j >= len(tokens) or tokens[j][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de variable después de '->'")
+        var_name = tokens[j][1]
+        j += 1
+        return ("READ_STMT", path_expr, cast_type, var_name), j
+
+    elif kind == "WRITE_KW":
+        # write "archivo" with expr
+        # write "archivo" append expr
+        j = i + 1
+        path_expr, j = parse_expression(tokens, j)
+        if j < len(tokens) and tokens[j][0] == "APPEND_KW":
+            j += 1
+            data_expr, j = parse_expression(tokens, j)
+            return ("WRITE_STMT", path_expr, data_expr, "append"), j
+        elif j < len(tokens) and tokens[j][0] == "WITH":
+            j += 1
+            data_expr, j = parse_expression(tokens, j)
+            return ("WRITE_STMT", path_expr, data_expr, "write"), j
+        else:
+            raise OrionSyntaxError("Se esperaba 'with' o 'append' después de la ruta en write")
+
+    elif kind == "ENV_KW":
+        # env "KEY" -> var
+        # env "KEY" as int -> var
+        j = i + 1
+        key_expr, j = parse_expression(tokens, j)
+        cast_type = None
+        if j < len(tokens) and tokens[j][0] == "AS":
+            j += 1
+            cast_type = tokens[j][1]
+            j += 1
+        if j >= len(tokens) or tokens[j][0] != "THIN_ARROW":
+            raise OrionSyntaxError("Se esperaba '->' después de env")
+        j += 1
+        if j >= len(tokens) or tokens[j][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de variable después de '->'")
+        var_name = tokens[j][1]
+        j += 1
+        return ("ENV_STMT", key_expr, cast_type, var_name), j
+
+    # --- IO nativos: ask / read / write / env ---
+
+    elif kind == "ASK":
+        # ask "msg" -> var
+        # ask "msg" as int -> var
+        # ask "msg" choices [...] -> var
+        j = i + 1
+        prompt_expr, j = parse_expression(tokens, j)
+        cast_type = None
+        choices_expr = None
+        # opcionales: as <type>  |  choices [...]
+        while j < len(tokens) and tokens[j][0] in ("AS", "CHOICES"):
+            if tokens[j][0] == "AS":
+                j += 1
+                cast_type = tokens[j][1]   # "int", "float", etc.
+                j += 1
+            elif tokens[j][0] == "CHOICES":
+                j += 1
+                choices_expr, j = parse_expression(tokens, j)
+        # obligatorio: -> var
+        if j >= len(tokens) or tokens[j][0] != "THIN_ARROW":
+            raise OrionSyntaxError("Se esperaba '->' después de ask")
+        j += 1
+        if j >= len(tokens) or tokens[j][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de variable después de '->'")
+        var_name = tokens[j][1]
+        j += 1
+        return ("ASK_STMT", prompt_expr, cast_type, choices_expr, var_name), j
+
+    elif kind == "READ_KW":
+        # read "archivo" -> var
+        # read "archivo" as json -> var
+        j = i + 1
+        path_expr, j = parse_expression(tokens, j)
+        cast_type = None
+        if j < len(tokens) and tokens[j][0] == "AS":
+            j += 1
+            cast_type = tokens[j][1]   # "json", "lines", etc.
+            j += 1
+        if j >= len(tokens) or tokens[j][0] != "THIN_ARROW":
+            raise OrionSyntaxError("Se esperaba '->' después de read")
+        j += 1
+        if j >= len(tokens) or tokens[j][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de variable después de '->'")
+        var_name = tokens[j][1]
+        j += 1
+        return ("READ_STMT", path_expr, cast_type, var_name), j
+
+    elif kind == "WRITE_KW":
+        # write "archivo" with expr
+        # write "archivo" append expr
+        j = i + 1
+        path_expr, j = parse_expression(tokens, j)
+        if j < len(tokens) and tokens[j][0] == "APPEND_KW":
+            j += 1
+            data_expr, j = parse_expression(tokens, j)
+            return ("WRITE_STMT", path_expr, data_expr, "append"), j
+        elif j < len(tokens) and tokens[j][0] == "WITH":
+            j += 1
+            data_expr, j = parse_expression(tokens, j)
+            return ("WRITE_STMT", path_expr, data_expr, "write"), j
+        else:
+            raise OrionSyntaxError("Se esperaba 'with' o 'append' después de la ruta en write")
+
+    elif kind == "ENV_KW":
+        # env "KEY" -> var
+        # env "KEY" as int -> var
+        j = i + 1
+        key_expr, j = parse_expression(tokens, j)
+        cast_type = None
+        if j < len(tokens) and tokens[j][0] == "AS":
+            j += 1
+            cast_type = tokens[j][1]
+            j += 1
+        if j >= len(tokens) or tokens[j][0] != "THIN_ARROW":
+            raise OrionSyntaxError("Se esperaba '->' después de env")
+        j += 1
+        if j >= len(tokens) or tokens[j][0] != "IDENT":
+            raise OrionSyntaxError("Se esperaba un nombre de variable después de '->'")
+        var_name = tokens[j][1]
+        j += 1
+        return ("ENV_STMT", key_expr, cast_type, var_name), j
 
     # --- SERVE statement: serve <port> <fn_name> ---
     # Sintaxis: serve 8080 handler_fn

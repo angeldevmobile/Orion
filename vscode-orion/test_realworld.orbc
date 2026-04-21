@@ -1,0 +1,893 @@
+{
+  "main": [
+    {
+      "LoadInt": 200
+    },
+    {
+      "Call": [
+        "describir_codigo",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 404
+    },
+    {
+      "Call": [
+        "describir_codigo",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 500
+    },
+    {
+      "Call": [
+        "describir_codigo",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadInt": 302
+    },
+    {
+      "Call": [
+        "describir_codigo",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "admin"
+    },
+    {
+      "Call": [
+        "rol_acceso",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "viewer"
+    },
+    {
+      "Call": [
+        "rol_acceso",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "guest"
+    },
+    {
+      "Call": [
+        "rol_acceso",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== match OK ==="
+    },
+    "Show",
+    {
+      "LoadStr": "host"
+    },
+    {
+      "LoadStr": "localhost"
+    },
+    {
+      "LoadStr": "puerto"
+    },
+    {
+      "LoadStr": "9090"
+    },
+    {
+      "LoadStr": "modo"
+    },
+    {
+      "LoadStr": "produccion"
+    },
+    {
+      "LoadStr": "version"
+    },
+    {
+      "LoadStr": "1.0"
+    },
+    {
+      "MakeDict": 4
+    },
+    {
+      "StoreVar": "config"
+    },
+    {
+      "LoadStr": "-- Configuraci\u00f3n del servidor:"
+    },
+    "Show",
+    {
+      "LoadVar": "config"
+    },
+    {
+      "StoreVar": "__dict_0__"
+    },
+    {
+      "LoadVar": "__dict_0__"
+    },
+    {
+      "Call": [
+        "keys",
+        1
+      ]
+    },
+    {
+      "StoreVar": "__keys_0__"
+    },
+    {
+      "LoadVar": "__keys_0__"
+    },
+    {
+      "Call": [
+        "len",
+        1
+      ]
+    },
+    {
+      "StoreVar": "__dlen_0__"
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "StoreVar": "__didx_0__"
+    },
+    {
+      "LoadVar": "__didx_0__"
+    },
+    {
+      "LoadVar": "__dlen_0__"
+    },
+    "Lt",
+    {
+      "JumpIfFalse": 68
+    },
+    {
+      "LoadVar": "__keys_0__"
+    },
+    {
+      "LoadVar": "__didx_0__"
+    },
+    "GetIndex",
+    {
+      "StoreVar": "clave"
+    },
+    {
+      "LoadVar": "__dict_0__"
+    },
+    {
+      "LoadVar": "clave"
+    },
+    "GetIndex",
+    {
+      "StoreVar": "valor"
+    },
+    {
+      "LoadVar": "clave"
+    },
+    {
+      "LoadStr": " = "
+    },
+    "Add",
+    {
+      "LoadVar": "valor"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadVar": "__didx_0__"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    {
+      "StoreVar": "__didx_0__"
+    },
+    {
+      "Jump": 45
+    },
+    {
+      "LoadStr": "manzanas"
+    },
+    {
+      "LoadStr": "50"
+    },
+    {
+      "LoadStr": "peras"
+    },
+    {
+      "LoadStr": "30"
+    },
+    {
+      "LoadStr": "uvas"
+    },
+    {
+      "LoadStr": "20"
+    },
+    {
+      "MakeDict": 3
+    },
+    {
+      "StoreVar": "inventario"
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "StoreVar": "total_items"
+    },
+    {
+      "LoadVar": "inventario"
+    },
+    {
+      "StoreVar": "__dict_1__"
+    },
+    {
+      "LoadVar": "__dict_1__"
+    },
+    {
+      "Call": [
+        "keys",
+        1
+      ]
+    },
+    {
+      "StoreVar": "__keys_1__"
+    },
+    {
+      "LoadVar": "__keys_1__"
+    },
+    {
+      "Call": [
+        "len",
+        1
+      ]
+    },
+    {
+      "StoreVar": "__dlen_1__"
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "StoreVar": "__didx_1__"
+    },
+    {
+      "LoadVar": "__didx_1__"
+    },
+    {
+      "LoadVar": "__dlen_1__"
+    },
+    "Lt",
+    {
+      "JumpIfFalse": 117
+    },
+    {
+      "LoadVar": "__keys_1__"
+    },
+    {
+      "LoadVar": "__didx_1__"
+    },
+    "GetIndex",
+    {
+      "StoreVar": "producto"
+    },
+    {
+      "LoadVar": "__dict_1__"
+    },
+    {
+      "LoadVar": "producto"
+    },
+    "GetIndex",
+    {
+      "StoreVar": "cantidad"
+    },
+    {
+      "LoadStr": "Producto: "
+    },
+    {
+      "LoadVar": "producto"
+    },
+    "Add",
+    {
+      "LoadStr": " | Stock: "
+    },
+    "Add",
+    {
+      "LoadVar": "cantidad"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadVar": "total_items"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    {
+      "StoreVar": "total_items"
+    },
+    {
+      "LoadVar": "__didx_1__"
+    },
+    {
+      "LoadInt": 1
+    },
+    "Add",
+    {
+      "StoreVar": "__didx_1__"
+    },
+    {
+      "Jump": 88
+    },
+    {
+      "LoadStr": "Total productos: "
+    },
+    {
+      "LoadVar": "total_items"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "=== for k,v in dict OK ==="
+    },
+    "Show",
+    {
+      "LoadStr": "Orion"
+    },
+    {
+      "StoreVar": "nombre"
+    },
+    {
+      "LoadStr": "1.0"
+    },
+    {
+      "StoreVar": "version"
+    },
+    {
+      "LoadStr": "Bienvenido a "
+    },
+    {
+      "LoadVar": "nombre"
+    },
+    "Add",
+    {
+      "LoadStr": " v"
+    },
+    "Add",
+    {
+      "LoadVar": "version"
+    },
+    "Add",
+    {
+      "LoadStr": "!"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "Angel"
+    },
+    {
+      "LoadStr": "admin"
+    },
+    {
+      "Call": [
+        "saludo",
+        2
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== interpolacion OK ==="
+    },
+    "Show",
+    {
+      "LoadStr": "=== TODAS LAS PRUEBAS PASARON ==="
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    19,
+    19,
+    19,
+    20,
+    20,
+    20,
+    21,
+    21,
+    21,
+    22,
+    22,
+    22,
+    34,
+    34,
+    34,
+    35,
+    35,
+    35,
+    36,
+    36,
+    36,
+    38,
+    38,
+    44,
+    44,
+    44,
+    44,
+    44,
+    44,
+    44,
+    44,
+    44,
+    44,
+    51,
+    51,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    52,
+    53,
+    53,
+    53,
+    53,
+    53,
+    53,
+    53,
+    53,
+    53,
+    53,
+    53,
+    57,
+    57,
+    57,
+    57,
+    57,
+    57,
+    57,
+    57,
+    63,
+    63,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    64,
+    65,
+    65,
+    65,
+    65,
+    65,
+    65,
+    65,
+    65,
+    66,
+    66,
+    66,
+    66,
+    66,
+    66,
+    66,
+    66,
+    66,
+    68,
+    68,
+    68,
+    68,
+    68,
+    70,
+    70,
+    76,
+    76,
+    77,
+    77,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    84,
+    84,
+    84,
+    84,
+    86,
+    86,
+    87,
+    87,
+    87
+  ],
+  "functions": {
+    "describir_codigo": {
+      "params": [
+        "codigo"
+      ],
+      "body": [
+        {
+          "LoadVar": "codigo"
+        },
+        {
+          "StoreVar": "__match_0__"
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadInt": 200
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 9
+        },
+        {
+          "LoadStr": "OK"
+        },
+        "Return",
+        {
+          "Jump": 50
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadInt": 201
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 16
+        },
+        {
+          "LoadStr": "Creado"
+        },
+        "Return",
+        {
+          "Jump": 50
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadInt": 400
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 23
+        },
+        {
+          "LoadStr": "Petici\u00f3n inv\u00e1lida"
+        },
+        "Return",
+        {
+          "Jump": 50
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadInt": 401
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 30
+        },
+        {
+          "LoadStr": "No autorizado"
+        },
+        "Return",
+        {
+          "Jump": 50
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadInt": 404
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 37
+        },
+        {
+          "LoadStr": "No encontrado"
+        },
+        "Return",
+        {
+          "Jump": 50
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadInt": 500
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 44
+        },
+        {
+          "LoadStr": "Error del servidor"
+        },
+        "Return",
+        {
+          "Jump": 50
+        },
+        {
+          "LoadStr": "C\u00f3digo desconocido: "
+        },
+        {
+          "LoadVar": "codigo"
+        },
+        {
+          "Call": [
+            "str",
+            1
+          ]
+        },
+        "Add",
+        "Return",
+        {
+          "Jump": 50
+        },
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        11,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        12,
+        13,
+        13,
+        13,
+        13,
+        13,
+        13,
+        13,
+        14,
+        14,
+        14,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15
+      ]
+    },
+    "rol_acceso": {
+      "params": [
+        "rol"
+      ],
+      "body": [
+        {
+          "LoadVar": "rol"
+        },
+        {
+          "StoreVar": "__match_0__"
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadStr": "admin"
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 9
+        },
+        {
+          "LoadStr": "acceso total"
+        },
+        "Return",
+        {
+          "Jump": 26
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadStr": "editor"
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 16
+        },
+        {
+          "LoadStr": "puede editar"
+        },
+        "Return",
+        {
+          "Jump": 26
+        },
+        {
+          "LoadVar": "__match_0__"
+        },
+        {
+          "LoadStr": "viewer"
+        },
+        "Eq",
+        {
+          "JumpIfFalse": 23
+        },
+        {
+          "LoadStr": "solo lectura"
+        },
+        "Return",
+        {
+          "Jump": 26
+        },
+        {
+          "LoadStr": "sin acceso"
+        },
+        "Return",
+        {
+          "Jump": 26
+        },
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        26,
+        26,
+        26,
+        26,
+        26,
+        26,
+        27,
+        27,
+        27,
+        27,
+        27,
+        27,
+        27,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        28,
+        29,
+        29,
+        29,
+        30,
+        30,
+        30,
+        30,
+        30
+      ]
+    },
+    "saludo": {
+      "params": [
+        "usuario",
+        "nivel"
+      ],
+      "body": [
+        {
+          "LoadStr": "Hola "
+        },
+        {
+          "LoadVar": "usuario"
+        },
+        "Add",
+        {
+          "LoadStr": ", tu nivel es "
+        },
+        "Add",
+        {
+          "LoadVar": "nivel"
+        },
+        "Add",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        81,
+        81,
+        81,
+        81,
+        81,
+        81,
+        81,
+        81,
+        81,
+        81
+      ]
+    }
+  },
+  "shapes": {}
+}

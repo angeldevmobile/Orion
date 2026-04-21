@@ -69,9 +69,16 @@ pub enum Instruction {
     //   Manejo de errores
     BeginAttempt(usize), // push handler — si hay error, salta a usize (error en stack)
     EndAttempt(usize),   // pop handler (bloque attempt ok), salta a usize (fin del handle)
+    Raise,               // pop mensaje del stack y lanza error explícito
 
     //   I/O nativo
     Show,                // muestra el top del stack
+
+    //   IO del lenguaje: ask / read / write / env
+    ReadInput { cast: Option<String>, choices: bool }, // pop prompt (+ lista si choices=true) → stdin → push String
+    ReadFile(String),    // pop path → lee archivo → push String (cast: "text","json","lines")
+    WriteFile(String),   // pop data, pop path → escribe archivo (mode: "write","append")
+    ReadEnv(String),     // pop key → lee var de entorno → push String (cast: "text","int","float")
 
     //   IA nativa (Fase 4)
     AiAsk,               // pop prompt → llama AI → push String respuesta

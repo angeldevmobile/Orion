@@ -1,0 +1,87 @@
+-- test_realworld.orx — Features para uso real: match, for k/v in dict, interpolación
+
+-- ══════════════════════════════
+-- 1. MATCH — pattern matching
+-- ══════════════════════════════
+
+fn describir_codigo(codigo) {
+    match codigo {
+        200: { return "OK" }
+        201: { return "Creado" }
+        400: { return "Petición inválida" }
+        401: { return "No autorizado" }
+        404: { return "No encontrado" }
+        500: { return "Error del servidor" }
+        else: { return "Código desconocido: " + str(codigo) }
+    }
+}
+
+show describir_codigo(200)
+show describir_codigo(404)
+show describir_codigo(500)
+show describir_codigo(302)
+
+-- match con strings
+fn rol_acceso(rol) {
+    match rol {
+        "admin": { return "acceso total" }
+        "editor": { return "puede editar" }
+        "viewer": { return "solo lectura" }
+        else: { return "sin acceso" }
+    }
+}
+
+show rol_acceso("admin")
+show rol_acceso("viewer")
+show rol_acceso("guest")
+
+show "=== match OK ==="
+
+-- ══════════════════════════════════
+-- 2. FOR K, V IN DICT — iteración
+-- ══════════════════════════════════
+
+config = {
+    "host": "localhost",
+    "puerto": "9090",
+    "modo": "produccion",
+    "version": "1.0"
+}
+
+show "-- Configuración del servidor:"
+for clave, valor in config {
+    show clave + " = " + valor
+}
+
+-- Contar entradas de un dict
+inventario = {
+    "manzanas": "50",
+    "peras": "30",
+    "uvas": "20"
+}
+
+total_items = 0
+for producto, cantidad in inventario {
+    show "Producto: " + producto + " | Stock: " + cantidad
+    total_items = total_items + 1
+}
+show "Total productos: " + str(total_items)
+
+show "=== for k,v in dict OK ==="
+
+-- ══════════════════════════════════
+-- 3. STRING INTERPOLATION con ${}
+-- ══════════════════════════════════
+
+nombre = "Orion"
+version = "1.0"
+show "Bienvenido a ${nombre} v${version}!"
+
+fn saludo(usuario, nivel) {
+    return "Hola ${usuario}, tu nivel es ${nivel}"
+}
+
+show saludo("Angel", "admin")
+
+show "=== interpolacion OK ==="
+show "=== TODAS LAS PRUEBAS PASARON ==="

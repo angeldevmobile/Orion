@@ -1,0 +1,22 @@
+-- Test IO nativo con sintaxis Orion
+-- write / read / env
+
+-- 1) Escribir un archivo y releerlo
+write "test_io_out.txt" with "Hola desde Orion IO!"
+read "test_io_out.txt" -> contenido
+show "Leido: " + contenido
+
+-- 2) Append
+write "test_log.txt" with "entrada 1"
+write "test_log.txt" append "entrada 2"
+write "test_log.txt" append "entrada 3"
+read "test_log.txt" -> log_data
+show "Log:"
+show log_data
+
+-- 3) Leer variable de entorno (PATH siempre existe)
+env "PATH" -> ruta
+show "PATH empieza con: " + ruta
+
+-- 4) ask se prueba aparte (requiere stdin interactivo)
+show "=== IO OK ==="

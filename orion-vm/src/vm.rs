@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::io::{self, Write};
 use crate::instruction::Instruction;
 use crate::value::{Value, InstanceData};
 use crate::bytecode::{FunctionDef, ShapeDef};
@@ -245,6 +246,11 @@ impl VM {
                 self.error_handlers.pop();
                 self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = end_addr;
             }
+            Instruction::Raise => {
+                // error "mensaje"  →  lanza error explícito (igual que runtime error)
+                let msg = self.pop()?;
+                return Err(msg.to_string());
+            }
 
             // ── Funciones ───────────────────────────────────────────────────
             Instruction::Call(name, argc) => {
@@ -435,6 +441,101 @@ impl VM {
             Instruction::Show => {
                 let val = self.pop()?;
                 println!("{}", val);
+            }
+
+            // ── IO nativo: ask / read / write / env ───────────────────────────
+            Instruction::ReadInput { cast, choices } => {
+                let prompt = self.pop()?;
+
+                // Si hay choices, están en el stack debajo del prompt (ya extraímos prompt)
+                let choices_list: Option<Vec<Value>> = if choices {
+                    let c = self.pop()?;
+                    if let Value::List(v) = c { Some(v) } else { None }
+                } else {
+                    None
+                };
+
+                // Mostrar opciones si hay
+                if let Some(ref opts) = choices_list {
+                    let opts_str: Vec<String> = opts.iter().map(|v| v.to_string()).collect();
+                    print!("{} [{}]: ", prompt, opts_str.join(" / "));
+                } else {
+                    print!("{}", prompt);
+                }
+                io::stdout().flush().ok();
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input).map_err(|e| e.to_string())?;
+                let raw = input.trim().to_string();
+
+                // Validar choices si se definieron
+                if let Some(ref opts) = choices_list {
+                    let opts_str: Vec<String> = opts.iter().map(|v| v.to_string()).collect();
+                    if !opts_str.contains(&raw) {
+                        return Err(format!("Opción inválida '{}'. Elige entre: {}", raw, opts_str.join(", ")));
+                    }
+                }
+
+                // Cast de tipo
+                let result = match cast.as_deref() {
+                    Some("int")   => Value::Int(raw.parse::<i64>().map_err(|_| format!("No se puede convertir '{}' a int", raw))?),
+                    Some("float") => Value::Float(raw.parse::<f64>().map_err(|_| format!("No se puede convertir '{}' a float", raw))?),
+                    Some("bool")  => Value::Bool(matches!(raw.as_str(), "yes" | "true" | "1")),
+                    _             => Value::Str(raw),
+                };
+                self.value_stack.push(result);
+            }
+
+            Instruction::ReadFile(fmt) => {
+                let path_val = self.pop()?;
+                let path = path_val.to_string();
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("read: no se pudo leer '{}': {}", path, e))?;
+                let result = match fmt.as_str() {
+                    "json" => {
+                        let parsed: serde_json::Value = serde_json::from_str(&content)
+                            .map_err(|e| format!("read as json: {}", e))?;
+                        json_to_value(parsed)
+                    }
+                    "lines" => {
+                        let lines: Vec<Value> = content.lines().map(|l| Value::Str(l.to_string())).collect();
+                        Value::List(lines)
+                    }
+                    _ => Value::Str(content),
+                };
+                self.value_stack.push(result);
+            }
+
+            Instruction::WriteFile(mode) => {
+                let data_val = self.pop()?;
+                let path_val = self.pop()?;
+                let path = path_val.to_string();
+                let data = data_val.to_string();
+                match mode.as_str() {
+                    "append" => {
+                        use std::io::Write;
+                        let mut f = std::fs::OpenOptions::new()
+                            .create(true).append(true).open(&path)
+                            .map_err(|e| format!("write append '{}': {}", path, e))?;
+                        writeln!(f, "{}", data).map_err(|e| e.to_string())?;
+                    }
+                    _ => {
+                        std::fs::write(&path, format!("{}\n", data))
+                            .map_err(|e| format!("write '{}': {}", path, e))?;
+                    }
+                }
+            }
+
+            Instruction::ReadEnv(cast) => {
+                let key_val = self.pop()?;
+                let key = key_val.to_string();
+                let raw = std::env::var(&key).unwrap_or_default();
+                let result = match cast.as_str() {
+                    "int"   => Value::Int(raw.parse::<i64>().unwrap_or(0)),
+                    "float" => Value::Float(raw.parse::<f64>().unwrap_or(0.0)),
+                    _       => Value::Str(raw),
+                };
+                self.value_stack.push(result);
             }
 
             // ── IA nativa (Fase 4) ────────────────────────────────────────────
@@ -1040,6 +1141,29 @@ impl VM {
 // ---------------------------------------------------------------------------
 // AI HTTP helper — usado por AiAsk / AiLearn / AiSense
 // ---------------------------------------------------------------------------
+
+/// Convierte un serde_json::Value en un Value de Orion.
+fn json_to_value(v: serde_json::Value) -> Value {
+    match v {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(b),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() { Value::Int(i) }
+            else { Value::Float(n.as_f64().unwrap_or(0.0)) }
+        }
+        serde_json::Value::String(s) => Value::Str(s),
+        serde_json::Value::Array(arr) => {
+            Value::List(arr.into_iter().map(json_to_value).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let mut hm = std::collections::HashMap::new();
+            for (k, val) in map {
+                hm.insert(k, json_to_value(val));
+            }
+            Value::Dict(hm)
+        }
+    }
+}
 
 /// Carga variables de un archivo .env (sin dependencias externas).
 fn load_dotenv() {

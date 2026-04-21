@@ -1,0 +1,3 @@
+entrada 1
+entrada 2
+entrada 3

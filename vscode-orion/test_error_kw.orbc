@@ -1,0 +1,182 @@
+{
+  "main": [
+    {
+      "BeginAttempt": 4
+    },
+    {
+      "LoadStr": "algo sali\u00f3 mal"
+    },
+    "Raise",
+    {
+      "EndAttempt": 9
+    },
+    {
+      "StoreVar": "err"
+    },
+    {
+      "LoadStr": "Capturado: "
+    },
+    {
+      "LoadVar": "err"
+    },
+    "Add",
+    "Show",
+    {
+      "BeginAttempt": 15
+    },
+    {
+      "LoadInt": 5
+    },
+    "Neg",
+    {
+      "Call": [
+        "validar",
+        1
+      ]
+    },
+    {
+      "StoreVar": "resultado"
+    },
+    {
+      "EndAttempt": 20
+    },
+    {
+      "StoreVar": "err"
+    },
+    {
+      "LoadStr": "Validaci\u00f3n fall\u00f3: "
+    },
+    {
+      "LoadVar": "err"
+    },
+    "Add",
+    "Show",
+    {
+      "LoadInt": 10
+    },
+    {
+      "Call": [
+        "validar",
+        1
+      ]
+    },
+    {
+      "StoreVar": "resultado_ok"
+    },
+    {
+      "LoadStr": "Resultado v\u00e1lido: "
+    },
+    {
+      "LoadVar": "resultado_ok"
+    },
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    "Show",
+    {
+      "LoadStr": "=== error keyword OK ==="
+    },
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    4,
+    5,
+    5,
+    5,
+    5,
+    7,
+    7,
+    7,
+    7,
+    18,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    21,
+    21,
+    21,
+    21,
+    24,
+    24,
+    24,
+    25,
+    25,
+    25,
+    25,
+    25,
+    27,
+    27,
+    27
+  ],
+  "functions": {
+    "validar": {
+      "params": [
+        "n"
+      ],
+      "body": [
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 0
+        },
+        "Lt",
+        {
+          "JumpIfFalse": 9
+        },
+        {
+          "LoadStr": "n\u00famero negativo: "
+        },
+        {
+          "LoadVar": "n"
+        },
+        {
+          "Call": [
+            "str",
+            1
+          ]
+        },
+        "Add",
+        "Raise",
+        {
+          "LoadVar": "n"
+        },
+        {
+          "LoadInt": 2
+        },
+        "Mul",
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        12,
+        12,
+        12,
+        12,
+        13,
+        13,
+        13,
+        13,
+        13,
+        15,
+        15,
+        15,
+        15,
+        15,
+        15
+      ]
+    }
+  },
+  "shapes": {}
+}

@@ -52,6 +52,7 @@ _TOKEN_SPECIFICATION = [
     ("USE",      r"\buse\b"),
     ("ATTEMPT",  r"\battempt\b"),
     ("HANDLE",   r"\bhandle\b"),
+    ("ERROR_KW",  r"\berror\b"),
     ("YES",      r"\byes\b"),
     ("NO",       r"\bno\b"),
     ("AS",       r"\bas\b"),
@@ -77,10 +78,18 @@ _TOKEN_SPECIFICATION = [
     ("PARALLEL",  r"\bparallel\b"),   
     ("LOCK",      r"\block\b"),
 
+    # --- IO nativo ---
+    ("ASK",       r"\bask\b"),
+    ("READ_KW",   r"\bread\b"),
+    ("WRITE_KW",  r"\bwrite\b"),
+    ("ENV_KW",    r"\benv\b"),
+    ("APPEND_KW", r"\bappend\b"),
+
     # --- Servidor / red nativa ---
     ("SERVE",     r"\bserve\b"),
     ("ROUTE",     r"\broute\b"),
     ("WITH",      r"\bwith\b"),
+    ("CHOICES",   r"\bchoices\b"),
 
     # --- Inteligencia Artificial / simbiótico ---
     ("THINK",     r"\bthink\b"),
@@ -242,7 +251,8 @@ def lex(code, track_position=False):
             "TASK", "STREAM", "SHAPE", "ACT", "USING", "IS",
             "ON_CREATE", "ON_EVENT", "ON_ERROR", "ME", "SUPER",
             "NULL", "UNDEFINED", "AUTO", "ANY", "AMPERSAND", "AT",
-            "AS", "TAKE", "SERVE", "ROUTE", "WITH"
+            "AS", "TAKE", "SERVE", "ROUTE", "WITH", "ERROR_KW",
+            "ASK", "READ_KW", "WRITE_KW", "ENV_KW", "APPEND_KW", "CHOICES"
         ):
             tokens.append(Token(kind, value, line, column) if track_position
                          else (kind, value, line))
