@@ -382,11 +382,29 @@ def parse_or(tokens, i):
 
 
 def parse_expression(tokens, i):
+    # Caso 0: fn(params) { body } — función anónima como expresión
+    if (i < len(tokens) and tokens[i][0] == "FN" and
+            i + 1 < len(tokens) and tokens[i + 1][0] == "LPAREN"):
+        j = i + 1  # apunta a '('
+        params, _, j = parse_fn_params(tokens, j)
+        while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+            j += 1
+        if j < len(tokens) and tokens[j][0] == "THIN_ARROW":
+            j += 1
+            if j < len(tokens) and tokens[j][0] in ("TYPE", "IDENT"):
+                j += 1  # consumir tipo de retorno (ignorado en LAMBDA)
+        while j < len(tokens) and tokens[j][0] in ("NEWLINE", "SEMICOLON"):
+            j += 1
+        if j >= len(tokens) or tokens[j][0] != "LBRACE":
+            raise OrionSyntaxError("Se esperaba '{' en función anónima")
+        body, j = parse_block(tokens, j)
+        return ("LAMBDA", params, body), j
+
     # Verificar si es una lambda
     if i < len(tokens):
         # Caso 1: IDENT => expr
-        if (i + 1 < len(tokens) and 
-            tokens[i][0] == "IDENT" and 
+        if (i + 1 < len(tokens) and
+            tokens[i][0] == "IDENT" and
             tokens[i + 1][0] == "ARROW"):
             return parse_lambda(tokens, i)
         

@@ -1,0 +1,23 @@
+use "server" as srv
+
+app = srv.create()
+
+app.get("/", fn(req) {
+    return "Hola desde Orion Server!"
+})
+
+app.get("/saludo/:nombre", fn(req) {
+    nombre = req.url_params.nombre
+    return "Hola, " + nombre + "!"
+})
+
+app.post("/echo", fn(req) {
+    return req.body
+})
+
+app.get("/status", fn(req) {
+    return {"status": 200, "body": "OK", "content_type": "application/json"}
+})
+
+show "Iniciando servidor..."
+app.listen(9999)

@@ -257,21 +257,161 @@ packages/   → math.orx, strings.orx, list.orx  (escritos en Orion)
 
 ---
 
-## Cómo ejecutar
+## CLI — Orion Command Line
+
+Orion incluye un CLI completo inspirado en las mejores herramientas modernas (Rust/Cargo, Node/npm, Flutter).
+
+### Instalación
 
 ```bash
-# REPL interactivo (sin argumentos)
-python src/main.py
+pip install -e .
+```
 
-# Intérprete directo
-python src/main.py archivo.orx
+Luego puedes usar `orion` directamente desde cualquier terminal.
 
-# Compilar a bytecode
-python compiler/bytecode_compiler.py archivo.orx
+### Comandos de desarrollo
 
-# Compilar + ejecutar con VM Rust
-python compiler/bytecode_compiler.py archivo.orx
-.\orion-vm\target\release\orion.exe archivo.orbc
+```bash
+# Ejecutar un archivo directamente
+orion archivo.orx
+
+# REPL interactivo (multi-línea, auto-print, comandos)
+orion
+```
+
+### Comandos de proyecto
+
+```bash
+# Crear un proyecto backend nuevo (scaffold completo)
+orion new mi-api
+
+# Verificar sintaxis sin ejecutar
+orion check main.orx
+
+# Compilar a bytecode sin ejecutar
+orion build main.orx
+```
+
+`orion new` genera esta estructura automáticamente:
+
+```
+mi-api/
+├── main.orx          ← servidor backend listo para usar
+├── orion.json        ← manifiesto del proyecto
+├── .env.example      ← variables de entorno
+├── .gitignore
+├── lib/
+│   └── utils.orx     ← helpers reutilizables
+└── test/
+    └── test_routes.orx
+```
+
+### Comandos de calidad
+
+```bash
+# Hot reload — recompila y re-ejecuta automáticamente al guardar
+orion watch main.orx
+
+# Benchmark de ejecución (default: 10 corridas)
+orion bench main.orx
+orion bench main.orx --runs=20
+
+# Test runner — auto-descubre test_*.orx y test/*.orx
+orion test
+orion test mi-carpeta/
+```
+
+#### `orion watch` — desarrollo sin interrupciones
+
+Detecta cambios al guardar y recompila + re-ejecuta automáticamente. Sin `Ctrl+C`, sin reinicios manuales.
+
+```
+──────────────────── 22:14:01 ────────────────────
+Hola mundo
+──────────────────── 22:14:08 ────────────────────   ← guardaste el archivo
+Hola Orion
+```
+
+#### `orion bench` — rendimiento real
+
+Mide tiempo de ejecución con N corridas y muestra tabla con promedio, mediana, mejor, peor y std dev, con barra visual proporcional.
+
+#### `orion test` — testing automatizado
+
+Descubre todos los archivos de test, los compila, ejecuta y reporta:
+
+```
+┌─────────────────────────────┬────────────┬──────────┬──────────────┐
+│ Archivo                     │ Estado     │ Tiempo   │ Info         │
+├─────────────────────────────┼────────────┼──────────┼──────────────┤
+│ test/test_routes.orx        │ ✔ PASS     │ 133ms    │              │
+│ test/test_auth.orx          │ ✖ FAIL     │ 45ms     │ Línea 7: ... │
+└─────────────────────────────┴────────────┴──────────┴──────────────┘
+✔ 1/2 tests pasaron.
+```
+
+### Gestión de paquetes
+
+```bash
+orion add math          # instalar paquete
+orion remove math       # desinstalar
+orion list              # paquetes instalados
+orion search json       # buscar en el registro
+orion update            # actualizar todos
+```
+
+### Diagnóstico
+
+```bash
+# Verifica todo el entorno: Python, Rust, VM, dependencias pip
+orion doctor
+```
+
+```
+┌──────────────────────────┬────────┬──────────────────────────────────┐
+│ Componente               │ Estado │ Detalle                          │
+├──────────────────────────┼────────┼──────────────────────────────────┤
+│ Python >= 3.10           │ ✔ OK   │ 3.13.2                           │
+│ Rust / Cargo             │ ✔ OK   │ cargo 1.89.0                     │
+│ Orion VM (orion.exe)     │ ✔ OK   │ release                          │
+│ pip: rich                │ ✔ OK   │ instalado                        │
+│ pip: watchdog            │ ✔ OK   │ instalado                        │
+│ Bytecode compiler        │ ✔ OK   │ compiler/bytecode_compiler.py    │
+└──────────────────────────┴────────┴──────────────────────────────────┘
+✔ Entorno listo.
+```
+
+### REPL interactivo
+
+```bash
+orion
+```
+
+```
+orion> 2 + 3
+5
+orion> nombre = "Orion"
+orion> "Hola " + nombre
+"Hola Orion"
+orion> fn doble(x) { return x * 2 }
+orion> doble(21)
+42
+orion> :vars          ← muestra todas las variables
+orion> :fns           ← muestra todas las funciones
+orion> :clear         ← limpia el estado
+orion> :help          ← ayuda
+orion> :exit          ← salir
+```
+
+Soporta bloques multi-línea:
+
+```
+orion> fn factorial(n) {
+  ...>     if n <= 1 { return 1 }
+  ...>     return n * factorial(n - 1)
+  ... > }
+orion> factorial(10)
+3628800
 ```
 
 **Desde VSCode:** Abre un archivo `.orx` y usa el botón `⚡ Orion` en la barra de estado.
@@ -314,10 +454,10 @@ python compiler/bytecode_compiler.py archivo.orx
 - [x] Instanciación de shapes, herencia `using`, `on_create` en Rust
 - [x] **`attempt/handle`** en Rust — opcode `BeginAttempt`/`EndAttempt`, pila de handlers, unwinding automático
 - [x] **`for..in` sobre listas** en bytecode — bucle con índice compilado, sin opcode extra
-- [x] **REPL interactivo** — `python src/main.py` sin args abre shell interactivo
+- [x] **REPL interactivo** — `orion` sin args abre shell interactivo
 - [x] Benchmark: intérprete Python vs VM Rust (~137x más rápido)
 
-### 🔄 Fase 4 — IA nativa *(en progreso)*
+### ✅ Fase 4 — IA nativa
 - [x] Módulo `ai` conectado a APIs reales (Claude / OpenAI) vía `.env`
 - [x] `ai.ask()`, `ai.summarize()`, `ai.classify()`, `ai.extract()`, `ai.code()`
 - [x] `ai.fix()`, `ai.translate()`, `ai.sentiment()`, `ai.improve()`, `ai.explain()`
@@ -326,17 +466,158 @@ python compiler/bytecode_compiler.py archivo.orx
 - [x] Auto-detección de proveedor: Claude primero, OpenAI como fallback
 - [x] **Sintaxis nativa `think`** — statement directo sin `use ai`, funciona en intérprete y bytecode
 - [x] **`net.reach()` real** — HTTP sin dependencias externas (usa `urllib`), `requests` como upgrade opcional
-- [ ] `learn` y `sense` como statements nativos
-- [ ] Módulos `vision` e `insight` con APIs reales
-- [ ] `AiAsk` como instrucción nativa en VM Rust (HTTP directo en Rust sin Python)
 
-### 🚀 Fase 5 — Producción y comunidad
-- [ ] Lexer y Parser reescritos en Rust
-- [ ] Compilación a binario nativo (LLVM o Cranelift)
-- [ ] Gestor de paquetes: `orion add paquete`
-- [ ] Documentación oficial
-- [ ] Concurrencia: `async / await`
-- [ ] Comunidad: foro, Discord, ejemplos
+### ✅ Fase 4B — CLI y tooling moderno
+- [x] **CLI completo** — `orion new`, `build`, `check`, `watch`, `bench`, `test`, `doctor`
+- [x] **`orion new`** — scaffold de proyecto backend (main.orx, orion.json, .gitignore, lib/, test/)
+- [x] **`orion watch`** — hot reload, recompila y re-ejecuta al guardar (sin Ctrl+C)
+- [x] **`orion bench`** — benchmark con N corridas, tabla con barra visual proporcional
+- [x] **`orion test`** — test runner que auto-descubre test_*.orx y test/*.orx
+- [x] **`orion doctor`** — health check completo del entorno de desarrollo
+- [x] **`orion build`** — compila a .orbc sin ejecutar
+- [x] **`orion check`** — verifica sintaxis y reporta nodos en ms
+- [x] **Gestor de paquetes** — `orion add`, `remove`, `list`, `search`, `update`
+- [x] **`async/await`** — concurrencia nativa con OS threads reales
+- [x] **REPL v2** — multi-línea, auto-print de expresiones, comandos `:vars`, `:fns`, `:clear`
+
+---
+
+### ✅ Fase 4C — IA nativa completa
+
+- [x] `learn` y `sense` como opcodes reales en VM Rust (`AiLearn` / `AiSense`)
+- [x] `AiAsk` como instrucción nativa en Rust (HTTP directo a Anthropic/OpenAI via `ureq`, sin Python)
+- [x] `vision.describe(img, prompt?)` — Claude Vision o GPT-4o describe cualquier imagen
+- [x] `vision.load_url(url)` — carga imagen desde URL sin dependencias externas
+- [x] `insight.analyze(img, question?)` — análisis de documentos con IA + análisis estructural combinados
+- [x] `insight._load_image` reescrito con `urllib` (sin `requests`)
+
+```orion
+-- IA como parte del lenguaje, sin imports
+learn "eres un asistente de código"
+sense datos_del_usuario
+think "resume esto en 3 puntos: " + contenido
+
+-- Vision con IA real
+use "vision" as v
+img = v.load("factura.jpg")
+descripcion = v.describe(img, "¿Qué campos tiene esta factura?")
+
+-- Insight con IA real
+use "insight" as ins
+analisis = ins.analyze(img, "¿Hay firmas y sellos en este documento?")
+```
+
+---
+
+### 🔜 Fase 5A — Servidor HTTP nativo
+
+Sintaxis nativa para construir APIs sin frameworks externos.
+
+```orion
+use "server" as srv
+
+srv.on(8080) {
+    GET "/" {
+        return "Hola desde Orion"
+    }
+    POST "/echo" {
+        body = request.json()
+        return body
+    }
+}
+```
+
+- [ ] Módulo `server` en stdlib con routing declarativo
+- [ ] Objetos `request` y `response` nativos
+- [ ] Soporte para middlewares con lambdas
+- [ ] `orion new --api` — scaffold de proyecto con servidor listo
+
+---
+
+### 🔜 Fase 5B — Type checker estático
+
+El salto más importante en madurez percibida del lenguaje.
+
+```bash
+orion check --types archivo.orx   # verifica tipos antes de ejecutar
+```
+
+- [ ] Inferencia de tipos en asignaciones (`x = 5` → `x: int` implícito)
+- [ ] Verificación de tipos en llamadas a funciones con type hints declarados
+- [ ] Verificación de tipo de retorno declarado vs. real
+- [ ] Reporte de errores de tipo con número de línea antes de ejecutar
+- [ ] Modo estricto opcional — el código sin hints sigue funcionando igual
+
+```orion
+fn suma(a: int, b: int) -> int {
+    return a + b
+}
+
+suma("hola", 5)   -- TypeError en línea 6: se esperaba int, se recibió string
+```
+
+---
+
+### 🔜 Fase 5C — Lexer y Parser en Rust
+
+Eliminar Python del pipeline de ejecución para producir un binario único sin dependencias.
+
+```
+HOY:   Python lexer → Python parser → bytecode → Rust VM
+META:  Rust lexer  → Rust parser  → bytecode → Rust VM
+```
+
+- [ ] `orion-vm/src/lexer.rs` — tokenizador completo en Rust
+- [ ] `orion-vm/src/parser.rs` — parser con el mismo AST que el actual
+- [ ] Eliminar dependencia de Python para ejecutar `.orx`
+- [ ] Tiempo de startup: de ~200ms a <5ms
+
+---
+
+### 🔜 Fase 5D — Binario único distribuible
+
+Con Lexer+Parser en Rust, Orion se distribuye como un solo ejecutable sin dependencias.
+
+- [ ] `orion.exe` / `orion` sin Python, sin pip, sin Cargo en la máquina del usuario
+- [ ] Instalación: descarga el binario y ejecuta
+- [ ] `orion build` produce `.orbc` portable entre máquinas
+- [ ] Cross-compilation para Linux, macOS y Windows desde CI
+
+```bash
+# Instalación futura
+curl -fsSL https://orionlang.dev/install.sh | sh
+```
+
+---
+
+### 🚀 Fase 6A — Compilación nativa (Cranelift)
+
+`.orx` compilado directamente a binario nativo sin VM en medio.
+
+```
+.orx → Rust pipeline → Cranelift IR → binario nativo
+```
+
+- [ ] Backend Cranelift integrado en `orion-vm`
+- [ ] `orion compile archivo.orx -o salida` — produce ejecutable nativo
+- [ ] Rendimiento objetivo: comparable a Go para scripts típicos
+- [ ] Cranelift primero; LLVM como backend opcional de alto rendimiento
+
+| Pipeline | Velocidad estimada |
+|---|---|
+| Hoy: Python + Rust VM | ~137x vs Python puro |
+| Fase 5D: Rust puro + Rust VM | ~400x estimado |
+| Fase 6A: compilación nativa | ~1000x+ estimado |
+
+---
+
+### 🚀 Fase 6B — Ecosistema y comunidad *(paralelo a 6A)*
+
+- [ ] Sitio de documentación oficial (orionlang.dev)
+- [ ] Registro de paquetes online — `orion publish` / `orion add <paquete>`
+- [ ] Showcase de proyectos reales construidos con Orion
+- [ ] Discord / comunidad
+- [ ] Guía de contribución y roadmap público
 
 ---
 
@@ -355,7 +636,10 @@ python compiler/bytecode_compiler.py archivo.orx
 | Sistema de módulos | ✅ Completo | Python |
 | Módulos stdlib | ✅ 15+ módulos | Python |
 | Extensión VSCode | ✅ Completa + OOP | TypeScript |
-| CLI | ✅ Funcional | Python |
+| CLI (`orion new/build/check/watch/bench/test/doctor`) | ✅ Completo | Python |
+| Gestor de paquetes (`orion add/remove/list`) | ✅ Completo | Python |
+| REPL interactivo v2 (multi-línea, auto-print) | ✅ Completo | Python |
+| `async / await` concurrencia nativa | ✅ Completo | Python + threads |
 | Manejo de errores | ✅ attempt/handle | Python |
 | String interpolation | ✅ Completa | Python |
 

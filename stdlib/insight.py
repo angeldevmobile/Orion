@@ -5,7 +5,14 @@ Orion Insight — Extracción inteligente de información desde documentos escan
 - Ideal para digitalización bancaria, formularios y documentos legales.
 """
 
-import io, re, math
+import base64
+import io
+import json
+import math
+import os
+import re
+import urllib.request
+import urllib.error
 from typing import List, Dict, Tuple, Optional
 from stdlib import vision
 
@@ -16,12 +23,12 @@ from stdlib import vision
 def _load_image(src):
     """Carga imagen desde path, bytes, objeto PIL o URL."""
     from stdlib import vision
-    import requests
+    import urllib.request
 
     if isinstance(src, str):
         if src.startswith("http"):
-            resp = requests.get(src)
-            return vision._ensure_pil(io.BytesIO(resp.content))
+            with urllib.request.urlopen(src, timeout=15) as resp:
+                return vision._ensure_pil(io.BytesIO(resp.read()))
         else:
             return vision._ensure_pil(src)
     elif isinstance(src, bytes):
@@ -145,6 +152,95 @@ def summarize(img):
 
 
 # ============================================================
+# IA Vision — análisis de documento con Claude o GPT-4o
+# ============================================================
+
+def _load_env_insight():
+    from pathlib import Path
+    for level in range(4):
+        p = Path(*[".."] * level) / ".env" if level else Path(".env")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, _, v = line.partition("=")
+                    k = k.strip(); v = v.strip().strip('"').strip("'")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+            return
+        except FileNotFoundError:
+            continue
+
+
+def analyze(img, question: str = None) -> str:
+    """
+    Analiza un documento o imagen usando Claude Vision o GPT-4o.
+    Combina el análisis estructural local con la comprensión de IA.
+    """
+    _load_env_insight()
+
+    structural = summarize(img)
+
+    pil = _load_image(img).convert("RGB")
+    buf = io.BytesIO()
+    pil.save(buf, format="JPEG", quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    context = (
+        f"Análisis estructural previo del documento:\n"
+        f"- Bloques de texto detectados: {structural['text_blocks']}\n"
+        f"- Tablas: {structural['tables']}\n"
+        f"- Firmas: {structural['signatures']}\n"
+        f"- Metadatos: {structural['metadata']}\n\n"
+    )
+    text_prompt = context + (question or "Describe el contenido de este documento en detalle.")
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")
+        body = json.dumps({
+            "model": model,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
+                {"type": "text", "text": text_prompt}
+            ]}]
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages", data=body,
+            headers={"Content-Type": "application/json", "x-api-key": anthropic_key,
+                     "anthropic-version": "2023-06-01"}, method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())["content"][0]["text"]
+
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+        model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        body = json.dumps({
+            "model": model, "max_tokens": 1024,
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": text_prompt}
+            ]}]
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions", data=body,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {openai_key}"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())["choices"][0]["message"]["content"]
+
+    raise RuntimeError(
+        "No hay API key para análisis visual.\n"
+        "Agrega en tu .env: ANTHROPIC_API_KEY=sk-ant-... o OPENAI_API_KEY=sk-..."
+    )
+
+
+# ============================================================
 # Registro y exportación Orion
 # ============================================================
 
@@ -153,7 +249,8 @@ ALIASES = {
     "extract_tables": extract_tables,
     "extract_metadata": extract_metadata,
     "extract_signatures": extract_signatures,
-    "summarize": summarize
+    "summarize": summarize,
+    "analyze": analyze,
 }
 
 def orion_export():

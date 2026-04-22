@@ -10,15 +10,16 @@ Principios:
 """
 
 from collections import Counter
+import base64
+import json
 import math
 import io
 import os
 import time
 import random
+import urllib.request
+import urllib.error
 from typing import Tuple, List, Callable, Optional
-import matplotlib.pyplot as plt
-import plotly.express as px
-from sklearn.decomposition import PCA
 
 # Optional accelerated libs
 try:
@@ -283,6 +284,89 @@ def scan_text(img, lang="eng"):
     return ""
 
 # -------------------------
+# Carga desde URL (sin requests)
+# -------------------------
+def load_url(url: str):
+    """Descarga imagen desde URL y retorna PIL Image."""
+    with urllib.request.urlopen(url, timeout=15) as resp:
+        return load(io.BytesIO(resp.read()))
+
+# -------------------------
+# IA Vision — describe imagen usando Claude o GPT-4o
+# -------------------------
+def _load_env_vision():
+    from pathlib import Path
+    for level in range(4):
+        p = Path(*[".."] * level) / ".env" if level else Path(".env")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, _, v = line.partition("=")
+                    k = k.strip(); v = v.strip().strip('"').strip("'")
+                    if k and k not in os.environ:
+                        os.environ[k] = v
+            return
+        except FileNotFoundError:
+            continue
+
+def describe(img, prompt: str = None) -> str:
+    """
+    Describe una imagen usando Claude Vision o GPT-4o (según API key disponible).
+    Retorna texto con la descripción.
+    """
+    _load_env_vision()
+    pil = _ensure_pil(img).convert("RGB")
+    buf = io.BytesIO()
+    pil.save(buf, format="JPEG", quality=85)
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    text_prompt = prompt or "Describe detalladamente esta imagen."
+
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")
+        body = json.dumps({
+            "model": model,
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}},
+                {"type": "text", "text": text_prompt}
+            ]}]
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages", data=body,
+            headers={"Content-Type": "application/json", "x-api-key": anthropic_key,
+                     "anthropic-version": "2023-06-01"}, method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())["content"][0]["text"]
+
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+        model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        body = json.dumps({
+            "model": model, "max_tokens": 1024,
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": text_prompt}
+            ]}]
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions", data=body,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {openai_key}"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())["choices"][0]["message"]["content"]
+
+    raise RuntimeError(
+        "No hay API key para visión.\n"
+        "Agrega en tu .env: ANTHROPIC_API_KEY=sk-ant-... o OPENAI_API_KEY=sk-..."
+    )
+
+# -------------------------
 # Content-aware seam carve (naive, small images)
 # -------------------------
 def seam_carve(img, target_w, target_h):
@@ -396,6 +480,7 @@ class ImagePipeline:
 # -------------------------
 ALIASES = {
     "load": load,
+    "load_url": load_url,
     "save": save,
     "resize": resize,
     "thumbnail": thumbnail,
@@ -410,6 +495,7 @@ ALIASES = {
     "blur_faces": blur_faces,
     "scan_text": scan_text,
     "seam_carve": seam_carve,
+    "describe": describe,
     "ImagePipeline": ImagePipeline,
 }
 
@@ -425,11 +511,15 @@ def register(runtime):
 def plot_clusters(embeds, labels, caption="Mapa cognitivo de tareas"):
     """
     Visualiza los clusters de embeddings en 2D usando PCA si hay más de 2 dimensiones.
+    Requiere: matplotlib, plotly, scikit-learn (pip install matplotlib plotly scikit-learn)
     """
+    import matplotlib.pyplot as plt
+    import plotly.express as px
+    from sklearn.decomposition import PCA
+
     if not embeds or not labels:
         print("No hay datos para graficar.")
         return
-    # Reduce a 2D si es necesario
     if len(embeds[0]) > 2:
         pca = PCA(n_components=2)
         reduced = pca.fit_transform(embeds)
@@ -439,15 +529,11 @@ def plot_clusters(embeds, labels, caption="Mapa cognitivo de tareas"):
         x = [vec[0] for vec in embeds]
         y = [vec[1] for vec in embeds]
     fig = px.scatter(
-        x=x,
-        y=y,
-        color=labels,
-        title=caption,
+        x=x, y=y, color=labels, title=caption,
         labels={"color": "Cluster", "x": "Dim 1", "y": "Dim 2"},
-        width=700,
-        height=500
+        width=700, height=500
     )
     fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
-    fig.show(renderer="browser")  
+    fig.show(renderer="browser")
 
 ALIASES["plot_clusters"] = plot_clusters

@@ -747,7 +747,8 @@ def _call_fn_value(fn_val, pos_args, kw_args, variables, functions):
         for p, a in zip(params, pos_args):
             local_vars[p] = a
         local_vars.update(kw_args)
-        return eval_expr(body, local_vars, functions)
+        result = evaluate(body, local_vars, functions, inside_fn=True)
+        return result.val if isinstance(result, _ReturnValue) else result
 
     # Lista de definiciones (sobrecarga)
     if isinstance(fn_val, list):
@@ -1459,6 +1460,39 @@ def eval_expr(expr, variables, functions):
                 raise OrionRuntimeError(
                     f"'{object.__getattribute__(obj_val, '_shape_name')}' no tiene acto '{method_name}'"
                 )
+
+            # === SERVIDOR HTTP: wrappear handlers Orion en Router calls ===
+            try:
+                from modules.server import Router as _Router
+                _ROUTER_ROUTE_METHODS = ("get", "post", "put", "delete", "patch", "route", "not_found")
+                if isinstance(obj_val, _Router) and method_name in _ROUTER_ROUTE_METHODS:
+                    _captured_vars = dict(variables)
+                    _captured_fns  = dict(functions)
+                    _wrapped = []
+                    for _arg in pos_args:
+                        _is_fn = (isinstance(_arg, dict) and _arg.get("type") in ("FN_DEF", "ANON_FN")) or \
+                                 (isinstance(_arg, tuple) and _arg[0] == "LAMBDA")
+                        if _is_fn:
+                            def _make_handler(_fn, _v, _f):
+                                def _handler(req):
+                                    _req_dict = {
+                                        "path":       req.path,
+                                        "method":     req.method,
+                                        "body":       req.body,
+                                        "params":     req.params,
+                                        "url_params": req.url_params,
+                                        "headers":    req.headers,
+                                    }
+                                    _r = _call_fn_value(_fn, [_req_dict], {}, _v, _f)
+                                    return _r.val if isinstance(_r, _ReturnValue) else _r
+                                return _handler
+                            _wrapped.append(_make_handler(_arg, _captured_vars, _captured_fns))
+                        else:
+                            _wrapped.append(_arg)
+                    _method = getattr(obj_val, method_name)
+                    return _method(*_wrapped, **kw_args)
+            except ImportError:
+                pass
 
             # === DISPATCH TEMPRANO PARA OBJETOS MÓDULO/NAMESPACE ===
             # Antes de los handlers de string/list, despachar objetos que no son tipos primitivos
@@ -3094,8 +3128,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             else:
                 # Fallback: intentar cargar ai.ask
                 try:
-                    import sys, os
-                    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+                    import sys as _sys
+                    _sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
                     from stdlib.ai import ask as _ai_ask
                     result = _ai_ask(prompt_str)
                 except Exception:
@@ -3108,8 +3142,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             learn_val = eval_expr(node[1], variables, functions)
             learn_str = str(learn_val) if not isinstance(learn_val, str) else learn_val
             try:
-                import sys, os
-                sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+                import sys as _sys
+                _sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
                 from stdlib.ai import embed as _ai_embed
                 result = _ai_embed(learn_str)
             except Exception:
@@ -3122,8 +3156,8 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
             sense_val = eval_expr(node[1], variables, functions)
             sense_str = str(sense_val) if not isinstance(sense_val, str) else sense_val
             try:
-                import sys, os
-                sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+                import sys as _sys
+                _sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
                 from stdlib.ai import recall as _ai_recall
                 result = _ai_recall(sense_str)
             except Exception:
