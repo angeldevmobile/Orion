@@ -5,6 +5,8 @@
 /// ejecución de Rust.
 
 use std::collections::HashMap;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
 use serde_json::Value as Json;
 
 use crate::eval_value::EvalValue;
@@ -301,11 +303,96 @@ pub fn eval_stmt(node: &Json, env: &mut Env) -> Result<Flow, String> {
             let body   = arr[3].as_array().ok_or("FN: body inválido")?.to_vec();
             let closure = env.snapshot();
             env.set(name, EvalValue::Function {
-                name:    name.to_string(),
+                name:     name.to_string(),
                 params,
                 body,
                 closure,
+                is_async: false,
             });
+            Ok(Flow::Normal)
+        }
+
+        //   Función async: async fn nombre(params) { body }
+        "ASYNC_FN" => {
+            // ["ASYNC_FN", name, params, body]
+            let name    = str_field(arr, 1, tag)?;
+            let params  = parse_params(&arr[2])?;
+            let body    = arr[3].as_array().ok_or("ASYNC_FN: body inválido")?.to_vec();
+            let closure = env.snapshot();
+            env.set(name, EvalValue::Function {
+                name:     name.to_string(),
+                params,
+                body,
+                closure,
+                is_async: true,
+            });
+            Ok(Flow::Normal)
+        }
+
+        //   AWAIT statement: await expr
+        "AWAIT_STMT" => {
+            // ["AWAIT_STMT", expr]
+            let val = eval_expr(&arr[1], env)?;
+            resolve_future(val)?;
+            Ok(Flow::Normal)
+        }
+
+        //   SPAWN: fire-and-forget de una función async
+        "SPAWN" => {
+            // ["SPAWN", call_expr]
+            eval_expr(&arr[1], env)?;  // evaluar lanza el thread; descartamos el Future
+            Ok(Flow::Normal)
+        }
+
+        //   SERVE_STMT: servidor HTTP integrado
+        "SERVE_STMT" => {
+            // ["SERVE_STMT", port_expr, handler_expr_or_fn]
+            let port = eval_expr(&arr[1], env)?.to_i64()?;
+
+            // El handler puede ser un nodo FN inline — si es así, registrarlo primero
+            let handler = if arr[2].as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str())
+                .map(|t| t == "FN" || t == "FN_DEF")
+                .unwrap_or(false)
+            {
+                eval_stmt(&arr[2], env)?;
+                let fn_name = arr[2].as_array().unwrap()[1].as_str().unwrap_or("");
+                env.get(fn_name).ok_or_else(|| format!("Handler '{}' no definido", fn_name))?
+            } else {
+                eval_expr(&arr[2], env)?
+            };
+
+            serve_http(port, handler, env)
+        }
+
+        //   THINK: think <expr>  →  llama al modelo AI con el prompt
+        "THINK" => {
+            // ["THINK", expr]
+            let prompt = eval_expr(&arr[1], env)?;
+            match crate::ai::think(&format!("{}", prompt)) {
+                Ok(resp) => println!("{}", resp),
+                Err(e)   => eprintln!("[think error] {}", e),
+            }
+            Ok(Flow::Normal)
+        }
+
+        //   LEARN: learn <expr>  →  guarda texto en memoria AI de sesión
+        "LEARN" => {
+            // ["LEARN", expr]
+            let text = eval_expr(&arr[1], env)?;
+            println!("{}", crate::ai::learn(&format!("{}", text)));
+            Ok(Flow::Normal)
+        }
+
+        //   SENSE: sense <expr>  →  consulta la memoria AI con una query
+        "SENSE" => {
+            // ["SENSE", expr]
+            let query = eval_expr(&arr[1], env)?;
+            match crate::ai::sense(&format!("{}", query)) {
+                Ok(resp) => println!("{}", resp),
+                Err(e)   => eprintln!("[sense error] {}", e),
+            }
             Ok(Flow::Normal)
         }
 
@@ -668,10 +755,11 @@ pub fn eval_expr(node: &Json, env: &mut Env) -> Result<EvalValue, String> {
                     let body    = arr[2].as_array().ok_or("LAMBDA: body inválido")?.to_vec();
                     let closure = env.snapshot();
                     Ok(EvalValue::Function {
-                        name: "<lambda>".into(),
+                        name:     "<lambda>".into(),
                         params,
                         body,
                         closure,
+                        is_async: false,
                     })
                 }
 
@@ -682,11 +770,19 @@ pub fn eval_expr(node: &Json, env: &mut Env) -> Result<EvalValue, String> {
                     let body    = arr[3].as_array().ok_or("FN_DEF expr: body inválido")?.to_vec();
                     let closure = env.snapshot();
                     Ok(EvalValue::Function {
-                        name:    name.to_string(),
+                        name:     name.to_string(),
                         params,
                         body,
                         closure,
+                        is_async: false,
                     })
+                }
+
+                //   Await como expresión: await fn_async()
+                "AWAIT_EXPR" => {
+                    // ["AWAIT_EXPR", expr]
+                    let val = eval_expr(&arr[1], env)?;
+                    resolve_future(val)
                 }
 
                 //   Acceso nulo-seguro: obj?.campo
@@ -877,17 +973,11 @@ fn call_function(
 ) -> Result<EvalValue, String> {
     let fn_copy = fn_val.clone();
     match fn_val {
-        EvalValue::Function { name, params, body, closure } => {
-            let mut fn_env = Env::from_snapshot(closure);
-            if !name.starts_with('<') {
-                fn_env.set_local(&name, fn_copy);
-            }
+        EvalValue::Function { name, params, body, closure, is_async } => {
+            // Construir argumentos combinando posicionales + kwargs
+            let kw_map: HashMap<String, EvalValue> =
+                kwargs.into_iter().collect();
 
-            // Construir mapa de kwargs para búsqueda rápida
-            let kw_map: HashMap<&str, EvalValue> =
-                kwargs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
-
-            // Llenar parámetros: primero posicional, luego kwarg, error si falta
             let mut bound: Vec<EvalValue> = Vec::with_capacity(params.len());
             let mut pos_iter = args.into_iter();
             for p in &params {
@@ -897,12 +987,37 @@ fn call_function(
                     bound.push(val.clone());
                 } else {
                     return Err(format!(
-                        "Función '{}': argumento '{}' no fue proporcionado",
-                        name, p
+                        "Función '{}': argumento '{}' no fue proporcionado", name, p
                     ));
                 }
             }
 
+            if is_async {
+                // Lanzar en thread y devolver Future
+                let state: Arc<(Mutex<Option<Result<EvalValue, String>>>, Condvar)> =
+                    Arc::new((Mutex::new(None), Condvar::new()));
+                let state_clone = Arc::clone(&state);
+
+                let mut fn_env = Env::from_snapshot(closure);
+                if !name.starts_with('<') { fn_env.set_local(&name, fn_copy); }
+                for (p, a) in params.iter().zip(bound.into_iter()) {
+                    fn_env.set_local(p, a);
+                }
+
+                thread::spawn(move || {
+                    let result = eval_body(&body, &mut fn_env)
+                        .map(|fc| match fc { Flow::Return(v) => v, _ => EvalValue::Null });
+                    let (lock, cvar) = &*state_clone;
+                    *lock.lock().unwrap() = Some(result);
+                    cvar.notify_one();
+                });
+
+                return Ok(EvalValue::Future(state));
+            }
+
+            // Función sincrónica normal
+            let mut fn_env = Env::from_snapshot(closure);
+            if !name.starts_with('<') { fn_env.set_local(&name, fn_copy); }
             for (p, a) in params.iter().zip(bound.into_iter()) {
                 fn_env.set_local(p, a);
             }
@@ -1173,4 +1288,101 @@ fn slice_access(obj: EvalValue, start: Option<i64>, end: Option<i64>) -> Result<
 fn resolve_slice_idx(i: i64, len: i64) -> usize {
     if i < 0 { (len + i).max(0) as usize }
     else      { i as usize }
+}
+
+/// Bloquea hasta que un Future se resuelve y devuelve su valor.
+fn resolve_future(val: EvalValue) -> Result<EvalValue, String> {
+    match val {
+        EvalValue::Future(state) => {
+            let (lock, cvar) = &*state;
+            let mut guard = lock.lock().unwrap();
+            while guard.is_none() {
+                guard = cvar.wait(guard).unwrap();
+            }
+            guard.take().unwrap()
+        }
+        other => Ok(other), // valor ya resuelto, devolverlo directamente
+    }
+}
+
+/// Servidor HTTP bloqueante usando tiny_http.
+fn serve_http(port: i64, handler: EvalValue, env: &mut Env) -> Result<Flow, String> {
+
+    let addr = format!("0.0.0.0:{}", port);
+    let server = tiny_http::Server::http(&addr)
+        .map_err(|e| format!("No se pudo iniciar servidor en {}: {}", addr, e))?;
+
+    eprintln!("[Orion] Servidor HTTP en http://localhost:{} (Ctrl+C para detener)", port);
+
+    loop {
+        let mut request = match server.recv() {
+            Ok(r)  => r,
+            Err(_) => break,
+        };
+
+        let method = request.method().to_string();
+        let url    = request.url().to_string();
+
+        let (path, query) = match url.find('?') {
+            Some(pos) => (url[..pos].to_string(), url[pos + 1..].to_string()),
+            None      => (url.clone(), String::new()),
+        };
+
+        // Query params → Dict
+        let mut params: HashMap<String, EvalValue> = HashMap::new();
+        for pair in query.split('&').filter(|s| !s.is_empty()) {
+            if let Some(eq) = pair.find('=') {
+                params.insert(pair[..eq].to_string(),
+                              EvalValue::Str(pair[eq + 1..].to_string()));
+            }
+        }
+
+        // Leer body
+        let mut body_bytes = Vec::new();
+        request.as_reader().read_to_end(&mut body_bytes).ok();
+        let body_str = String::from_utf8_lossy(&body_bytes).to_string();
+
+        // Dict de request
+        let mut req: HashMap<String, EvalValue> = HashMap::new();
+        req.insert("path".into(),   EvalValue::Str(path));
+        req.insert("method".into(), EvalValue::Str(method));
+        req.insert("body".into(),   EvalValue::Str(body_str));
+        req.insert("params".into(), EvalValue::Dict(params));
+
+        // Llamar handler
+        let resp_val = match call_function(handler.clone(), vec![EvalValue::Dict(req)], vec![], env) {
+            Ok(v)  => v,
+            Err(e) => {
+                let mut err: HashMap<String, EvalValue> = HashMap::new();
+                err.insert("status".into(), EvalValue::Int(500));
+                err.insert("body".into(),   EvalValue::Str(e));
+                EvalValue::Dict(err)
+            }
+        };
+
+        // Parsear respuesta
+        let (status_code, resp_body, content_type) = match &resp_val {
+            EvalValue::Dict(m) => {
+                let sc = m.get("status").and_then(|v| v.to_i64().ok()).unwrap_or(200) as u16;
+                let bd = m.get("body").map(|v| format!("{}", v)).unwrap_or_default();
+                let ct = m.get("content_type").map(|v| format!("{}", v))
+                    .unwrap_or_else(|| "text/plain; charset=utf-8".into());
+                (sc, bd, ct)
+            }
+            other => (200, format!("{}", other), "text/plain; charset=utf-8".into()),
+        };
+
+        let response = tiny_http::Response::from_string(resp_body)
+            .with_status_code(tiny_http::StatusCode(status_code))
+            .with_header(
+                tiny_http::Header::from_bytes("Content-Type", content_type.as_bytes())
+                    .unwrap_or_else(|_| {
+                        tiny_http::Header::from_bytes("Content-Type", b"text/plain").unwrap()
+                    }),
+            );
+
+        request.respond(response).ok();
+    }
+
+    Ok(Flow::Normal)
 }

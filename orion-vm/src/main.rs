@@ -7,6 +7,9 @@ mod env;
 mod builtins;
 mod stdlib_bridge;
 mod eval;
+mod ai;
+mod token;
+mod lexer;
 
 extern crate tiny_http;
 
@@ -25,7 +28,29 @@ fn main() {
     }
 
     if args[1] == "--version" {
-        println!("Orion VM v0.2.0 (Rust) — bytecode + tree-walker");
+        println!("Orion VM v0.3.0 (Rust) — bytecode + tree-walker + lexer");
+        return;
+    }
+
+    // ── Modo lexer ───────────────────────────────────────────────────────────
+    if args[1] == "--lex" {
+        if args.len() < 3 {
+            eprintln!("Uso: orion --lex <archivo.orn>");
+            std::process::exit(1);
+        }
+        let src = match fs::read_to_string(&args[2]) {
+            Ok(s) => s,
+            Err(e) => { eprintln!("[ORION ERROR] {}", e); std::process::exit(1); }
+        };
+        match lexer::lex(&src) {
+            Ok(tokens) => {
+                for tok in &tokens {
+                    println!("[{:>4}:{:<3}] {:?}", tok.line, tok.col, tok.kind);
+                }
+                eprintln!("[Orion] {} tokens", tokens.len());
+            }
+            Err(e) => { eprintln!("[ORION ERROR] {}", e); std::process::exit(1); }
+        }
         return;
     }
 

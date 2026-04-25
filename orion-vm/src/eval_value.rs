@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Arc, Condvar, Mutex};
 use serde_json::Value as Json;
 
 /// Tipo de valor del evaluador de árbol (independiente del bytecode VM).
@@ -12,11 +13,14 @@ pub enum EvalValue {
     List(Vec<EvalValue>),
     Dict(HashMap<String, EvalValue>),
     Function {
-        name:    String,
-        params:  Vec<String>,
-        body:    Vec<Json>,
-        closure: HashMap<String, EvalValue>,
+        name:     String,
+        params:   Vec<String>,
+        body:     Vec<Json>,
+        closure:  HashMap<String, EvalValue>,
+        is_async: bool,
     },
+    /// Future de una función async. Se resuelve bloqueando con AWAIT.
+    Future(Arc<(Mutex<Option<Result<EvalValue, String>>>, Condvar)>),
     /// Definición de shape (tipo OOP de Orion). Se crea con SHAPE_DEF.
     Shape {
         name:      String,
@@ -63,7 +67,9 @@ impl fmt::Display for EvalValue {
                 }
                 write!(f, "}}")
             }
-            EvalValue::Function { name, .. } => write!(f, "<fn {}>", name),
+            EvalValue::Function { name, is_async, .. } =>
+                write!(f, "<{} {}>", if *is_async { "async fn" } else { "fn" }, name),
+            EvalValue::Future(_) => write!(f, "<future>"),
             EvalValue::Shape    { name, .. } => write!(f, "<shape {}>", name),
             EvalValue::Instance { shape_name, fields, .. } => {
                 write!(f, "{} {{", shape_name)?;
@@ -87,6 +93,7 @@ impl EvalValue {
             EvalValue::List(_)      => "list",
             EvalValue::Dict(_)      => "dict",
             EvalValue::Function{..} => "function",
+            EvalValue::Future(_)    => "future",
             EvalValue::Shape{..}    => "shape",
             EvalValue::Instance{..} => "instance",
             EvalValue::Null         => "null",
@@ -103,6 +110,7 @@ impl EvalValue {
             EvalValue::List(v)      => !v.is_empty(),
             EvalValue::Dict(m)      => !m.is_empty(),
             EvalValue::Function{..} => true,
+            EvalValue::Future(_)    => true,
             EvalValue::Shape{..}    => true,
             EvalValue::Instance{..} => true,
         }
