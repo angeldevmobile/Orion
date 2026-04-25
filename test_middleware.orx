@@ -1,0 +1,34 @@
+use "server" as srv
+
+app = srv.create()
+
+// Middleware 1: logger (1 param — siempre continua, show y pasa al siguiente)
+app.use(fn(req) {
+    show "[LOG] " + req.method + " " + req.path
+})
+
+// Middleware 2: auth (2 params — llama next() para continuar, o retorna 401)
+app.use(fn(req, next) {
+    token = req.headers["Authorization"]
+    if token == "Bearer secreto" {
+        next()
+    }
+    return {"status": 401, "body": "No autorizado"}
+})
+
+// Rutas protegidas — solo llegan si el middleware auth llamó next()
+app.get("/", fn(req) {
+    return "Bienvenido al API protegido"
+})
+
+app.get("/saludo/:nombre", fn(req) {
+    nombre = req.url_params.nombre
+    return "Hola, " + nombre + "!"
+})
+
+app.post("/echo", fn(req) {
+    return req.body
+})
+
+show "Servidor con middleware en http://localhost:8080"
+app.listen(8080)

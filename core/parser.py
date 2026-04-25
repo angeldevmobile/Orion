@@ -120,9 +120,10 @@ def parse_primary(tokens, i):
         expr = value
         i += 1
         # Support method calls on string literals: "hello".upper()
+        _KEYWORD_AS_METHOD = {"USE", "DELETE", "GET", "POST", "PUT", "PATCH", "TYPE", "IN", "IS", "NOT"}
         while i < len(tokens) and tokens[i][0] == "DOT":
             i += 1
-            if i >= len(tokens) or tokens[i][0] != "IDENT":
+            if i >= len(tokens) or (tokens[i][0] != "IDENT" and tokens[i][0] not in _KEYWORD_AS_METHOD):
                 raise OrionSyntaxError("Se esperaba un identificador después de '.'")
             attr_name = tokens[i][1]
             i += 1
@@ -152,7 +153,9 @@ def parse_primary(tokens, i):
             token_type = tokens[i][0]
             if token_type == "DOT":
                 i += 1
-                if i >= len(tokens) or tokens[i][0] != "IDENT":
+                # Aceptar IDENT o cualquier keyword usado como nombre de método (ej: .use, .delete)
+                _KEYWORD_AS_METHOD = {"USE", "DELETE", "GET", "POST", "PUT", "PATCH", "TYPE", "IN", "IS", "NOT"}
+                if i >= len(tokens) or (tokens[i][0] != "IDENT" and tokens[i][0] not in _KEYWORD_AS_METHOD):
                     raise OrionSyntaxError("Se esperaba un identificador después de '.'")
                 attr_name = tokens[i][1]
                 i += 1

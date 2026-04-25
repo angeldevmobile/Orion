@@ -1182,6 +1182,12 @@ def eval_expr(expr, variables, functions):
                     if op == "!=":
                         return str(left_val) != str(right_val)
 
+                # Null-safe: None comparado con cualquier valor
+                if left_val is None or right_val is None:
+                    if op == "==": return left_val is right_val
+                    if op == "!=": return left_val is not right_val
+                    return False
+
                 raise OrionRuntimeError(
                     f"No se puede comparar {type(left_val).__name__} con {type(right_val).__name__}"
                 )
@@ -1540,7 +1546,7 @@ def eval_expr(expr, variables, functions):
             # === SERVIDOR HTTP: wrappear handlers Orion en Router calls ===
             try:
                 from modules.server import Router as _Router
-                _ROUTER_ROUTE_METHODS = ("get", "post", "put", "delete", "patch", "route", "not_found")
+                _ROUTER_ROUTE_METHODS = ("get", "post", "put", "delete", "patch", "route", "not_found", "use")
                 if isinstance(obj_val, _Router) and method_name in _ROUTER_ROUTE_METHODS:
                     _captured_vars = dict(variables)
                     _captured_fns  = dict(functions)
@@ -1549,20 +1555,46 @@ def eval_expr(expr, variables, functions):
                         _is_fn = (isinstance(_arg, dict) and _arg.get("type") in ("FN_DEF", "ANON_FN")) or \
                                  (isinstance(_arg, tuple) and _arg[0] == "LAMBDA")
                         if _is_fn:
-                            def _make_handler(_fn, _v, _f):
-                                def _handler(req):
-                                    _req_dict = {
-                                        "path":       req.path,
-                                        "method":     req.method,
-                                        "body":       req.body,
-                                        "params":     req.params,
-                                        "url_params": req.url_params,
-                                        "headers":    req.headers,
-                                    }
-                                    _r = _call_fn_value(_fn, [_req_dict], {}, _v, _f)
-                                    return _r.val if isinstance(_r, _ReturnValue) else _r
-                                return _handler
-                            _wrapped.append(_make_handler(_arg, _captured_vars, _captured_fns))
+                            # Detectar cuántos parámetros declara la función Orion
+                            if isinstance(_arg, dict):
+                                _nparams = len(_arg.get("params", []))
+                            elif isinstance(_arg, tuple) and _arg[0] == "LAMBDA":
+                                _nparams = len(_arg[1])
+                            else:
+                                _nparams = 1
+
+                            if method_name == "use" and _nparams >= 2:
+                                # Middleware con next: fn(req, next) — pasa next como callable Python
+                                def _make_middleware(_fn, _v, _f):
+                                    def _middleware(req, next_fn):
+                                        _req_dict = {
+                                            "path":       req.path,
+                                            "method":     req.method,
+                                            "body":       req.body,
+                                            "params":     req.params,
+                                            "url_params": req.url_params,
+                                            "headers":    req.headers,
+                                        }
+                                        _r = _call_fn_value(_fn, [_req_dict, next_fn], {}, _v, _f)
+                                        return _r.val if isinstance(_r, _ReturnValue) else _r
+                                    return _middleware
+                                _wrapped.append(_make_middleware(_arg, _captured_vars, _captured_fns))
+                            else:
+                                # Handler de ruta o middleware de 1 param: fn(req)
+                                def _make_handler(_fn, _v, _f):
+                                    def _handler(req):
+                                        _req_dict = {
+                                            "path":       req.path,
+                                            "method":     req.method,
+                                            "body":       req.body,
+                                            "params":     req.params,
+                                            "url_params": req.url_params,
+                                            "headers":    req.headers,
+                                        }
+                                        _r = _call_fn_value(_fn, [_req_dict], {}, _v, _f)
+                                        return _r.val if isinstance(_r, _ReturnValue) else _r
+                                    return _handler
+                                _wrapped.append(_make_handler(_arg, _captured_vars, _captured_fns))
                         else:
                             _wrapped.append(_arg)
                     _method = getattr(obj_val, method_name)

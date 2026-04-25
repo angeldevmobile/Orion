@@ -227,12 +227,11 @@ def _repl_show_fns(functions: dict):
 
 _REPL_HELP = """\
 [bold cyan]Comandos del REPL:[/bold cyan]
-  [cyan]:vars[/cyan]          — muestra variables actuales
-  [cyan]:fns[/cyan]           — muestra funciones definidas
-  [cyan]:clear[/cyan]         — limpia el estado (vars + fns)
-  [cyan]:reset[/cyan]         — alias de :clear
-  [cyan]:help[/cyan]          — muestra esta ayuda
-  [cyan]:exit[/cyan]  [dim]exit[/dim]    — sale del REPL
+  [cyan]:vars[/cyan]  [dim]vars[/dim]        — muestra variables actuales
+  [cyan]:fns[/cyan]   [dim]fns[/dim]         — muestra funciones definidas
+  [cyan]:clear[/cyan] [dim]clear reset[/dim] — limpia el estado (vars + fns)
+  [cyan]:help[/cyan]  [dim]help ? ayuda[/dim] — muestra esta ayuda
+  [cyan]:exit[/cyan]  [dim]exit quit salir[/dim] — sale del REPL
 
 [bold cyan]Sintaxis rápida:[/bold cyan]
   [white]x = 42[/white]              — asignar variable
@@ -283,13 +282,13 @@ def repl():
             cmd = stripped.lower()
             if cmd in ("exit", "quit", "salir", ":exit", ":quit"):
                 break
-            if cmd in (":vars",):
+            if cmd in (":vars", "vars"):
                 _repl_show_vars(variables)
                 continue
-            if cmd in (":fns",):
+            if cmd in (":fns", "fns"):
                 _repl_show_fns(functions)
                 continue
-            if cmd in (":clear", ":reset"):
+            if cmd in (":clear", ":reset", "clear", "reset"):
                 variables.clear()
                 functions.clear()
                 with redirect_stdout(_io.StringIO()), redirect_stderr(_io.StringIO()):
@@ -299,7 +298,7 @@ def repl():
                         pass
                 console.print("  [dim]Estado limpiado.[/dim]")
                 continue
-            if cmd in (":help",):
+            if cmd in (":help", "help", "ayuda", "?"):
                 console.print(_REPL_HELP)
                 continue
 

@@ -66,12 +66,60 @@ def _compile_pattern(pattern: str):
 # ---------------------------------------------------------------------------
 
 class Router:
-    """Router HTTP con soporte de path params y métodos HTTP estándar."""
+    """Router HTTP con soporte de path params, métodos HTTP estándar y middleware."""
 
     def __init__(self):
-        self._static   = {}   # {(METHOD, path): handler}
-        self._patterns = []   # [(METHOD, regex, [param_names], handler)]
+        self._static      = {}   # {(METHOD, path): handler}
+        self._patterns    = []   # [(METHOD, regex, [param_names], handler)]
+        self._middlewares = []   # [(handler, nparams)]
         self._not_found_handler = None
+
+    # ── Middleware ──────────────────────────────────────────────────────────
+
+    def use(self, handler):
+        """Registra middleware global que corre antes de cada handler de ruta."""
+        import inspect
+        try:
+            sig = inspect.signature(handler)
+            nparams = sum(1 for p in sig.parameters.values()
+                         if p.default is inspect.Parameter.empty)
+        except (ValueError, TypeError):
+            nparams = 1
+        self._middlewares.append((handler, nparams))
+        return self
+
+    def _build_chain(self, handler, req):
+        """Ejecuta la cadena middleware → handler. Cada fn(req) o fn(req, next)."""
+        import inspect
+        try:
+            sig = inspect.signature(handler)
+            hnparams = sum(1 for p in sig.parameters.values()
+                          if p.default is inspect.Parameter.empty)
+        except (ValueError, TypeError):
+            hnparams = 1
+        chain = list(self._middlewares) + [(handler, hnparams)]
+
+        def run(i):
+            if i >= len(chain):
+                return None
+            fn, nparams = chain[i]
+            if nparams >= 2:
+                result_holder = [None]
+                next_called = [False]
+                def next_fn():
+                    next_called[0] = True
+                    result_holder[0] = run(i + 1)
+                    return result_holder[0]
+                result = fn(req, next_fn)
+                # Si next() fue llamado, su resultado toma prioridad (Express-style)
+                if next_called[0]:
+                    return result_holder[0]
+                return result
+            else:
+                result = fn(req)
+                return result if result is not None else run(i + 1)
+
+        return run(0)
 
     # ── Route registration ──────────────────────────────────────────────────
 
@@ -146,10 +194,14 @@ class Router:
 
                 handler, url_params = router._match(self.command, path)
 
+                req = _OrionRequest(self.command, path, body, params, url_params, headers)
+
                 if handler is None:
                     if router._not_found_handler:
-                        req = _OrionRequest(self.command, path, body, params, url_params, headers)
-                        result = router._not_found_handler(req)
+                        try:
+                            result = router._build_chain(router._not_found_handler, req)
+                        except Exception as e:
+                            result = {"status": 500, "body": f"Internal Server Error: {e}"}
                         self._send(result)
                     else:
                         self.send_response(404)
@@ -158,9 +210,8 @@ class Router:
                         self.wfile.write(b"404 Not Found")
                     return
 
-                req = _OrionRequest(self.command, path, body, params, url_params, headers)
                 try:
-                    result = handler(req)
+                    result = router._build_chain(handler, req)
                 except Exception as e:
                     result = {"status": 500, "body": f"Internal Server Error: {e}"}
 
@@ -255,6 +306,7 @@ ALIASES = {
     "html":     html_response,
     "redirect": redirect,
     "Router":   Router,
+    "use":      None,   # método de instancia — se resuelve vía Router.use()
 }
 
 

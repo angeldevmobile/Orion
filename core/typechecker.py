@@ -85,10 +85,11 @@ def _types_compatible(declared: str, actual: str) -> bool:
 
 # ───────────────────────── Inferencia de tipos sobre el AST ───────────────────
 
-def _infer_type(expr) -> Optional[str]:
+def _infer_type(expr, scope: Optional[dict] = None) -> Optional[str]:
     """
     Inferencia de tipo a partir de un nodo AST.
     Retorna el nombre de tipo Orion o None si es desconocido.
+    scope: diccionario nombre→tipo acumulado por el TypeChecker.
     """
     if expr is None:
         return None
@@ -131,12 +132,14 @@ def _infer_type(expr) -> Optional[str]:
         return "dict"
 
     if tag == "IDENT":
-        return None   # dependiente del scope
+        if scope:
+            return scope.get(expr[1])   # tipo conocido del scope
+        return None
 
     if tag == "BINARY_OP":
         _, op, left, right = expr[0], expr[1], expr[2], expr[3]
-        lt = _infer_type(left)
-        rt = _infer_type(right)
+        lt = _infer_type(left, scope)
+        rt = _infer_type(right, scope)
         if op in ("+", "-", "*", "/", "%", "**"):
             if lt == "float" or rt == "float":
                 return "float"
@@ -151,8 +154,8 @@ def _infer_type(expr) -> Optional[str]:
 
     # Alias legacy
     if tag == "BINOP":
-        lt = _infer_type(expr[2])
-        rt = _infer_type(expr[3])
+        lt = _infer_type(expr[2], scope)
+        rt = _infer_type(expr[3], scope)
         op = expr[1]
         if op in ("+", "-", "*", "/", "%", "**"):
             if lt == "float" or rt == "float":
@@ -168,7 +171,7 @@ def _infer_type(expr) -> Optional[str]:
         op = expr[1]
         if op == "not":
             return "bool"
-        return _infer_type(expr[2])
+        return _infer_type(expr[2], scope)
 
     if tag == "INDEX":
         return None
@@ -202,6 +205,8 @@ class TypeChecker:
         self._fn_sigs: dict[str, dict] = {}
         # Stack de return_types para funciones anidadas
         self._return_stack: list[Optional[str]] = []
+        # Scope de variables: nombre → tipo inferido
+        self._scope: dict[str, str] = {}
 
     # ── API pública ────────────────────────────────────────────────────────────
 
@@ -210,6 +215,7 @@ class TypeChecker:
         self.issues = []
         self._fn_sigs = {}
         self._return_stack = []
+        self._scope = {}
 
         # Primer pase: recolectar firmas de todas las funciones globales
         self._collect_fn_signatures(ast)
@@ -250,29 +256,42 @@ class TypeChecker:
             # node = ("TYPED_ASSIGN", name, declared_type, expr [, line])
             name, declared, expr = node[1], node[2], node[3]
             line = _node_line(node)
-            actual = _infer_type(expr)
+            actual = _infer_type(expr, self._scope)
             if actual is not None and not _types_compatible(declared, actual):
                 self._report(
                     f"'{name}: {declared}' — se asignó valor de tipo '{actual}'",
                     line
                 )
+            # Registrar el tipo declarado en el scope
+            self._scope[name] = _normalize(declared)
 
         # ── ASSIGN ──
         elif tag == "ASSIGN":
-            self._check_expr(node[2] if len(node) > 2 else None, _node_line(node))
+            expr = node[2] if len(node) > 2 else None
+            # Registrar tipo inferido en el scope para usos futuros
+            inferred = _infer_type(expr, self._scope)
+            if inferred and len(node) > 1:
+                self._scope[node[1]] = inferred
+            self._check_expr(expr, _node_line(node))
 
         # ── FN / ASYNC_FN definition ──
         elif tag in ("FN", "ASYNC_FN"):
             # node = ("FN", name, params, body, return_type, param_types [, line])
-            fn_name = node[1]
-            body         = node[3]
-            return_type  = node[4] if len(node) > 4 else None
-            param_types  = node[5] if len(node) > 5 and isinstance(node[5], dict) else {}
+            fn_name     = node[1]
+            body        = node[3]
+            return_type = node[4] if len(node) > 4 else None
+            param_types = node[5] if len(node) > 5 and isinstance(node[5], dict) else {}
             self._fn_sigs[fn_name] = {
                 "return_type": return_type,
                 "param_types": param_types or {},
             }
+            # Guardar scope exterior y crear uno local con los parámetros tipados
+            outer_scope = dict(self._scope)
+            for pname, ptype in (param_types or {}).items():
+                self._scope[pname] = _normalize(ptype)
             self._check_stmts(body, scope_return_type=return_type)
+            # Restaurar scope exterior al salir de la función
+            self._scope = outer_scope
 
         # ── RETURN ──
         elif tag == "RETURN":
@@ -280,7 +299,7 @@ class TypeChecker:
             ret_expr = node[1] if len(node) > 1 else None
             line = _node_line(node)
             if scope_return_type and scope_return_type not in ("void", "any"):
-                actual = _infer_type(ret_expr)
+                actual = _infer_type(ret_expr, self._scope)
                 if actual is not None and not _types_compatible(scope_return_type, actual):
                     self._report(
                         f"RETURN: se esperaba '{scope_return_type}', "
@@ -318,9 +337,14 @@ class TypeChecker:
             if len(node) > 2 and isinstance(node[2], list):
                 self._check_stmts(node[2], scope_return_type)
 
+        # ── EXPR wrapper (parser envuelve expresiones sueltas como statement) ──
+        elif tag == "EXPR":
+            inner = node[1] if len(node) > 1 else None
+            self._check_expr(inner, _node_line(node))
+
         # ── CALL statement (expr suelto) ──
         elif tag == "CALL":
-            self._check_expr(node)
+            self._check_expr(node, _node_line(node))
 
         # ── Otros nodos: verificar recursivamente ──
         else:
@@ -370,7 +394,7 @@ class TypeChecker:
                             declared = param_types.get(pname) if pname else None
                             arg_expr = arg
                         if declared:
-                            actual = _infer_type(arg_expr)
+                            actual = _infer_type(arg_expr, self._scope)
                             if actual is not None and not _types_compatible(declared, actual):
                                 self._report(
                                     f"Llamada a '{fn_name}': argumento #{idx+1} "
