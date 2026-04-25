@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::token::{Token, TokenKind};
 use crate::ast::{ActDef, Expr, FieldDef, Handler, MatchArm, Param, Stmt};
 
@@ -164,6 +165,15 @@ impl Parser {
             TokenKind::Ident(n)   => { self.pos += 1; Ok(n) }
             _ => Err(self.err("Se esperaba un tipo")),
         }
+    }
+
+    /// Comprueba si el token actual puede comenzar un nombre de tipo (sin consumir).
+    fn is_type_token(&self) -> bool {
+        matches!(self.peek(),
+            TokenKind::TypeInt | TokenKind::TypeFloat | TokenKind::TypeBool |
+            TokenKind::TypeString | TokenKind::TypeList | TokenKind::TypeDict |
+            TokenKind::TypeAny | TokenKind::TypeAuto | TokenKind::Ident(_)
+        )
     }
 
     //   Argumentos de llamada  f(a, b, kw=val)                 
@@ -816,16 +826,33 @@ impl Parser {
                             acts.push(ActDef { name: act_name, params, body });
                         }
                         TokenKind::Ident(_) => {
-                            // campo: name [: type] [= default]
+                            // campo: name [: type] = default  |  name: default_expr
                             let fname = self.expect_ident()?;
-                            let type_hint = if matches!(self.peek(), TokenKind::Colon) {
+                            let mut type_hint = None;
+                            let mut default = None;
+                            if matches!(self.peek(), TokenKind::Colon) {
                                 self.pos += 1;
-                                Some(self.parse_type_name()?)
-                            } else { None };
-                            let default = if matches!(self.peek(), TokenKind::Assign) {
+                                // Si el siguiente token es un tipo Y el de después es '=' o newline/'}',
+                                // interpretarlo como type_hint. De lo contrario, es un valor default.
+                                let next_is_type = self.is_type_token();
+                                let after_is_assign_or_end = matches!(
+                                    self.tokens.get(self.pos + 1).map(|t| &t.kind).unwrap_or(&TokenKind::Eof),
+                                    TokenKind::Assign | TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Eof | TokenKind::Comma
+                                );
+                                if next_is_type && after_is_assign_or_end {
+                                    type_hint = Some(self.parse_type_name()?);
+                                    if matches!(self.peek(), TokenKind::Assign) {
+                                        self.pos += 1;
+                                        default = Some(self.parse_expression()?);
+                                    }
+                                } else {
+                                    // 'campo: valor_default' sin tipo explícito
+                                    default = Some(self.parse_expression()?);
+                                }
+                            } else if matches!(self.peek(), TokenKind::Assign) {
                                 self.pos += 1;
-                                Some(self.parse_expression()?)
-                            } else { None };
+                                default = Some(self.parse_expression()?);
+                            }
                             fields.push(FieldDef { name: fname, type_hint, default });
                         }
                         _ => { self.pos += 1; } // saltar tokens inesperados
@@ -838,6 +865,32 @@ impl Parser {
             //   Asignación, asignación compuesta o expresión          
             _ => {
                 let expr = self.parse_expression()?;
+
+                // nombre: tipo [= expr]  — variable con anotación de tipo
+                if let Expr::Ident(ref vname) = expr {
+                    if matches!(self.peek(), TokenKind::Colon) {
+                        let after_colon_is_type = {
+                            let kind = self.tokens.get(self.pos + 1).map(|t| &t.kind).unwrap_or(&TokenKind::Eof);
+                            matches!(kind,
+                                TokenKind::TypeInt | TokenKind::TypeFloat | TokenKind::TypeBool |
+                                TokenKind::TypeString | TokenKind::TypeList | TokenKind::TypeDict |
+                                TokenKind::TypeAny | TokenKind::TypeAuto | TokenKind::Ident(_)
+                            )
+                        };
+                        if after_colon_is_type {
+                            let vname = vname.clone();
+                            self.pos += 1; // consume ':'
+                            let _type_hint = self.parse_type_name()?;
+                            let value = if matches!(self.peek(), TokenKind::Assign) {
+                                self.pos += 1;
+                                self.parse_expression()?
+                            } else {
+                                Expr::Null
+                            };
+                            return Ok(Stmt::Assign { name: vname, value, line });
+                        }
+                    }
+                }
 
                 // x = expr
                 if matches!(self.peek(), TokenKind::Assign) {

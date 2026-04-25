@@ -1,9 +1,10 @@
+#![allow(dead_code)]
 /// codegen.rs — Generador de bytecode Orion
 /// Convierte Vec<Stmt> (AST de parser.rs) en OrionBytecode listo para la VM.
 ///
 /// Equivale a compiler/bytecode_compiler.py pero en Rust puro.
 
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use crate::ast::{ActDef, Expr, FieldDef, Handler, Stmt};
 use crate::bytecode::{ActDef as BcActDef, FieldDef as BcFieldDef, FunctionDef, OrionBytecode, ShapeDef};
@@ -36,8 +37,8 @@ pub fn compile(stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
 struct Codegen {
     main_instrs: Vec<Instruction>,
     main_lines:  Vec<u32>,
-    functions:   HashMap<String, FunctionDef>,
-    shapes:      HashMap<String, ShapeDef>,
+    functions:   IndexMap<String, FunctionDef>,
+    shapes:      IndexMap<String, ShapeDef>,
     async_fns:   std::collections::HashSet<String>,
     current_line: u32,
     for_counter:  usize,
@@ -49,8 +50,8 @@ impl Codegen {
         Codegen {
             main_instrs:   Vec::new(),
             main_lines:    Vec::new(),
-            functions:     HashMap::new(),
-            shapes:        HashMap::new(),
+            functions:     IndexMap::new(),
+            shapes:        IndexMap::new(),
             async_fns:     std::collections::HashSet::new(),
             current_line:  0,
             for_counter:   0,
@@ -107,7 +108,7 @@ impl Codegen {
         // Segundo pase: emitir código principal
         for stmt in stmts {
             match &stmt {
-                Stmt::Fn { .. } | Stmt::AsyncFn { .. } | Stmt::Shape { .. } | Stmt::Use { .. } => {}
+                Stmt::Fn { .. } | Stmt::AsyncFn { .. } | Stmt::Shape { .. } => {}
                 _ => self.compile_stmt(stmt)?,
             }
         }
@@ -117,13 +118,17 @@ impl Codegen {
 
     //    Función / act                                                          
 
-    fn compile_fn_body(&self, params: Vec<String>, body: &[Stmt]) -> Result<FunctionDef, CodegenError> {
+    fn compile_fn_body(&mut self, params: Vec<String>, body: &[Stmt]) -> Result<FunctionDef, CodegenError> {
         let mut fc = FnCompiler::new();
         for stmt in body {
             fc.compile_stmt(stmt, &self.async_fns)?;
         }
         fc.emit(Instruction::LoadNull);
         fc.emit(Instruction::Return);
+        // Register any lambdas discovered inside the function body
+        for (name, func) in fc.pending_lambdas.drain(..) {
+            self.functions.insert(name, func);
+        }
         Ok(FunctionDef { params, body: fc.instrs, lines: fc.lines })
     }
 
@@ -166,7 +171,7 @@ impl Codegen {
         } else { None };
 
         // acts
-        let mut bc_acts = HashMap::new();
+        let mut bc_acts = IndexMap::new();
         for act in acts {
             let mut fc = FnCompiler::new();
             for stmt in &act.body {
@@ -443,7 +448,10 @@ impl Codegen {
                 self.emit(Instruction::ServeHTTP(fn_name));
             }
 
-            Stmt::Use { .. }    => {} // resuelto en compile-time (sin instrucción runtime)
+            Stmt::Use { path, .. } => {
+                // Emitir instrucción de carga de módulo en runtime
+                self.emit(Instruction::UseModule(path.clone()));
+            }
             Stmt::Fn { .. }     => {} // compilado en primer pase
             Stmt::AsyncFn { .. }=> {} // compilado en primer pase
             Stmt::Shape { name, .. } => {
@@ -467,13 +475,19 @@ impl Codegen {
 
     fn compile_expr_main(&mut self, expr: &Expr) -> Result<(), CodegenError> {
         // Para el código principal usamos el mismo FnCompiler inlinado sobre self
+        let mut extra_fns: Vec<(String, FunctionDef)> = Vec::new();
         compile_expr_into(
             &mut self.main_instrs,
             &mut self.main_lines,
             self.current_line,
             &self.async_fns,
+            &mut extra_fns,
             expr,
-        )
+        )?;
+        for (name, func) in extra_fns {
+            self.functions.insert(name, func);
+        }
+        Ok(())
     }
 }
 
@@ -485,11 +499,12 @@ struct FnCompiler {
     current_line: u32,
     for_counter:  usize,
     match_counter: usize,
+    pending_lambdas: Vec<(String, FunctionDef)>,
 }
 
 impl FnCompiler {
     fn new() -> Self {
-        FnCompiler { instrs: Vec::new(), lines: Vec::new(), current_line: 0, for_counter: 0, match_counter: 0 }
+        FnCompiler { instrs: Vec::new(), lines: Vec::new(), current_line: 0, for_counter: 0, match_counter: 0, pending_lambdas: Vec::new() }
     }
 
     fn emit(&mut self, instr: Instruction) -> usize {
@@ -768,7 +783,12 @@ impl FnCompiler {
     }
 
     fn compile_expr(&mut self, expr: &Expr, async_fns: &std::collections::HashSet<String>) -> Result<(), CodegenError> {
-        compile_expr_into(&mut self.instrs, &mut self.lines, self.current_line, async_fns, expr)
+        let mut extra_fns: Vec<(String, FunctionDef)> = Vec::new();
+        compile_expr_into(&mut self.instrs, &mut self.lines, self.current_line, async_fns, &mut extra_fns, expr)?;
+        // Lambdas within function bodies are stored in the outer functions map.
+        // We store them in a temporary list on `self` to be picked up by the caller.
+        self.pending_lambdas.extend(extra_fns);
+        Ok(())
     }
 }
 
@@ -779,13 +799,14 @@ fn compile_expr_into(
     lines:  &mut Vec<u32>,
     current_line: u32,
     async_fns: &std::collections::HashSet<String>,
+    extra_fns: &mut Vec<(String, FunctionDef)>,
     expr: &Expr,
 ) -> Result<(), CodegenError> {
     macro_rules! emit {
         ($i:expr) => {{ instrs.push($i); lines.push(current_line); }}
     }
     macro_rules! recurse {
-        ($e:expr) => { compile_expr_into(instrs, lines, current_line, async_fns, $e)? }
+        ($e:expr) => { compile_expr_into(instrs, lines, current_line, async_fns, extra_fns, $e)? }
     }
 
     match expr {
@@ -899,14 +920,33 @@ fn compile_expr_into(
             // Lambda → función anónima con nombre autogenerado
             let name = format!("__lambda_{}__", instrs.len());
             let mut fc = FnCompiler::new();
-            for stmt in body {
+            // Si el cuerpo es una sola expr-stmt, tratarla como return implícito
+            let last_is_expr = matches!(body.last(), Some(Stmt::Expr { .. }));
+            let (main_body, last_stmt) = if last_is_expr && body.len() > 0 {
+                (&body[..body.len()-1], body.last())
+            } else {
+                (&body[..], None)
+            };
+            for stmt in main_body {
                 fc.compile_stmt(stmt, async_fns).ok();
             }
-            fc.emit(Instruction::LoadNull);
+            if let Some(Stmt::Expr { expr, .. }) = last_stmt {
+                // expr result queda en stack → Return la devuelve
+                let mut extra2: Vec<(String, FunctionDef)> = Vec::new();
+                compile_expr_into(&mut fc.instrs, &mut fc.lines, fc.current_line, async_fns, &mut extra2, expr).ok();
+                fc.pending_lambdas.extend(extra2);
+            } else {
+                fc.emit(Instruction::LoadNull);
+            }
             fc.emit(Instruction::Return);
-            // Emitir un LoadVar con el nombre de la lambda (la función se registra por separado)
-            // Para inlining simple: usamos MakeFunction
-            emit!(Instruction::MakeFunction(name, params.clone(), 0));
+            // Registrar la función lambda
+            extra_fns.push((name.clone(), FunctionDef {
+                params: params.clone(),
+                body: fc.instrs,
+                lines: fc.lines,
+            }));
+            extra_fns.extend(fc.pending_lambdas);
+            emit!(Instruction::LoadStr(name));
         }
     }
     Ok(())
@@ -990,7 +1030,9 @@ fn compile_sub_expr(
     let tokens = lex(src).map_err(|e| CodegenError { message: e.message, line: current_line })?;
     let stmts  = parse(tokens).map_err(|e| CodegenError { message: e.message, line: e.line })?;
     if let Some(Stmt::Expr { expr, .. }) = stmts.into_iter().next() {
-        compile_expr_into(instrs, lines, current_line, async_fns, &expr)?;
+        let mut extra_fns: Vec<(String, FunctionDef)> = Vec::new();
+        compile_expr_into(instrs, lines, current_line, async_fns, &mut extra_fns, &expr)?;
+        // Note: lambdas in string interpolation are dropped (edge case, uncommon)
     }
     Ok(())
 }

@@ -1,6 +1,6 @@
 use std::fmt;
-use std::collections::HashMap;
 use std::rc::Rc;
+use indexmap::IndexMap;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug, Clone)]
 pub struct InstanceData {
     pub shape_name: String,
-    pub fields: HashMap<String, Value>,
+    pub fields: IndexMap<String, Value>,
 }
 
 /// Versión thread-safe de Value (sin Rc) para paso entre tareas async
@@ -20,7 +20,7 @@ pub enum SendValue {
     Float(f64),
     Str(String),
     List(Vec<SendValue>),
-    Dict(HashMap<String, SendValue>),
+    Dict(IndexMap<String, SendValue>),
 }
 
 /// Convierte un SendValue de vuelta a Value
@@ -44,7 +44,7 @@ pub enum Value {
     Str(String),
     Bool(bool),
     List(Vec<Value>),
-    Dict(HashMap<String, Value>),
+    Dict(IndexMap<String, Value>),
     Instance(Rc<RefCell<InstanceData>>),
     /// Handle a una tarea asíncrona en curso
     Task(Arc<Mutex<Option<Result<SendValue, String>>>>),
@@ -137,7 +137,7 @@ impl Value {
                 Ok(SendValue::List(sv?))
             }
             Value::Dict(map) => {
-                let mut m = HashMap::new();
+                let mut m = IndexMap::new();
                 for (k, v) in map {
                     m.insert(k.clone(), v.to_send()?);
                 }

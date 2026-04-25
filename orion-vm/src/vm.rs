@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use indexmap::IndexMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::{self, Write};
@@ -11,7 +12,7 @@ struct CallFrame {
     instructions: Vec<Instruction>,
     lines: Vec<u32>,
     ip: usize,
-    vars: HashMap<String, Value>,
+    vars: IndexMap<String, Value>,
     consts: HashSet<String>,
     /// Si es un frame de act/on_create, referencia a la instancia actual
     self_instance: Option<Rc<RefCell<InstanceData>>>,
@@ -25,7 +26,7 @@ impl CallFrame {
     fn new(instructions: Vec<Instruction>, lines: Vec<u32>) -> Self {
         CallFrame {
             instructions, lines, ip: 0,
-            vars: HashMap::new(),
+            vars: IndexMap::new(),
             consts: HashSet::new(),
             self_instance: None,
             instance_fields: Vec::new(),
@@ -77,8 +78,8 @@ struct ErrorHandler {
 pub struct VM {
     value_stack: Vec<Value>,
     call_stack: Vec<CallFrame>,
-    functions: HashMap<String, FunctionDef>,
-    shapes: HashMap<String, ShapeDef>,
+    functions: IndexMap<String, FunctionDef>,
+    shapes: IndexMap<String, ShapeDef>,
     current_line: u32,
     error_handlers: Vec<ErrorHandler>,
     /// Memoria de sesión para instrucciones AiLearn / AiSense
@@ -89,8 +90,8 @@ impl VM {
     pub fn new(
         main: Vec<Instruction>,
         main_lines: Vec<u32>,
-        functions: HashMap<String, FunctionDef>,
-        shapes: HashMap<String, ShapeDef>,
+        functions: IndexMap<String, FunctionDef>,
+        shapes: IndexMap<String, ShapeDef>,
     ) -> Self {
         VM {
             value_stack: Vec::new(),
@@ -117,7 +118,14 @@ impl VM {
     }
 
     pub fn run(&mut self) -> Result<(), String> {
-        self.run_inner().map_err(|e| {
+        let run_result: Result<(), String> = loop {
+            match self.step() {
+                Ok(true) => break Ok(()),
+                Ok(false) => {}
+                Err(e) => break Err(e),
+            }
+        };
+        run_result.map_err(|e| {
             let trace = self.stack_trace();
             let line_info = if self.current_line > 0 {
                 format!("Linea {} | ", self.current_line)
@@ -134,57 +142,57 @@ impl VM {
 
     /// Ejecuta sin formatear errores — usar en subtareas async para evitar doble-prefijo
     pub fn run_raw(&mut self) -> Result<(), String> {
-        self.run_inner()
-    }
-
-    fn run_inner(&mut self) -> Result<(), String> {
         loop {
-            // Manejo de fin de frame
-            {
-                let frame = match self.call_stack.last_mut() {
-                    Some(f) => f,
-                    None => break,
-                };
-                if frame.ip >= frame.instructions.len() {
-                    let frame = self.call_stack.pop().unwrap();
-                    frame.sync_to_instance();
-                    continue;
-                }
-            }
-
-            let instr = {
-                let frame = self.call_stack.last_mut().unwrap();
-                let line = frame.lines.get(frame.ip).copied().unwrap_or(0);
-                let instr = frame.instructions[frame.ip].clone();
-                frame.ip += 1;
-                if line > 0 { self.current_line = line; }
-                instr
-            };
-
-            match self.dispatch_instr(instr) {
-                Ok(true) => break,
-                Ok(false) => {}
-                Err(e) => {
-                    if let Some(handler) = self.error_handlers.pop() {
-                        // Deshacer call stack hasta la profundidad del handler
-                        while self.call_stack.len() > handler.frame_depth {
-                            let f = self.call_stack.pop().unwrap();
-                            f.sync_to_instance();
-                        }
-                        // Poner mensaje de error en el stack (lo toma StoreVar)
-                        self.value_stack.push(Value::Str(e));
-                        // Saltar al bloque handle
-                        let frame = self.call_stack.last_mut()
-                            .ok_or("Sin frame activo para handle")?;
-                        frame.ip = handler.handler_addr;
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
+            let done = self.step()?;
+            if done { break; }
         }
         Ok(())
     }
+
+    /// Ejecuta un solo ciclo del loop principal. Retorna Ok(true) si el programa terminó.
+    fn step(&mut self) -> Result<bool, String> {
+        // Fin de frame
+        {
+            let frame = match self.call_stack.last_mut() {
+                Some(f) => f,
+                None => return Ok(true),
+            };
+            if frame.ip >= frame.instructions.len() {
+                let frame = self.call_stack.pop().unwrap();
+                frame.sync_to_instance();
+                return Ok(false);
+            }
+        }
+
+        let instr = {
+            let frame = self.call_stack.last_mut().unwrap();
+            let line = frame.lines.get(frame.ip).copied().unwrap_or(0);
+            let instr = frame.instructions[frame.ip].clone();
+            frame.ip += 1;
+            if line > 0 { self.current_line = line; }
+            instr
+        };
+
+        match self.dispatch_instr(instr) {
+            Ok(done) => Ok(done),
+            Err(e) => {
+                if let Some(handler) = self.error_handlers.pop() {
+                    while self.call_stack.len() > handler.frame_depth {
+                        let f = self.call_stack.pop().unwrap();
+                        f.sync_to_instance();
+                    }
+                    self.value_stack.push(Value::Str(e));
+                    let frame = self.call_stack.last_mut()
+                        .ok_or("Sin frame activo para handle")?;
+                    frame.ip = handler.handler_addr;
+                    Ok(false)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
 
     /// Ejecuta una sola instrucción. Devuelve Ok(true) para Halt/Return-en-main.
     fn dispatch_instr(&mut self, instr: Instruction) -> Result<bool, String> {
@@ -198,9 +206,32 @@ impl VM {
 
             // ── Variables ───────────────────────────────────────────────────
             Instruction::LoadVar(name) => {
-                let frame = self.call_stack.last().ok_or("Sin frame activo")?;
-                let val = frame.vars.get(&name).cloned()
-                    .ok_or_else(|| format!("Variable '{}' no definida", name))?;
+                // 1. Frame local
+                let val = self.call_stack.last()
+                    .and_then(|f| f.vars.get(&name).cloned());
+                // 2. Main (global) frame
+                let val = val.or_else(|| {
+                    if self.call_stack.len() > 1 {
+                        self.call_stack.first().and_then(|f| f.vars.get(&name).cloned())
+                    } else { None }
+                });
+                // 3. Nombre de función registrada → push Str(name)
+                let val = val.or_else(|| {
+                    if self.functions.contains_key(&name) {
+                        Some(Value::Str(name.clone()))
+                    } else {
+                        None
+                    }
+                });
+                // 4. Nombre de shape registrado → push Str(name)
+                let val = val.or_else(|| {
+                    if self.shapes.contains_key(&name) {
+                        Some(Value::Str(name.clone()))
+                    } else {
+                        None
+                    }
+                });
+                let val = val.ok_or_else(|| format!("Variable '{}' no definida", name))?;
                 self.value_stack.push(val);
             }
             Instruction::StoreVar(name) => {
@@ -303,20 +334,31 @@ impl VM {
                     .collect::<Result<Vec<_>, _>>()?;
                 args.reverse();
 
-                if self.shapes.contains_key(&name) {
-                    let inst_rc = self.instantiate_shape(&name, args)?;
+                // Resolve the actual function name: may be a local variable holding a fn-name string
+                let resolved_name = self.call_stack.last()
+                    .and_then(|f| f.vars.get(&name).cloned())
+                    .or_else(|| {
+                        if self.call_stack.len() > 1 {
+                            self.call_stack.first().and_then(|f| f.vars.get(&name).cloned())
+                        } else { None }
+                    })
+                    .and_then(|v| if let Value::Str(s) = v { Some(s) } else { None })
+                    .unwrap_or_else(|| name.clone());
+
+                if self.shapes.contains_key(&resolved_name) {
+                    let inst_rc = self.instantiate_shape(&resolved_name, args)?;
                     self.value_stack.push(Value::Instance(inst_rc));
-                } else if let Some(func) = self.functions.get(&name).cloned() {
+                } else if let Some(func) = self.functions.get(&resolved_name).cloned() {
                     if args.len() != func.params.len() {
                         return Err(format!(
                             "'{}' espera {} argumento(s), recibió {}",
-                            name, func.params.len(), args.len()
+                            resolved_name, func.params.len(), args.len()
                         ));
                     }
-                    let frame = CallFrame::with_args_named(func.body, func.lines, &name, &func.params, args);
+                    let frame = CallFrame::with_args_named(func.body, func.lines, &resolved_name, &func.params, args);
                     self.call_stack.push(frame);
                 } else {
-                    let result = self.call_builtin(&name, args)?;
+                    let result = self.call_builtin(&resolved_name, args)?;
                     if let Some(val) = result {
                         self.value_stack.push(val);
                     }
@@ -331,6 +373,19 @@ impl VM {
             }
             Instruction::Halt => return Ok(true),
 
+            // ── Módulos ──────────────────────────────────────────────────────
+            Instruction::UseModule(path) => {
+                let module_val = self.load_module(&path)?;
+                // Determinar nombre del namespace: basename sin extensión
+                let ns_name = std::path::Path::new(&path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&path)
+                    .to_string();
+                let frame = self.call_stack.last_mut().unwrap();
+                frame.vars.insert(ns_name, module_val);
+            }
+
             // ── OOP ─────────────────────────────────────────────────────────
             Instruction::DefineShape(_) => {}
 
@@ -343,7 +398,12 @@ impl VM {
                             .ok_or_else(|| format!("Atributo '{}' no encontrado en '{}'", attr, inst.shape_name))?;
                         self.value_stack.push(val);
                     }
-                    _ => return Err(format!("GetAttr '{}': no es una instancia", attr)),
+                    Value::Dict(map) => {
+                        let val = map.get(&attr).cloned()
+                            .ok_or_else(|| format!("Atributo '{}' no encontrado en dict/módulo", attr))?;
+                        self.value_stack.push(val);
+                    }
+                    _ => return Err(format!("GetAttr '{}': no es una instancia ni módulo", attr)),
                 }
             }
             Instruction::SetAttr(attr) => {
@@ -373,6 +433,217 @@ impl VM {
 
                 let obj = self.pop()?;
                 match obj {
+                    // ── Métodos de String ────────────────────────────────
+                    Value::Str(s) => {
+                        let result = match method_name.as_str() {
+                            "trim"        => Value::Str(s.trim().to_string()),
+                            "trim_start"  => Value::Str(s.trim_start().to_string()),
+                            "trim_end"    => Value::Str(s.trim_end().to_string()),
+                            "lower"       => Value::Str(s.to_lowercase()),
+                            "upper"       => Value::Str(s.to_uppercase()),
+                            "len"         => Value::Int(s.chars().count() as i64),
+                            "is_empty"    => Value::Bool(s.trim().is_empty()),
+                            "reverse"     => Value::Str(s.chars().rev().collect()),
+                            "contains" => {
+                                let needle = args.into_iter().next()
+                                    .ok_or("string.contains() requiere 1 argumento")?;
+                                Value::Bool(s.contains(needle.to_string().as_str()))
+                            }
+                            "starts_with" => {
+                                let prefix = args.into_iter().next()
+                                    .ok_or("string.starts_with() requiere 1 argumento")?;
+                                Value::Bool(s.starts_with(prefix.to_string().as_str()))
+                            }
+                            "ends_with" => {
+                                let suffix = args.into_iter().next()
+                                    .ok_or("string.ends_with() requiere 1 argumento")?;
+                                Value::Bool(s.ends_with(suffix.to_string().as_str()))
+                            }
+                            "split" => {
+                                let sep = args.into_iter().next()
+                                    .ok_or("string.split() requiere 1 argumento")?;
+                                let parts: Vec<Value> = s.split(sep.to_string().as_str())
+                                    .map(|p| Value::Str(p.to_string()))
+                                    .collect();
+                                Value::List(parts)
+                            }
+                            "replace" => {
+                                let mut it = args.into_iter();
+                                let from = it.next().ok_or("string.replace() requiere 2 argumentos")?;
+                                let to   = it.next().ok_or("string.replace() requiere 2 argumentos")?;
+                                Value::Str(s.replace(from.to_string().as_str(), &to.to_string()))
+                            }
+                            "index_of" | "find" => {
+                                let needle = args.into_iter().next()
+                                    .ok_or("string.find() requiere 1 argumento")?;
+                                match s.find(needle.to_string().as_str()) {
+                                    Some(i) => Value::Int(i as i64),
+                                    None    => Value::Int(-1),
+                                }
+                            }
+                            "slice" => {
+                                let mut it = args.into_iter();
+                                let start = match it.next() {
+                                    Some(Value::Int(n)) => n as usize,
+                                    _ => return Err("string.slice() requiere índice int".to_string()),
+                                };
+                                let end = match it.next() {
+                                    Some(Value::Int(n)) => n as usize,
+                                    None => s.chars().count(),
+                                    _ => return Err("string.slice() índice inválido".to_string()),
+                                };
+                                let sliced: String = s.chars().skip(start).take(end - start).collect();
+                                Value::Str(sliced)
+                            }
+                            "repeat" => {
+                                let n = match args.into_iter().next() {
+                                    Some(Value::Int(n)) => n as usize,
+                                    _ => return Err("string.repeat() requiere un int".to_string()),
+                                };
+                                Value::Str(s.repeat(n))
+                            }
+                            "to_int" | "parse_int" => {
+                                match s.trim().parse::<i64>() {
+                                    Ok(n) => Value::Int(n),
+                                    Err(_) => return Err(format!("No se puede convertir '{}' a int", s)),
+                                }
+                            }
+                            "to_float" | "parse_float" => {
+                                match s.trim().parse::<f64>() {
+                                    Ok(n) => Value::Float(n),
+                                    Err(_) => return Err(format!("No se puede convertir '{}' a float", s)),
+                                }
+                            }
+                            _ => return Err(format!("String no tiene método '{}'", method_name)),
+                        };
+                        self.value_stack.push(result);
+                    }
+
+                    // ── Métodos de List ──────────────────────────────────
+                    Value::List(mut list) => {
+                        let result = match method_name.as_str() {
+                            "len"      => Value::Int(list.len() as i64),
+                            "is_empty" => Value::Bool(list.is_empty()),
+                            "push" | "append" => {
+                                let item = args.into_iter().next()
+                                    .ok_or("list.push() requiere 1 argumento")?;
+                                list.push(item);
+                                Value::List(list)
+                            }
+                            "first" => list.first().cloned().unwrap_or(Value::Null),
+                            "last"  => list.last().cloned().unwrap_or(Value::Null),
+                            "reverse" => { list.reverse(); Value::List(list) }
+                            "contains" => {
+                                let item = args.into_iter().next()
+                                    .ok_or("list.contains() requiere 1 argumento")?;
+                                Value::Bool(list.contains(&item))
+                            }
+                            "join" => {
+                                let sep = match args.into_iter().next() {
+                                    Some(Value::Str(s)) => s,
+                                    None => String::new(),
+                                    Some(v) => v.to_string(),
+                                };
+                                Value::Str(list.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(&sep))
+                            }
+                            "map" => {
+                                let cb = args.into_iter().next()
+                                    .ok_or("list.map() requiere una función/lambda")?;
+                                let mut out = Vec::with_capacity(list.len());
+                                for item in list {
+                                    let r = self.call_value(cb.clone(), vec![item])?;
+                                    out.push(r);
+                                }
+                                Value::List(out)
+                            }
+                            "filter" => {
+                                let cb = args.into_iter().next()
+                                    .ok_or("list.filter() requiere una función/lambda")?;
+                                let mut out = Vec::new();
+                                for item in list {
+                                    let r = self.call_value(cb.clone(), vec![item.clone()])?;
+                                    if r.is_truthy() { out.push(item); }
+                                }
+                                Value::List(out)
+                            }
+                            "reduce" => {
+                                let mut it = args.into_iter();
+                                let cb  = it.next().ok_or("list.reduce() requiere función y acumulador")?;
+                                let acc = it.next().ok_or("list.reduce() requiere acumulador inicial")?;
+                                let mut acc = acc;
+                                for item in list {
+                                    acc = self.call_value(cb.clone(), vec![acc, item])?;
+                                }
+                                acc
+                            }
+                            "sort" => {
+                                list.sort_by(|a, b| match (a, b) {
+                                    (Value::Int(x), Value::Int(y))     => x.cmp(y),
+                                    (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+                                    (Value::Str(x), Value::Str(y))     => x.cmp(y),
+                                    _ => std::cmp::Ordering::Equal,
+                                });
+                                Value::List(list)
+                            }
+                            "sum" => {
+                                let mut total = 0.0f64;
+                                let mut is_int = true;
+                                for v in &list {
+                                    match v {
+                                        Value::Int(n)   => total += *n as f64,
+                                        Value::Float(n) => { total += n; is_int = false; }
+                                        _ => {}
+                                    }
+                                }
+                                if is_int { Value::Int(total as i64) } else { Value::Float(total) }
+                            }
+                            "min" => list.iter().cloned().reduce(|a, b| match (&a, &b) {
+                                (Value::Int(x), Value::Int(y))     => if x <= y { a } else { b },
+                                (Value::Float(x), Value::Float(y)) => if x <= y { a } else { b },
+                                _ => a,
+                            }).unwrap_or(Value::Null),
+                            "max" => list.iter().cloned().reduce(|a, b| match (&a, &b) {
+                                (Value::Int(x), Value::Int(y))     => if x >= y { a } else { b },
+                                (Value::Float(x), Value::Float(y)) => if x >= y { a } else { b },
+                                _ => a,
+                            }).unwrap_or(Value::Null),
+                            _ => return Err(format!("List no tiene método '{}'", method_name)),
+                        };
+                        self.value_stack.push(result);
+                    }
+
+                    // ── Métodos de Dict ──────────────────────────────────
+                    Value::Dict(map) => {
+                        // Primero probar métodos builtin de dict
+                        match method_name.as_str() {
+                            "len"      => { self.value_stack.push(Value::Int(map.len() as i64)); }
+                            "is_empty" => { self.value_stack.push(Value::Bool(map.is_empty())); }
+                            "keys"     => { self.value_stack.push(Value::List(map.keys().map(|k| Value::Str(k.clone())).collect())); }
+                            "values"   => { self.value_stack.push(Value::List(map.values().cloned().collect())); }
+                            "contains" | "has_key" => {
+                                let key = args.into_iter().next()
+                                    .ok_or("dict.contains() requiere 1 argumento")?
+                                    .to_string();
+                                self.value_stack.push(Value::Bool(map.contains_key(&key)));
+                            }
+                            "get" => {
+                                let key = args.into_iter().next()
+                                    .ok_or("dict.get() requiere 1 argumento")?
+                                    .to_string();
+                                self.value_stack.push(map.get(&key).cloned().unwrap_or(Value::Null));
+                            }
+                            _ => {
+                                // Buscar función en el dict (módulo namespace)
+                                if let Some(fn_val) = map.get(method_name.as_str()).cloned() {
+                                    let result = self.call_value(fn_val, args)?;
+                                    self.value_stack.push(result);
+                                } else {
+                                    return Err(format!("Dict no tiene método '{}'", method_name));
+                                }
+                            }
+                        }
+                    }
+
                     Value::Instance(inst_rc) => {
                         let shape_name = inst_rc.borrow().shape_name.clone();
                         let act = self.find_act(&shape_name, &method_name)
@@ -412,7 +683,7 @@ impl VM {
                 self.value_stack.push(Value::List(items));
             }
             Instruction::MakeDict(n) => {
-                let mut map = HashMap::new();
+                let mut map = IndexMap::new();
                 for _ in 0..n {
                     let val = self.pop()?;
                     let key = match self.pop()? {
@@ -716,14 +987,232 @@ impl VM {
         self.value_stack.pop().ok_or_else(|| "Stack vacío".to_string())
     }
 
-    // -------------------------------------------------------------------------
-    // OOP helpers
-    // -------------------------------------------------------------------------
+    /// Carga un módulo por su path/nombre y devuelve un Value::Dict namespace.
+    fn load_module(&mut self, path: &str) -> Result<Value, String> {
+        use std::path::Path;
+        let base_name = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or(path);
+        let prefix = format!("{}__", base_name);
+
+        // 1) Módulos builtin Rust tienen prioridad sobre archivos
+        match base_name {
+            "math" => return Ok(self.builtin_math_module()),
+            _ => {}
+        }
+
+        // 2) Buscar archivo .orx en packages/ o ruta relativa
+        let orx_candidates = [
+            format!("packages/{}.orx", path),
+            format!("{}.orx", path),
+            format!("lib/{}.orx", path),
+        ];
+
+        for candidate in &orx_candidates {
+            if std::path::Path::new(candidate).exists() {
+                return self.load_orx_module(candidate, base_name, &prefix);
+            }
+        }
+
+        Err(format!("Módulo '{}' no encontrado", path))
+    }
+
+    /// Carga un módulo .orx: compila, ejecuta en sub-VM, extrae vars y fns en un dict.
+    fn load_orx_module(&mut self, path: &str, module_name: &str, prefix: &str) -> Result<Value, String> {
+        use crate::lexer::lex;
+        use crate::parser::parse;
+        use crate::codegen::compile;
+
+        let src = std::fs::read_to_string(path)
+            .map_err(|e| format!("No se pudo leer '{}': {}", path, e))?;
+        let tokens = lex(&src).map_err(|e| format!("Error lexando '{}': {:?}", path, e))?;
+        let ast = parse(tokens).map_err(|e| format!("Error parseando '{}': {:?}", path, e))?;
+        let bc = compile(ast).map_err(|e| format!("Error compilando '{}': {:?}", path, e))?;
+
+        // Copiar funciones del módulo al namespace actual con prefijo
+        let mut ns: IndexMap<String, Value> = IndexMap::new();
+        for (fname, fdef) in &bc.functions {
+            let prefixed = format!("{}{}", prefix, fname);
+            ns.insert(fname.clone(), Value::Str(prefixed.clone()));
+            self.functions.insert(prefixed, fdef.clone());
+        }
+
+        // Ejecutar el módulo para obtener variables globales
+        let mut sub_vm = VM::new(bc.main.clone(), bc.lines.clone(), bc.functions.clone(), bc.shapes.clone());
+        sub_vm.run().ok(); // ignorar errores de side effects
+        // Extraer vars del frame principal del sub_vm
+        if let Some(frame) = sub_vm.call_stack.first() {
+            for (k, v) in &frame.vars {
+                if !k.starts_with('_') {
+                    ns.insert(k.clone(), v.clone());
+                }
+            }
+        }
+
+        Ok(Value::Dict(ns))
+    }
+
+    /// Módulo math builtin con funciones nativas Rust.
+    fn builtin_math_module(&mut self) -> Value {
+        use std::f64::consts;
+        let mut ns: IndexMap<String, Value> = IndexMap::new();
+
+        // Constantes
+        ns.insert("PI".to_string(), Value::Float(consts::PI));
+        ns.insert("E".to_string(), Value::Float(consts::E));
+        ns.insert("TAU".to_string(), Value::Float(consts::TAU));
+        ns.insert("PHI".to_string(), Value::Float(1.6180339887498948));
+        ns.insert("INF".to_string(), Value::Float(f64::INFINITY));
+
+        // Registrar funciones builtin en self.functions
+        let math_fns: &[(&str, &[&str])] = &[
+            ("sqrt",     &["x"]),
+            ("abs",      &["x"]),
+            ("floor",    &["x"]),
+            ("ceil",     &["x"]),
+            ("round",    &["x"]),
+            ("sin",      &["x"]),
+            ("cos",      &["x"]),
+            ("tan",      &["x"]),
+            ("log",      &["x"]),
+            ("log10",    &["x"]),
+            ("log2",     &["x"]),
+            ("exp",      &["x"]),
+            ("pow",      &["a", "b"]),
+            ("max",      &["a", "b"]),
+            ("min",      &["a", "b"]),
+            ("clamp",    &["x", "lo", "hi"]),
+            ("factorial",&["n"]),
+            ("sign",     &["x"]),
+            ("degrees",  &["r"]),
+            ("radians",  &["d"]),
+            ("hypot",    &["a", "b"]),
+            ("rand",     &[]),
+            ("randint",  &["a", "b"]),
+        ];
+
+        for (fname, params) in math_fns {
+            let key = format!("__math__{}", fname);
+            ns.insert(fname.to_string(), Value::Str(key.clone()));
+            // Registrar función con un body especial: usamos la instrucción Call con nombre especial
+            // La VM resolverá __math__X directamente en call_value / Call handler
+        }
+
+        // Registrar un FunctionDef nativo fake para cada función math que haga dispatch
+        // La forma más simple: crear FunctionDef con body = [CallBuiltin, Return]
+        // Como no tenemos CallBuiltin, usamos una estrategia diferente:
+        // Añadimos la lógica en call_value para __math__* nombres
+
+        Value::Dict(ns)
+    }
+
+    /// Invoca un callable por nombre (string) con los argumentos dados
+    /// y devuelve el resultado. Útil para map/filter/reduce sobre colecciones.
+    fn call_value(&mut self, callee: Value, args: Vec<Value>) -> Result<Value, String> {
+        match callee {
+            Value::Str(fn_name) => {
+                // Funciones math builtin
+                if fn_name.starts_with("__math__") {
+                    return self.call_math_builtin(&fn_name[8..], args);
+                }
+                let func_def = self.functions.get(&fn_name)
+                    .ok_or_else(|| format!("Función '{}' no encontrada (lambda/fn)", fn_name))?
+                    .clone();
+                let stack_depth = self.call_stack.len();
+                let frame = CallFrame::with_args_named(
+                    func_def.body, func_def.lines, &fn_name, &func_def.params, args
+                );
+                self.call_stack.push(frame);
+                // Run until we come back to stack_depth
+                loop {
+                    if self.call_stack.len() <= stack_depth {
+                        break;
+                    }
+                    let done = self.step()?;
+                    if done { break; }
+                }
+                Ok(self.value_stack.pop().unwrap_or(Value::Null))
+            }
+            _ => Err(format!("No es un callable: {:?}", callee)),
+        }
+    }
+
+    /// Dispatch de funciones math builtin
+    fn call_math_builtin(&self, name: &str, args: Vec<Value>) -> Result<Value, String> {
+        fn to_f64(v: &Value) -> Result<f64, String> {
+            match v {
+                Value::Float(f) => Ok(*f),
+                Value::Int(i) => Ok(*i as f64),
+                _ => Err(format!("Se esperaba número, no {:?}", v)),
+            }
+        }
+        match name {
+            "sqrt"      => Ok(Value::Float(to_f64(&args[0])?.sqrt())),
+            "abs"       => match &args[0] {
+                Value::Int(i)   => Ok(Value::Int(i.abs())),
+                Value::Float(f) => Ok(Value::Float(f.abs())),
+                _ => Err("abs() requiere número".into()),
+            },
+            "floor"     => Ok(Value::Int(to_f64(&args[0])?.floor() as i64)),
+            "ceil"      => Ok(Value::Int(to_f64(&args[0])?.ceil() as i64)),
+            "round"     => Ok(Value::Int(to_f64(&args[0])?.round() as i64)),
+            "sin"       => Ok(Value::Float(to_f64(&args[0])?.sin())),
+            "cos"       => Ok(Value::Float(to_f64(&args[0])?.cos())),
+            "tan"       => Ok(Value::Float(to_f64(&args[0])?.tan())),
+            "log"       => Ok(Value::Float(to_f64(&args[0])?.ln())),
+            "log10"     => Ok(Value::Float(to_f64(&args[0])?.log10())),
+            "log2"      => Ok(Value::Float(to_f64(&args[0])?.log2())),
+            "exp"       => Ok(Value::Float(to_f64(&args[0])?.exp())),
+            "pow"       => Ok(Value::Float(to_f64(&args[0])?.powf(to_f64(&args[1])?))),
+            "max"       => {
+                let a = to_f64(&args[0])?; let b = to_f64(&args[1])?;
+                if a >= b { Ok(args[0].clone()) } else { Ok(args[1].clone()) }
+            }
+            "min"       => {
+                let a = to_f64(&args[0])?; let b = to_f64(&args[1])?;
+                if a <= b { Ok(args[0].clone()) } else { Ok(args[1].clone()) }
+            }
+            "clamp"     => {
+                let x = to_f64(&args[0])?; let lo = to_f64(&args[1])?; let hi = to_f64(&args[2])?;
+                Ok(Value::Float(x.clamp(lo, hi)))
+            }
+            "factorial" => {
+                let n = match &args[0] { Value::Int(i) => *i, _ => to_f64(&args[0])? as i64 };
+                if n < 0 { return Err("factorial de negativo".into()); }
+                let mut r: i64 = 1;
+                for i in 2..=n { r *= i; }
+                Ok(Value::Int(r))
+            }
+            "sign"      => {
+                let f = to_f64(&args[0])?;
+                Ok(Value::Int(if f > 0.0 { 1 } else if f < 0.0 { -1 } else { 0 }))
+            }
+            "degrees"   => Ok(Value::Float(to_f64(&args[0])?.to_degrees())),
+            "radians"   => Ok(Value::Float(to_f64(&args[0])?.to_radians())),
+            "hypot"     => Ok(Value::Float(to_f64(&args[0])?.hypot(to_f64(&args[1])?))),
+            "rand"      => {
+                // Simple LCG random (no external crate)
+                use std::time::SystemTime;
+                let seed = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().subsec_nanos();
+                let r = (seed as f64) / (u32::MAX as f64);
+                Ok(Value::Float(r))
+            }
+            "randint"   => {
+                use std::time::SystemTime;
+                let a = match &args[0] { Value::Int(i) => *i, _ => to_f64(&args[0])? as i64 };
+                let b = match &args[1] { Value::Int(i) => *i, _ => to_f64(&args[1])? as i64 };
+                let seed = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().subsec_nanos();
+                let range = (b - a + 1).max(1);
+                Ok(Value::Int(a + (seed as i64 % range)))
+            }
+            _ => Err(format!("math.{} no implementado", name)),
+        }
+    }
+
+
 
     fn instantiate_shape(&mut self, shape_name: &str, args: Vec<Value>) -> Result<Rc<RefCell<InstanceData>>, String> {
         let all_fields = self.resolve_fields(shape_name)?;
 
-        let mut fields: HashMap<String, Value> = HashMap::new();
+        let mut fields: IndexMap<String, Value> = IndexMap::new();
         for field in &all_fields {
             let default_val = self.eval_mini_bytecode(&field.default)?;
             fields.insert(field.name.clone(), default_val);
@@ -909,7 +1398,7 @@ impl VM {
                 (url.clone(), String::new())
             };
 
-            let mut params = HashMap::new();
+            let mut params = IndexMap::new();
             for pair in query.split('&') {
                 if let Some((k, v)) = pair.split_once('=') {
                     params.insert(k.to_string(), Value::Str(v.to_string()));
@@ -921,7 +1410,7 @@ impl VM {
                 request.as_reader().read_to_string(&mut body_str).ok();
             }
 
-            let mut req_map = HashMap::new();
+            let mut req_map = IndexMap::new();
             req_map.insert("path".to_string(),   Value::Str(path));
             req_map.insert("method".to_string(), Value::Str(method));
             req_map.insert("body".to_string(),   Value::Str(body_str));
@@ -1286,7 +1775,7 @@ fn json_to_value(v: serde_json::Value) -> Value {
             Value::List(arr.into_iter().map(json_to_value).collect())
         }
         serde_json::Value::Object(map) => {
-            let mut hm = std::collections::HashMap::new();
+            let mut hm = IndexMap::new();
             for (k, val) in map {
                 hm.insert(k, json_to_value(val));
             }

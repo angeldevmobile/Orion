@@ -13,6 +13,7 @@ mod ast;
 mod lexer;
 mod parser;
 mod codegen;
+mod pkg;
 
 extern crate tiny_http;
 
@@ -30,12 +31,58 @@ fn main() {
         eprintln!("     orion --repl                    (modo interactivo)");
         eprintln!("     orion --lex     <archivo.orx>   (imprime tokens)");
         eprintln!("     orion --eval    <ast.json>      (evaluador de árbol)");
+        eprintln!("     orion --add     <paquete>       (instalar paquete)");
+        eprintln!("     orion --add     <paquete> --force  (reinstalar)");
+        eprintln!("     orion --remove  <paquete>       (desinstalar paquete)");
+        eprintln!("     orion --list                    (paquetes disponibles)");
+        eprintln!("     orion --search  <consulta>      (buscar paquetes)");
+        eprintln!("     orion --update  [paquete]       (actualizar uno o todos)");
         eprintln!("     orion --version");
         std::process::exit(1);
     }
 
     if args[1] == "--version" {
         println!("Orion VM v0.4.0 (Rust) — pipeline completo: lexer + parser + codegen + VM");
+        return;
+    }
+
+    //    Package manager                                                        
+    if args[1] == "--add" {
+        if args.len() < 3 {
+            eprintln!("Uso: orion --add <paquete> [--force]");
+            std::process::exit(1);
+        }
+        let force = args.iter().any(|a| a == "--force");
+        pkg::add_package(&args[2], force);
+        return;
+    }
+
+    if args[1] == "--remove" {
+        if args.len() < 3 {
+            eprintln!("Uso: orion --remove <paquete>");
+            std::process::exit(1);
+        }
+        pkg::remove_package(&args[2]);
+        return;
+    }
+
+    if args[1] == "--list" {
+        pkg::list_packages();
+        return;
+    }
+
+    if args[1] == "--search" {
+        if args.len() < 3 {
+            eprintln!("Uso: orion --search <consulta>");
+            std::process::exit(1);
+        }
+        pkg::search_packages(&args[2]);
+        return;
+    }
+
+    if args[1] == "--update" {
+        let target = args.get(2).map(String::as_str);
+        pkg::update_packages(target);
         return;
     }
 

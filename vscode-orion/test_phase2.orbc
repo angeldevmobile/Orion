@@ -1,0 +1,331 @@
+{
+  "main": [
+    {
+      "LoadStr": "=== use math (lib/math.py) ==="
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 25
+    },
+    {
+      "CallMethod": [
+        "sqrt",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "GetAttr": "PI"
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 5
+    },
+    {
+      "CallMethod": [
+        "factorial",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== use packages/math ==="
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 9
+    },
+    {
+      "CallMethod": [
+        "sqrt",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 7
+    },
+    "Neg",
+    {
+      "CallMethod": [
+        "abs",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 3
+    },
+    {
+      "LoadInt": 8
+    },
+    {
+      "CallMethod": [
+        "max",
+        2
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 3
+    },
+    {
+      "LoadInt": 8
+    },
+    {
+      "CallMethod": [
+        "min",
+        2
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 2
+    },
+    {
+      "LoadInt": 10
+    },
+    {
+      "CallMethod": [
+        "pow",
+        2
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 6
+    },
+    {
+      "CallMethod": [
+        "factorial",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "math"
+    },
+    {
+      "LoadInt": 15
+    },
+    {
+      "LoadInt": 0
+    },
+    {
+      "LoadInt": 10
+    },
+    {
+      "CallMethod": [
+        "clamp",
+        3
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== use packages/strings ==="
+    },
+    "Show",
+    {
+      "LoadVar": "strings"
+    },
+    {
+      "LoadStr": "Orion "
+    },
+    {
+      "LoadInt": 3
+    },
+    {
+      "CallMethod": [
+        "repeat",
+        2
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "strings"
+    },
+    {
+      "LoadStr": "hola"
+    },
+    {
+      "CallMethod": [
+        "reverse",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "strings"
+    },
+    {
+      "LoadStr": "   "
+    },
+    {
+      "CallMethod": [
+        "is_empty",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "strings"
+    },
+    {
+      "LoadStr": "texto"
+    },
+    {
+      "CallMethod": [
+        "is_empty",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "strings"
+    },
+    {
+      "LoadStr": "42"
+    },
+    {
+      "LoadInt": 5
+    },
+    {
+      "LoadStr": "0"
+    },
+    {
+      "CallMethod": [
+        "pad_left",
+        3
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "strings"
+    },
+    {
+      "LoadStr": "banana"
+    },
+    {
+      "LoadStr": "a"
+    },
+    {
+      "CallMethod": [
+        "count",
+        2
+      ]
+    },
+    "Show",
+    "Halt"
+  ],
+  "lines": [
+    4,
+    4,
+    6,
+    6,
+    6,
+    6,
+    7,
+    7,
+    7,
+    8,
+    8,
+    8,
+    8,
+    11,
+    11,
+    15,
+    15,
+    15,
+    15,
+    16,
+    16,
+    16,
+    16,
+    16,
+    17,
+    17,
+    17,
+    17,
+    17,
+    18,
+    18,
+    18,
+    18,
+    18,
+    19,
+    19,
+    19,
+    19,
+    19,
+    20,
+    20,
+    20,
+    20,
+    21,
+    21,
+    21,
+    21,
+    21,
+    21,
+    24,
+    24,
+    26,
+    26,
+    26,
+    26,
+    26,
+    27,
+    27,
+    27,
+    27,
+    28,
+    28,
+    28,
+    28,
+    29,
+    29,
+    29,
+    29,
+    30,
+    30,
+    30,
+    30,
+    30,
+    30,
+    31,
+    31,
+    31,
+    31,
+    31,
+    31
+  ],
+  "functions": {},
+  "shapes": {}
+}

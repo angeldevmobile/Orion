@@ -1,5 +1,5 @@
 use std::fs;
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use crate::instruction::Instruction;
 
@@ -35,7 +35,7 @@ pub struct ActDef {
 pub struct ShapeDef {
     pub fields: Vec<FieldDef>,
     pub on_create: Option<ActDef>,
-    pub acts: HashMap<String, ActDef>,
+    pub acts: IndexMap<String, ActDef>,
     #[serde(default)]
     pub using: Vec<String>,
 }
@@ -46,9 +46,9 @@ pub struct OrionBytecode {
     pub main: Vec<Instruction>,
     #[serde(default)]
     pub lines: Vec<u32>,
-    pub functions: HashMap<String, FunctionDef>,
+    pub functions: IndexMap<String, FunctionDef>,
     #[serde(default)]
-    pub shapes: HashMap<String, ShapeDef>,
+    pub shapes: IndexMap<String, ShapeDef>,
 }
 
 pub fn load(path: &str) -> Result<OrionBytecode, String> {

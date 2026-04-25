@@ -92,6 +92,9 @@ pub enum Instruction {
     //   Servidor HTTP nativo (Fase 7)
     ServeHTTP(String),   // pop puerto (int) → levanta servidor HTTP, handler = String fn_name
 
+    //   Módulos
+    UseModule(String),   // carga módulo por nombre/path → almacena namespace en variable
+
     //   Fin
     Halt,
 }
