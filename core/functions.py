@@ -14,11 +14,16 @@ from copy import deepcopy
 
 
 # --- Registro de funciones ---
-def register_function(env: dict, name: str, params: list, body: list, closure=None, is_async=False):
+def register_function(env: dict, name: str, params: list, body: list,
+                      closure=None, is_async=False,
+                      param_types: dict | None = None,
+                      return_type: str | None = None):
     """
     Registra una función en el entorno.
-    closure: entorno capturado (para closures).
-    is_async: marca si es async futurista.
+    closure:     entorno capturado (para closures).
+    is_async:    marca si es async.
+    param_types: dict nombre→tipo de cada parámetro anotado.
+    return_type: tipo declarado de retorno, o None.
     """
     if name not in env:
         env[name] = []
@@ -28,7 +33,9 @@ def register_function(env: dict, name: str, params: list, body: list, closure=No
         "params": params,
         "body": body,
         "closure": deepcopy(closure) if closure else {},
-        "async": is_async
+        "async": is_async,
+        "param_types": param_types or {},
+        "return_type": return_type,
     })
 
 

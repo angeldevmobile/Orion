@@ -66,6 +66,20 @@ def run_script(path: str):
 
     console.print(f"[blue]Ejecutando:[/blue] {path}\n")
 
+    # Type check — muestra advertencias sin bloquear la ejecución
+    try:
+        with open(path, "r", encoding="utf-8") as _f:
+            _src = _f.read()
+        from core.typechecker import type_check
+        _tc_issues = type_check(parse(lex(_src)), strict=False)
+        if _tc_issues:
+            console.print(f"[yellow]⚠  {len(_tc_issues)} advertencia(s) de tipos:[/yellow]")
+            for _issue in _tc_issues:
+                console.print(f"   [yellow]{_issue}[/yellow]")
+            console.print()
+    except Exception:
+        pass
+
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     orbc_path = os.path.splitext(path)[0] + ".orbc"
     vm_exe = os.path.join(project_root, "orion-vm", "target", "release", "orion.exe")
@@ -330,6 +344,7 @@ def show_help():
     help_table.add_row("orion new <proyecto>", "Crea un proyecto backend nuevo", "orion new mi-api")
     help_table.add_row("orion build <archivo>", "Compila a .orbc sin ejecutar", "orion build main.orx")
     help_table.add_row("orion check <archivo>", "Verifica sintaxis sin ejecutar", "orion check main.orx")
+    help_table.add_row("orion check --types <archivo>", "Verifica sintaxis + tipos estáticos", "orion check --types main.orx")
     help_table.add_row("orion watch <archivo>", "Hot reload — re-ejecuta al guardar", "orion watch main.orx")
     help_table.add_row("orion bench <archivo>", "Benchmark de ejecución", "orion bench main.orx --runs=20")
     help_table.add_row("orion test [carpeta]", "Ejecuta todos los tests", "orion test")
@@ -898,8 +913,8 @@ def cmd_build(path: str):
         console.print(f"[red]✖ Error al compilar:[/red]\n{result.stderr or result.stdout}")
 
 
-def cmd_check(path: str):
-    """orion check <archivo.orx> — verifica sintaxis sin ejecutar"""
+def cmd_check(path: str, check_types: bool = False):
+    """orion check <archivo.orx> [--types] — verifica sintaxis (y tipos) sin ejecutar"""
     import pathlib
     src = pathlib.Path(path)
     if not src.exists():
@@ -912,19 +927,39 @@ def cmd_check(path: str):
     import time
     source = src.read_text(encoding="utf-8")
     t0 = time.perf_counter()
-    errors = []
     try:
         tokens = lex(source)
         ast = parse(tokens)
-        elapsed = (time.perf_counter() - t0) * 1000
+        elapsed_parse = (time.perf_counter() - t0) * 1000
         console.print(
             f"[green]✔[/green] Sintaxis válida: [cyan]{src}[/cyan]  "
-            f"[dim]({len(ast)} nodos, {elapsed:.1f} ms)[/dim]"
+            f"[dim]({len(ast)} nodos, {elapsed_parse:.1f} ms)[/dim]"
         )
     except Exception as e:
         elapsed = (time.perf_counter() - t0) * 1000
         console.print(f"[red]✖[/red] [bold red]Error de sintaxis[/bold red] en [cyan]{src}[/cyan]")
         console.print(f"   [red]{e}[/red]")
+        return
+
+    if check_types:
+        from core.typechecker import type_check
+        t1 = time.perf_counter()
+        issues = type_check(ast, strict=False)
+        elapsed_tc = (time.perf_counter() - t1) * 1000
+        if not issues:
+            console.print(
+                f"[green]✔[/green] Sin errores de tipos  "
+                f"[dim]({elapsed_tc:.1f} ms)[/dim]"
+            )
+        else:
+            console.print(
+                f"[yellow]⚠[/yellow]  [bold yellow]{len(issues)} error(es) de tipos[/bold yellow]"
+                f"  [dim]({elapsed_tc:.1f} ms)[/dim]"
+            )
+            for issue in issues:
+                color = "red" if issue.kind == "error" else "yellow"
+                console.print(f"   [{color}]{issue}[/{color}]")
+
 
 
 def cmd_add(pkg_name: str, force: bool = False):
@@ -1117,7 +1152,11 @@ def main():
 
         if sub == "check" and len(_raw) >= 2:
             banner()
-            cmd_check(_raw[1])
+            # Soporta: orion check <file> y orion check --types <file>
+            _check_types = "--types" in _raw
+            _check_file = next((x for x in _raw[1:] if not x.startswith("--")), None)
+            if _check_file:
+                cmd_check(_check_file, check_types=_check_types)
             return
 
         if sub == "add" and len(_raw) >= 2:

@@ -20,4 +20,4 @@ app.get("/status", fn(req) {
 })
 
 show "Iniciando servidor..."
-app.listen(9999)
+app.listen(7777)

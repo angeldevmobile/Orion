@@ -699,6 +699,74 @@ def _serve_http(port: int, handler_fn, variables: dict, functions: dict):
         server.server_close()
 
 
+# ═══════════════════════ Runtime Type Checking ═══════════════════════════════
+
+_TYPE_ALIASES = {
+    "str": "string", "integer": "int", "boolean": "bool",
+    "num": "number", "number": "number",
+}
+
+def _orion_type_of(value) -> str:
+    """Devuelve el nombre de tipo Orion de un valor en runtime."""
+    # bool antes de int porque bool es subclase de int en Python
+    if isinstance(value, (OrionBool, bool)):
+        return "bool"
+    if isinstance(value, OrionNumber):
+        return "float" if isinstance(value.value, float) else "int"
+    if isinstance(value, (int,)):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, (OrionString, str)):
+        return "string"
+    if isinstance(value, (OrionList, list)):
+        return "list"
+    if isinstance(value, (OrionDict, dict)):
+        return "dict"
+    return "any"
+
+
+def _runtime_check_type(value, type_hint: str, context: str):
+    """
+    Valida que `value` sea compatible con `type_hint` en tiempo de ejecución.
+    Lanza OrionTypeError si hay mismatch. No hace nada si type_hint es None/any/void.
+    """
+    if type_hint is None:
+        return
+    normalized = _TYPE_ALIASES.get(type_hint, type_hint)
+    if normalized in ("any", "void"):
+        return
+    actual = _orion_type_of(value)
+    # number acepta int y float
+    if normalized == "number" and actual in ("int", "float", "number"):
+        return
+    # float acepta int (widening)
+    if normalized == "float" and actual == "int":
+        return
+    if actual == normalized:
+        return
+    raise OrionTypeError(
+        f"{context}: se esperaba '{type_hint}', se recibió '{actual}'"
+    )
+
+
+def _runtime_check_args(fn_def: dict, params: list, pos_args: list, fn_name: str):
+    """Valida los tipos de los argumentos contra param_types del fn_def."""
+    param_types = fn_def.get("param_types") or {}
+    if not param_types:
+        return
+    for i, (param, arg) in enumerate(zip(params, pos_args)):
+        declared = param_types.get(param)
+        if declared:
+            _runtime_check_type(
+                arg, declared,
+                f"'{fn_name}' argumento #{i+1} ('{param}: {declared}')"
+            )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+
+
 def _call_fn_value(fn_val, pos_args, kw_args, variables, functions):
     """
     Llama un valor que representa una función: dict FN_DEF/ANON_FN, lambda AST,
@@ -1386,6 +1454,8 @@ def eval_expr(expr, variables, functions):
                     raise OrionFunctionError(
                         f"Argumentos esperados: {len(params)}, recibidos: {len(pos_args)}"
                     )
+                # ── Validar tipos de argumentos en runtime ──
+                _runtime_check_args(fn_def, params, pos_args, fn_name)
                 # Start with global scope, then apply closure, then current scope, then args
                 local_vars = variables.copy()
                 if closure:
@@ -1396,7 +1466,13 @@ def eval_expr(expr, variables, functions):
                 _mod_fns = fn_def.get("module_fns", {})
                 _merged_fns = {**_mod_fns, **functions} if _mod_fns else functions
                 _r = evaluate(body, local_vars, _merged_fns, inside_fn=True)
-                return _r.val if isinstance(_r, _ReturnValue) else _r
+                _ret_val = _r.val if isinstance(_r, _ReturnValue) else _r
+                # ── Validar tipo de retorno en runtime ──
+                _ret_type = fn_def.get("return_type")
+                if _ret_type and _ret_type not in ("void", "any") and _ret_val is not None:
+                    _runtime_check_type(_ret_val, _ret_type,
+                                        f"retorno de '{fn_name}'")
+                return _ret_val
 
             # Función anónima (valor de variable con cuerpo AST)
             elif fn_def["type"] == "ANON_FN":
@@ -2026,7 +2102,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
     for node in ast:
         if isinstance(node, tuple) and len(node) >= 4 and node[0] == "FN":
             fn_name, params, body = node[1], node[2], node[3]
-            register_function(functions, fn_name, params, body)
+            _ret_t   = node[4] if len(node) > 4 else None
+            _par_t   = node[5] if len(node) > 5 else {}
+            register_function(functions, fn_name, params, body,
+                              param_types=_par_t, return_type=_ret_t)
             code.debug(f"Function '{fn_name}' registered with {len(params)} params", module="fn-registry")
 
     # Solo inicializar el motor visual si NO estamos dentro de una función Y es la primera llamada
@@ -2159,7 +2238,10 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
         for node in ast:
             if isinstance(node, tuple) and node[0] == "FN":
                 fn_name, params, body = node[1], node[2], node[3]
-                register_function(functions, fn_name, params, body)
+                _ret_t  = node[4] if len(node) > 4 else None
+                _par_t  = node[5] if len(node) > 5 else {}
+                register_function(functions, fn_name, params, body,
+                                  param_types=_par_t, return_type=_ret_t)
         # Marcar como inicializado
         evaluate._initialized = True  
 
@@ -2583,14 +2665,19 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 fn_name_inner = fn_tuple[1]
                 fn_params = fn_tuple[2]
                 fn_body = fn_tuple[3]
+                fn_ret_t = fn_tuple[4] if len(fn_tuple) > 4 else None
+                fn_par_t = fn_tuple[5] if len(fn_tuple) > 5 else {}
                 # Capturar scope actual como closure (excluyendo __consts__ y _variables)
                 captured = {k: v for k, v in variables.items()
                             if k not in ("__consts__", "_variables")}
-                register_function(functions, fn_name_inner, fn_params, fn_body, closure=captured)
+                register_function(functions, fn_name_inner, fn_params, fn_body,
+                                  closure=captured, param_types=fn_par_t, return_type=fn_ret_t)
                 # También almacenar como valor de variable para pasar como argumento
                 from core.functions import create_anonymous_function
                 fn_as_value = create_anonymous_function(fn_params, fn_body, closure=captured)
                 fn_as_value["type"] = "FN_DEF"
+                fn_as_value["param_types"] = fn_par_t
+                fn_as_value["return_type"] = fn_ret_t
                 variables[fn_name_inner] = fn_as_value
             i += 1
             continue
@@ -2700,12 +2787,15 @@ def evaluate(ast, variables=None, functions=None, inside_fn=False):
                 raise OrionRuntimeError(f"No se puede asignar atributo '{attr_name}' al tipo {type(obj).__name__}")
 
         elif tag == "TYPED_ASSIGN":
-            # nombre: tipo = valor  — el tipo es metadata, no se valida en runtime
+            # nombre: tipo = valor
             _, name, _type_hint, value = node
             if name in variables.get("__consts__", set()):
                 raise OrionRuntimeError(f"No se puede reasignar '{name}': es una constante")
             val = eval_expr(value, variables, functions)
             val = _wrap_orion_type(val)
+            # ── Validar tipo en runtime ──
+            if _type_hint:
+                _runtime_check_type(val, _type_hint, f"'{name}: {_type_hint}'")
             variables[name] = val
 
         elif tag == "ASSIGN":

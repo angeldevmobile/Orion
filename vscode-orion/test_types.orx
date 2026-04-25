@@ -1,0 +1,36 @@
+-- test_types.orx — Prueba del type checker (Fase 5B)
+
+-- 1. TYPED_ASSIGN válido
+x: int = 42
+nombre: string = "Orion"
+activo: bool = yes
+
+show("=== Asignaciones tipadas OK ===")
+show(x)
+show(nombre)
+show(activo)
+
+-- 2. Función con anotaciones de tipo
+fn suma(a: int, b: int) -> int {
+    return a + b
+}
+
+resultado: int = suma(10, 20)
+show("suma(10, 20) =")
+show(resultado)
+
+-- 3. Función que retorna string
+fn saludo(nombre: string) -> string {
+    return "Hola, " + nombre
+}
+
+msg: string = saludo("Mundo")
+show(msg)
+
+-- 4. Función sin anotaciones (debe funcionar igual)
+fn doble(n) {
+    return n * 2
+}
+show(doble(7))
+
+show("=== Todas las pruebas OK ===")

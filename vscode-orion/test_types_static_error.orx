@@ -1,0 +1,11 @@
+-- test_types_static_error.orx — Debe detectar errores estáticos
+
+fn suma(a: int, b: int) -> int {
+    return a + b
+}
+
+-- Error estático: se pasa literal string donde se espera int
+resultado = suma("hola", 5)
+
+-- Error estático: TYPED_ASSIGN con tipo incorrecto  
+x: int = 3.14
