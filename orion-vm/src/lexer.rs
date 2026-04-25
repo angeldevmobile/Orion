@@ -1,6 +1,8 @@
 use crate::token::{LexError, Token, TokenKind};
 
 pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
+    // Saltar BOM UTF-8 si está presente
+    let source = source.strip_prefix('\u{FEFF}').unwrap_or(source);
     Lexer::new(source).tokenize()
 }
 

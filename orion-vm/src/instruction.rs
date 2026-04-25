@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Set completo de instrucciones de la VM Orion
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instruction {
     //   Constantes                
     LoadInt(i64),        // push int literal
