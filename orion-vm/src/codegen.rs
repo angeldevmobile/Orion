@@ -137,7 +137,7 @@ impl Codegen {
     fn compile_shape(
         &self,
         fields:    &[FieldDef],
-        on_create: &Option<Vec<Stmt>>,
+        on_create: &Option<(Vec<crate::ast::Param>, Vec<Stmt>)>,
         acts:      &[ActDef],
         using:     &[String],
     ) -> Result<ShapeDef, CodegenError> {
@@ -159,15 +159,16 @@ impl Codegen {
             });
         }
 
-        // on_create
-        let bc_on_create = if let Some(oc_body) = on_create {
+        // on_create — versión clone-friendly
+        let bc_on_create = if let Some((oc_params, oc_body)) = on_create.as_ref() {
             let mut fc = FnCompiler::new();
             for stmt in oc_body {
                 fc.compile_stmt(stmt, &self.async_fns)?;
             }
             fc.emit(Instruction::LoadNull);
             fc.emit(Instruction::Return);
-            Some(BcActDef { params: vec![], body: fc.instrs, lines: fc.lines })
+            let params = oc_params.iter().map(|p| p.name.clone()).collect();
+            Some(BcActDef { params, body: fc.instrs, lines: fc.lines })
         } else { None };
 
         // acts

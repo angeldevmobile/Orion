@@ -90,6 +90,27 @@ impl Parser {
         }
     }
 
+    /// Como expect_ident pero también acepta keywords como nombres de atributo/método.
+    /// Usado después de `.` para permitir `obj.append(...)`, `obj.len`, etc.
+    fn expect_attr_name(&mut self) -> Result<String, ParseError> {
+        use crate::token::TokenKind::*;
+        let name = match self.peek().clone() {
+            Ident(n) => n,
+            // Keywords que pueden usarse como nombres de método
+            Append => "append".to_string(),
+            _ => {
+                let line = self.current_line();
+                let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
+                return Err(ParseError {
+                    message: format!("Se esperaba un identificador, pero se encontró {:?}", self.peek()),
+                    line, col,
+                });
+            }
+        };
+        self.pos += 1;
+        Ok(name)
+    }
+
     fn err(&self, msg: impl Into<String>) -> ParseError {
         let tok = self.tokens.get(self.pos);
         ParseError {
@@ -394,7 +415,7 @@ impl Parser {
                 // método: expr.method(args) o acceso: expr.field
                 TokenKind::Dot => {
                     self.pos += 1;
-                    let attr = self.expect_ident()?;
+                    let attr = self.expect_attr_name()?;
                     if matches!(self.peek(), TokenKind::LParen) {
                         let (args, kwargs) = self.parse_call_args()?;
                         expr = Expr::CallMethod { method: attr, receiver: Box::new(expr), args, kwargs };
@@ -806,13 +827,26 @@ impl Parser {
                     self.skip_newlines();
                     match self.peek().clone() {
                         TokenKind::RBrace | TokenKind::Eof => break,
+                        TokenKind::Using => {
+                            // using ParentName  (dentro del bloque del shape)
+                            self.pos += 1;
+                            // puede ser: using Parent  o  using [Parent1, Parent2]
+                            if matches!(self.peek(), TokenKind::LBracket) {
+                                self.pos += 1;
+                                while !matches!(self.peek(), TokenKind::RBracket | TokenKind::Eof) {
+                                    using.push(self.expect_ident()?);
+                                    if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }
+                                }
+                                self.expect(&TokenKind::RBracket)?;
+                            } else {
+                                using.push(self.expect_ident()?);
+                            }
+                        }
                         TokenKind::OnCreate => {
                             self.pos += 1;
                             let params = self.parse_params()?;
                             let body = self.parse_block()?;
-                            // params de on_create se añaden como asignaciones implícitas
-                            let _ = params;
-                            on_create = Some(body);
+                            on_create = Some((params, body));
                         }
                         TokenKind::Act => {
                             self.pos += 1;

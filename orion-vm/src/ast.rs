@@ -68,7 +68,7 @@ pub enum Stmt {
     // Funciones / clases
     Fn      { name: String, params: Vec<Param>, body: Vec<Stmt>, line: u32 },
     AsyncFn { name: String, params: Vec<Param>, body: Vec<Stmt>, line: u32 },
-    Shape   { name: String, fields: Vec<FieldDef>, on_create: Option<Vec<Stmt>>, acts: Vec<ActDef>, using: Vec<String>, line: u32 },
+    Shape   { name: String, fields: Vec<FieldDef>, on_create: Option<(Vec<Param>, Vec<Stmt>)>, acts: Vec<ActDef>, using: Vec<String>, line: u32 },
 
     // Módulos
     Use     { path: String, alias: Option<String>, selective: Option<Vec<String>>, line: u32 },
