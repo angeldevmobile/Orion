@@ -4,13 +4,14 @@ use crate::{lexer, parser, codegen};
 use super::banner;
 
 pub fn run_doctor() {
+    banner::animate_startup();
     banner::print_banner();
     banner::section("Diagnóstico del entorno Orion");
 
     let mut all_ok = true;
 
     // 1. Binary version
-    banner::row("Versión VM", "v0.4.0 (Rust)", true);
+    banner::row("Versión VM", "v0.4.0", true);
 
     // 2. Packages directory
     let pkg_dir = packages_dir();

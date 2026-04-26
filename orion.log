@@ -4278,3 +4278,4 @@
 [2026-04-25 20:32:02] [OK   ] [TIMEWARP-REGISTRY] → 10 funciones TimeWarp registradas como built-ins (Processing — balanced)
 [2026-04-25 20:32:02] [OK   ] [VISION-REGISTRY] → 20 funciones Vision registradas como built-ins (Resolving — activated)
 [2026-04-25 20:32:02] [TRACE] [ORION-RUNTIME] → No main function to execute (Connecting — detected)
+[2026-04-25 21:21:37] [WARN ] [SPREADSHEET-CORE] → Módulo de hojas de cálculo no disponible: cannot import name 'OSync' from 'modules.sheets_localbridge' (C:\Users\lenovo\Desktop\ORION-LANGUAGE\modules\sheets_localbridge.py) (Processing — balanced)

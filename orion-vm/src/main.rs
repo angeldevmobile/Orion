@@ -32,7 +32,11 @@ fn main() {
 
     match args[1].as_str() {
 
-        "--version" => {
+        "--help" | "-h" => {
+            print_help();
+        }
+
+        "--version" | "-v" => {
             println!("Orion VM v0.4.0 (Rust) — pipeline completo: lexer + parser + codegen + VM");
         }
 
@@ -234,6 +238,7 @@ fn main() {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn print_help() {
+    cli::banner::animate_startup();
     cli::banner::print_banner();
     println!("  {BOLD}Uso:{RESET}  orion <comando> [opciones]",
         BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
@@ -398,6 +403,7 @@ impl ReplSession {
 fn run_repl() {
     use std::io::{self, BufRead, Write};
 
+    cli::banner::animate_startup();
     cli::banner::print_banner();
     println!("  REPL v0.4.0  —  {DIM}Ctrl+C / Ctrl+D para salir{RESET}",
         DIM = cli::banner::DIM, RESET = cli::banner::RESET);
