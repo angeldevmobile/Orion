@@ -14,6 +14,7 @@ mod lexer;
 mod parser;
 mod codegen;
 mod pkg;
+mod typechecker;
 mod cli;
 
 extern crate tiny_http;

@@ -914,14 +914,14 @@ impl Parser {
                         if after_colon_is_type {
                             let vname = vname.clone();
                             self.pos += 1; // consume ':'
-                            let _type_hint = self.parse_type_name()?;
+                            let type_hint = self.parse_type_name()?;
                             let value = if matches!(self.peek(), TokenKind::Assign) {
                                 self.pos += 1;
                                 self.parse_expression()?
                             } else {
                                 Expr::Null
                             };
-                            return Ok(Stmt::Assign { name: vname, value, line });
+                            return Ok(Stmt::TypedAssign { name: vname, type_hint, value, line });
                         }
                     }
                 }

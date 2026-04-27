@@ -204,6 +204,11 @@ impl Codegen {
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::StoreVar(name));
             }
+            Stmt::TypedAssign { name, type_hint: _, value, line } => {
+                self.current_line = line;
+                self.compile_expr_main(&value)?;
+                self.emit(Instruction::StoreVar(name));
+            }
             Stmt::Const { name, value, line } => {
                 self.current_line = line;
                 self.compile_expr_main(&value)?;
@@ -523,6 +528,11 @@ impl FnCompiler {
     fn compile_stmt(&mut self, stmt: &Stmt, async_fns: &std::collections::HashSet<String>) -> Result<(), CodegenError> {
         match stmt {
             Stmt::Assign { name, value, line } => {
+                self.current_line = *line;
+                self.compile_expr(value, async_fns)?;
+                self.emit(Instruction::StoreVar(name.clone()));
+            }
+            Stmt::TypedAssign { name, type_hint: _, value, line } => {
                 self.current_line = *line;
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::StoreVar(name.clone()));

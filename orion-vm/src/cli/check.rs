@@ -1,5 +1,5 @@
 use std::fs;
-use crate::{lexer, parser, codegen};
+use crate::{lexer, parser, codegen, typechecker};
 use super::banner;
 
 pub fn run_check(path: &str, check_types: bool) {
@@ -32,14 +32,32 @@ pub fn run_check(path: &str, check_types: bool) {
         }
     };
 
-    // Phase 3: codegen (catches undefined jump targets, duplicate names, etc.)
+    // Phase 3: type check (antes de codegen para errores más claros)
+    if check_types {
+        let issues = typechecker::type_check(&stmts);
+        if issues.is_empty() {
+            banner::ok("Type check — sin errores de tipos");
+        } else {
+            let errors: Vec<_> = issues.iter().filter(|i| i.kind == "error").collect();
+            let warnings: Vec<_> = issues.iter().filter(|i| i.kind == "warning").collect();
+            for w in &warnings {
+                let prefix = if w.line > 0 { format!("línea {} — ", w.line) } else { String::new() };
+                banner::warn(&format!("[advertencia] {}{}", prefix, w.message));
+            }
+            for e in &errors {
+                let prefix = if e.line > 0 { format!("línea {} — ", e.line) } else { String::new() };
+                banner::fail(&format!("[tipo] {}{}", prefix, e.message));
+            }
+            if !errors.is_empty() {
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Phase 4: codegen (detecta errores semánticos adicionales)
     if let Err(e) = codegen::compile(stmts) {
         banner::fail(&format!("Error semántico  línea {} — {}", e.line, e.message));
         std::process::exit(1);
-    }
-
-    if check_types {
-        banner::warn("Verificación de tipos (--types): en desarrollo — coming soon");
     }
 
     banner::ok(&format!("'{path}' — sin errores"));

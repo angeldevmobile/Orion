@@ -50,7 +50,8 @@ pub enum Expr {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     // Asignación
-    Assign  { name: String, value: Expr, line: u32 },
+    Assign      { name: String, value: Expr, line: u32 },
+    TypedAssign { name: String, type_hint: String, value: Expr, line: u32 },
     AssignIndex { object: Expr, index: Expr, value: Expr, line: u32 },
     AssignAttr  { object: Expr, attr: String, value: Expr, line: u32 },
     AugAssign   { name: String, op: String, value: Expr, line: u32 },
