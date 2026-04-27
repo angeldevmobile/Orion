@@ -1,0 +1,54 @@
+{
+  "main": [
+    {
+      "LoadInt": 20
+    },
+    {
+      "StoreVar": "x"
+    },
+    {
+      "LoadInt": 22
+    },
+    {
+      "StoreVar": "y"
+    },
+    {
+      "LoadVar": "x"
+    },
+    {
+      "LoadVar": "y"
+    },
+    "Add",
+    {
+      "StoreVar": "suma"
+    },
+    {
+      "LoadStr": "La suma es: "
+    },
+    {
+      "LoadVar": "suma"
+    },
+    "Add",
+    "Show",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    1,
+    1,
+    2,
+    2,
+    4,
+    4,
+    4,
+    4,
+    5,
+    5,
+    5,
+    5,
+    5
+  ],
+  "functions": {},
+  "shapes": {}
+}

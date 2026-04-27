@@ -1,0 +1,450 @@
+{
+  "main": [
+    {
+      "LoadStr": "AN\u00c1LISIS VISUAL DE DOCUMENTOS"
+    },
+    {
+      "Call": [
+        "trace_start",
+        1
+      ]
+    },
+    "Pop",
+    {
+      "LoadStr": "documento_bancario.png"
+    },
+    {
+      "StoreVar": "doc_path"
+    },
+    {
+      "LoadStr": "Documento cargado:"
+    },
+    {
+      "LoadVar": "doc_path"
+    },
+    "Show",
+    {
+      "LoadVar": "insight"
+    },
+    {
+      "LoadVar": "doc_path"
+    },
+    {
+      "CallMethod": [
+        "summarize",
+        1
+      ]
+    },
+    {
+      "StoreVar": "resumen"
+    },
+    {
+      "LoadStr": "Resumen inicial Insight:"
+    },
+    {
+      "LoadVar": "resumen"
+    },
+    "Show",
+    {
+      "LoadVar": "resumen"
+    },
+    {
+      "LoadStr": "metadata"
+    },
+    "GetIndex",
+    {
+      "StoreVar": "meta"
+    },
+    {
+      "LoadStr": "Orientaci\u00f3n:"
+    },
+    {
+      "LoadVar": "meta"
+    },
+    {
+      "LoadStr": "orientation"
+    },
+    "GetIndex",
+    {
+      "LoadStr": " | Densidad:"
+    },
+    {
+      "LoadVar": "meta"
+    },
+    {
+      "LoadStr": "density"
+    },
+    "GetIndex",
+    {
+      "LoadStr": " | Contraste:"
+    },
+    {
+      "LoadVar": "meta"
+    },
+    {
+      "LoadStr": "contrast"
+    },
+    "GetIndex",
+    "Show",
+    {
+      "LoadVar": "resumen"
+    },
+    {
+      "LoadStr": "tables"
+    },
+    "GetIndex",
+    {
+      "LoadStr": "detected"
+    },
+    "GetIndex",
+    {
+      "JumpIfFalse": 50
+    },
+    {
+      "LoadStr": "Tabla detectada (confianza="
+    },
+    {
+      "LoadVar": "resumen"
+    },
+    {
+      "LoadStr": "tables"
+    },
+    "GetIndex",
+    {
+      "LoadStr": "confidence"
+    },
+    "GetIndex",
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    {
+      "LoadStr": ")"
+    },
+    "Add",
+    "Show",
+    {
+      "Jump": 52
+    },
+    {
+      "LoadStr": "No se detectaron tablas"
+    },
+    "Show",
+    {
+      "LoadVar": "resumen"
+    },
+    {
+      "LoadStr": "signatures"
+    },
+    "GetIndex",
+    {
+      "LoadStr": "detected"
+    },
+    "GetIndex",
+    {
+      "JumpIfFalse": 70
+    },
+    {
+      "LoadStr": "Firma/sello detectado (confianza="
+    },
+    {
+      "LoadVar": "resumen"
+    },
+    {
+      "LoadStr": "signatures"
+    },
+    "GetIndex",
+    {
+      "LoadStr": "confidence"
+    },
+    "GetIndex",
+    {
+      "Call": [
+        "str",
+        1
+      ]
+    },
+    "Add",
+    {
+      "LoadStr": ")"
+    },
+    "Add",
+    "Show",
+    {
+      "Jump": 72
+    },
+    {
+      "LoadStr": "No se detectaron firmas ni sellos"
+    },
+    "Show",
+    {
+      "LoadVar": "net"
+    },
+    {
+      "LoadStr": "https://jsonplaceholder.typicode.com/posts"
+    },
+    {
+      "CallMethod": [
+        "transmit",
+        1
+      ]
+    },
+    {
+      "StoreVar": "res"
+    },
+    {
+      "LoadVar": "res"
+    },
+    {
+      "GetAttr": "status"
+    },
+    {
+      "LoadInt": 201
+    },
+    "Eq",
+    {
+      "JumpIfFalse": 84
+    },
+    {
+      "LoadStr": "Orion Cloud confirm\u00f3 el an\u00e1lisis Insight"
+    },
+    "Show",
+    {
+      "Jump": 88
+    },
+    {
+      "LoadStr": "Error al sincronizar con Orion Cloud:"
+    },
+    {
+      "LoadVar": "res"
+    },
+    {
+      "GetAttr": "status"
+    },
+    "Show",
+    {
+      "LoadStr": "AN\u00c1LISIS VISUAL COMPLETO"
+    },
+    {
+      "Call": [
+        "trace_end",
+        1
+      ]
+    },
+    "Pop",
+    {
+      "Halt": null
+    }
+  ],
+  "lines": [
+    10,
+    10,
+    10,
+    13,
+    13,
+    14,
+    14,
+    14,
+    17,
+    17,
+    17,
+    17,
+    18,
+    18,
+    18,
+    21,
+    21,
+    21,
+    21,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    22,
+    27,
+    27,
+    27,
+    27,
+    27,
+    27,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    28,
+    30,
+    30,
+    33,
+    33,
+    33,
+    33,
+    33,
+    33,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    34,
+    36,
+    36,
+    64,
+    64,
+    64,
+    64,
+    66,
+    66,
+    66,
+    66,
+    66,
+    67,
+    67,
+    67,
+    69,
+    69,
+    69,
+    69,
+    72,
+    72,
+    72,
+    72
+  ],
+  "functions": {
+    "main": {
+      "params": [],
+      "body": [
+        {
+          "LoadInt": 10
+        },
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadFloat": 3.14
+        },
+        {
+          "StoreVar": "y"
+        },
+        {
+          "LoadBool": false
+        },
+        {
+          "StoreVar": "activo"
+        },
+        {
+          "LoadStr": "Hola Orion!"
+        },
+        {
+          "StoreVar": "mensaje"
+        },
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadInt": 10
+        },
+        "GtEq",
+        {
+          "LoadVar": "activo"
+        },
+        "And",
+        {
+          "JumpIfFalse": 17
+        },
+        {
+          "LoadVar": "activo"
+        },
+        "Show",
+        {
+          "Jump": 21
+        },
+        {
+          "LoadStr": "Condici\u00f3n falsa, terminando..."
+        },
+        "Show",
+        "LoadNull",
+        "Return",
+        {
+          "LoadVar": "x"
+        },
+        {
+          "LoadInt": 5
+        },
+        "Add",
+        {
+          "StoreVar": "x"
+        },
+        {
+          "LoadVar": "y"
+        },
+        {
+          "LoadInt": 2
+        },
+        "Mul",
+        {
+          "StoreVar": "y"
+        },
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        3,
+        3,
+        4,
+        4,
+        5,
+        5,
+        6,
+        6,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        9,
+        9,
+        9,
+        11,
+        11,
+        12,
+        12,
+        15,
+        15,
+        15,
+        15,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16
+      ]
+    }
+  },
+  "shapes": {}
+}
