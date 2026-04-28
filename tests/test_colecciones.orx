@@ -1,0 +1,21 @@
+fn test_dict_mutation() {
+    d = {"x": 1}
+    d["x"] = 42
+    assert_eq(d["x"], 42, "dict mutation")
+    d["nuevo"] = "hola"
+    assert_eq(d["nuevo"], "hola", "dict nueva clave")
+}
+
+fn test_range_loop() {
+    suma = 0
+    for i in 1..6 {
+        suma = suma + i
+    }
+    assert_eq(suma, 15, "suma 1..5")
+}
+
+fn test_lista_mutation() {
+    nums = [1, 2, 3]
+    nums[0] = 99
+    assert_eq(nums[0], 99, "list mutation")
+}

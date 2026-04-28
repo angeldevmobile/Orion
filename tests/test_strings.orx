@@ -1,0 +1,13 @@
+fn test_concatenacion() {
+    s = "Hola" + " " + "Orion"
+    assert_eq(s, "Hola Orion", "concat strings")
+}
+
+fn test_longitud() {
+    assert_eq(len("abc"), 3, "len de string")
+    assert_eq(len(""), 0, "len de string vacio")
+}
+
+fn test_falla_intencional() {
+    assert_eq(1, 2, "este test debe fallar")
+}

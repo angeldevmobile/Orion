@@ -1808,6 +1808,42 @@ impl VM {
                     .unwrap_or_default();
                 Ok(Some(Value::Str(line)))
             }
+            // ── Tests ───────────────────────────────────────────────────────
+            "assert" => {
+                let mut it = args.into_iter();
+                let cond = it.next().ok_or("assert() requiere al menos 1 argumento")?;
+                let msg  = it.next();
+                if !cond.is_truthy() {
+                    let text = msg.map(|v| v.to_string())
+                        .unwrap_or_else(|| "Aserción falló".to_string());
+                    return Err(format!("assert: {}", text));
+                }
+                Ok(Some(Value::Null))
+            }
+            "assert_eq" => {
+                let mut it = args.into_iter();
+                let a = it.next().ok_or("assert_eq() requiere 2 argumentos")?;
+                let b = it.next().ok_or("assert_eq() requiere 2 argumentos")?;
+                let msg = it.next();
+                if a != b {
+                    let header = msg.map(|v| format!("{} — ", v)).unwrap_or_default();
+                    return Err(format!(
+                        "assert_eq: {}esperado: {}\n  obtenido: {}",
+                        header, b, a
+                    ));
+                }
+                Ok(Some(Value::Null))
+            }
+            "assert_ne" => {
+                let mut it = args.into_iter();
+                let a = it.next().ok_or("assert_ne() requiere 2 argumentos")?;
+                let b = it.next().ok_or("assert_ne() requiere 2 argumentos")?;
+                if a == b {
+                    return Err(format!("assert_ne: se esperaban valores distintos, ambos son: {}", a));
+                }
+                Ok(Some(Value::Null))
+            }
+
             other => Err(format!("Función '{}' no definida", other)),
         }
     }

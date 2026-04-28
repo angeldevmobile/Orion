@@ -74,7 +74,7 @@ pub fn animate_startup() {
 
 pub fn print_banner() {
     println!();
-    // ASCII art — gradiente azul eléctrico → cyan
+    // ASCII art — gradiente azul eléctrico = cyan
     println!("  {BOLD}{BBLUE}  ██████╗ ██████╗ ██╗ ██████╗ ███╗   ██╗{RESET}");
     println!("  {BOLD}{BBLUE} ██╔═══██╗██╔══██╗██║██╔═══██╗████╗  ██║{RESET}");
     println!("  {BOLD}{BCYAN} ██║   ██║██████╔╝██║██║   ██║██╔██╗ ██║{RESET}");
