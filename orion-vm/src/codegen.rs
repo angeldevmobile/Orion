@@ -835,7 +835,13 @@ fn compile_expr_into(
         Expr::Null      => emit!(Instruction::LoadNull),
         Expr::Undefined => emit!(Instruction::LoadNull),
 
-        Expr::Ident(name) => emit!(Instruction::LoadVar(name.clone())),
+        Expr::Ident(name) => {
+            if name == "me" {
+                emit!(Instruction::PushSelf)
+            } else {
+                emit!(Instruction::LoadVar(name.clone()))
+            }
+        }
 
         Expr::BinaryOp { op, left, right } => {
             recurse!(left);

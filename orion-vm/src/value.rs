@@ -156,9 +156,14 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 + b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a + *b as f64)),
-            (Value::Str(a), Value::Str(b))     => Ok(Value::Str(format!("{}{}", a, b))),
-            (Value::Str(a), b)                 => Ok(Value::Str(format!("{}{}", a, b))),
-            (a, Value::Str(b))                 => Ok(Value::Str(format!("{}{}", a, b))),
+            (Value::Str(a), Value::Str(b))         => Ok(Value::Str(format!("{}{}", a, b))),
+            (Value::Str(a), b)                     => Ok(Value::Str(format!("{}{}", a, b))),
+            (a, Value::Str(b))                     => Ok(Value::Str(format!("{}{}", a, b))),
+            (Value::List(a), Value::List(b))        => {
+                let mut result = a.clone();
+                result.extend_from_slice(b);
+                Ok(Value::List(result))
+            }
             _ => Err(format!("No se puede sumar {} + {}", self.type_name(), other.type_name())),
         }
     }

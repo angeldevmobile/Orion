@@ -1,0 +1,69 @@
+-- Test: Generics en Orion
+
+-- Función genérica básica
+fn identity[T](x: T) -> T {
+    return x
+}
+
+-- Función genérica con dos type params
+fn pair[T, U](a: T, b: U) -> any {
+    return [a, b]
+}
+
+-- Shape genérica
+shape Stack[T] {
+    top: T = null
+    count: int = 0
+
+    on_create(first: T) {
+        top = first
+        count = 1
+    }
+
+    act peek() -> T {
+        return top
+    }
+
+    act size() -> int {
+        return count
+    }
+}
+
+-- Shape genérica con dos params
+shape Pair[K, V] {
+    key: K = null
+    value: V = null
+
+    on_create(k: K, v: V) {
+        key = k
+        value = v
+    }
+
+    act show_pair() {
+        show str(key) + " -> " + str(value)
+    }
+}
+
+-- Pruebas
+show "=== identity ==="
+show identity(42)
+show identity("hola")
+show identity(yes)
+
+show "=== pair ==="
+p = pair(1, "uno")
+show p
+
+show "=== Stack[int] ==="
+s = Stack(42)
+show s.peek()
+show s.size()
+
+show "=== Stack[string] ==="
+s2 = Stack("hola")
+show s2.peek()
+show s2.size()
+
+show "=== Pair ==="
+kv = Pair("edad", 25)
+kv.show_pair()

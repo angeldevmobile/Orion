@@ -410,8 +410,28 @@ impl VM {
                 let val = self.pop()?;
                 let obj = self.pop()?;
                 match obj {
-                    Value::Instance(inst_rc) => { inst_rc.borrow_mut().fields.insert(attr, val); }
+                    Value::Instance(inst_rc) => {
+                        inst_rc.borrow_mut().fields.insert(attr.clone(), val.clone());
+                        // Si es la instancia actual del frame, sincronizar también la var local
+                        // para que sync_to_instance no sobreescriba al retornar el método.
+                        if let Some(frame) = self.call_stack.last_mut() {
+                            if frame.self_instance.as_ref()
+                                .map(|r| Rc::ptr_eq(r, &inst_rc))
+                                .unwrap_or(false)
+                            {
+                                frame.vars.insert(attr, val);
+                            }
+                        }
+                    }
                     _ => return Err(format!("SetAttr '{}': no es una instancia", attr)),
+                }
+            }
+            Instruction::PushSelf => {
+                let frame = self.call_stack.last()
+                    .ok_or("PushSelf: sin frame activo")?;
+                match &frame.self_instance {
+                    Some(inst_rc) => self.value_stack.push(Value::Instance(Rc::clone(inst_rc))),
+                    None          => self.value_stack.push(Value::Null),
                 }
             }
             Instruction::IsInstance(shape_name) => {

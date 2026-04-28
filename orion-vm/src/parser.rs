@@ -174,18 +174,45 @@ impl Parser {
     }
 
     fn parse_type_name(&mut self) -> Result<String, ParseError> {
-        match self.peek().clone() {
-            TokenKind::TypeInt    => { self.pos += 1; Ok("int".into()) }
-            TokenKind::TypeFloat  => { self.pos += 1; Ok("float".into()) }
-            TokenKind::TypeBool   => { self.pos += 1; Ok("bool".into()) }
-            TokenKind::TypeString => { self.pos += 1; Ok("string".into()) }
-            TokenKind::TypeList   => { self.pos += 1; Ok("list".into()) }
-            TokenKind::TypeDict   => { self.pos += 1; Ok("dict".into()) }
-            TokenKind::TypeAny    => { self.pos += 1; Ok("any".into()) }
-            TokenKind::TypeAuto   => { self.pos += 1; Ok("auto".into()) }
-            TokenKind::Ident(n)   => { self.pos += 1; Ok(n) }
-            _ => Err(self.err("Se esperaba un tipo")),
+        let base = match self.peek().clone() {
+            TokenKind::TypeInt    => { self.pos += 1; "int".to_string() }
+            TokenKind::TypeFloat  => { self.pos += 1; "float".to_string() }
+            TokenKind::TypeBool   => { self.pos += 1; "bool".to_string() }
+            TokenKind::TypeString => { self.pos += 1; "string".to_string() }
+            TokenKind::TypeList   => { self.pos += 1; "List".to_string() }
+            TokenKind::TypeDict   => { self.pos += 1; "Dict".to_string() }
+            TokenKind::TypeAny    => { self.pos += 1; "any".to_string() }
+            TokenKind::TypeAuto   => { self.pos += 1; "auto".to_string() }
+            TokenKind::Ident(n)   => { self.pos += 1; n }
+            _ => return Err(self.err("Se esperaba un tipo")),
+        };
+        // Tipo genérico aplicado: List[T], Map[K, V], Stack[int], etc.
+        if matches!(self.peek(), TokenKind::LBracket) {
+            self.pos += 1; // [
+            let mut args = Vec::new();
+            while !matches!(self.peek(), TokenKind::RBracket | TokenKind::Eof) {
+                args.push(self.parse_type_name()?);
+                if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }
+            }
+            self.expect(&TokenKind::RBracket)?;
+            return Ok(format!("{}[{}]", base, args.join(", ")));
         }
+        Ok(base)
+    }
+
+    /// Parsea parámetros de tipo: [T], [T, U], [K, V] — retorna vec vacío si no hay `[`
+    fn parse_type_params(&mut self) -> Result<Vec<String>, ParseError> {
+        if !matches!(self.peek(), TokenKind::LBracket) {
+            return Ok(vec![]);
+        }
+        self.pos += 1; // [
+        let mut params = Vec::new();
+        while !matches!(self.peek(), TokenKind::RBracket | TokenKind::Eof) {
+            params.push(self.expect_ident()?);
+            if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }
+        }
+        self.expect(&TokenKind::RBracket)?;
+        Ok(params)
     }
 
     /// Comprueba si el token actual puede comenzar un nombre de tipo (sin consumir).
@@ -304,8 +331,8 @@ impl Parser {
 
     fn parse_anon_fn(&mut self) -> Result<Expr, ParseError> {
         self.pos += 1; // 'fn'
+        let _type_params = self.parse_type_params()?; // fn[T](...) anónima genérica
         let params = self.parse_params()?;
-        // retorno opcional: -> type
         if matches!(self.peek(), TokenKind::ThinArrow) {
             self.pos += 1;
             self.parse_type_name().ok();
@@ -526,6 +553,12 @@ impl Parser {
                 Ok(Expr::Dict(items))
             }
 
+            // me — referencia a la instancia actual dentro de act/on_create
+            TokenKind::Me => {
+                self.pos += 1;
+                Ok(Expr::Ident("me".to_string()))
+            }
+
             // await como expresión: result = await future
             TokenKind::Await => {
                 self.pos += 1;
@@ -577,32 +610,33 @@ impl Parser {
             //   continue                           ─
             TokenKind::Continue => { self.pos += 1; Ok(Stmt::Continue { line }) }
 
-            //   fn name(params) { body }                   ─
+            //   fn name[T, U](params) -> ret { body }
             TokenKind::Fn => {
                 self.pos += 1;
                 let name = self.expect_ident()?;
+                let type_params = self.parse_type_params()?;
                 let params = self.parse_params()?;
-                // retorno opcional -> type
-                if matches!(self.peek(), TokenKind::ThinArrow) {
+                let ret_type = if matches!(self.peek(), TokenKind::ThinArrow) {
                     self.pos += 1;
-                    self.parse_type_name().ok();
-                }
+                    self.parse_type_name().ok()
+                } else { None };
                 let body = self.parse_block()?;
-                Ok(Stmt::Fn { name, params, body, line })
+                Ok(Stmt::Fn { name, type_params, params, body, ret_type, line })
             }
 
-            //   async fn name(params) { body }                ─
+            //   async fn name[T](params) -> ret { body }
             TokenKind::Async => {
                 self.pos += 1; // async
                 self.expect(&TokenKind::Fn)?;
                 let name = self.expect_ident()?;
+                let type_params = self.parse_type_params()?;
                 let params = self.parse_params()?;
-                if matches!(self.peek(), TokenKind::ThinArrow) {
+                let ret_type = if matches!(self.peek(), TokenKind::ThinArrow) {
                     self.pos += 1;
-                    self.parse_type_name().ok();
-                }
+                    self.parse_type_name().ok()
+                } else { None };
                 let body = self.parse_block()?;
-                Ok(Stmt::AsyncFn { name, params, body, line })
+                Ok(Stmt::AsyncFn { name, type_params, params, body, ret_type, line })
             }
 
             //   if cond { } [else { }]                    ─
@@ -804,10 +838,11 @@ impl Parser {
                 Ok(Stmt::Serve { port, routes, line })
             }
 
-            //   shape Name { fields, on_create, acts }             
+            //   shape Name[T, U] { fields, on_create, acts }
             TokenKind::Shape => {
                 self.pos += 1;
                 let name = self.expect_ident()?;
+                let type_params = self.parse_type_params()?;
                 // using: shape Name using [Other1, Other2]
                 let mut using = Vec::new();
                 if matches!(self.peek(), TokenKind::Using) {
@@ -893,7 +928,7 @@ impl Parser {
                     }
                 }
                 self.expect(&TokenKind::RBrace)?;
-                Ok(Stmt::Shape { name, fields, on_create, acts, using, line })
+                Ok(Stmt::Shape { name, type_params, fields, on_create, acts, using, line })
             }
 
             //   Asignación, asignación compuesta o expresión          

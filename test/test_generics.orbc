@@ -1,0 +1,451 @@
+{
+  "main": [
+    {
+      "LoadStr": "=== identity ==="
+    },
+    "Show",
+    {
+      "LoadInt": 42
+    },
+    {
+      "Call": [
+        "identity",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "hola"
+    },
+    {
+      "Call": [
+        "identity",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadBool": true
+    },
+    {
+      "Call": [
+        "identity",
+        1
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== pair ==="
+    },
+    "Show",
+    {
+      "LoadInt": 1
+    },
+    {
+      "LoadStr": "uno"
+    },
+    {
+      "Call": [
+        "pair",
+        2
+      ]
+    },
+    {
+      "StoreVar": "p"
+    },
+    {
+      "LoadVar": "p"
+    },
+    "Show",
+    {
+      "LoadStr": "=== Stack[int] ==="
+    },
+    "Show",
+    {
+      "LoadInt": 42
+    },
+    {
+      "Call": [
+        "Stack",
+        1
+      ]
+    },
+    {
+      "StoreVar": "s"
+    },
+    {
+      "LoadVar": "s"
+    },
+    {
+      "CallMethod": [
+        "peek",
+        0
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "s"
+    },
+    {
+      "CallMethod": [
+        "size",
+        0
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== Stack[string] ==="
+    },
+    "Show",
+    {
+      "LoadStr": "hola"
+    },
+    {
+      "Call": [
+        "Stack",
+        1
+      ]
+    },
+    {
+      "StoreVar": "s2"
+    },
+    {
+      "LoadVar": "s2"
+    },
+    {
+      "CallMethod": [
+        "peek",
+        0
+      ]
+    },
+    "Show",
+    {
+      "LoadVar": "s2"
+    },
+    {
+      "CallMethod": [
+        "size",
+        0
+      ]
+    },
+    "Show",
+    {
+      "LoadStr": "=== Pair ==="
+    },
+    "Show",
+    {
+      "LoadStr": "edad"
+    },
+    {
+      "LoadInt": 25
+    },
+    {
+      "Call": [
+        "Pair",
+        2
+      ]
+    },
+    {
+      "StoreVar": "kv"
+    },
+    {
+      "LoadVar": "kv"
+    },
+    {
+      "CallMethod": [
+        "show_pair",
+        0
+      ]
+    },
+    "Pop",
+    "Halt"
+  ],
+  "lines": [
+    48,
+    48,
+    49,
+    49,
+    49,
+    50,
+    50,
+    50,
+    51,
+    51,
+    51,
+    53,
+    53,
+    54,
+    54,
+    54,
+    54,
+    55,
+    55,
+    57,
+    57,
+    58,
+    58,
+    58,
+    59,
+    59,
+    59,
+    60,
+    60,
+    60,
+    62,
+    62,
+    63,
+    63,
+    63,
+    64,
+    64,
+    64,
+    65,
+    65,
+    65,
+    67,
+    67,
+    68,
+    68,
+    68,
+    68,
+    69,
+    69,
+    69,
+    69
+  ],
+  "functions": {
+    "identity": {
+      "params": [
+        "x"
+      ],
+      "body": [
+        {
+          "LoadVar": "x"
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        5,
+        5,
+        5,
+        5
+      ]
+    },
+    "pair": {
+      "params": [
+        "a",
+        "b"
+      ],
+      "body": [
+        {
+          "LoadVar": "a"
+        },
+        {
+          "LoadVar": "b"
+        },
+        {
+          "MakeList": 2
+        },
+        "Return",
+        "LoadNull",
+        "Return"
+      ],
+      "lines": [
+        10,
+        10,
+        10,
+        10,
+        10,
+        10
+      ]
+    }
+  },
+  "shapes": {
+    "Stack": {
+      "fields": [
+        {
+          "name": "top",
+          "type": "T",
+          "default": [
+            "LoadNull",
+            "Return"
+          ]
+        },
+        {
+          "name": "count",
+          "type": "int",
+          "default": [
+            {
+              "LoadInt": 0
+            },
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "first"
+        ],
+        "body": [
+          {
+            "LoadVar": "first"
+          },
+          {
+            "StoreVar": "top"
+          },
+          {
+            "LoadInt": 1
+          },
+          {
+            "StoreVar": "count"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          19,
+          19,
+          20,
+          20,
+          20,
+          20
+        ]
+      },
+      "acts": {
+        "peek": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "top"
+            },
+            "Return",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            24,
+            24,
+            24,
+            24
+          ]
+        },
+        "size": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "count"
+            },
+            "Return",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            28,
+            28,
+            28,
+            28
+          ]
+        }
+      },
+      "using": []
+    },
+    "Pair": {
+      "fields": [
+        {
+          "name": "key",
+          "type": "K",
+          "default": [
+            "LoadNull",
+            "Return"
+          ]
+        },
+        {
+          "name": "value",
+          "type": "V",
+          "default": [
+            "LoadNull",
+            "Return"
+          ]
+        }
+      ],
+      "on_create": {
+        "params": [
+          "k",
+          "v"
+        ],
+        "body": [
+          {
+            "LoadVar": "k"
+          },
+          {
+            "StoreVar": "key"
+          },
+          {
+            "LoadVar": "v"
+          },
+          {
+            "StoreVar": "value"
+          },
+          "LoadNull",
+          "Return"
+        ],
+        "lines": [
+          38,
+          38,
+          39,
+          39,
+          39,
+          39
+        ]
+      },
+      "acts": {
+        "show_pair": {
+          "params": [],
+          "body": [
+            {
+              "LoadVar": "key"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            {
+              "LoadStr": " -> "
+            },
+            "Add",
+            {
+              "LoadVar": "value"
+            },
+            {
+              "Call": [
+                "str",
+                1
+              ]
+            },
+            "Add",
+            "Show",
+            "LoadNull",
+            "Return"
+          ],
+          "lines": [
+            43,
+            43,
+            43,
+            43,
+            43,
+            43,
+            43,
+            43,
+            43,
+            43
+          ]
+        }
+      },
+      "using": []
+    }
+  }
+}

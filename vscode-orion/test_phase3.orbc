@@ -1,7 +1,7 @@
 {
   "main": [
     {
-      "LoadStr": "=== Shape b\u00e1sico ==="
+      "LoadStr": "=== Shape básico ==="
     },
     "Show",
     {
@@ -50,7 +50,7 @@
     },
     "Pop",
     {
-      "LoadStr": "=== Verificaci\u00f3n de tipo ==="
+      "LoadStr": "=== Verificación de tipo ==="
     },
     "Show",
     {
@@ -63,7 +63,7 @@
       "JumpIfFalse": 22
     },
     {
-      "LoadStr": "p es una Person \u2014 correcto"
+      "LoadStr": "p es una Person — correcto"
     },
     "Show",
     {
@@ -85,7 +85,7 @@
     },
     "Show",
     {
-      "LoadStr": "=== Composici\u00f3n con using ==="
+      "LoadStr": "=== Composición con using ==="
     },
     "Show",
     {
@@ -136,11 +136,11 @@
       "JumpIfFalse": 48
     },
     {
-      "LoadStr": "d es un Dog \u2014 correcto"
+      "LoadStr": "d es un Dog — correcto"
     },
     "Show",
     {
-      "LoadStr": "=== Auto-asignaci\u00f3n posicional ==="
+      "LoadStr": "=== Auto-asignación posicional ==="
     },
     "Show",
     {
@@ -168,9 +168,7 @@
       ]
     },
     "Pop",
-    {
-      "Halt": null
-    }
+    "Halt"
   ],
   "lines": [
     6,
@@ -313,7 +311,7 @@
             },
             "Add",
             {
-              "LoadStr": " a\u00f1os"
+              "LoadStr": " años"
             },
             "Add",
             "Show",

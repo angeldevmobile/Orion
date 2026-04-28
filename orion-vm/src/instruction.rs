@@ -65,6 +65,7 @@ pub enum Instruction {
     DefineShape(String),     // registrar shape (no-op, ya cargado desde bytecode)
     CallMethod(String, u8),  // obj.method(args) — nombre del método, num args
     IsInstance(String),      // obj is ShapeName → bool
+    PushSelf,                // push la instancia actual (me) → Null si no hay
 
     //   Stack
     Pop,                 // descarta el top del stack

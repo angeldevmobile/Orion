@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::ast::{Expr, Stmt, Handler};
 
 // ── Resultado ─────────────────────────────────────────────────────────────────
@@ -20,6 +20,7 @@ impl TypeIssue {
 
 #[derive(Debug, Clone)]
 struct FnSig {
+    type_params: Vec<String>,               // parámetros de tipo: [T, U]
     params: Vec<(String, Option<String>)>,  // (nombre, type_hint)
     return_type: Option<String>,
 }
@@ -29,6 +30,7 @@ struct FnSig {
 pub struct TypeChecker {
     issues: Vec<TypeIssue>,
     fn_sigs: HashMap<String, FnSig>,
+    shape_type_params: HashMap<String, Vec<String>>, // shape → sus type params
     scope_stack: Vec<HashMap<String, String>>,
     current_line: u32,
 }
@@ -38,6 +40,7 @@ impl TypeChecker {
         TypeChecker {
             issues: Vec::new(),
             fn_sigs: HashMap::new(),
+            shape_type_params: HashMap::new(),
             scope_stack: vec![HashMap::new()],
             current_line: 0,
         }
@@ -78,15 +81,19 @@ impl TypeChecker {
     fn collect_fn_sigs(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             match stmt {
-                Stmt::Fn { name, params, body: _, line: _ } |
-                Stmt::AsyncFn { name, params, body: _, line: _ } => {
+                Stmt::Fn { name, type_params, params, ret_type, .. } |
+                Stmt::AsyncFn { name, type_params, params, ret_type, .. } => {
                     let sig = FnSig {
+                        type_params: type_params.clone(),
                         params: params.iter()
                             .map(|p| (p.name.clone(), p.type_hint.clone()))
                             .collect(),
-                        return_type: None,
+                        return_type: ret_type.clone(),
                     };
                     self.fn_sigs.insert(name.clone(), sig);
+                }
+                Stmt::Shape { name, type_params, .. } => {
+                    self.shape_type_params.insert(name.clone(), type_params.clone());
                 }
                 _ => {}
             }
@@ -135,23 +142,30 @@ impl TypeChecker {
             }
 
             // definición de función: registra firma, verifica cuerpo
-            Stmt::Fn { name, params, body, line } |
-            Stmt::AsyncFn { name, params, body, line } => {
+            Stmt::Fn { name, type_params, params, body, ret_type, line } |
+            Stmt::AsyncFn { name, type_params, params, body, ret_type, line } => {
                 self.current_line = *line;
                 let sig = FnSig {
+                    type_params: type_params.clone(),
                     params: params.iter()
                         .map(|p| (p.name.clone(), p.type_hint.clone()))
                         .collect(),
-                    return_type: None,
+                    return_type: ret_type.clone(),
                 };
                 self.fn_sigs.insert(name.clone(), sig);
                 self.push_scope();
+                // Los type params se registran como tipo "any" dentro del cuerpo
+                for tp in type_params {
+                    self.scope_set(tp.clone(), "any".to_string());
+                }
                 for p in params {
                     if let Some(th) = &p.type_hint {
-                        self.scope_set(p.name.clone(), normalize(th));
+                        // Si el type hint es un type param (T, U...), registrar como "any"
+                        let resolved = if type_params.contains(th) { "any".to_string() } else { normalize(th) };
+                        self.scope_set(p.name.clone(), resolved);
                     }
                 }
-                self.check_stmts(body, None);
+                self.check_stmts(body, ret_type.as_deref());
                 self.pop_scope();
             }
 
@@ -222,29 +236,29 @@ impl TypeChecker {
                 self.check_call_types(expr);
             }
 
-            Stmt::Shape { name: _, fields, on_create, acts, using: _, line } => {
+            Stmt::Shape { name, type_params, fields, on_create, acts, using: _, line } => {
                 self.current_line = *line;
-                if let Some((params, body)) = on_create {
-                    self.push_scope();
+                self.shape_type_params.insert(name.clone(), type_params.clone());
+                // Verificar on_create y acts con type params en scope
+                let check_with_type_params = |checker: &mut TypeChecker, params: &[crate::ast::Param], body: &[Stmt]| {
+                    checker.push_scope();
+                    for tp in type_params { checker.scope_set(tp.clone(), "any".to_string()); }
                     for p in params {
                         if let Some(th) = &p.type_hint {
-                            self.scope_set(p.name.clone(), normalize(th));
+                            let resolved = if type_params.contains(th) { "any".to_string() } else { normalize(th) };
+                            checker.scope_set(p.name.clone(), resolved);
                         }
                     }
-                    self.check_stmts(body, None);
-                    self.pop_scope();
+                    checker.check_stmts(body, None);
+                    checker.pop_scope();
+                };
+                if let Some((params, body)) = on_create {
+                    check_with_type_params(self, params, body);
                 }
                 for act in acts {
-                    self.push_scope();
-                    for p in &act.params {
-                        if let Some(th) = &p.type_hint {
-                            self.scope_set(p.name.clone(), normalize(th));
-                        }
-                    }
-                    self.check_stmts(&act.body, None);
-                    self.pop_scope();
+                    check_with_type_params(self, &act.params, &act.body);
                 }
-                let _ = fields; // campos: type hints almacenados pero no verificados aún
+                let _ = fields;
             }
 
             _ => {}
@@ -258,16 +272,20 @@ impl TypeChecker {
                 if let Expr::Ident(fn_name) = callee.as_ref() {
                     let sig = self.fn_sigs.get(fn_name).cloned();
                     if let Some(sig) = sig {
+                        // Unificar type params: T → tipo concreto inferido del primer arg que lo usa
+                        let bindings = self.unify_type_params(&sig, args);
                         for (idx, arg) in args.iter().enumerate() {
                             if let Some((pname, Some(declared))) = sig.params.get(idx) {
+                                // Resolver el declared con los bindings de generics
+                                let resolved = resolve_generic(declared, &bindings);
                                 if let Some(actual) = self.infer_type(arg) {
-                                    if !types_compatible(declared, &actual) {
+                                    if !types_compatible(&resolved, &actual) {
                                         let line = self.current_line;
                                         self.report(
                                             format!(
                                                 "Llamada a '{fn_name}': argumento #{} \
                                                  ('{pname}: {declared}') — se esperaba \
-                                                 '{declared}', se recibió '{actual}'",
+                                                 '{resolved}', se recibió '{actual}'",
                                                 idx + 1
                                             ),
                                             line,
@@ -346,6 +364,34 @@ impl TypeChecker {
             _ => None,
         }
     }
+
+    // ── Unificación de type params ─────────────────────────────────────────────
+
+    /// Dado `fn f[T, U](a: T, b: U)` y los args reales, devuelve {T→"int", U→"string"}.
+    fn unify_type_params(&mut self, sig: &FnSig, args: &[Expr]) -> HashMap<String, String> {
+        let mut bindings: HashMap<String, String> = HashMap::new();
+        let type_param_set: HashSet<&str> = sig.type_params.iter().map(|s| s.as_str()).collect();
+        for (idx, (_, declared_opt)) in sig.params.iter().enumerate() {
+            if let Some(declared) = declared_opt {
+                if type_param_set.contains(declared.as_str()) {
+                    if let Some(arg) = args.get(idx) {
+                        if let Some(actual) = self.infer_type(arg) {
+                            // Solo ligar si no hay conflicto
+                            let entry = bindings.entry(declared.clone()).or_insert_with(|| actual.clone());
+                            if *entry != actual && actual != "any" {
+                                let line = self.current_line;
+                                self.report(
+                                    format!("Generic '{declared}' usado como '{}' y '{}' en la misma llamada", entry, actual),
+                                    line,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        bindings
+    }
 }
 
 // ── Helpers de tipos ─────────────────────────────────────────────────────────
@@ -358,6 +404,23 @@ fn normalize(t: &str) -> String {
         "num" | "number" => "number",
         other => other,
     }.to_string()
+}
+
+/// Resuelve un tipo declarado usando los bindings de type params.
+/// Ej: declared="T", bindings={"T":"int"} → "int"
+/// Ej: declared="List[T]", bindings={"T":"int"} → "List[int]"
+fn resolve_generic(declared: &str, bindings: &HashMap<String, String>) -> String {
+    if let Some(concrete) = bindings.get(declared) {
+        return concrete.clone();
+    }
+    // Intento simple para tipos compuestos como "List[T]"
+    if let Some(bracket) = declared.find('[') {
+        let base = &declared[..bracket];
+        let inner = &declared[bracket + 1..declared.len().saturating_sub(1)];
+        let resolved_inner = resolve_generic(inner, bindings);
+        return format!("{}[{}]", base, resolved_inner);
+    }
+    declared.to_string()
 }
 
 fn types_compatible(declared: &str, actual: &str) -> bool {
