@@ -267,6 +267,13 @@ impl Parser {
 
         let mut expr = self.parse_or()?;
 
+        // range: start..end  (e.g. 1..10)
+        if matches!(self.peek(), TokenKind::DotDot) {
+            self.pos += 1;
+            let right = self.parse_or()?;
+            expr = Expr::BinaryOp { op: "..".into(), left: Box::new(expr), right: Box::new(right) };
+        }
+
         // is-check: expr is ShapeName
         if matches!(self.peek(), TokenKind::Is) {
             self.pos += 1;

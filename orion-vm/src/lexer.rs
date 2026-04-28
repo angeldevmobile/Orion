@@ -315,6 +315,11 @@ fn keyword_or_ident(word: &str) -> TokenKind {
         "yes"       => TokenKind::Bool(true),
         "no"        => TokenKind::Bool(false),
 
+        // Operadores lógicos como palabras clave (alternativa a && || !)
+        "and"  => TokenKind::And,
+        "or"   => TokenKind::Or,
+        "not"  => TokenKind::Not,
+
         "int"    => TokenKind::TypeInt,
         "float"  => TokenKind::TypeFloat,
         "bool"   => TokenKind::TypeBool,

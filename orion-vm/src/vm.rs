@@ -334,16 +334,21 @@ impl VM {
                     .collect::<Result<Vec<_>, _>>()?;
                 args.reverse();
 
-                // Resolve the actual function name: may be a local variable holding a fn-name string
-                let resolved_name = self.call_stack.last()
+                // Resolver el valor real: variable local que puede ser Str, Closure o directo
+                let local_val = self.call_stack.last()
                     .and_then(|f| f.vars.get(&name).cloned())
                     .or_else(|| {
                         if self.call_stack.len() > 1 {
                             self.call_stack.first().and_then(|f| f.vars.get(&name).cloned())
                         } else { None }
-                    })
-                    .and_then(|v| if let Value::Str(s) = v { Some(s) } else { None })
-                    .unwrap_or_else(|| name.clone());
+                    });
+
+                // Extraer nombre resuelto y env de closure (si aplica)
+                let (resolved_name, closure_env) = match local_val {
+                    Some(Value::Closure { fn_name, env }) => (fn_name, Some(env)),
+                    Some(Value::Str(s))                   => (s, None),
+                    _                                     => (name.clone(), None),
+                };
 
                 if self.shapes.contains_key(&resolved_name) {
                     let inst_rc = self.instantiate_shape(&resolved_name, args)?;
@@ -355,7 +360,15 @@ impl VM {
                             resolved_name, func.params.len(), args.len()
                         ));
                     }
-                    let frame = CallFrame::with_args_named(func.body, func.lines, &resolved_name, &func.params, args);
+                    let mut frame = CallFrame::with_args_named(
+                        func.body, func.lines, &resolved_name, &func.params, args
+                    );
+                    // Inyectar env capturado (los params tienen prioridad)
+                    if let Some(env) = closure_env {
+                        for (k, v) in env {
+                            frame.vars.entry(k).or_insert(v);
+                        }
+                    }
                     self.call_stack.push(frame);
                 } else {
                     let result = self.call_builtin(&resolved_name, args)?;
@@ -433,6 +446,14 @@ impl VM {
                     Some(inst_rc) => self.value_stack.push(Value::Instance(Rc::clone(inst_rc))),
                     None          => self.value_stack.push(Value::Null),
                 }
+            }
+
+            Instruction::MakeClosure(fn_name) => {
+                // Captura una copia del scope actual como entorno de la closure
+                let env = self.call_stack.last()
+                    .map(|f| f.vars.clone())
+                    .unwrap_or_default();
+                self.value_stack.push(Value::Closure { fn_name, env });
             }
             Instruction::IsInstance(shape_name) => {
                 let obj = self.pop()?;
@@ -754,12 +775,24 @@ impl VM {
                 let obj = self.pop()?;
                 match (obj, idx) {
                     (Value::List(mut items), Value::Int(i)) => {
-                        let i_usize = i as usize;
+                        let i_usize = if i < 0 {
+                            (items.len() as i64 + i) as usize
+                        } else {
+                            i as usize
+                        };
                         if i_usize >= items.len() {
                             return Err(format!("Índice {} fuera de rango en SetIndex", i));
                         }
                         items[i_usize] = val;
                         self.value_stack.push(Value::List(items));
+                    }
+                    (Value::Dict(mut map), idx) => {
+                        let key = match idx {
+                            Value::Str(s) => s,
+                            other => other.to_string(),
+                        };
+                        map.insert(key, val);
+                        self.value_stack.push(Value::Dict(map));
                     }
                     _ => return Err("SetIndex: tipo no soportado".to_string()),
                 }
@@ -1127,32 +1160,35 @@ impl VM {
     /// Invoca un callable por nombre (string) con los argumentos dados
     /// y devuelve el resultado. Útil para map/filter/reduce sobre colecciones.
     fn call_value(&mut self, callee: Value, args: Vec<Value>) -> Result<Value, String> {
-        match callee {
-            Value::Str(fn_name) => {
-                // Funciones math builtin
-                if fn_name.starts_with("__math__") {
-                    return self.call_math_builtin(&fn_name[8..], args);
-                }
-                let func_def = self.functions.get(&fn_name)
-                    .ok_or_else(|| format!("Función '{}' no encontrada (lambda/fn)", fn_name))?
-                    .clone();
-                let stack_depth = self.call_stack.len();
-                let frame = CallFrame::with_args_named(
-                    func_def.body, func_def.lines, &fn_name, &func_def.params, args
-                );
-                self.call_stack.push(frame);
-                // Run until we come back to stack_depth
-                loop {
-                    if self.call_stack.len() <= stack_depth {
-                        break;
-                    }
-                    let done = self.step()?;
-                    if done { break; }
-                }
-                Ok(self.value_stack.pop().unwrap_or(Value::Null))
-            }
-            _ => Err(format!("No es un callable: {:?}", callee)),
+        let (fn_name, closure_env) = match callee {
+            Value::Closure { fn_name, env } => (fn_name, Some(env)),
+            Value::Str(s) => (s, None),
+            other => return Err(format!("No es un callable: {:?}", other)),
+        };
+
+        if fn_name.starts_with("__math__") {
+            return self.call_math_builtin(&fn_name[8..], args);
         }
+
+        let func_def = self.functions.get(&fn_name)
+            .ok_or_else(|| format!("Función '{}' no encontrada", fn_name))?
+            .clone();
+        let stack_depth = self.call_stack.len();
+        let mut frame = CallFrame::with_args_named(
+            func_def.body, func_def.lines, &fn_name, &func_def.params, args
+        );
+        if let Some(env) = closure_env {
+            for (k, v) in env {
+                frame.vars.entry(k).or_insert(v);
+            }
+        }
+        self.call_stack.push(frame);
+        loop {
+            if self.call_stack.len() <= stack_depth { break; }
+            let done = self.step()?;
+            if done { break; }
+        }
+        Ok(self.value_stack.pop().unwrap_or(Value::Null))
     }
 
     /// Dispatch de funciones math builtin

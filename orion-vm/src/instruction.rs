@@ -67,6 +67,9 @@ pub enum Instruction {
     IsInstance(String),      // obj is ShapeName → bool
     PushSelf,                // push la instancia actual (me) → Null si no hay
 
+    //   Closures
+    MakeClosure(String),     // captura vars del frame actual → push Closure{fn_name, env}
+
     //   Stack
     Pop,                 // descarta el top del stack
     Dup,                 // duplica el top del stack

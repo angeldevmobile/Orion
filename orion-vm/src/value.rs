@@ -46,6 +46,8 @@ pub enum Value {
     List(Vec<Value>),
     Dict(IndexMap<String, Value>),
     Instance(Rc<RefCell<InstanceData>>),
+    /// Closure: función + variables capturadas del scope donde fue creada
+    Closure { fn_name: String, env: IndexMap<String, Value> },
     /// Handle a una tarea asíncrona en curso
     Task(Arc<Mutex<Option<Result<SendValue, String>>>>),
     Null,
@@ -61,8 +63,9 @@ impl PartialEq for Value {
             (Value::Null, Value::Null)           => true,
             (Value::List(a), Value::List(b))     => a == b,
             (Value::Dict(a), Value::Dict(b))     => a == b,
-            (Value::Instance(a), Value::Instance(b)) => Rc::ptr_eq(a, b),
-            (Value::Task(a), Value::Task(b))           => Arc::ptr_eq(a, b),
+            (Value::Instance(a), Value::Instance(b))  => Rc::ptr_eq(a, b),
+            (Value::Closure { fn_name: a, .. }, Value::Closure { fn_name: b, .. }) => a == b,
+            (Value::Task(a), Value::Task(b))            => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -86,9 +89,8 @@ impl fmt::Display for Value {
                     .collect();
                 write!(f, "{{{}}}", parts.join(", "))
             }
-            Value::Instance(inst) => {
-                write!(f, "<{} instance>", inst.borrow().shape_name)
-            }
+            Value::Instance(inst) => write!(f, "<{} instance>", inst.borrow().shape_name),
+            Value::Closure { fn_name, .. } => write!(f, "<fn {}>", fn_name),
             Value::Task(_) => write!(f, "<tarea>"),
         }
     }
@@ -103,9 +105,10 @@ impl Value {
             Value::Bool(_)     => "bool".to_string(),
             Value::List(_)     => "list".to_string(),
             Value::Dict(_)     => "dict".to_string(),
-            Value::Null        => "null".to_string(),
-            Value::Instance(i) => i.borrow().shape_name.clone(),
-            Value::Task(_)     => "tarea".to_string(),
+            Value::Null                => "null".to_string(),
+            Value::Instance(i)         => i.borrow().shape_name.clone(),
+            Value::Closure { .. }      => "fn".to_string(),
+            Value::Task(_)             => "tarea".to_string(),
         }
     }
 
@@ -117,9 +120,10 @@ impl Value {
             Value::Str(s)    => !s.is_empty(),
             Value::List(v)   => !v.is_empty(),
             Value::Dict(m)   => !m.is_empty(),
-            Value::Instance(_) => true,
-            Value::Task(_)   => true,
-            Value::Null      => false,
+            Value::Instance(_)    => true,
+            Value::Closure { .. } => true,
+            Value::Task(_)        => true,
+            Value::Null           => false,
         }
     }
 
@@ -143,6 +147,8 @@ impl Value {
                 }
                 Ok(SendValue::Dict(m))
             }
+            Value::Closure { fn_name, .. } =>
+                Ok(SendValue::Str(fn_name.clone())),
             Value::Instance(_) =>
                 Err("No se puede pasar una instancia a una función async".to_string()),
             Value::Task(_) =>

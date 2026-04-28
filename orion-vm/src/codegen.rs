@@ -5,8 +5,11 @@
 /// Equivale a compiler/bytecode_compiler.py pero en Rust puro.
 
 use indexmap::IndexMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::ast::{ActDef, Expr, FieldDef, Handler, Stmt};
+
+static LAMBDA_COUNTER: AtomicUsize = AtomicUsize::new(0);
 use crate::bytecode::{ActDef as BcActDef, FieldDef as BcFieldDef, FunctionDef, OrionBytecode, ShapeDef};
 use crate::instruction::Instruction;
 
@@ -223,10 +226,15 @@ impl Codegen {
             }
             Stmt::AssignIndex { object, index, value, line } => {
                 self.current_line = line;
+                let var_name = if let Expr::Ident(n) = &object { Some(n.clone()) } else { None };
                 self.compile_expr_main(&object)?;
                 self.compile_expr_main(&index)?;
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::SetIndex);
+                match var_name {
+                    Some(name) => { self.emit(Instruction::StoreVar(name)); }
+                    None => { self.emit(Instruction::Pop); }
+                }
             }
             Stmt::AssignAttr { object, attr, value, line } => {
                 self.current_line = line;
@@ -284,6 +292,35 @@ impl Codegen {
                 self.current_line = line;
                 let ctr = self.for_counter;
                 self.for_counter += 1;
+
+                // range syntax: for i in start..end
+                if let Expr::BinaryOp { op, left, right } = &iter {
+                    if op == ".." {
+                        let cur_var = format!("__cur_{ctr}__");
+                        let end_var = format!("__end_{ctr}__");
+                        self.compile_expr_main(left)?;
+                        self.emit(Instruction::StoreVar(cur_var.clone()));
+                        self.compile_expr_main(right)?;
+                        self.emit(Instruction::StoreVar(end_var.clone()));
+                        let loop_start = self.addr();
+                        self.emit(Instruction::LoadVar(cur_var.clone()));
+                        self.emit(Instruction::LoadVar(end_var.clone()));
+                        self.emit(Instruction::Lt);
+                        let jf = self.emit(Instruction::JumpIfFalse(0));
+                        self.emit(Instruction::LoadVar(cur_var.clone()));
+                        self.emit(Instruction::StoreVar(var));
+                        for s in body { self.compile_stmt(s)?; }
+                        self.emit(Instruction::LoadVar(cur_var.clone()));
+                        self.emit(Instruction::LoadInt(1));
+                        self.emit(Instruction::Add);
+                        self.emit(Instruction::StoreVar(cur_var));
+                        self.emit(Instruction::Jump(loop_start));
+                        let end = self.addr();
+                        self.patch(jf, Instruction::JumpIfFalse(end));
+                        return Ok(());
+                    }
+                }
+
                 let list_var = format!("__list_{ctr}__");
                 let len_var  = format!("__len_{ctr}__");
                 let idx_var  = format!("__idx_{ctr}__");
@@ -551,10 +588,15 @@ impl FnCompiler {
             }
             Stmt::AssignIndex { object, index, value, line } => {
                 self.current_line = *line;
+                let var_name = if let Expr::Ident(n) = object { Some(n.clone()) } else { None };
                 self.compile_expr(object, async_fns)?;
                 self.compile_expr(index, async_fns)?;
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::SetIndex);
+                match var_name {
+                    Some(name) => { self.emit(Instruction::StoreVar(name)); }
+                    None => { self.emit(Instruction::Pop); }
+                }
             }
             Stmt::AssignAttr { object, attr, value, line } => {
                 self.current_line = *line;
@@ -612,6 +654,35 @@ impl FnCompiler {
                 self.current_line = *line;
                 let ctr = self.for_counter;
                 self.for_counter += 1;
+
+                // range syntax: for i in start..end
+                if let Expr::BinaryOp { op, left, right } = iter {
+                    if op == ".." {
+                        let cur_var = format!("__cur_{ctr}__");
+                        let end_var = format!("__end_{ctr}__");
+                        self.compile_expr(left, async_fns)?;
+                        self.emit(Instruction::StoreVar(cur_var.clone()));
+                        self.compile_expr(right, async_fns)?;
+                        self.emit(Instruction::StoreVar(end_var.clone()));
+                        let loop_start = self.addr();
+                        self.emit(Instruction::LoadVar(cur_var.clone()));
+                        self.emit(Instruction::LoadVar(end_var.clone()));
+                        self.emit(Instruction::Lt);
+                        let jf = self.emit(Instruction::JumpIfFalse(0));
+                        self.emit(Instruction::LoadVar(cur_var.clone()));
+                        self.emit(Instruction::StoreVar(var.clone()));
+                        for s in body { self.compile_stmt(s, async_fns)?; }
+                        self.emit(Instruction::LoadVar(cur_var.clone()));
+                        self.emit(Instruction::LoadInt(1));
+                        self.emit(Instruction::Add);
+                        self.emit(Instruction::StoreVar(cur_var));
+                        self.emit(Instruction::Jump(loop_start));
+                        let end = self.addr();
+                        self.patch(jf, Instruction::JumpIfFalse(end));
+                        return Ok(());
+                    }
+                }
+
                 let list_var = format!("__list_{ctr}__");
                 let len_var  = format!("__len_{ctr}__");
                 let idx_var  = format!("__idx_{ctr}__");
@@ -782,7 +853,35 @@ impl FnCompiler {
             }
 
             Stmt::Shape { name, .. } => { self.emit(Instruction::DefineShape(name.clone())); }
-            Stmt::Fn { .. } | Stmt::AsyncFn { .. } | Stmt::Use { .. } | Stmt::Route { .. } => {}
+            Stmt::Use { .. } | Stmt::Route { .. } => {}
+
+            // fn interna dentro de un cuerpo de función → closure accesible como variable local
+            Stmt::Fn { name, params, body, .. } | Stmt::AsyncFn { name, params, body, .. } => {
+                let fn_name = name.clone();
+                let mut inner = FnCompiler::new();
+                let last_is_expr = matches!(body.last(), Some(Stmt::Expr { .. }));
+                let (main_body, last_stmt) = if last_is_expr && !body.is_empty() {
+                    (&body[..body.len()-1], body.last())
+                } else {
+                    (&body[..], None)
+                };
+                for s in main_body { inner.compile_stmt(s, async_fns).ok(); }
+                if let Some(Stmt::Expr { expr, .. }) = last_stmt {
+                    inner.compile_expr(expr, async_fns).ok();
+                } else {
+                    inner.emit(Instruction::LoadNull);
+                }
+                inner.emit(Instruction::Return);
+                self.pending_lambdas.push((fn_name.clone(), FunctionDef {
+                    params: params.iter().map(|p| p.name.clone()).collect(),
+                    body: inner.instrs,
+                    lines: inner.lines,
+                }));
+                self.pending_lambdas.extend(inner.pending_lambdas);
+                // Crear closure y almacenarla como variable local con el nombre de la función
+                self.emit(Instruction::MakeClosure(fn_name.clone()));
+                self.emit(Instruction::StoreVar(fn_name));
+            }
 
             Stmt::Expr { expr, line } => {
                 self.current_line = *line;
@@ -934,12 +1033,12 @@ fn compile_expr_into(
         }
 
         Expr::Lambda { params, body } => {
-            // Lambda → función anónima con nombre autogenerado
-            let name = format!("__lambda_{}__", instrs.len());
+            // Lambda → closure con nombre único global + captura del scope actual
+            let name = format!("__lambda_{}__", LAMBDA_COUNTER.fetch_add(1, Ordering::Relaxed));
             let mut fc = FnCompiler::new();
             // Si el cuerpo es una sola expr-stmt, tratarla como return implícito
             let last_is_expr = matches!(body.last(), Some(Stmt::Expr { .. }));
-            let (main_body, last_stmt) = if last_is_expr && body.len() > 0 {
+            let (main_body, last_stmt) = if last_is_expr && !body.is_empty() {
                 (&body[..body.len()-1], body.last())
             } else {
                 (&body[..], None)
@@ -948,7 +1047,6 @@ fn compile_expr_into(
                 fc.compile_stmt(stmt, async_fns).ok();
             }
             if let Some(Stmt::Expr { expr, .. }) = last_stmt {
-                // expr result queda en stack → Return la devuelve
                 let mut extra2: Vec<(String, FunctionDef)> = Vec::new();
                 compile_expr_into(&mut fc.instrs, &mut fc.lines, fc.current_line, async_fns, &mut extra2, expr).ok();
                 fc.pending_lambdas.extend(extra2);
@@ -956,14 +1054,14 @@ fn compile_expr_into(
                 fc.emit(Instruction::LoadNull);
             }
             fc.emit(Instruction::Return);
-            // Registrar la función lambda
             extra_fns.push((name.clone(), FunctionDef {
                 params: params.clone(),
                 body: fc.instrs,
                 lines: fc.lines,
             }));
             extra_fns.extend(fc.pending_lambdas);
-            emit!(Instruction::LoadStr(name));
+            // MakeClosure captura el scope actual en tiempo de ejecución
+            emit!(Instruction::MakeClosure(name));
         }
     }
     Ok(())
