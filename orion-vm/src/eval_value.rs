@@ -34,6 +34,8 @@ pub enum EvalValue {
         fields:     HashMap<String, EvalValue>,
         acts:       HashMap<String, (Vec<String>, Vec<Json>)>,
     },
+    /// Módulo stdlib nativo cargado con `use`.
+    Module(String),
     Null,
 }
 
@@ -69,6 +71,7 @@ impl fmt::Display for EvalValue {
             }
             EvalValue::Function { name, is_async, .. } =>
                 write!(f, "<{} {}>", if *is_async { "async fn" } else { "fn" }, name),
+            EvalValue::Module(n)  => write!(f, "<module {}>", n),
             EvalValue::Future(_) => write!(f, "<future>"),
             EvalValue::Shape    { name, .. } => write!(f, "<shape {}>", name),
             EvalValue::Instance { shape_name, fields, .. } => {
@@ -93,6 +96,7 @@ impl EvalValue {
             EvalValue::List(_)      => "list",
             EvalValue::Dict(_)      => "dict",
             EvalValue::Function{..} => "function",
+            EvalValue::Module(_)    => "module",
             EvalValue::Future(_)    => "future",
             EvalValue::Shape{..}    => "shape",
             EvalValue::Instance{..} => "instance",
@@ -110,6 +114,7 @@ impl EvalValue {
             EvalValue::List(v)      => !v.is_empty(),
             EvalValue::Dict(m)      => !m.is_empty(),
             EvalValue::Function{..} => true,
+            EvalValue::Module(_)    => true,
             EvalValue::Future(_)    => true,
             EvalValue::Shape{..}    => true,
             EvalValue::Instance{..} => true,

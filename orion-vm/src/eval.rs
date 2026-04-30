@@ -12,6 +12,7 @@ use serde_json::Value as Json;
 use crate::eval_value::EvalValue;
 use crate::env::Env;
 use crate::builtins::{call_builtin, cmp_values};
+use crate::modules;
 
 //   Control de flujo interno                          
 
@@ -526,14 +527,15 @@ pub fn eval_stmt(node: &Json, env: &mut Env) -> Result<Flow, String> {
             Ok(Flow::Normal)
         }
 
-        //   USE (módulos externos → no soportado en Rust aún)
+        //   USE (carga módulo stdlib nativo Rust)
         "USE" => {
             let module = arr[1].as_str().unwrap_or("?").trim_matches('"');
-            Err(format!(
-                "Módulo '{}' no soportado en el evaluador Rust. \
-                 Usa `python orion {}` para módulos externos.",
-                module, module
-            ))
+            if modules::is_known_module(module) {
+                env.set(module, EvalValue::Module(module.to_string()));
+                Ok(Flow::Normal)
+            } else {
+                Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module))
+            }
         }
 
         //   Fallback: intenta como expresión                
@@ -745,6 +747,10 @@ pub fn eval_expr(node: &Json, env: &mut Env) -> Result<EvalValue, String> {
                     }
 
                     let obj = eval_expr(&arr[2], env)?;
+                    // Dispatch a módulos nativos Rust
+                    if let EvalValue::Module(ref mod_name) = obj {
+                        return modules::call(mod_name, method, args);
+                    }
                     call_method(obj, method, args)
                 }
 

@@ -198,6 +198,15 @@ pub fn learn(text: &str) -> String {
             if mem.len() == 1 { "entrada" } else { "entradas" })
 }
 
+/// Retorna el número de entradas en memoria de sesión.
+pub fn memory_size() -> usize {
+    SESSION_MEMORY.lock().unwrap().len()
+}
+
+pub fn memory_clear() {
+    SESSION_MEMORY.lock().unwrap().clear();
+}
+
 /// `sense <expr>` — consulta la memoria de sesión con ayuda del modelo.
 pub fn sense(query: &str) -> Result<String, String> {
     let context = {

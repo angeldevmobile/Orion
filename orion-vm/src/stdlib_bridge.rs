@@ -1,43 +1,33 @@
-/// Puente hacia los módulos Python de Orion (server, net, fs, etc.).
+/// Puente hacia módulos externos de Orion.
 ///
-/// En Fase 5B, los módulos externos siguen corriendo en Python.
-/// Este módulo centraliza las llamadas de inter-proceso para cuando
-/// el evaluador Rust necesite invocar funcionalidad de módulos.
-///
-/// Por ahora expone stubs con errores descriptivos; cada módulo
-/// se implementará en fases posteriores.
+/// Todos los módulos stdlib (fs, json, random, strings, datetime,
+/// process, env, net) están ahora implementados en Rust nativo
+/// bajo `crate::modules`. Este archivo se mantiene como referencia
+/// de la arquitectura de migración.
 
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
 
-/// Representa un módulo externo cargado.
-pub struct ExternalModule {
-    pub name: String,
-    /// Funciones exportadas como closures Rust (para módulos nativos futuros).
-    pub functions: HashMap<String, fn(Vec<EvalValue>) -> Result<EvalValue, String>>,
+/// Módulos que están completamente migrados a Rust nativo.
+pub const NATIVE_MODULES: &[&str] = &[
+    "fs", "json", "random", "strings", "datetime", "process", "env", "net",
+];
+
+/// Módulos avanzados que aún no han sido migrados (stdlib avanzada).
+pub const PENDING_MODULES: &[&str] = &[
+    "vision", "quantum", "ai", "crypto", "matrix", "insight", "cosmos", "timewarp",
+    "server",
+];
+
+/// Retorna true si el módulo tiene implementación nativa Rust.
+pub fn is_native(name: &str) -> bool {
+    NATIVE_MODULES.contains(&name)
 }
 
-/// Intenta cargar un módulo por nombre.
-/// Retorna None si el módulo no está soportado en el evaluador Rust aún.
-pub fn load_module(name: &str) -> Option<ExternalModule> {
-    match name {
-        // Módulos que aún delegan a Python
-        "server" | "net" | "fs" | "json" | "env" |
-        "random" | "datetime" | "process" | "strings" => None,
-        _ => None,
-    }
-}
-
-/// Llama una función de módulo externo via subprocess Python.
-/// Se usa como fallback cuando el módulo no tiene implementación nativa Rust.
-pub fn call_python_module(
-    module: &str,
-    function: &str,
-    _args: Vec<EvalValue>,
-) -> Result<EvalValue, String> {
+/// Retorna un error descriptivo para módulos avanzados no migrados.
+pub fn not_implemented(module: &str, function: &str) -> Result<EvalValue, String> {
     Err(format!(
-        "Módulo '{}' (función '{}') requiere el runtime Python. \
-         Usa `orion {}` en vez de `orion --eval` para programas con módulos externos.",
-        module, function, module
+        "Módulo '{}' (función '{}') aún no migrado a Rust. \
+         Está en la lista de módulos avanzados pendientes.",
+        module, function
     ))
 }

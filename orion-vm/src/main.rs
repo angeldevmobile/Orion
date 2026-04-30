@@ -6,6 +6,7 @@ mod eval_value;
 mod env;
 mod builtins;
 mod stdlib_bridge;
+mod modules;
 mod eval;
 mod ai;
 mod token;
