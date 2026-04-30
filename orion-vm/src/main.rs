@@ -17,6 +17,7 @@ mod codegen;
 mod pkg;
 mod typechecker;
 mod cli;
+mod jit;
 
 extern crate tiny_http;
 
@@ -172,6 +173,40 @@ fn main() {
             cli::banner::ok(&format!("Compilado → {out_path}"));
         }
 
+        // ── JIT (Cranelift) ───────────────────────────────────────────────────
+        "--jit" => {
+            if args.len() < 3 {
+                cli::banner::fail("Uso: orion --jit <archivo.orx>");
+                std::process::exit(1);
+            }
+            let src_path = &args[2];
+            let t0 = Instant::now();
+            let src = read_src(src_path);
+            let bc = compile_source(&src, src_path);
+
+            match jit::run_program(&bc) {
+                Ok(true) => {
+                    eprintln!("[JIT] {:.3} ms — Cranelift nativo", t0.elapsed().as_secs_f64() * 1000.0);
+                }
+                Ok(false) => {
+                    eprintln!("[JIT] Instrucciones no soportadas → fallback al intérprete");
+                    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
+                    match machine.run() {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("\n  [!] Error de Orion\n  {}\n", e.replace('\n', "\n  "));
+                            std::process::exit(1);
+                        }
+                    }
+                    eprintln!("[Intérprete] {:.3} ms", t0.elapsed().as_secs_f64() * 1000.0);
+                }
+                Err(e) => {
+                    cli::banner::fail(&format!("Error JIT: {e}"));
+                    std::process::exit(1);
+                }
+            }
+        }
+
         // ── Run .orx en memoria ───────────────────────────────────────────────
         "--run" => {
             if args.len() < 3 {
@@ -248,6 +283,7 @@ fn print_help() {
 
     let cmds = [
         ("--run  <archivo.orx>",         "Compilar y ejecutar"),
+        ("--jit  <archivo.orx>",         "Compilar y ejecutar con JIT Cranelift"),
         ("--compile <archivo.orx>",       "Compilar a .orbc"),
         ("--check <archivo.orx>",         "Verificar sintaxis  [--types]"),
         ("--watch <archivo.orx>",         "Hot reload automático"),

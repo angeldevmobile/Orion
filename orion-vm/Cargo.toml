@@ -20,3 +20,10 @@ regex = "1"
 sha2 = "0.10"
 hmac = "0.12"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "gif"] }
+
+# ── Cranelift JIT ─────────────────────────────────────────────────────────────
+cranelift-codegen  = { version = "0.113", default-features = false, features = ["std"] }
+cranelift-frontend = "0.113"
+cranelift-jit      = "0.113"
+cranelift-module   = "0.113"
+cranelift-native   = "0.113"
