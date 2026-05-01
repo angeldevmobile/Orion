@@ -50,7 +50,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ─── Análisis con AI Vision ───────────────────────────────────────────────────
+//     Análisis con AI Vision                                                    
 
 fn analyze_with_ai(path: &str, question: &str) -> Result<EvalValue, String> {
     let img = open_img(path)?;
@@ -128,7 +128,7 @@ fn analyze_with_ai(path: &str, question: &str) -> Result<EvalValue, String> {
     Ok(EvalValue::Dict(m))
 }
 
-// ─── Análisis estructural (sin AI) ───────────────────────────────────────────
+//     Análisis estructural (sin AI)                                            
 
 fn extract_metadata(path: &str) -> Result<EvalValue, String> {
     let img = open_img(path)?;
@@ -220,7 +220,7 @@ fn img_to_base64(img: &DynamicImage) -> Result<String, String> {
     Ok(b64_encode(buf.get_ref()))
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+//     Helpers                                                                   
 
 fn open_img(path: &str) -> Result<DynamicImage, String> {
     ImageReader::open(path)

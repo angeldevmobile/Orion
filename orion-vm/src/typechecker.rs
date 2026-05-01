@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use crate::ast::{Expr, Stmt, Handler};
 
-// ── Resultado ─────────────────────────────────────────────────────────────────
+//    Resultado                                                                  
 
 #[derive(Debug, Clone)]
 pub struct TypeIssue {
@@ -16,7 +16,7 @@ impl TypeIssue {
     }
 }
 
-// ── Firma de función ──────────────────────────────────────────────────────────
+//    Firma de función                                                           
 
 #[derive(Debug, Clone)]
 struct FnSig {
@@ -25,7 +25,7 @@ struct FnSig {
     return_type: Option<String>,
 }
 
-// ── Type Checker ──────────────────────────────────────────────────────────────
+//    Type Checker                                                               
 
 pub struct TypeChecker {
     issues: Vec<TypeIssue>,
@@ -52,7 +52,7 @@ impl TypeChecker {
         self.issues
     }
 
-    // ── Scope ──────────────────────────────────────────────────────────────────
+    //    Scope                                                                   
 
     fn scope_get(&self, name: &str) -> Option<String> {
         for scope in self.scope_stack.iter().rev() {
@@ -76,7 +76,7 @@ impl TypeChecker {
         self.issues.push(TypeIssue::error(msg, line));
     }
 
-    // ── Recolección de firmas (primer pase) ────────────────────────────────────
+    //    Recolección de firmas (primer pase)                                     
 
     fn collect_fn_sigs(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
@@ -100,7 +100,7 @@ impl TypeChecker {
         }
     }
 
-    // ── Statements ────────────────────────────────────────────────────────────
+    //    Statements                                                             
 
     fn check_stmts(&mut self, stmts: &[Stmt], return_type: Option<&str>) {
         for stmt in stmts {
@@ -317,7 +317,7 @@ impl TypeChecker {
         }
     }
 
-    // ── Inferencia de tipos ───────────────────────────────────────────────────
+    //    Inferencia de tipos                                                    
 
     fn infer_type(&mut self, expr: &Expr) -> Option<String> {
         match expr {
@@ -365,7 +365,7 @@ impl TypeChecker {
         }
     }
 
-    // ── Unificación de type params ─────────────────────────────────────────────
+    //    Unificación de type params                                              
 
     /// Dado `fn f[T, U](a: T, b: U)` y los args reales, devuelve {T→"int", U→"string"}.
     fn unify_type_params(&mut self, sig: &FnSig, args: &[Expr]) -> HashMap<String, String> {
@@ -394,7 +394,7 @@ impl TypeChecker {
     }
 }
 
-// ── Helpers de tipos ─────────────────────────────────────────────────────────
+//    Helpers de tipos                                                          
 
 fn normalize(t: &str) -> String {
     match t {
@@ -434,7 +434,7 @@ fn types_compatible(declared: &str, actual: &str) -> bool {
     false
 }
 
-// ── API pública ───────────────────────────────────────────────────────────────
+//    API pública                                                                
 
 pub fn type_check(stmts: &[Stmt]) -> Vec<TypeIssue> {
     TypeChecker::new().check(stmts)

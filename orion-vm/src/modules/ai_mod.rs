@@ -281,7 +281,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ─── Helpers internos ─────────────────────────────────────────────────────────
+//     Helpers internos                                                          
 
 fn ai_call_with_system(prompt: &str, system: &str, max_tokens: u32) -> Result<String, String> {
     let env = load_env();

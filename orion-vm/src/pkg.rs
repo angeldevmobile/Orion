@@ -18,7 +18,7 @@ const REGISTRY_REMOTE: &str =
 const PKG_REMOTE_BASE: &str =
     "https://raw.githubusercontent.com/angeldevmobile/Orion/master/packages";
 
-// ── Rutas ─────────────────────────────────────────────────────────────────────
+//    Rutas                                                                      
 
 fn packages_dir() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
@@ -39,7 +39,7 @@ fn packages_dir() -> PathBuf {
 fn registry_path() -> PathBuf  { packages_dir().join("registry.json") }
 fn installed_path() -> PathBuf { packages_dir().join("installed.json") }
 
-// ── Structuras internas ───────────────────────────────────────────────────────
+//    Structuras internas                                                        
 
 #[derive(Debug, Clone)]
 struct PkgEntry {
@@ -50,7 +50,7 @@ struct PkgEntry {
     tags:        Vec<String>,
 }
 
-// ── Registry ──────────────────────────────────────────────────────────────────
+//    Registry                                                                   
 
 /// Carga el registry local. Si `refresh=true` intenta actualizar desde GitHub primero.
 fn load_registry(refresh: bool) -> Result<(String, HashMap<String, PkgEntry>), String> {
@@ -103,7 +103,7 @@ fn parse_registry(raw: &str) -> Result<(String, HashMap<String, PkgEntry>), Stri
     Ok((base_url, map))
 }
 
-// ── installed.json ────────────────────────────────────────────────────────────
+//    installed.json                                                             
 
 fn load_installed() -> HashMap<String, serde_json::Value> {
     let path = installed_path();
@@ -121,7 +121,7 @@ fn save_installed(installed: &HashMap<String, serde_json::Value>) -> Result<(), 
         .map_err(|e| format!("Error escribiendo {}: {}", path.display(), e))
 }
 
-// ── Descarga de .orx ─────────────────────────────────────────────────────────
+//    Descarga de .orx                                                          
 
 fn download_orx(pkg_name: &str, file_name: &str) -> Result<String, String> {
     let url = format!("{}/{}", PKG_REMOTE_BASE, file_name);
@@ -132,7 +132,7 @@ fn download_orx(pkg_name: &str, file_name: &str) -> Result<String, String> {
         .map_err(|e| format!("Error leyendo respuesta para '{}': {}", pkg_name, e))
 }
 
-// ── Lógica interna de instalación ─────────────────────────────────────────────
+//    Lógica interna de instalación                                              
 
 fn install_entry(name: &str, entry: &PkgEntry, force: bool) -> String {
     let dest = packages_dir().join(&entry.file);
@@ -190,7 +190,7 @@ fn install_entry(name: &str, entry: &PkgEntry, force: bool) -> String {
     format!("[ok] {} v{} instalado  → packages/{}", name, entry.version, entry.file)
 }
 
-// ── orion --add <pkg> [--force] ───────────────────────────────────────────────
+//    orion --add <pkg> [--force]                                                
 
 pub fn add_package(name: &str, force: bool) {
     let installed = load_installed();
@@ -237,7 +237,7 @@ pub fn add_package(name: &str, force: bool) {
     println!("[orion pkg] {}", msg);
 }
 
-// ── orion --remove <pkg> ──────────────────────────────────────────────────────
+//    orion --remove <pkg>                                                       
 
 pub fn remove_package(name: &str) {
     let mut installed = load_installed();
@@ -276,7 +276,7 @@ pub fn remove_package(name: &str) {
     println!("[orion pkg] '{}' desregistrado.", name);
 }
 
-// ── orion --list ──────────────────────────────────────────────────────────────
+//    orion --list                                                               
 
 pub fn list_packages() {
     let (_base_url, registry) = match load_registry(false) {
@@ -291,7 +291,7 @@ pub fn list_packages() {
     println!();
     println!("  Paquetes Orion disponibles:");
     println!("  {:<14} {:<10} {:<12} {}", "NOMBRE", "VERSIÓN", "TIPO", "DESCRIPCIÓN");
-    println!("  {}", "─".repeat(72));
+    println!("  {}", " ".repeat(72));
 
     for name in names {
         let entry = &registry[name];
@@ -306,7 +306,7 @@ pub fn list_packages() {
     println!();
 }
 
-// ── orion --search <query> ────────────────────────────────────────────────────
+//    orion --search <query>                                                     
 
 pub fn search_packages(query: &str) {
     let (_base, registry) = match load_registry(false) {
@@ -338,7 +338,7 @@ pub fn search_packages(query: &str) {
     println!();
     println!("  Resultados para '{}':", query);
     println!("  {:<14} {:<10} {}", "NOMBRE", "VERSIÓN", "DESCRIPCIÓN");
-    println!("  {}", "─".repeat(60));
+    println!("  {}", " ".repeat(60));
     for (_, name, entry) in &results {
         let mark = if installed.contains_key(*name) { "✓" } else { " " };
         println!("  {} {:<13} {:<10} {}", mark, name, entry.version, entry.description);
@@ -346,7 +346,7 @@ pub fn search_packages(query: &str) {
     println!();
 }
 
-// ── orion --update [pkg] ──────────────────────────────────────────────────────
+//    orion --update [pkg]                                                       
 
 pub fn update_packages(pkg_name: Option<&str>) {
     let installed = load_installed();

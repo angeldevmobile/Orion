@@ -106,7 +106,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ─── Cuerpo ───────────────────────────────────────────────────────────────────
+//     Cuerpo                                                                    
 
 struct Body { name: String, mass: f64, pos: [f64;3], vel: [f64;3] }
 
@@ -145,7 +145,7 @@ fn body_to_eval(b: &Body) -> EvalValue {
     make_body(&b.name, b.mass, b.pos, b.vel)
 }
 
-// ─── Física ───────────────────────────────────────────────────────────────────
+//     Física                                                                    
 
 fn body_distance(b1: &Body, b2: &Body) -> f64 {
     let d: f64 = (0..3).map(|i| (b1.pos[i] - b2.pos[i]).powi(2)).sum();
@@ -237,7 +237,7 @@ fn universe_energy(universe: &EvalValue) -> Result<EvalValue, String> {
     Ok(EvalValue::Dict(res))
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+//     Helpers                                                                   
 
 fn to_f64(v: &EvalValue) -> Result<f64, String> {
     match v {

@@ -151,7 +151,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ─── Puertas estándar ─────────────────────────────────────────────────────────
+//     Puertas estándar                                                          
 
 fn hadamard() -> Gate {
     let s = 1.0 / 2.0f64.sqrt();
@@ -170,7 +170,7 @@ fn cnot()    -> Gate {
     ]
 }
 
-// ─── Operaciones matemáticas ──────────────────────────────────────────────────
+//     Operaciones matemáticas                                                   
 
 fn c_add(a: C, b: C) -> C { (a.0 + b.0, a.1 + b.1) }
 fn c_mul(a: C, b: C) -> C { (a.0*b.0 - a.1*b.1, a.0*b.1 + a.1*b.0) }
@@ -217,7 +217,7 @@ fn measure(state: &State, shots: usize) -> HashMap<String, usize> {
     counts
 }
 
-// ─── Conversiones EvalValue ↔ State ──────────────────────────────────────────
+//     Conversiones EvalValue ↔ State                                           
 
 fn state_to_eval(state: &State) -> EvalValue {
     EvalValue::List(state.iter().map(|(re, im)| {

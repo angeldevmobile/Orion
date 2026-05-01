@@ -197,14 +197,14 @@ impl VM {
     /// Ejecuta una sola instrucción. Devuelve Ok(true) para Halt/Return-en-main.
     fn dispatch_instr(&mut self, instr: Instruction) -> Result<bool, String> {
         match instr {
-            // ── Constantes ──────────────────────────────────────────────────
+            //    Constantes                                                   
             Instruction::LoadInt(n)   => self.value_stack.push(Value::Int(n)),
             Instruction::LoadFloat(f) => self.value_stack.push(Value::Float(f)),
             Instruction::LoadStr(s)   => self.value_stack.push(Value::Str(s)),
             Instruction::LoadBool(b)  => self.value_stack.push(Value::Bool(b)),
             Instruction::LoadNull     => self.value_stack.push(Value::Null),
 
-            // ── Variables ───────────────────────────────────────────────────
+            //    Variables                                                    
             Instruction::LoadVar(name) => {
                 // 1. Frame local
                 let val = self.call_stack.last()
@@ -249,7 +249,7 @@ impl VM {
                 frame.vars.insert(name, val);
             }
 
-            // ── Aritmética ──────────────────────────────────────────────────
+            //    Aritmética                                                   
             Instruction::Add => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(a.add(&b)?); }
             Instruction::Sub => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(a.sub(&b)?); }
             Instruction::Mul => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(a.mul(&b)?); }
@@ -279,7 +279,7 @@ impl VM {
                 }
             }
 
-            // ── Comparación ─────────────────────────────────────────────────
+            //    Comparación                                                  
             Instruction::Eq    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_eq(&b))); }
             Instruction::NotEq => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_eq(&b))); }
             Instruction::Lt    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_lt(&b)?)); }
@@ -287,12 +287,12 @@ impl VM {
             Instruction::Gt    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_lt(&b)? && !a.compare_eq(&b))); }
             Instruction::GtEq  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_lt(&b)?)); }
 
-            // ── Lógica ──────────────────────────────────────────────────────
+            //    Lógica                                                       
             Instruction::And => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.is_truthy() && b.is_truthy())); }
             Instruction::Or  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.is_truthy() || b.is_truthy())); }
             Instruction::Not => { let a = self.pop()?; self.value_stack.push(Value::Bool(!a.is_truthy())); }
 
-            // ── Control de flujo ────────────────────────────────────────────
+            //    Control de flujo                                             
             Instruction::Jump(addr) => {
                 self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
             }
@@ -309,7 +309,7 @@ impl VM {
                 }
             }
 
-            // ── Manejo de errores ───────────────────────────────────────────
+            //    Manejo de errores                                            
             Instruction::BeginAttempt(handler_addr) => {
                 self.error_handlers.push(ErrorHandler {
                     handler_addr,
@@ -327,7 +327,7 @@ impl VM {
                 return Err(msg.to_string());
             }
 
-            // ── Funciones ───────────────────────────────────────────────────
+            //    Funciones                                                    
             Instruction::Call(name, argc) => {
                 let mut args: Vec<Value> = (0..argc)
                     .map(|_| self.pop())
@@ -386,7 +386,7 @@ impl VM {
             }
             Instruction::Halt => return Ok(true),
 
-            // ── Módulos ──────────────────────────────────────────────────────
+            //    Módulos                                                       
             Instruction::UseModule(path) => {
                 let module_val = self.load_module(&path)?;
                 // Determinar nombre del namespace: basename sin extensión
@@ -399,7 +399,7 @@ impl VM {
                 frame.vars.insert(ns_name, module_val);
             }
 
-            // ── OOP ─────────────────────────────────────────────────────────
+            //    OOP                                                          
             Instruction::DefineShape(_) => {}
 
             Instruction::GetAttr(attr) => {
@@ -474,7 +474,7 @@ impl VM {
 
                 let obj = self.pop()?;
                 match obj {
-                    // ── Métodos de String ────────────────────────────────
+                    //    Métodos de String                                 
                     Value::Str(s) => {
                         let result = match method_name.as_str() {
                             "trim"        => Value::Str(s.trim().to_string()),
@@ -560,7 +560,7 @@ impl VM {
                         self.value_stack.push(result);
                     }
 
-                    // ── Métodos de List ──────────────────────────────────
+                    //    Métodos de List                                   
                     Value::List(mut list) => {
                         let result = match method_name.as_str() {
                             "len"      => Value::Int(list.len() as i64),
@@ -653,7 +653,7 @@ impl VM {
                         self.value_stack.push(result);
                     }
 
-                    // ── Métodos de Dict ──────────────────────────────────
+                    //    Métodos de Dict                                   
                     Value::Dict(map) => {
                         // Primero probar métodos builtin de dict
                         match method_name.as_str() {
@@ -717,7 +717,7 @@ impl VM {
                 }
             }
 
-            // ── Colecciones ─────────────────────────────────────────────────
+            //    Colecciones                                                  
             Instruction::MakeList(n) => {
                 let mut items: Vec<Value> = (0..n).map(|_| self.pop()).collect::<Result<Vec<_>, _>>()?;
                 items.reverse();
@@ -798,14 +798,14 @@ impl VM {
                 }
             }
 
-            // ── Stack ────────────────────────────────────────────────────────
+            //    Stack                                                         
             Instruction::Pop => { self.pop()?; }
             Instruction::Dup => {
                 let top = self.value_stack.last().cloned().ok_or("Stack vacío en Dup")?;
                 self.value_stack.push(top);
             }
 
-            // ── Async ────────────────────────────────────────────────────────
+            //    Async                                                         
             Instruction::CallAsync(fn_name, argc) => {
                 let argc = argc as usize;
                 let mut args: Vec<Value> = (0..argc)
@@ -891,13 +891,13 @@ impl VM {
                 }
             }
 
-            // ── I/O ──────────────────────────────────────────────────────────
+            //    I/O                                                           
             Instruction::Show => {
                 let val = self.pop()?;
                 println!("{}", val);
             }
 
-            // ── IO nativo: ask / read / write / env ───────────────────────────
+            //    IO nativo: ask / read / write / env                            
             Instruction::ReadInput { cast, choices } => {
                 let prompt = self.pop()?;
 
@@ -992,7 +992,7 @@ impl VM {
                 self.value_stack.push(result);
             }
 
-            // ── IA nativa (Fase 4) ────────────────────────────────────────────
+            //    IA nativa (Fase 4)                                             
             Instruction::AiAsk => {
                 let prompt = self.pop()?;
                 let response = ai_call(prompt.to_string(), None)?;
@@ -1019,7 +1019,7 @@ impl VM {
                 }
             }
 
-            // ── Servidor HTTP nativo (Fase 7) ──────────────────────────────
+            //    Servidor HTTP nativo (Fase 7)                               
             Instruction::ServeHTTP(fn_name) => {
                 let port_val = self.pop()?;
                 let port: u16 = match port_val {
@@ -1565,7 +1565,7 @@ impl VM {
                 println!();
                 Ok(None)
             }
-            // ── Listas ───────────────────────────────────────────────────────
+            //    Listas                                                        
             "push" | "append" => {
                 let mut it = args.into_iter();
                 let list = it.next().ok_or("push() requiere al menos 2 argumentos")?;
@@ -1637,7 +1637,7 @@ impl VM {
                     _ => Err("contains(): tipo no soportado".to_string()),
                 }
             }
-            // ── Dicts ───────────────────────────────────────────────────────
+            //    Dicts                                                        
             "keys" => {
                 let val = args.into_iter().next().ok_or("keys() requiere un argumento")?;
                 match val {
@@ -1661,7 +1661,7 @@ impl VM {
                     _ => Err("has_key(): requiere un dict".to_string()),
                 }
             }
-            // ── Strings ─────────────────────────────────────────────────────
+            //    Strings                                                      
             "upper" => {
                 let val = args.into_iter().next().ok_or("upper() requiere un argumento")?;
                 match val {
@@ -1739,7 +1739,7 @@ impl VM {
                     _ => Err("replace(): requiere strings".to_string()),
                 }
             }
-            // ── Matemáticas ─────────────────────────────────────────────────
+            //    Matemáticas                                                  
             "abs" => {
                 let val = args.into_iter().next().ok_or("abs() requiere un argumento")?;
                 match val {
@@ -1795,7 +1795,7 @@ impl VM {
                     _ => Err("sqrt(): requiere un número".to_string()),
                 }
             }
-            // ── I/O ─────────────────────────────────────────────────────────
+            //    I/O                                                          
             "input" => {
                 use std::io::{self, BufRead};
                 let prompt = args.into_iter().next().unwrap_or(Value::Null);
@@ -1808,7 +1808,7 @@ impl VM {
                     .unwrap_or_default();
                 Ok(Some(Value::Str(line)))
             }
-            // ── Tests ───────────────────────────────────────────────────────
+            //    Tests                                                        
             "assert" => {
                 let mut it = args.into_iter();
                 let cond = it.next().ok_or("assert() requiere al menos 1 argumento")?;

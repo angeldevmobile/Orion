@@ -124,7 +124,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ─── SHA256 hash con salt ─────────────────────────────────────────────────────
+//     SHA256 hash con salt                                                      
 
 fn do_hash(data: &str, salt: &str, _algo: &str) -> String {
     let mut hasher = Sha256::new();
@@ -135,7 +135,7 @@ fn do_hash(data: &str, salt: &str, _algo: &str) -> String {
     hex_encode(&hasher.finalize())
 }
 
-// ─── HMAC-SHA256 ──────────────────────────────────────────────────────────────
+//     HMAC-SHA256                                                               
 
 fn hmac_sign(data: &[u8], key: &[u8]) -> Result<String, String> {
     let mut mac = HmacSha256::new_from_slice(key)
@@ -144,7 +144,7 @@ fn hmac_sign(data: &[u8], key: &[u8]) -> Result<String, String> {
     Ok(hex_encode(&mac.finalize().into_bytes()))
 }
 
-// ─── XOR encrypt (fallback sin AES) ──────────────────────────────────────────
+//     XOR encrypt (fallback sin AES)                                           
 
 fn xor_encrypt(data: &[u8], key: &str) -> (Vec<u8>, String) {
     let mut hasher = Sha256::new();
@@ -157,20 +157,20 @@ fn xor_encrypt(data: &[u8], key: &str) -> (Vec<u8>, String) {
     (encrypted, key.to_string())
 }
 
-// ─── Hex encoding ─────────────────────────────────────────────────────────────
+//     Hex encoding                                                              
 
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-// ─── Random hex ───────────────────────────────────────────────────────────────
+//     Random hex                                                                
 
 fn random_hex(n: usize) -> String {
     let mut rng = rand::thread_rng();
     (0..n).map(|_| format!("{:02x}", rng.gen::<u8>())).collect::<String>()[..n*2.min(n*2)].to_string()
 }
 
-// ─── UUID v4 ──────────────────────────────────────────────────────────────────
+//     UUID v4                                                                   
 
 fn gen_uuid() -> String {
     let mut rng = rand::thread_rng();
@@ -189,7 +189,7 @@ fn gen_uuid() -> String {
     )
 }
 
-// ─── Base64 (sin dep externa) ─────────────────────────────────────────────────
+//     Base64 (sin dep externa)                                                  
 
 const B64: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -229,7 +229,7 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-// ─── MD5 simple (para compatibilidad, no seguro) ──────────────────────────────
+//     MD5 simple (para compatibilidad, no seguro)                               
 
 fn simple_md5(input: &[u8]) -> String {
     // Implementación básica de MD5 — solo para compatibilidad, no para seguridad
@@ -240,7 +240,7 @@ fn simple_md5(input: &[u8]) -> String {
     hex_encode(&hasher.finalize()[..16])
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+//     Helpers                                                                   
 
 fn one_str(fn_name: &str, args: Vec<EvalValue>) -> Result<String, String> {
     if args.is_empty() { return Err(format!("crypto.{}() requiere 1 argumento", fn_name)); }

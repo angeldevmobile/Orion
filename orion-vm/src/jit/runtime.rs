@@ -1,11 +1,11 @@
-//! Runtime Orion JIT — Fase JIT-1: Sistema de Valores Unificado
+//! Runtime Orion JIT — Fase JIT-4: ReadInput, ReadFile, WriteFile, ReadEnv, UseModule
 //!
 //! OrionVal: valor boxeado en heap que representa cualquier valor Orion.
 //! Todas las funciones de runtime reciben y devuelven punteros como i64.
-//! Fase JIT-2 añadirá: TAG_LIST, TAG_DICT.
 //! Fase JIT-5 añadirá: TAG_SHAPE, TAG_CLOSURE, TAG_TASK.
 
-use std::io::{self, Write as IoWrite};
+use std::cell::RefCell;
+use std::io::{self, BufRead, Write as IoWrite};
 
 //     Tags                                                                     
 
@@ -14,12 +14,22 @@ pub const TAG_INT:   u8 = 1;
 pub const TAG_FLOAT: u8 = 2;
 pub const TAG_BOOL:  u8 = 3;
 pub const TAG_STR:   u8 = 4;
-// Reservados:
-// pub const TAG_LIST:    u8 = 5;
-// pub const TAG_DICT:    u8 = 6;
+pub const TAG_LIST:  u8 = 5;  // data_i = Box::into_raw(Box<Vec<i64>>)
+pub const TAG_DICT:  u8 = 6;  // data_i = Box::into_raw(Box<Vec<(String, i64)>>)
+// Reservados JIT-5:
 // pub const TAG_SHAPE:   u8 = 7;
 // pub const TAG_CLOSURE: u8 = 8;
 // pub const TAG_TASK:    u8 = 9;
+
+// Buffer thread-local para pasar N argumentos variádicos a MakeList/MakeDict.
+thread_local! {
+    static ARG_BUF: RefCell<Vec<i64>> = RefCell::new(Vec::new());
+}
+
+// Error activo para attempt/handle — almacena el OrionVal* del mensaje.
+thread_local! {
+    static ORION_ERROR: RefCell<Option<i64>> = RefCell::new(None);
+}
 
 //     OrionVal                                                                 
 
@@ -73,6 +83,18 @@ fn val_to_display(v: &OrionVal) -> String {
         TAG_BOOL  => if v.data_i != 0 { "yes".to_string() } else { "no".to_string() },
         TAG_STR   => unsafe { cstr_to_str(v.data_i).to_string() },
         TAG_NULL  => "null".to_string(),
+        TAG_LIST  => unsafe {
+            let items = &*(v.data_i as *const Vec<i64>);
+            let parts: Vec<String> = items.iter().map(|&p| val_to_display(val_ref(p))).collect();
+            format!("[{}]", parts.join(", "))
+        },
+        TAG_DICT  => unsafe {
+            let entries = &*(v.data_i as *const Vec<(String, i64)>);
+            let parts: Vec<String> = entries.iter()
+                .map(|(k, p)| format!("{}: {}", k, val_to_display(val_ref(*p))))
+                .collect();
+            format!("{{{}}}", parts.join(", "))
+        },
         _         => "<valor>".to_string(),
     }
 }
@@ -84,6 +106,8 @@ fn is_truthy_val(v: &OrionVal) -> bool {
         TAG_FLOAT => v.data_f != 0.0,
         TAG_BOOL  => v.data_i != 0,
         TAG_STR   => unsafe { !cstr_to_str(v.data_i).is_empty() },
+        TAG_LIST  => unsafe { !(*(v.data_i as *const Vec<i64>)).is_empty() },
+        TAG_DICT  => unsafe { !(*(v.data_i as *const Vec<(String, i64)>)).is_empty() },
         _         => true,
     }
 }
@@ -344,7 +368,157 @@ pub extern "C" fn rt_gteq(a: i64, b: i64) -> i64 {
     }
 }
 
-//     Lógica                                                                   
+//     Manejo de errores — JIT-3
+
+/// Guarda el mensaje de error en TLS. Llamada por Raise antes de saltar al handler.
+#[no_mangle]
+pub extern "C" fn rt_set_error(msg: i64) {
+    ORION_ERROR.with(|e| *e.borrow_mut() = Some(msg));
+}
+
+/// Recupera y limpia el error de TLS. Llamada al entrar al handler block.
+/// Si no hay error (no debería pasar), retorna null.
+#[no_mangle]
+pub extern "C" fn rt_take_error() -> i64 {
+    ORION_ERROR.with(|e| {
+        e.borrow_mut().take().unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
+    })
+}
+
+/// Raise sin handler activo: imprime el error y termina el proceso.
+#[no_mangle]
+pub extern "C" fn rt_raise_exit(msg: i64) {
+    unsafe {
+        eprintln!("Error: {}", val_to_display(val_ref(msg)));
+    }
+    std::process::exit(1);
+}
+
+//     Colecciones — JIT-2
+
+/// Acumula un argumento en el buffer thread-local para MakeList/MakeDict.
+#[no_mangle]
+pub extern "C" fn rt_push_arg(val: i64) {
+    ARG_BUF.with(|b| b.borrow_mut().push(val));
+}
+
+/// Construye una Lista con los N primeros elementos del buffer.
+/// El compilador empuja los elementos en orden (elem_0 primero).
+#[no_mangle]
+pub extern "C" fn rt_make_list_n(n: i64) -> i64 {
+    ARG_BUF.with(|b| {
+        let mut buf = b.borrow_mut();
+        let n = n as usize;
+        let items: Vec<i64> = buf.drain(..n).collect();
+        let raw = Box::into_raw(Box::new(items)) as i64;
+        alloc_val(TAG_LIST, raw, 0.0)
+    })
+}
+
+/// Construye un Diccionario con N pares del buffer.
+/// El compilador empuja en orden: val_{n-1}, key_{n-1}, ..., val_0, key_0
+/// (mismo orden de pop del stack → mismo orden de inserción que el intérprete).
+#[no_mangle]
+pub extern "C" fn rt_make_dict_n(n: i64) -> i64 {
+    ARG_BUF.with(|b| {
+        let mut buf = b.borrow_mut();
+        let n = n as usize;
+        let flat: Vec<i64> = buf.drain(..n * 2).collect();
+        let mut entries: Vec<(String, i64)> = Vec::with_capacity(n);
+        for i in 0..n {
+            let val_ptr = flat[i * 2];
+            let key_ptr = flat[i * 2 + 1];
+            let key_str = unsafe {
+                let kv = val_ref(key_ptr);
+                if kv.tag == TAG_STR { cstr_to_str(kv.data_i).to_string() }
+                else { val_to_display(kv) }
+            };
+            entries.push((key_str, val_ptr));
+        }
+        let raw = Box::into_raw(Box::new(entries)) as i64;
+        alloc_val(TAG_DICT, raw, 0.0)
+    })
+}
+
+/// `obj[idx]` — soporta List[Int], Dict[Str], Str[Int].
+#[no_mangle]
+pub extern "C" fn rt_get_index(obj: i64, idx: i64) -> i64 {
+    unsafe {
+        let ov = val_ref(obj);
+        let iv = val_ref(idx);
+        match ov.tag {
+            TAG_LIST => {
+                let items = &*(ov.data_i as *const Vec<i64>);
+                let i = iv.data_i;
+                let i_usize = if i < 0 { (items.len() as i64 + i) as usize } else { i as usize };
+                match items.get(i_usize) {
+                    Some(&p) => p,
+                    None => { eprintln!("[JIT] Índice {} fuera de rango", i); std::process::exit(1) }
+                }
+            }
+            TAG_DICT => {
+                let entries = &*(ov.data_i as *const Vec<(String, i64)>);
+                let key_str = if iv.tag == TAG_STR { cstr_to_str(iv.data_i).to_string() }
+                              else { val_to_display(iv) };
+                for (k, p) in entries {
+                    if k == &key_str { return *p; }
+                }
+                eprintln!("[JIT] Clave '{}' no encontrada", key_str);
+                std::process::exit(1)
+            }
+            TAG_STR => {
+                let s = cstr_to_str(ov.data_i);
+                let i = iv.data_i;
+                let i_usize = if i < 0 { (s.len() as i64 + i) as usize } else { i as usize };
+                match s.chars().nth(i_usize) {
+                    Some(ch) => alloc_val(TAG_STR, string_to_cptr(ch.to_string()), 0.0),
+                    None => { eprintln!("[JIT] Índice {} fuera de rango en string", i); std::process::exit(1) }
+                }
+            }
+            _ => { eprintln!("[JIT] GetIndex: tipo no soportado (tag={})", ov.tag); std::process::exit(1) }
+        }
+    }
+}
+
+/// `obj[idx] = val` — retorna el objeto modificado (semántica por valor, igual que el intérprete).
+#[no_mangle]
+pub extern "C" fn rt_set_index(obj: i64, idx: i64, val: i64) -> i64 {
+    unsafe {
+        let ov = val_ref(obj);
+        let iv = val_ref(idx);
+        match ov.tag {
+            TAG_LIST => {
+                let items = &*(ov.data_i as *const Vec<i64>);
+                let mut new_items = items.clone();
+                let i = iv.data_i;
+                let i_usize = if i < 0 { (new_items.len() as i64 + i) as usize } else { i as usize };
+                if i_usize >= new_items.len() {
+                    eprintln!("[JIT] Índice {} fuera de rango en SetIndex", i);
+                    std::process::exit(1);
+                }
+                new_items[i_usize] = val;
+                let raw = Box::into_raw(Box::new(new_items)) as i64;
+                alloc_val(TAG_LIST, raw, 0.0)
+            }
+            TAG_DICT => {
+                let entries = &*(ov.data_i as *const Vec<(String, i64)>);
+                let mut new_entries = entries.clone();
+                let key_str = if iv.tag == TAG_STR { cstr_to_str(iv.data_i).to_string() }
+                              else { val_to_display(iv) };
+                let mut found = false;
+                for entry in &mut new_entries {
+                    if entry.0 == key_str { entry.1 = val; found = true; break; }
+                }
+                if !found { new_entries.push((key_str, val)); }
+                let raw = Box::into_raw(Box::new(new_entries)) as i64;
+                alloc_val(TAG_DICT, raw, 0.0)
+            }
+            _ => { eprintln!("[JIT] SetIndex: tipo no soportado (tag={})", ov.tag); std::process::exit(1) }
+        }
+    }
+}
+
+//     Lógica
 
 #[no_mangle]
 pub extern "C" fn rt_and(a: i64, b: i64) -> i64 {
@@ -367,5 +541,178 @@ pub extern "C" fn rt_not(a: i64) -> i64 {
     unsafe {
         let t = !is_truthy_val(val_ref(a));
         alloc_val(TAG_BOOL, if t { 1 } else { 0 }, 0.0)
+    }
+}
+
+//     I/O nativo — JIT-4
+
+/// Lee una línea de stdin y aplica cast opcional.
+/// `cast_ptr`: puntero C-string con "int"/"float"/"bool", o 0 para string puro.
+#[no_mangle]
+pub extern "C" fn rt_read_input(prompt: i64, cast_ptr: i64) -> i64 {
+    unsafe {
+        let prompt_str = val_to_display(val_ref(prompt));
+        print!("{} ", prompt_str);
+        let _ = io::stdout().flush();
+        let raw = {
+            let stdin = io::stdin();
+            let mut line = String::new();
+            stdin.lock().read_line(&mut line).unwrap_or(0);
+            line.trim().to_string()
+        };
+        let cast_str = cstr_to_str(cast_ptr);
+        apply_cast(raw, cast_str)
+    }
+}
+
+/// Igual que `rt_read_input` pero valida la entrada contra una lista de opciones.
+#[no_mangle]
+pub extern "C" fn rt_read_input_choices(prompt: i64, choices: i64, cast_ptr: i64) -> i64 {
+    unsafe {
+        let choices_val = val_ref(choices);
+        let choice_strings: Vec<String> = if choices_val.tag == TAG_LIST {
+            let items = &*(choices_val.data_i as *const Vec<i64>);
+            items.iter().map(|&p| val_to_display(val_ref(p))).collect()
+        } else {
+            vec![]
+        };
+        let prompt_str = val_to_display(val_ref(prompt));
+        if !choice_strings.is_empty() {
+            println!("{}", choice_strings.join(" / "));
+        }
+        let raw = loop {
+            print!("{} ", prompt_str);
+            let _ = io::stdout().flush();
+            let stdin = io::stdin();
+            let mut line = String::new();
+            stdin.lock().read_line(&mut line).unwrap_or(0);
+            let trimmed = line.trim().to_string();
+            if choice_strings.is_empty() || choice_strings.contains(&trimmed) {
+                break trimmed;
+            }
+        };
+        let cast_str = cstr_to_str(cast_ptr);
+        apply_cast(raw, cast_str)
+    }
+}
+
+/// Lee un archivo y devuelve su contenido según `fmt_ptr` ("text", "lines", o cualquier otro = text).
+#[no_mangle]
+pub extern "C" fn rt_read_file(path: i64, fmt_ptr: i64) -> i64 {
+    unsafe {
+        let path_str = val_to_display(val_ref(path));
+        let content = match std::fs::read_to_string(&path_str) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[JIT] read: no se pudo leer '{}': {}", path_str, e);
+                std::process::exit(1);
+            }
+        };
+        let fmt_str = cstr_to_str(fmt_ptr);
+        match fmt_str {
+            "lines" => {
+                let items: Vec<i64> = content
+                    .lines()
+                    .map(|l| alloc_val(TAG_STR, string_to_cptr(l.to_string()), 0.0))
+                    .collect();
+                let raw = Box::into_raw(Box::new(items)) as i64;
+                alloc_val(TAG_LIST, raw, 0.0)
+            }
+            _ => alloc_val(TAG_STR, string_to_cptr(content), 0.0),
+        }
+    }
+}
+
+/// Escribe `data` en el archivo `path`. `mode_ptr`: "append" o cualquier otro = "write".
+#[no_mangle]
+pub extern "C" fn rt_write_file(path: i64, data: i64, mode_ptr: i64) {
+    unsafe {
+        let path_str = val_to_display(val_ref(path));
+        let data_str = val_to_display(val_ref(data));
+        let mode_str = cstr_to_str(mode_ptr);
+        match mode_str {
+            "append" => {
+                match std::fs::OpenOptions::new().append(true).create(true).open(&path_str) {
+                    Ok(mut f) => { let _ = writeln!(f, "{}", data_str); }
+                    Err(e) => { eprintln!("[JIT] write append '{}': {}", path_str, e); std::process::exit(1); }
+                }
+            }
+            _ => {
+                if let Err(e) = std::fs::write(&path_str, format!("{}\n", data_str)) {
+                    eprintln!("[JIT] write '{}': {}", path_str, e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+/// Lee una variable de entorno y aplica cast opcional.
+#[no_mangle]
+pub extern "C" fn rt_read_env(key: i64, cast_ptr: i64) -> i64 {
+    unsafe {
+        let key_str = val_to_display(val_ref(key));
+        let raw = std::env::var(&key_str).unwrap_or_default();
+        let cast_str = cstr_to_str(cast_ptr);
+        apply_cast(raw, cast_str)
+    }
+}
+
+/// Carga un módulo por nombre/path y devuelve un dict con su namespace.
+/// Soporta el módulo builtin "math" con constantes. Los módulos .orx devuelven dict vacío.
+#[no_mangle]
+pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
+    unsafe {
+        let path_str = cstr_to_str(path_ptr);
+        let base_name = std::path::Path::new(path_str)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(path_str);
+
+        match base_name {
+            "math" => {
+                use std::f64::consts;
+                let entries: Vec<(String, i64)> = vec![
+                    ("PI".to_string(),  alloc_val(TAG_FLOAT, 0, consts::PI)),
+                    ("E".to_string(),   alloc_val(TAG_FLOAT, 0, consts::E)),
+                    ("TAU".to_string(), alloc_val(TAG_FLOAT, 0, consts::TAU)),
+                    ("PHI".to_string(), alloc_val(TAG_FLOAT, 0, 1.618_033_988_749_895)),
+                    ("INF".to_string(), alloc_val(TAG_FLOAT, 0, f64::INFINITY)),
+                ];
+                let raw = Box::into_raw(Box::new(entries)) as i64;
+                alloc_val(TAG_DICT, raw, 0.0)
+            }
+            _ => {
+                let candidates = [
+                    format!("packages/{}.orx", path_str),
+                    format!("{}.orx", path_str),
+                    format!("lib/{}.orx", path_str),
+                ];
+                let exists = candidates.iter().any(|c| std::path::Path::new(c).exists());
+                if exists {
+                    // Módulos .orx necesitan sub-VM; JIT devuelve dict vacío como placeholder
+                    let entries: Vec<(String, i64)> = Vec::new();
+                    let raw = Box::into_raw(Box::new(entries)) as i64;
+                    alloc_val(TAG_DICT, raw, 0.0)
+                } else {
+                    eprintln!("[JIT] Módulo '{}' no encontrado", path_str);
+                    std::process::exit(1)
+                }
+            }
+        }
+    }
+}
+
+//     Helpers privados — JIT-4
+
+fn apply_cast(raw: String, cast: &str) -> i64 {
+    match cast {
+        "int"   => alloc_val(TAG_INT,  raw.parse::<i64>().unwrap_or(0),   0.0),
+        "float" => alloc_val(TAG_FLOAT, 0, raw.parse::<f64>().unwrap_or(0.0)),
+        "bool"  => {
+            let v = matches!(raw.as_str(), "yes" | "true" | "1");
+            alloc_val(TAG_BOOL, if v { 1 } else { 0 }, 0.0)
+        }
+        _       => alloc_val(TAG_STR, string_to_cptr(raw), 0.0),
     }
 }

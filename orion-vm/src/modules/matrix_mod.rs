@@ -148,7 +148,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ─── Operaciones matriciales ──────────────────────────────────────────────────
+//     Operaciones matriciales                                                   
 
 fn mat_add(a: &Mat, b: &Mat) -> Result<Mat, String> {
     check_same_shape(a, b)?;
@@ -240,7 +240,7 @@ fn shape(m: &Mat) -> (usize, usize) {
     (m.len(), m.first().map(|r| r.len()).unwrap_or(0))
 }
 
-// ─── Conversiones EvalValue ↔ Mat ─────────────────────────────────────────────
+//     Conversiones EvalValue ↔ Mat                                              
 
 fn parse_mat(v: &EvalValue) -> Result<Mat, String> {
     match v {

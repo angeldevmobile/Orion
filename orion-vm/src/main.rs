@@ -43,7 +43,7 @@ fn main() {
             println!("Orion VM v0.4.0 (Rust) — pipeline completo: lexer + parser + codegen + VM");
         }
 
-        // ── Verificar sintaxis ────────────────────────────────────────────────
+        //    Verificar sintaxis                                                 
         "--check" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --check <archivo.orx> [--types]");
@@ -53,7 +53,7 @@ fn main() {
             cli::check::run_check(&args[2], check_types);
         }
 
-        // ── Hot reload ────────────────────────────────────────────────────────
+        //    Hot reload                                                         
         "--watch" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --watch <archivo.orx>");
@@ -62,7 +62,7 @@ fn main() {
             cli::watch::run_watch(&args[2]);
         }
 
-        // ── Benchmark ─────────────────────────────────────────────────────────
+        //    Benchmark                                                          
         "--bench" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --bench <archivo.orx> [--runs=N]");
@@ -72,18 +72,18 @@ fn main() {
             cli::bench::run_bench(&args[2], runs);
         }
 
-        // ── Test runner ───────────────────────────────────────────────────────
+        //    Test runner                                                        
         "--test" => {
             let folder = args.get(2).map(String::as_str).unwrap_or(".");
             cli::test_runner::run_tests(folder);
         }
 
-        // ── Doctor ────────────────────────────────────────────────────────────
+        //    Doctor                                                             
         "--doctor" => {
             cli::doctor::run_doctor();
         }
 
-        // ── Scaffold proyecto ─────────────────────────────────────────────────
+        //    Scaffold proyecto                                                  
         "--new" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --new <nombre-proyecto>");
@@ -92,7 +92,7 @@ fn main() {
             cli::new_project::run_new(&args[2]);
         }
 
-        // ── Package manager ───────────────────────────────────────────────────
+        //    Package manager                                                    
         "--add" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --add <paquete> [--force]");
@@ -125,10 +125,10 @@ fn main() {
             pkg::update_packages(target);
         }
 
-        // ── REPL ──────────────────────────────────────────────────────────────
+        //    REPL                                                               
         "--repl" => run_repl(),
 
-        // ── Lexer ─────────────────────────────────────────────────────────────
+        //    Lexer                                                              
         "--lex" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --lex <archivo.orx>");
@@ -149,7 +149,7 @@ fn main() {
             }
         }
 
-        // ── Tree-walker evaluator ─────────────────────────────────────────────
+        //    Tree-walker evaluator                                              
         "--eval" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --eval <ast.json>");
@@ -158,7 +158,7 @@ fn main() {
             run_eval(&args[2]);
         }
 
-        // ── Compile .orx → .orbc ─────────────────────────────────────────────
+        //    Compile .orx → .orbc                                              
         "--compile" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --compile <archivo.orx>");
@@ -173,7 +173,7 @@ fn main() {
             cli::banner::ok(&format!("Compilado → {out_path}"));
         }
 
-        // ── JIT (Cranelift) ───────────────────────────────────────────────────
+        //    JIT (Cranelift)                                                    
         "--jit" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --jit <archivo.orx>");
@@ -207,7 +207,7 @@ fn main() {
             }
         }
 
-        // ── Run .orx en memoria ───────────────────────────────────────────────
+        //    Run .orx en memoria                                                
         "--run" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --run <archivo.orx>");
@@ -231,7 +231,7 @@ fn main() {
             eprintln!("[Orion] {:.3} ms", t_total.elapsed().as_secs_f64() * 1000.0);
         }
 
-        // ── Bytecode VM (.orbc) ───────────────────────────────────────────────
+        //    Bytecode VM (.orbc)                                                
         path => {
             let t_total = Instant::now();
             let t0 = Instant::now();
@@ -272,7 +272,7 @@ fn main() {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+//    Helpers                                                                   
 
 fn print_help() {
     cli::banner::animate_startup();
@@ -390,7 +390,7 @@ fn run_eval(ast_path: &str) {
     eprintln!("[Orion] Exec: {:.3} ms", t0.elapsed().as_secs_f64() * 1000.0);
 }
 
-// ── REPL ─────────────────────────────────────────────────────────────────────
+//    REPL                                                                      
 
 struct ReplSession {
     history: Vec<String>,  // successfully executed source snippets

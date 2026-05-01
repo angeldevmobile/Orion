@@ -212,7 +212,7 @@ pub fn call_builtin(name: &str, args: Vec<EvalValue>) -> Result<EvalValue, Strin
     }
 }
 
-//   helpers                                 ─
+//   helpers                                  
 
 fn one_arg(name: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() != 1 {

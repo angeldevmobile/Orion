@@ -146,7 +146,7 @@ impl Parser {
         Ok(stmts)
     }
 
-    //   Parámetros de función                         ─
+    //   Parámetros de función                          
 
     fn parse_params(&mut self) -> Result<Vec<Param>, ParseError> {
         self.expect(&TokenKind::LParen)?;
@@ -586,7 +586,7 @@ impl Parser {
         self.skip_newlines();
         match self.peek().clone() {
 
-            //   const x = expr                        ─
+            //   const x = expr                         
             TokenKind::Const => {
                 self.pos += 1;
                 let name = self.expect_ident()?;
@@ -614,7 +614,7 @@ impl Parser {
             //   break                             
             TokenKind::Break    => { self.pos += 1; Ok(Stmt::Break { line }) }
 
-            //   continue                           ─
+            //   continue                            
             TokenKind::Continue => { self.pos += 1; Ok(Stmt::Continue { line }) }
 
             //   fn name[T, U](params) -> ret { body }
@@ -646,7 +646,7 @@ impl Parser {
                 Ok(Stmt::AsyncFn { name, type_params, params, body, ret_type, line })
             }
 
-            //   if cond { } [else { }]                    ─
+            //   if cond { } [else { }]                     
             TokenKind::If => {
                 self.pos += 1;
                 let cond = self.parse_expression()?;
@@ -663,7 +663,7 @@ impl Parser {
                 Ok(Stmt::If { cond, then_body, else_body, line })
             }
 
-            //   while cond { }                        ─
+            //   while cond { }                         
             TokenKind::While => {
                 self.pos += 1;
                 let cond = self.parse_expression()?;
@@ -681,7 +681,7 @@ impl Parser {
                 Ok(Stmt::For { var, iter, body, line })
             }
 
-            //   match expr { pattern { } ... }                ─
+            //   match expr { pattern { } ... }                 
             TokenKind::Match => {
                 self.pos += 1;
                 let expr = self.parse_expression()?;
@@ -724,7 +724,7 @@ impl Parser {
                 Ok(Stmt::Use { path, alias, selective, line })
             }
 
-            //   attempt { } handle err { }                  ─
+            //   attempt { } handle err { }                   
             TokenKind::Attempt => {
                 self.pos += 1;
                 let body = self.parse_block()?;
@@ -740,35 +740,35 @@ impl Parser {
                 Ok(Stmt::Attempt { body, handler, line })
             }
 
-            //   error expr                          ─
+            //   error expr                           
             TokenKind::ErrorKw => {
                 self.pos += 1;
                 let msg = self.parse_expression()?;
                 Ok(Stmt::ErrorStmt { msg, line })
             }
 
-            //   think expr                          ─
+            //   think expr                           
             TokenKind::Think => {
                 self.pos += 1;
                 let prompt = self.parse_expression()?;
                 Ok(Stmt::Think { prompt, line })
             }
 
-            //   learn expr                          ─
+            //   learn expr                           
             TokenKind::Learn => {
                 self.pos += 1;
                 let text = self.parse_expression()?;
                 Ok(Stmt::Learn { text, line })
             }
 
-            //   sense expr                          ─
+            //   sense expr                           
             TokenKind::Sense => {
                 self.pos += 1;
                 let query = self.parse_expression()?;
                 Ok(Stmt::Sense { query, line })
             }
 
-            //   spawn expr                          ─
+            //   spawn expr                           
             TokenKind::Spawn => {
                 self.pos += 1;
                 let call = self.parse_expression()?;
@@ -795,7 +795,7 @@ impl Parser {
                 Ok(Stmt::Ask { prompt, var, cast, choices, line })
             }
 
-            //   read "path" [as type] -> var                 ─
+            //   read "path" [as type] -> var                  
             TokenKind::Read => {
                 self.pos += 1;
                 let path = self.parse_expression()?;
@@ -822,7 +822,7 @@ impl Parser {
                 Ok(Stmt::Write { path, content, line })
             }
 
-            //   append "path" with expr                    ─
+            //   append "path" with expr                     
             TokenKind::Append => {
                 self.pos += 1;
                 let path = self.parse_expression()?;
@@ -1018,7 +1018,7 @@ impl Parser {
     }
 }
 
-//   Tests                                   ─
+//   Tests                                    
 
 #[cfg(test)]
 mod tests {

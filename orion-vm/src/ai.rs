@@ -5,11 +5,11 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-// ─── Memoria de sesión (persistente durante la ejecución del programa) ───────
+//     Memoria de sesión (persistente durante la ejecución del programa)        
 
 static SESSION_MEMORY: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-// ─── Carga de .env ────────────────────────────────────────────────────────────
+//     Carga de .env                                                             
 
 fn load_env_vars() -> HashMap<String, String> {
     // Partir de las variables de entorno del proceso
@@ -46,7 +46,7 @@ fn load_env_vars() -> HashMap<String, String> {
     vars
 }
 
-// ─── HTTP helper ──────────────────────────────────────────────────────────────
+//     HTTP helper                                                               
 
 fn http_post(
     url: &str,
@@ -73,7 +73,7 @@ fn http_post(
         .map_err(|e| format!("Error al parsear respuesta JSON: {}", e))
 }
 
-// ─── Llamadas por proveedor ───────────────────────────────────────────────────
+//     Llamadas por proveedor                                                    
 
 fn call_anthropic(
     env: &HashMap<String, String>,
@@ -183,7 +183,7 @@ fn ai_call(prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String
     }
 }
 
-// ─── API pública (usada desde eval.rs) ───────────────────────────────────────
+//     API pública (usada desde eval.rs)                                        
 
 /// `think <expr>` — pregunta al modelo y muestra la respuesta.
 pub fn think(prompt: &str) -> Result<String, String> {

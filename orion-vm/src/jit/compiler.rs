@@ -1,8 +1,9 @@
-//! Compilador Bytecode → Cranelift JIT — Fase JIT-1: Valores Unificados
+//! Compilador Bytecode → Cranelift JIT — Fase JIT-4: I/O nativo y UseModule
 //!
 //! Todos los valores son punteros a OrionVal en heap (pasados como i64).
 //! Cada operación delega a una función de runtime (rt_add, rt_eq, etc.).
-//! Fase JIT-2 añadirá MakeList, MakeDict, GetIndex, SetIndex.
+//! JIT-4: ReadInput, ReadFile, WriteFile, ReadEnv, UseModule.
+//! Fase JIT-5 añadirá DefineShape, CallMethod, IsInstance, PushSelf, GetAttr, SetAttr.
 
 use std::collections::{HashMap, HashSet};
 
@@ -16,16 +17,33 @@ use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use crate::bytecode::OrionBytecode;
 use crate::instruction::Instruction;
 
-// ─── IDs de runtime ──────────────────────────────────────────────────────────
+//     IDs de runtime                                                           
 
 #[derive(Clone)]
 struct RuntimeIds {
-    // Constructores
+    // Constructores escalares
     make_null:       FuncId,
     make_int:        FuncId,
     make_float_bits: FuncId,
     make_bool:       FuncId,
     make_str:        FuncId,
+    // Colecciones — JIT-2
+    push_arg:        FuncId,
+    make_list_n:     FuncId,
+    make_dict_n:     FuncId,
+    get_index:       FuncId,
+    set_index:       FuncId,
+    // Manejo de errores — JIT-3
+    set_error:       FuncId,
+    take_error:      FuncId,
+    raise_exit:      FuncId,
+    // I/O nativo — JIT-4
+    read_input:         FuncId,
+    read_input_choices: FuncId,
+    read_file:          FuncId,
+    write_file:         FuncId,
+    read_env:           FuncId,
+    use_module:         FuncId,
     // I/O y control
     show:            FuncId,
     is_truthy:       FuncId,
@@ -39,7 +57,7 @@ struct RuntimeIds {
     and: FuncId, or: FuncId, not: FuncId,
 }
 
-// ─── Análisis de bloques básicos ─────────────────────────────────────────────
+//     Análisis de bloques básicos                                              
 
 fn find_block_starts(instructions: &[Instruction]) -> HashSet<usize> {
     let mut starts = HashSet::new();
@@ -51,13 +69,24 @@ fn find_block_starts(instructions: &[Instruction]) -> HashSet<usize> {
             Instruction::JumpIfFalse(t) | Instruction::JumpIfTrue(t) => {
                 starts.insert(*t); starts.insert(i + 1);
             }
+            // JIT-3: el handler y el bloque post-attempt son targets de salto
+            Instruction::BeginAttempt(h) => {
+                starts.insert(*h);    // bloque del handler
+                starts.insert(i + 1); // cuerpo del attempt
+            }
+            Instruction::EndAttempt(e) => {
+                starts.insert(*e);    // bloque final (post-handler)
+                starts.insert(i + 1); // primer instrucción del handler body
+            }
+            // Raise es una terminación implícita de bloque
+            Instruction::Raise => { starts.insert(i + 1); }
             _ => {}
         }
     }
     starts
 }
 
-// ─── Elegibilidad ────────────────────────────────────────────────────────────
+//     Elegibilidad                                                             
 
 fn is_eligible(instr: &Instruction) -> bool {
     matches!(
@@ -96,10 +125,25 @@ fn is_eligible(instr: &Instruction) -> bool {
             | Instruction::MakeFunction(_, _, _)
             | Instruction::Return
             | Instruction::Halt
+            // JIT-2: colecciones
+            | Instruction::MakeList(_)
+            | Instruction::MakeDict(_)
+            | Instruction::GetIndex
+            | Instruction::SetIndex
+            // JIT-3: manejo de errores
+            | Instruction::BeginAttempt(_)
+            | Instruction::EndAttempt(_)
+            | Instruction::Raise
+            // JIT-4: I/O nativo y módulos
+            | Instruction::ReadInput { .. }
+            | Instruction::ReadFile(_)
+            | Instruction::WriteFile(_)
+            | Instruction::ReadEnv(_)
+            | Instruction::UseModule(_)
     )
 }
 
-// ─── Compilador JIT ──────────────────────────────────────────────────────────
+//     Compilador JIT                                                           
 
 pub struct JitCompiler {
     module:         JITModule,
@@ -134,7 +178,21 @@ impl JitCompiler {
         sym!("rt_make_float_bits", super::runtime::rt_make_float_bits);
         sym!("rt_make_bool",       super::runtime::rt_make_bool);
         sym!("rt_make_str",        super::runtime::rt_make_str);
-        sym!("rt_show",            super::runtime::rt_show);
+        sym!("rt_push_arg",        super::runtime::rt_push_arg);
+        sym!("rt_make_list_n",     super::runtime::rt_make_list_n);
+        sym!("rt_make_dict_n",     super::runtime::rt_make_dict_n);
+        sym!("rt_get_index",       super::runtime::rt_get_index);
+        sym!("rt_set_index",       super::runtime::rt_set_index);
+        sym!("rt_set_error",           super::runtime::rt_set_error);
+        sym!("rt_take_error",          super::runtime::rt_take_error);
+        sym!("rt_raise_exit",          super::runtime::rt_raise_exit);
+        sym!("rt_read_input",          super::runtime::rt_read_input);
+        sym!("rt_read_input_choices",  super::runtime::rt_read_input_choices);
+        sym!("rt_read_file",           super::runtime::rt_read_file);
+        sym!("rt_write_file",          super::runtime::rt_write_file);
+        sym!("rt_read_env",            super::runtime::rt_read_env);
+        sym!("rt_use_module",          super::runtime::rt_use_module);
+        sym!("rt_show",                super::runtime::rt_show);
         sym!("rt_is_truthy",       super::runtime::rt_is_truthy);
         sym!("rt_add",             super::runtime::rt_add);
         sym!("rt_sub",             super::runtime::rt_sub);
@@ -171,32 +229,49 @@ impl JitCompiler {
             }};
         }
 
-        let make_null       = decl!("rt_make_null",       [],       [i]);
-        let make_int        = decl!("rt_make_int",        [i],      [i]);
-        let make_float_bits = decl!("rt_make_float_bits", [i],      [i]);
-        let make_bool       = decl!("rt_make_bool",       [i],      [i]);
-        let make_str        = decl!("rt_make_str",        [i],      [i]);
-        let show            = decl!("rt_show",            [i],      []);
-        let is_truthy       = decl!("rt_is_truthy",       [i],      [i]);
-        let add             = decl!("rt_add",             [i, i],   [i]);
-        let sub             = decl!("rt_sub",             [i, i],   [i]);
-        let mul             = decl!("rt_mul",             [i, i],   [i]);
-        let div             = decl!("rt_div",             [i, i],   [i]);
-        let rt_mod          = decl!("rt_mod",             [i, i],   [i]);
-        let pow             = decl!("rt_pow",             [i, i],   [i]);
-        let neg             = decl!("rt_neg",             [i],      [i]);
-        let eq              = decl!("rt_eq",              [i, i],   [i]);
-        let neq             = decl!("rt_neq",             [i, i],   [i]);
-        let lt              = decl!("rt_lt",              [i, i],   [i]);
-        let lteq            = decl!("rt_lteq",            [i, i],   [i]);
-        let gt              = decl!("rt_gt",              [i, i],   [i]);
-        let gteq            = decl!("rt_gteq",            [i, i],   [i]);
-        let and             = decl!("rt_and",             [i, i],   [i]);
-        let or              = decl!("rt_or",              [i, i],   [i]);
-        let not             = decl!("rt_not",             [i],      [i]);
+        let make_null       = decl!("rt_make_null",       [],          [i]);
+        let make_int        = decl!("rt_make_int",        [i],         [i]);
+        let make_float_bits = decl!("rt_make_float_bits", [i],         [i]);
+        let make_bool       = decl!("rt_make_bool",       [i],         [i]);
+        let make_str        = decl!("rt_make_str",        [i],         [i]);
+        let push_arg        = decl!("rt_push_arg",        [i],         []);
+        let make_list_n     = decl!("rt_make_list_n",     [i],         [i]);
+        let make_dict_n     = decl!("rt_make_dict_n",     [i],         [i]);
+        let get_index       = decl!("rt_get_index",       [i, i],      [i]);
+        let set_index       = decl!("rt_set_index",       [i, i, i],   [i]);
+        let set_error          = decl!("rt_set_error",          [i],         []);
+        let take_error         = decl!("rt_take_error",         [],          [i]);
+        let raise_exit         = decl!("rt_raise_exit",         [i],         []);
+        let read_input         = decl!("rt_read_input",         [i, i],      [i]);
+        let read_input_choices = decl!("rt_read_input_choices", [i, i, i],   [i]);
+        let read_file          = decl!("rt_read_file",          [i, i],      [i]);
+        let write_file         = decl!("rt_write_file",         [i, i, i],   []);
+        let read_env           = decl!("rt_read_env",           [i, i],      [i]);
+        let use_module         = decl!("rt_use_module",         [i],         [i]);
+        let show               = decl!("rt_show",               [i],         []);
+        let is_truthy       = decl!("rt_is_truthy",       [i],         [i]);
+        let add             = decl!("rt_add",             [i, i],      [i]);
+        let sub             = decl!("rt_sub",             [i, i],      [i]);
+        let mul             = decl!("rt_mul",             [i, i],      [i]);
+        let div             = decl!("rt_div",             [i, i],      [i]);
+        let rt_mod          = decl!("rt_mod",             [i, i],      [i]);
+        let pow             = decl!("rt_pow",             [i, i],      [i]);
+        let neg             = decl!("rt_neg",             [i],         [i]);
+        let eq              = decl!("rt_eq",              [i, i],      [i]);
+        let neq             = decl!("rt_neq",             [i, i],      [i]);
+        let lt              = decl!("rt_lt",              [i, i],      [i]);
+        let lteq            = decl!("rt_lteq",            [i, i],      [i]);
+        let gt              = decl!("rt_gt",              [i, i],      [i]);
+        let gteq            = decl!("rt_gteq",            [i, i],      [i]);
+        let and             = decl!("rt_and",             [i, i],      [i]);
+        let or              = decl!("rt_or",              [i, i],      [i]);
+        let not             = decl!("rt_not",             [i],         [i]);
 
         self.rt = Some(RuntimeIds {
             make_null, make_int, make_float_bits, make_bool, make_str,
+            push_arg, make_list_n, make_dict_n, get_index, set_index,
+            set_error, take_error, raise_exit,
+            read_input, read_input_choices, read_file, write_file, read_env, use_module,
             show, is_truthy,
             add, sub, mul, div, rt_mod, pow, neg,
             eq, neq, lt, lteq, gt, gteq,
@@ -205,7 +280,7 @@ impl JitCompiler {
         Ok(())
     }
 
-    // ─── API pública ─────────────────────────────────────────────────────────
+    //     API pública                                                          
 
     /// Compila y ejecuta un programa completo (main + funciones).
     ///
@@ -295,7 +370,7 @@ impl JitCompiler {
         self.run_program(&dummy)
     }
 
-    // ─── Generación de IR ────────────────────────────────────────────────────
+    //     Generación de IR                                                     
 
     fn fill_function_body(
         &mut self,
@@ -318,7 +393,21 @@ impl JitCompiler {
         let make_fbits_ref  = self.module.declare_func_in_func(rt.make_float_bits, &mut ctx.func);
         let make_bool_ref   = self.module.declare_func_in_func(rt.make_bool,       &mut ctx.func);
         let make_str_ref    = self.module.declare_func_in_func(rt.make_str,        &mut ctx.func);
-        let show_ref        = self.module.declare_func_in_func(rt.show,            &mut ctx.func);
+        let push_arg_ref    = self.module.declare_func_in_func(rt.push_arg,        &mut ctx.func);
+        let make_list_n_ref = self.module.declare_func_in_func(rt.make_list_n,     &mut ctx.func);
+        let make_dict_n_ref = self.module.declare_func_in_func(rt.make_dict_n,     &mut ctx.func);
+        let get_index_ref   = self.module.declare_func_in_func(rt.get_index,       &mut ctx.func);
+        let set_index_ref   = self.module.declare_func_in_func(rt.set_index,       &mut ctx.func);
+        let set_error_ref          = self.module.declare_func_in_func(rt.set_error,          &mut ctx.func);
+        let take_error_ref         = self.module.declare_func_in_func(rt.take_error,         &mut ctx.func);
+        let raise_exit_ref         = self.module.declare_func_in_func(rt.raise_exit,         &mut ctx.func);
+        let read_input_ref         = self.module.declare_func_in_func(rt.read_input,         &mut ctx.func);
+        let read_input_choices_ref = self.module.declare_func_in_func(rt.read_input_choices, &mut ctx.func);
+        let read_file_ref          = self.module.declare_func_in_func(rt.read_file,          &mut ctx.func);
+        let write_file_ref         = self.module.declare_func_in_func(rt.write_file,         &mut ctx.func);
+        let read_env_ref           = self.module.declare_func_in_func(rt.read_env,           &mut ctx.func);
+        let use_module_ref         = self.module.declare_func_in_func(rt.use_module,         &mut ctx.func);
+        let show_ref               = self.module.declare_func_in_func(rt.show,               &mut ctx.func);
         let is_truthy_ref   = self.module.declare_func_in_func(rt.is_truthy,       &mut ctx.func);
         let add_ref         = self.module.declare_func_in_func(rt.add,             &mut ctx.func);
         let sub_ref         = self.module.declare_func_in_func(rt.sub,             &mut ctx.func);
@@ -358,6 +447,15 @@ impl JitCompiler {
             match instr {
                 Instruction::StoreVar(n) | Instruction::StoreConst(n) | Instruction::LoadVar(n) => {
                     if !var_names.contains(n) { var_names.push(n.clone()); }
+                }
+                // JIT-4: UseModule almacena el namespace directamente en una variable
+                Instruction::UseModule(path) => {
+                    let ns_name = std::path::Path::new(path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(path)
+                        .to_string();
+                    if !var_names.contains(&ns_name) { var_names.push(ns_name); }
                 }
                 _ => {}
             }
@@ -406,6 +504,13 @@ impl JitCompiler {
         let mut stack: Vec<cranelift_codegen::ir::Value> = Vec::new();
         let mut terminated = false;
 
+        // JIT-3: pre-computar qué bloques son de handler (reciben el error al entrar)
+        let handler_block_addrs: HashSet<usize> = instructions.iter()
+            .filter_map(|ins| if let Instruction::BeginAttempt(h) = ins { Some(*h) } else { None })
+            .collect();
+        // Stack de handlers en tiempo de compilación: bloque Cranelift del handler activo
+        let mut handler_stack: Vec<cranelift_codegen::ir::Block> = Vec::new();
+
         // Macro para llamadas binarias frecuentes
         macro_rules! binop {
             ($fref:expr) => {{
@@ -431,11 +536,21 @@ impl JitCompiler {
                 builder.switch_to_block(next_block);
                 terminated = false;
                 stack.clear();
+                // JIT-3: si este bloque es el inicio del handler, poner el error en el stack
+                if handler_block_addrs.contains(&i) {
+                    let call = builder.ins().call(take_error_ref, &[]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
             }
-            if terminated { continue; }
+            // JIT-3: EndAttempt debe procesarse incluso si el bloque previo fue terminado por Raise
+            // (necesitamos hacer pop del handler_stack en tiempo de compilación)
+            if terminated {
+                if let Instruction::EndAttempt(_) = instr { handler_stack.pop(); }
+                continue;
+            }
 
             match instr {
-                // ── Literales ────────────────────────────────────────────────
+                //    Literales                                                 
                 Instruction::LoadNull => {
                     let call = builder.ins().call(make_null_ref, &[]);
                     stack.push(builder.inst_results(call)[0]);
@@ -465,7 +580,7 @@ impl JitCompiler {
                     stack.push(builder.inst_results(call)[0]);
                 }
 
-                // ── Variables ────────────────────────────────────────────────
+                //    Variables                                                 
                 Instruction::LoadVar(name) => {
                     let &var = var_table.get(name)
                         .ok_or_else(|| format!("JIT: variable '{name}' no declarada"))?;
@@ -478,7 +593,7 @@ impl JitCompiler {
                     }
                 }
 
-                // ── Aritmética ───────────────────────────────────────────────
+                //    Aritmética                                                
                 Instruction::Add => { binop!(add_ref); }
                 Instruction::Sub => { binop!(sub_ref); }
                 Instruction::Mul => { binop!(mul_ref); }
@@ -487,7 +602,7 @@ impl JitCompiler {
                 Instruction::Pow => { binop!(pow_ref); }
                 Instruction::Neg => { unop!(neg_ref); }
 
-                // ── Comparación ──────────────────────────────────────────────
+                //    Comparación                                               
                 Instruction::Eq    => { binop!(eq_ref);   }
                 Instruction::NotEq => { binop!(neq_ref);  }
                 Instruction::Lt    => { binop!(lt_ref);   }
@@ -495,12 +610,12 @@ impl JitCompiler {
                 Instruction::Gt    => { binop!(gt_ref);   }
                 Instruction::GtEq  => { binop!(gteq_ref); }
 
-                // ── Lógica ───────────────────────────────────────────────────
+                //    Lógica                                                    
                 Instruction::And => { binop!(and_ref); }
                 Instruction::Or  => { binop!(or_ref);  }
                 Instruction::Not => { unop!(not_ref);  }
 
-                // ── Control de flujo ─────────────────────────────────────────
+                //    Control de flujo                                          
                 Instruction::Jump(target) => {
                     let tb = *block_map.get(target)
                         .ok_or_else(|| format!("Jump: bloque {target} no encontrado"))?;
@@ -530,7 +645,7 @@ impl JitCompiler {
                     terminated = true;
                 }
 
-                // ── Funciones ────────────────────────────────────────────────
+                //    Funciones                                                 
                 Instruction::MakeFunction(_, _, _) => { /* no-op: ya compilado */ }
                 Instruction::Call(fname, n_args) => {
                     let n = *n_args as usize;
@@ -558,20 +673,20 @@ impl JitCompiler {
                     terminated = true;
                 }
 
-                // ── I/O ──────────────────────────────────────────────────────
+                //    I/O                                                       
                 Instruction::Show => {
                     let val = stack.pop().ok_or("Show: pila vacía")?;
                     builder.ins().call(show_ref, &[val]);
                 }
 
-                // ── Stack ────────────────────────────────────────────────────
+                //    Stack                                                     
                 Instruction::Pop => { stack.pop(); }
                 Instruction::Dup => {
                     let top = stack.last().cloned().ok_or("Dup: pila vacía")?;
                     stack.push(top);
                 }
 
-                // ── Terminadores ─────────────────────────────────────────────
+                //    Terminadores                                              
                 Instruction::Halt => {
                     if is_main {
                         builder.ins().return_(&[]);
@@ -581,6 +696,153 @@ impl JitCompiler {
                         builder.ins().return_(&[nv]);
                     }
                     terminated = true;
+                }
+
+                // ── Manejo de errores — JIT-3 ────────────────────────────────
+                Instruction::BeginAttempt(handler_addr) => {
+                    let handler_block = *block_map.get(handler_addr)
+                        .ok_or_else(|| format!("BeginAttempt: handler {handler_addr} no encontrado"))?;
+                    handler_stack.push(handler_block);
+                    // No emite IR: la caída natural lleva al cuerpo del attempt
+                }
+                Instruction::EndAttempt(end_addr) => {
+                    handler_stack.pop();
+                    let end_block = *block_map.get(end_addr)
+                        .ok_or_else(|| format!("EndAttempt: bloque {end_addr} no encontrado"))?;
+                    builder.ins().jump(end_block, &[]);
+                    terminated = true;
+                }
+                Instruction::Raise => {
+                    let msg = stack.pop().ok_or("Raise: pila vacía")?;
+                    if let Some(&handler_block) = handler_stack.last() {
+                        builder.ins().call(set_error_ref, &[msg]);
+                        builder.ins().jump(handler_block, &[]);
+                    } else {
+                        builder.ins().call(raise_exit_ref, &[msg]);
+                        if is_main {
+                            builder.ins().return_(&[]);
+                        } else {
+                            let c = builder.ins().call(make_null_ref, &[]);
+                            let nv = builder.inst_results(c)[0];
+                            builder.ins().return_(&[nv]);
+                        }
+                    }
+                    terminated = true;
+                }
+
+                // ── Colecciones — JIT-2 ──────────────────────────────────────
+                Instruction::MakeList(n_count) => {
+                    let n = *n_count as usize;
+                    // Pop N elementos del stack en orden inverso, luego revertir.
+                    let mut items: Vec<cranelift_codegen::ir::Value> = (0..n)
+                        .map(|_| stack.pop().ok_or("MakeList: pila vacía"))
+                        .collect::<Result<_, _>>()?;
+                    items.reverse(); // items[0] = primer elemento de la lista
+                    for item in &items {
+                        builder.ins().call(push_arg_ref, &[*item]);
+                    }
+                    let nv = builder.ins().iconst(types::I64, n as i64);
+                    let call = builder.ins().call(make_list_n_ref, &[nv]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::MakeDict(n_count) => {
+                    let n = *n_count as usize;
+                    // El stack tiene [key0, val0, key1, val1, ...] (bottom→top).
+                    // El intérprete hace: pop val, pop key, insert (n veces).
+                    // Replicamos: por cada par, pop val luego pop key, push ambos al buffer.
+                    for _ in 0..n {
+                        let val = stack.pop().ok_or("MakeDict: pila vacía (val)")?;
+                        let key = stack.pop().ok_or("MakeDict: pila vacía (key)")?;
+                        builder.ins().call(push_arg_ref, &[val]);
+                        builder.ins().call(push_arg_ref, &[key]);
+                    }
+                    let nv = builder.ins().iconst(types::I64, n as i64);
+                    let call = builder.ins().call(make_dict_n_ref, &[nv]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::GetIndex => {
+                    let idx = stack.pop().ok_or("GetIndex: pila vacía")?;
+                    let obj = stack.pop().ok_or("GetIndex: pila vacía")?;
+                    let call = builder.ins().call(get_index_ref, &[obj, idx]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::SetIndex => {
+                    let val = stack.pop().ok_or("SetIndex: pila vacía")?;
+                    let idx = stack.pop().ok_or("SetIndex: pila vacía")?;
+                    let obj = stack.pop().ok_or("SetIndex: pila vacía")?;
+                    let call = builder.ins().call(set_index_ref, &[obj, idx, val]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+
+                // ── I/O nativo — JIT-4 ──────────────────────────────────────
+                Instruction::ReadInput { cast, choices } => {
+                    let cast_ptr = if let Some(c) = cast {
+                        let mut bytes = c.as_bytes().to_vec();
+                        bytes.push(0u8);
+                        let raw = bytes.as_ptr() as i64;
+                        self.string_storage.push(bytes);
+                        builder.ins().iconst(types::I64, raw)
+                    } else {
+                        builder.ins().iconst(types::I64, 0i64)
+                    };
+                    if *choices {
+                        let prompt      = stack.pop().ok_or("ReadInput: pila vacía (prompt)")?;
+                        let choices_val = stack.pop().ok_or("ReadInput: pila vacía (choices)")?;
+                        let call = builder.ins().call(read_input_choices_ref, &[prompt, choices_val, cast_ptr]);
+                        stack.push(builder.inst_results(call)[0]);
+                    } else {
+                        let prompt = stack.pop().ok_or("ReadInput: pila vacía (prompt)")?;
+                        let call = builder.ins().call(read_input_ref, &[prompt, cast_ptr]);
+                        stack.push(builder.inst_results(call)[0]);
+                    }
+                }
+                Instruction::ReadFile(fmt) => {
+                    let mut bytes = fmt.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let fmt_ptr = builder.ins().iconst(types::I64, raw);
+                    let path = stack.pop().ok_or("ReadFile: pila vacía")?;
+                    let call = builder.ins().call(read_file_ref, &[path, fmt_ptr]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::WriteFile(mode) => {
+                    let mut bytes = mode.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let mode_ptr = builder.ins().iconst(types::I64, raw);
+                    let data = stack.pop().ok_or("WriteFile: pila vacía (data)")?;
+                    let path = stack.pop().ok_or("WriteFile: pila vacía (path)")?;
+                    builder.ins().call(write_file_ref, &[path, data, mode_ptr]);
+                }
+                Instruction::ReadEnv(cast) => {
+                    let mut bytes = cast.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let cast_ptr = builder.ins().iconst(types::I64, raw);
+                    let key = stack.pop().ok_or("ReadEnv: pila vacía")?;
+                    let call = builder.ins().call(read_env_ref, &[key, cast_ptr]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::UseModule(path) => {
+                    let ns_name = std::path::Path::new(path)
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(path)
+                        .to_string();
+                    let mut bytes = path.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let path_ptr = builder.ins().iconst(types::I64, raw);
+                    let call = builder.ins().call(use_module_ref, &[path_ptr]);
+                    let module_val = builder.inst_results(call)[0];
+                    // Almacena el namespace en la variable (igual que la VM: no push al stack)
+                    if let Some(&var) = var_table.get(&ns_name) {
+                        builder.def_var(var, module_val);
+                    }
                 }
 
                 other => {
