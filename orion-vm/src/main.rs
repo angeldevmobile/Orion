@@ -231,26 +231,29 @@ fn main() {
             eprintln!("[Orion] {:.3} ms", t_total.elapsed().as_secs_f64() * 1000.0);
         }
 
-        //    Bytecode VM (.orbc)                                                
+        //    Ejecutar .orx directamente o cargar .orbc
         path => {
             let t_total = Instant::now();
-            let t0 = Instant::now();
-            let instructions = match bytecode::load(path) {
-                Ok(i) => i,
-                Err(e) => {
-                    cli::banner::fail(&e);
-                    std::process::exit(1);
-                }
+
+            let bc = if path.ends_with(".orx") {
+                let src = read_src(path);
+                compile_source(&src, path)
+            } else {
+                let t0 = Instant::now();
+                let instructions = match bytecode::load(path) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        cli::banner::fail(&e);
+                        std::process::exit(1);
+                    }
+                };
+                let t_load = t0.elapsed();
+                eprintln!("  Carga : {:.3} ms", t_load.as_secs_f64() * 1000.0);
+                instructions
             };
-            let t_load = t0.elapsed();
 
             let t0 = Instant::now();
-            let mut machine = vm::VM::new(
-                instructions.main,
-                instructions.lines,
-                instructions.functions,
-                instructions.shapes,
-            );
+            let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
             match machine.run() {
                 Ok(_) => {}
                 Err(e) => {
@@ -263,11 +266,8 @@ fn main() {
             }
             let t_exec = t0.elapsed();
 
-            eprintln!();
-            eprintln!("  Carga : {:.3} ms", t_load.as_secs_f64() * 1000.0);
-            eprintln!("  Exec  : {:.3} ms", t_exec.as_secs_f64() * 1000.0);
-            eprintln!("  Total : {:.3} ms", t_total.elapsed().as_secs_f64() * 1000.0);
-            eprintln!();
+            eprintln!("[Orion] {:.3} ms", t_total.elapsed().as_secs_f64() * 1000.0);
+            let _ = t_exec;
         }
     }
 }
