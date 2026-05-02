@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::ast::{ActDef, Expr, FieldDef, Handler, Stmt};
 
 static LAMBDA_COUNTER: AtomicUsize = AtomicUsize::new(0);
-use crate::bytecode::{ActDef as BcActDef, FieldDef as BcFieldDef, FunctionDef, OrionBytecode, ShapeDef};
+use crate::bytecode::{ActDef as BcActDef, ExternFnDef, FieldDef as BcFieldDef, FunctionDef, OrionBytecode, ShapeDef};
 use crate::instruction::Instruction;
 
 //    Error de codegen                                                           
@@ -42,6 +42,7 @@ struct Codegen {
     main_lines:  Vec<u32>,
     functions:   IndexMap<String, FunctionDef>,
     shapes:      IndexMap<String, ShapeDef>,
+    extern_fns:  IndexMap<String, ExternFnDef>,
     async_fns:   std::collections::HashSet<String>,
     current_line: u32,
     for_counter:  usize,
@@ -55,6 +56,7 @@ impl Codegen {
             main_lines:    Vec::new(),
             functions:     IndexMap::new(),
             shapes:        IndexMap::new(),
+            extern_fns:    IndexMap::new(),
             async_fns:     std::collections::HashSet::new(),
             current_line:  0,
             for_counter:   0,
@@ -78,10 +80,11 @@ impl Codegen {
 
     fn into_bytecode(self) -> OrionBytecode {
         OrionBytecode {
-            main:      self.main_instrs,
-            lines:     self.main_lines,
-            functions: self.functions,
-            shapes:    self.shapes,
+            main:       self.main_instrs,
+            lines:      self.main_lines,
+            functions:  self.functions,
+            shapes:     self.shapes,
+            extern_fns: self.extern_fns,
         }
     }
 
@@ -104,6 +107,16 @@ impl Codegen {
                     let shape = self.compile_shape(fields, on_create, acts, using)?;
                     self.shapes.insert(name.clone(), shape);
                 }
+                Stmt::ExternFn { name, params, ret_type, lib, .. } => {
+                    let param_types: Vec<String> = params.iter()
+                        .map(|p| p.type_hint.clone().unwrap_or_else(|| "ptr".to_string()))
+                        .collect();
+                    self.extern_fns.insert(name.clone(), ExternFnDef {
+                        params:   param_types,
+                        ret_type: ret_type.clone().unwrap_or_else(|| "void".to_string()),
+                        lib:      lib.clone(),
+                    });
+                }
                 _ => {}
             }
         }
@@ -111,7 +124,7 @@ impl Codegen {
         // Segundo pase: emitir código principal
         for stmt in stmts {
             match &stmt {
-                Stmt::Fn { .. } | Stmt::AsyncFn { .. } | Stmt::Shape { .. } => {}
+                Stmt::Fn { .. } | Stmt::AsyncFn { .. } | Stmt::Shape { .. } | Stmt::ExternFn { .. } => {}
                 _ => self.compile_stmt(stmt)?,
             }
         }
@@ -495,8 +508,9 @@ impl Codegen {
                 // Emitir instrucción de carga de módulo en runtime
                 self.emit(Instruction::UseModule(path.clone()));
             }
-            Stmt::Fn { .. }     => {} // compilado en primer pase
-            Stmt::AsyncFn { .. }=> {} // compilado en primer pase
+            Stmt::Fn { .. }      => {} // compilado en primer pase
+            Stmt::AsyncFn { .. } => {} // compilado en primer pase
+            Stmt::ExternFn { .. }=> {} // registrado en primer pase
             Stmt::Shape { name, .. } => {
                 self.emit(Instruction::DefineShape(name));
             }
@@ -853,7 +867,7 @@ impl FnCompiler {
             }
 
             Stmt::Shape { name, .. } => { self.emit(Instruction::DefineShape(name.clone())); }
-            Stmt::Use { .. } | Stmt::Route { .. } => {}
+            Stmt::Use { .. } | Stmt::Route { .. } | Stmt::ExternFn { .. } => {}
 
             // fn interna dentro de un cuerpo de función → closure accesible como variable local
             Stmt::Fn { name, params, body, .. } | Stmt::AsyncFn { name, params, body, .. } => {

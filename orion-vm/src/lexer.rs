@@ -348,6 +348,7 @@ fn keyword_or_ident(word: &str) -> TokenKind {
         "error"    => TokenKind::ErrorKw,
         "as"       => TokenKind::As,
         "take"     => TokenKind::Take,
+        "extern"   => TokenKind::Extern,
 
         "shape"     => TokenKind::Shape,
         "act"       => TokenKind::Act,

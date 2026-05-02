@@ -71,6 +71,15 @@ pub enum Stmt {
     AsyncFn { name: String, type_params: Vec<String>, params: Vec<Param>, body: Vec<Stmt>, ret_type: Option<String>, line: u32 },
     Shape   { name: String, type_params: Vec<String>, fields: Vec<FieldDef>, on_create: Option<(Vec<Param>, Vec<Stmt>)>, acts: Vec<ActDef>, using: Vec<String>, line: u32 },
 
+    // FFI — declaración de función C externa
+    ExternFn {
+        name: String,
+        params: Vec<Param>,
+        ret_type: Option<String>,
+        lib: String,
+        line: u32,
+    },
+
     // Módulos
     Use     { path: String, alias: Option<String>, selective: Option<Vec<String>>, line: u32 },
 

@@ -21,6 +21,7 @@ pub enum SendValue {
     Str(String),
     List(Vec<SendValue>),
     Dict(IndexMap<String, SendValue>),
+    Ptr(u64),
 }
 
 /// Convierte un SendValue de vuelta a Value
@@ -33,6 +34,7 @@ pub fn from_send(sv: SendValue) -> Value {
         SendValue::Str(s)      => Value::Str(s),
         SendValue::List(items) => Value::List(items.into_iter().map(from_send).collect()),
         SendValue::Dict(map)   => Value::Dict(map.into_iter().map(|(k, v)| (k, from_send(v))).collect()),
+        SendValue::Ptr(p)      => Value::Ptr(p),
     }
 }
 
@@ -50,6 +52,8 @@ pub enum Value {
     Closure { fn_name: String, env: IndexMap<String, Value> },
     /// Handle a una tarea asíncrona en curso
     Task(Arc<Mutex<Option<Result<SendValue, String>>>>),
+    /// Puntero opaco de C FFI (dirección de memoria como u64)
+    Ptr(u64),
     Null,
 }
 
@@ -63,6 +67,7 @@ impl PartialEq for Value {
             (Value::Null, Value::Null)           => true,
             (Value::List(a), Value::List(b))     => a == b,
             (Value::Dict(a), Value::Dict(b))     => a == b,
+            (Value::Ptr(a), Value::Ptr(b))       => a == b,
             (Value::Instance(a), Value::Instance(b))  => Rc::ptr_eq(a, b),
             (Value::Closure { fn_name: a, .. }, Value::Closure { fn_name: b, .. }) => a == b,
             (Value::Task(a), Value::Task(b))            => Arc::ptr_eq(a, b),
@@ -79,6 +84,7 @@ impl fmt::Display for Value {
             Value::Str(s)    => write!(f, "{}", s),
             Value::Bool(b)   => write!(f, "{}", if *b { "yes" } else { "no" }),
             Value::Null      => write!(f, "null"),
+            Value::Ptr(p)    => write!(f, "<ptr 0x{:x}>", p),
             Value::List(items) => {
                 let parts: Vec<String> = items.iter().map(|v| v.to_string()).collect();
                 write!(f, "[{}]", parts.join(", "))
@@ -105,6 +111,7 @@ impl Value {
             Value::Bool(_)     => "bool".to_string(),
             Value::List(_)     => "list".to_string(),
             Value::Dict(_)     => "dict".to_string(),
+            Value::Ptr(_)      => "ptr".to_string(),
             Value::Null                => "null".to_string(),
             Value::Instance(i)         => i.borrow().shape_name.clone(),
             Value::Closure { .. }      => "fn".to_string(),
@@ -120,6 +127,7 @@ impl Value {
             Value::Str(s)    => !s.is_empty(),
             Value::List(v)   => !v.is_empty(),
             Value::Dict(m)   => !m.is_empty(),
+            Value::Ptr(p)    => *p != 0,
             Value::Instance(_)    => true,
             Value::Closure { .. } => true,
             Value::Task(_)        => true,
@@ -147,6 +155,7 @@ impl Value {
                 }
                 Ok(SendValue::Dict(m))
             }
+            Value::Ptr(p) => Ok(SendValue::Ptr(*p)),
             Value::Closure { fn_name, .. } =>
                 Ok(SendValue::Str(fn_name.clone())),
             Value::Instance(_) =>

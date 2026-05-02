@@ -617,6 +617,31 @@ impl Parser {
             //   continue                            
             TokenKind::Continue => { self.pos += 1; Ok(Stmt::Continue { line }) }
 
+            //   extern fn name(params) -> ret from "lib"
+            TokenKind::Extern => {
+                self.pos += 1; // extern
+                self.expect(&TokenKind::Fn)?;
+                let name = self.expect_ident()?;
+                let params = self.parse_params()?;
+                let ret_type = if matches!(self.peek(), TokenKind::ThinArrow) {
+                    self.pos += 1;
+                    self.parse_type_name().ok()
+                } else { None };
+                // from "lib_name"
+                let lib = if let TokenKind::Ident(kw) = self.peek().clone() {
+                    if kw == "from" {
+                        self.pos += 1;
+                        if let TokenKind::Str(lib_name) = self.peek().clone() {
+                            self.pos += 1;
+                            lib_name
+                        } else {
+                            return Err(self.err("Se esperaba nombre de librería como string después de 'from'"));
+                        }
+                    } else { String::new() }
+                } else { String::new() };
+                Ok(Stmt::ExternFn { name, params, ret_type, lib, line })
+            }
+
             //   fn name[T, U](params) -> ret { body }
             TokenKind::Fn => {
                 self.pos += 1;
@@ -902,27 +927,53 @@ impl Parser {
                             acts.push(ActDef { name: act_name, params, body });
                         }
                         TokenKind::Ident(_) => {
-                            // campo: name [: type] = default  |  name: default_expr
+                            // campo: name [: type] [= default]  |  name: default_expr
                             let fname = self.expect_ident()?;
                             let mut type_hint = None;
                             let mut default = None;
                             if matches!(self.peek(), TokenKind::Colon) {
-                                self.pos += 1;
-                                // Si el siguiente token es un tipo Y el de después es '=' o newline/'}',
-                                // interpretarlo como type_hint. De lo contrario, es un valor default.
-                                let next_is_type = self.is_type_token();
-                                let after_is_assign_or_end = matches!(
-                                    self.tokens.get(self.pos + 1).map(|t| &t.kind).unwrap_or(&TokenKind::Eof),
-                                    TokenKind::Assign | TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Eof | TokenKind::Comma
+                                self.pos += 1; // consume ':'
+                                // Distinción: tipo vs valor default.
+                                // El lexer no emite tokens de newline, así que después de un tipo
+                                // puede venir directamente el siguiente Ident (campo/act/using).
+                                // Primitivos (int, string, bool…) son siempre tipos.
+                                // Para Ident (shapes de usuario), verificamos que lo siguiente
+                                // sea inicio de nueva declaración o '='.
+                                let is_primitive_type = matches!(self.peek(),
+                                    TokenKind::TypeInt | TokenKind::TypeFloat | TokenKind::TypeBool |
+                                    TokenKind::TypeString | TokenKind::TypeList | TokenKind::TypeDict |
+                                    TokenKind::TypeAny | TokenKind::TypeAuto
                                 );
-                                if next_is_type && after_is_assign_or_end {
+                                let is_ident_type = matches!(self.peek(), TokenKind::Ident(_));
+                                if is_primitive_type {
                                     type_hint = Some(self.parse_type_name()?);
                                     if matches!(self.peek(), TokenKind::Assign) {
                                         self.pos += 1;
                                         default = Some(self.parse_expression()?);
                                     }
+                                } else if is_ident_type {
+                                    // Ident es tipo si lo que sigue es inicio de nueva
+                                    // declaración (campo, act, on_create, using, '}') o '='/','
+                                    let after = self.tokens.get(self.pos + 1)
+                                        .map(|t| &t.kind).unwrap_or(&TokenKind::Eof);
+                                    let after_is_decl = matches!(after,
+                                        TokenKind::Assign | TokenKind::Semicolon |
+                                        TokenKind::RBrace | TokenKind::Eof | TokenKind::Comma |
+                                        TokenKind::Ident(_) | TokenKind::Act |
+                                        TokenKind::OnCreate | TokenKind::Using |
+                                        TokenKind::LBracket
+                                    );
+                                    if after_is_decl {
+                                        type_hint = Some(self.parse_type_name()?);
+                                        if matches!(self.peek(), TokenKind::Assign) {
+                                            self.pos += 1;
+                                            default = Some(self.parse_expression()?);
+                                        }
+                                    } else {
+                                        default = Some(self.parse_expression()?);
+                                    }
                                 } else {
-                                    // 'campo: valor_default' sin tipo explícito
+                                    // Literal (Bool, Int, Float, Str, Null…): valor default
                                     default = Some(self.parse_expression()?);
                                 }
                             } else if matches!(self.peek(), TokenKind::Assign) {

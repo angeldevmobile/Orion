@@ -30,6 +30,7 @@ pub enum TokenKind {
     ErrorKw,
     As,
     Take,
+    Extern,
 
     // Keywords – type annotations
     TypeInt,

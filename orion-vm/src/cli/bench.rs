@@ -43,7 +43,7 @@ pub fn run_bench(path: &str, runs: u32) {
         let bc_run: bytecode::OrionBytecode = serde_json::from_str(&bc_json)
             .expect("deserializar bytecode");
         let t = Instant::now();
-        let mut machine = vm::VM::new(bc_run.main, bc_run.lines, bc_run.functions, bc_run.shapes);
+        let mut machine = vm::VM::new(bc_run.main, bc_run.lines, bc_run.functions, bc_run.shapes, bc_run.extern_fns);
         match machine.run() {
             Ok(_) => {}
             Err(e) => {

@@ -154,7 +154,7 @@ fn run_test_file(
 fn run_stmts(stmts: Vec<Stmt>) -> Result<(), String> {
     let bc = codegen::compile(stmts)
         .map_err(|e| format!("Codegen línea {} — {}", e.line, e.message))?;
-    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
+    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
     machine.run()
 }
 

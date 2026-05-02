@@ -511,6 +511,7 @@ impl JitCompiler {
             lines: vec![],
             functions: IndexMap::new(),
             shapes: IndexMap::new(),
+            extern_fns: IndexMap::new(),
         };
         self.run_program(&dummy)
     }

@@ -40,6 +40,17 @@ pub struct ShapeDef {
     pub using: Vec<String>,
 }
 
+/// Definición de una función C externa (FFI)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternFnDef {
+    /// Tipos de los parámetros: "int", "ptr", "string", "bool"
+    pub params: Vec<String>,
+    /// Tipo de retorno: "int", "ptr", "string", "bool", "void"
+    pub ret_type: String,
+    /// Nombre de la librería dinámica, ej: "sqlite3"
+    pub lib: String,
+}
+
 /// Formato completo del archivo .orbc
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OrionBytecode {
@@ -49,6 +60,8 @@ pub struct OrionBytecode {
     pub functions: IndexMap<String, FunctionDef>,
     #[serde(default)]
     pub shapes: IndexMap<String, ShapeDef>,
+    #[serde(default)]
+    pub extern_fns: IndexMap<String, ExternFnDef>,
 }
 
 pub fn load(path: &str) -> Result<OrionBytecode, String> {

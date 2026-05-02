@@ -232,7 +232,33 @@ fn main() {
             println!("{}", serde_json::to_string(&result).unwrap());
         }
 
-        //    Hot reload                                                         
+        //    Exportar tabla de símbolos (salida JSON para LSP hover/definition)
+        "--symbols-json" => {
+            let src_path = match args[2..].iter().find(|a| !a.starts_with("--")) {
+                Some(p) => p.as_str(),
+                None => {
+                    println!("{}", serde_json::to_string(&SymbolsResult { ok: true, symbols: vec![] }).unwrap());
+                    return;
+                }
+            };
+            let src = match fs::read_to_string(src_path) {
+                Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
+                Err(_) => {
+                    println!("{}", serde_json::to_string(&SymbolsResult { ok: false, symbols: vec![] }).unwrap());
+                    return;
+                }
+            };
+            let symbols = match lexer::lex(&src) {
+                Ok(tokens) => match parser::parse(tokens) {
+                    Ok(stmts) => extract_symbols(&stmts),
+                    Err(_)    => vec![],
+                },
+                Err(_) => vec![],
+            };
+            println!("{}", serde_json::to_string(&SymbolsResult { ok: true, symbols }).unwrap());
+        }
+
+        //    Hot reload
         "--watch" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --watch <archivo.orx>");
@@ -375,7 +401,7 @@ fn main() {
                 }
                 Ok(false) => {
                     eprintln!("[JIT] Instrucciones no soportadas → fallback al intérprete");
-                    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
+                    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
                     match machine.run() {
                         Ok(_) => {}
                         Err(e) => {
@@ -405,7 +431,7 @@ fn main() {
                 Ok(bc) => bc,
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
-            let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
+            let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
             match machine.run() {
                 Ok(_) => {}
                 Err(e) => {
@@ -441,7 +467,7 @@ fn main() {
                 (instructions, String::new())
             };
 
-            let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
+            let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
             match machine.run() {
                 Ok(_) => {}
                 Err(e) => {
@@ -734,7 +760,7 @@ fn repl_exec(source: &str, session: &mut ReplSession) {
         Ok(b) => b,
         Err(e) => { eprint!("{}", e.render(source)); return; }
     };
-    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
+    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
     match machine.run() {
         Ok(_) => session.record(source),
         Err(e) => eprint!("{}", error::parse_vm_error(&e, "<repl>").render(source)),

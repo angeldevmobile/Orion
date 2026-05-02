@@ -4,9 +4,10 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
+use libloading;
 use crate::instruction::Instruction;
 use crate::value::{Value, InstanceData, SendValue, from_send};
-use crate::bytecode::{FunctionDef, ShapeDef};
+use crate::bytecode::{ExternFnDef, FunctionDef, ShapeDef};
 
 struct CallFrame {
     instructions: Vec<Instruction>,
@@ -80,6 +81,8 @@ pub struct VM {
     call_stack: Vec<CallFrame>,
     functions: IndexMap<String, FunctionDef>,
     shapes: IndexMap<String, ShapeDef>,
+    extern_fns: IndexMap<String, ExternFnDef>,
+    extern_libs: IndexMap<String, libloading::Library>,
     current_line: u32,
     error_handlers: Vec<ErrorHandler>,
     /// Memoria de sesión para instrucciones AiLearn / AiSense
@@ -92,12 +95,15 @@ impl VM {
         main_lines: Vec<u32>,
         functions: IndexMap<String, FunctionDef>,
         shapes: IndexMap<String, ShapeDef>,
+        extern_fns: IndexMap<String, ExternFnDef>,
     ) -> Self {
         VM {
             value_stack: Vec::new(),
             call_stack: vec![CallFrame::new(main, main_lines)],
             functions,
             shapes,
+            extern_fns,
+            extern_libs: IndexMap::new(),
             current_line: 0,
             error_handlers: Vec::new(),
             ai_memory: Vec::new(),
@@ -370,6 +376,9 @@ impl VM {
                         }
                     }
                     self.call_stack.push(frame);
+                } else if self.extern_fns.contains_key(&resolved_name) {
+                    let result = self.call_extern_fn(&resolved_name, args)?;
+                    self.value_stack.push(result);
                 } else {
                     let result = self.call_builtin(&resolved_name, args)?;
                     if let Some(val) = result {
@@ -822,9 +831,10 @@ impl VM {
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e| format!("Error en argumentos async '{}': {}", fn_name, e))?;
 
-                let functions_clone = self.functions.clone();
-                let shapes_clone    = self.shapes.clone();
-                let fn_name_clone   = fn_name.clone();
+                let functions_clone  = self.functions.clone();
+                let shapes_clone     = self.shapes.clone();
+                let extern_fns_clone = self.extern_fns.clone();
+                let fn_name_clone    = fn_name.clone();
 
                 let slot: Arc<Mutex<Option<Result<SendValue, String>>>> =
                     Arc::new(Mutex::new(None));
@@ -836,6 +846,7 @@ impl VM {
                         func.lines.clone(),
                         functions_clone,
                         shapes_clone,
+                        extern_fns_clone,
                     );
                     // Inyectar argumentos como vars del frame principal
                     for (param, val) in func.params.iter()
@@ -1089,7 +1100,7 @@ impl VM {
         }
 
         // Ejecutar el módulo para obtener variables globales
-        let mut sub_vm = VM::new(bc.main.clone(), bc.lines.clone(), bc.functions.clone(), bc.shapes.clone());
+        let mut sub_vm = VM::new(bc.main.clone(), bc.lines.clone(), bc.functions.clone(), bc.shapes.clone(), bc.extern_fns.clone());
         sub_vm.run().ok(); // ignorar errores de side effects
         // Extraer vars del frame principal del sub_vm
         if let Some(frame) = sub_vm.call_stack.first() {
@@ -1847,7 +1858,230 @@ impl VM {
             other => Err(format!("Función '{}' no definida", other)),
         }
     }
+    // ─── C FFI ───────────────────────────────────────────────────────────────
+
+    fn call_extern_fn(&mut self, name: &str, args: Vec<Value>) -> Result<Value, String> {
+        use libffi::middle::{Arg, Cif, CodePtr, Type};
+        use std::ffi::{CStr, CString};
+
+        let def = self.extern_fns.get(name).cloned()
+            .ok_or_else(|| format!("FFI: función extern '{}' no registrada", name))?;
+        if def.lib.is_empty() {
+            return Err(format!("FFI: '{}' no especifica librería (falta `from \"lib\"`)", name));
+        }
+        if args.len() != def.params.len() {
+            return Err(format!("FFI: '{}' espera {} arg(s), recibió {}", name, def.params.len(), args.len()));
+        }
+
+        // Cargar librería dinámicamente (con caché)
+        if !self.extern_libs.contains_key(&def.lib) {
+            let path = ffi_resolve_lib(&def.lib);
+            let lib = unsafe { libloading::Library::new(&path) }
+                .map_err(|e| format!("FFI: no se pudo cargar '{}': {}", path, e))?;
+            self.extern_libs.insert(def.lib.clone(), lib);
+        }
+
+        // Obtener puntero de función (antes de liberar el borrow)
+        let fn_ptr_raw: *const () = {
+            let lib = self.extern_libs.get(&def.lib).unwrap();
+            unsafe {
+                let sym: libloading::Symbol<unsafe extern "C" fn()> = lib.get(name.as_bytes())
+                    .map_err(|e| format!("FFI: símbolo '{}' no encontrado en '{}': {}", name, def.lib, e))?;
+                *sym as *const ()
+            }
+        };
+
+        // ── Almacenamiento tipado (deben vivir hasta que termine la llamada) ───
+        let mut s_i32:  Vec<i32>        = Vec::new();
+        let mut s_i64:  Vec<i64>        = Vec::new();
+        let mut s_u32:  Vec<u32>        = Vec::new();
+        let mut s_u64:  Vec<u64>        = Vec::new();
+        let mut s_f32:  Vec<f32>        = Vec::new();
+        let mut s_f64:  Vec<f64>        = Vec::new();
+        let mut s_ptr:  Vec<*const ()>  = Vec::new();
+        let mut _cstrs: Vec<CString>    = Vec::new();
+
+        enum AK { I32(usize), I64(usize), U32(usize), U64(usize), F32(usize), F64(usize), Ptr(usize) }
+        let mut arg_kinds: Vec<AK>  = Vec::new();
+        let mut ffi_types: Vec<Type> = Vec::new();
+
+        // ── Convertir cada argumento ──────────────────────────────────────────
+        for (pt, arg) in def.params.iter().zip(args.iter()) {
+            match pt.as_str() {
+                "int" | "i32" => {
+                    let v = match arg {
+                        Value::Int(n)  => *n as i32,
+                        Value::Bool(b) => *b as i32,
+                        _ => return Err(format!("FFI: param 'int', recibió {}", arg.type_name())),
+                    };
+                    s_i32.push(v); arg_kinds.push(AK::I32(s_i32.len()-1)); ffi_types.push(Type::i32());
+                }
+                "i64" | "long" | "int64" => {
+                    let v = match arg {
+                        Value::Int(n)  => *n,
+                        Value::Bool(b) => *b as i64,
+                        _ => return Err(format!("FFI: param 'i64', recibió {}", arg.type_name())),
+                    };
+                    s_i64.push(v); arg_kinds.push(AK::I64(s_i64.len()-1)); ffi_types.push(Type::i64());
+                }
+                "uint" | "u32" => {
+                    let v = match arg {
+                        Value::Int(n) => *n as u32,
+                        _ => return Err(format!("FFI: param 'u32', recibió {}", arg.type_name())),
+                    };
+                    s_u32.push(v); arg_kinds.push(AK::U32(s_u32.len()-1)); ffi_types.push(Type::u32());
+                }
+                "u64" | "size_t" | "usize" => {
+                    let v = match arg {
+                        Value::Int(n) => *n as u64,
+                        Value::Ptr(p) => *p,
+                        _ => return Err(format!("FFI: param 'u64', recibió {}", arg.type_name())),
+                    };
+                    s_u64.push(v); arg_kinds.push(AK::U64(s_u64.len()-1)); ffi_types.push(Type::u64());
+                }
+                "float" | "f32" => {
+                    let v = match arg {
+                        Value::Float(f) => *f as f32,
+                        Value::Int(n)   => *n as f32,
+                        _ => return Err(format!("FFI: param 'float', recibió {}", arg.type_name())),
+                    };
+                    s_f32.push(v); arg_kinds.push(AK::F32(s_f32.len()-1)); ffi_types.push(Type::f32());
+                }
+                "double" | "f64" => {
+                    let v = match arg {
+                        Value::Float(f) => *f,
+                        Value::Int(n)   => *n as f64,
+                        _ => return Err(format!("FFI: param 'double', recibió {}", arg.type_name())),
+                    };
+                    s_f64.push(v); arg_kinds.push(AK::F64(s_f64.len()-1)); ffi_types.push(Type::f64());
+                }
+                "bool" => {
+                    let v = match arg {
+                        Value::Bool(b) => *b as i32,
+                        Value::Int(n)  => (*n != 0) as i32,
+                        _ => return Err(format!("FFI: param 'bool', recibió {}", arg.type_name())),
+                    };
+                    s_i32.push(v); arg_kinds.push(AK::I32(s_i32.len()-1)); ffi_types.push(Type::i32());
+                }
+                "ptr" | "pointer" | "void*" => {
+                    let v: *const () = match arg {
+                        Value::Ptr(p) => *p as *const (),
+                        Value::Int(n) => *n as *const (),
+                        Value::Null   => std::ptr::null(),
+                        _ => return Err(format!("FFI: param 'ptr', recibió {}", arg.type_name())),
+                    };
+                    s_ptr.push(v); arg_kinds.push(AK::Ptr(s_ptr.len()-1)); ffi_types.push(Type::pointer());
+                }
+                "string" | "str" | "cstr" | "char*" => {
+                    let v: *const () = match arg {
+                        Value::Str(s) => {
+                            let cs = CString::new(s.as_bytes())
+                                .map_err(|_| format!("FFI: string para '{}' contiene byte nulo", name))?;
+                            let p = cs.as_ptr() as *const ();
+                            _cstrs.push(cs);
+                            p
+                        }
+                        Value::Null => std::ptr::null(),
+                        _ => return Err(format!("FFI: param 'string', recibió {}", arg.type_name())),
+                    };
+                    s_ptr.push(v); arg_kinds.push(AK::Ptr(s_ptr.len()-1)); ffi_types.push(Type::pointer());
+                }
+                t => return Err(format!(
+                    "FFI: tipo '{}' no soportado (usa: int, i64, uint, u64, float, double, ptr, string, bool)", t
+                )),
+            }
+        }
+
+        // ── Tipo de retorno ───────────────────────────────────────────────────
+        let ffi_ret = match def.ret_type.as_str() {
+            "void" | ""              => Type::void(),
+            "int"  | "i32" | "bool" => Type::i32(),
+            "i64"  | "long"          => Type::i64(),
+            "uint" | "u32"           => Type::u32(),
+            "u64"  | "size_t" | "usize" => Type::u64(),
+            "float"  | "f32"         => Type::f32(),
+            "double" | "f64"         => Type::f64(),
+            _                        => Type::pointer(),
+        };
+
+        let cif  = Cif::new(ffi_types.into_iter(), ffi_ret);
+        let code = CodePtr(fn_ptr_raw as *mut _);
+
+        // ── Construir lista de Arg (después de todos los push — sin más realloc) ─
+        let ffi_args: Vec<Arg> = arg_kinds.iter().map(|ak| match ak {
+            AK::I32(i) => Arg::new(&s_i32[*i]),
+            AK::I64(i) => Arg::new(&s_i64[*i]),
+            AK::U32(i) => Arg::new(&s_u32[*i]),
+            AK::U64(i) => Arg::new(&s_u64[*i]),
+            AK::F32(i) => Arg::new(&s_f32[*i]),
+            AK::F64(i) => Arg::new(&s_f64[*i]),
+            AK::Ptr(i) => Arg::new(&s_ptr[*i]),
+        }).collect();
+
+        // ── Llamar y convertir resultado ─────────────────────────────────────
+        let result = match def.ret_type.as_str() {
+            "void" | "" => {
+                unsafe { cif.call::<()>(code, &ffi_args) };
+                Value::Null
+            }
+            "int" | "i32" => {
+                let r: i32 = unsafe { cif.call(code, &ffi_args) };
+                Value::Int(r as i64)
+            }
+            "i64" | "long" => {
+                let r: i64 = unsafe { cif.call(code, &ffi_args) };
+                Value::Int(r)
+            }
+            "uint" | "u32" => {
+                let r: u32 = unsafe { cif.call(code, &ffi_args) };
+                Value::Int(r as i64)
+            }
+            "u64" | "size_t" | "usize" => {
+                let r: u64 = unsafe { cif.call(code, &ffi_args) };
+                Value::Int(r as i64)
+            }
+            "float" | "f32" => {
+                let r: f32 = unsafe { cif.call(code, &ffi_args) };
+                Value::Float(r as f64)
+            }
+            "double" | "f64" => {
+                let r: f64 = unsafe { cif.call(code, &ffi_args) };
+                Value::Float(r)
+            }
+            "bool" => {
+                let r: i32 = unsafe { cif.call(code, &ffi_args) };
+                Value::Bool(r != 0)
+            }
+            "string" | "cstr" | "char*" => {
+                let r: *const std::os::raw::c_char = unsafe { cif.call(code, &ffi_args) };
+                if r.is_null() { Value::Null } else {
+                    unsafe { Value::Str(CStr::from_ptr(r).to_string_lossy().into_owned()) }
+                }
+            }
+            _ => {
+                let r: *mut () = unsafe { cif.call(code, &ffi_args) };
+                if r.is_null() { Value::Null } else { Value::Ptr(r as u64) }
+            }
+        };
+
+        Ok(result)
+    }
+
 } // fin impl VM
+
+// ---------------------------------------------------------------------------
+// C FFI — utilidades
+// ---------------------------------------------------------------------------
+
+/// Resuelve el nombre de librería al path correcto para la plataforma.
+fn ffi_resolve_lib(name: &str) -> String {
+    if name.contains('.') { return name.to_string(); }
+    #[cfg(target_os = "windows")]  return format!("{}.dll", name);
+    #[cfg(target_os = "linux")]    return format!("lib{}.so", name);
+    #[cfg(target_os = "macos")]    return format!("lib{}.dylib", name);
+    #[allow(unreachable_code)]
+    name.to_string()
+}
 
 // ---------------------------------------------------------------------------
 // AI HTTP helper — usado por AiAsk / AiLearn / AiSense

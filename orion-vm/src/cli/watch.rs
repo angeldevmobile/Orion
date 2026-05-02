@@ -51,7 +51,7 @@ fn compile_and_run(path: &str) {
         Err(e) => { banner::fail(&format!("Codegen  línea {} — {}", e.line, e.message)); return; }
     };
 
-    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
+    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
     match machine.run() {
         Ok(_) => banner::ok(&format!("OK  {DIM}({:.1} ms){RESET}",
             t.elapsed().as_secs_f64() * 1000.0,
