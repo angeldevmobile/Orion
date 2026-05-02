@@ -44,6 +44,21 @@ struct RuntimeIds {
     write_file:         FuncId,
     read_env:           FuncId,
     use_module:         FuncId,
+    // OOP — JIT-5
+    create_instance:    FuncId,  // rt_create_instance_and_init(name_ptr, n_args) -> i64
+    get_attr:           FuncId,  // rt_get_attr(obj, name_ptr) -> i64
+    set_attr:           FuncId,  // rt_set_attr(obj, name_ptr, val)
+    is_instance:        FuncId,  // rt_is_instance(obj, name_ptr) -> i64
+    get_self:           FuncId,  // rt_get_current_self() -> i64
+    push_self:          FuncId,  // rt_push_self(inst)
+    pop_self:           FuncId,  // rt_pop_self()
+    get_self_field:     FuncId,  // rt_get_self_field(name_ptr) -> i64
+    set_self_field:     FuncId,  // rt_set_self_field(name_ptr, val)
+    call_method:        FuncId,  // rt_call_method(obj, name_ptr, n_args) -> i64
+    // JIT-6: Closures y Async
+    make_closure:    FuncId,  // rt_make_closure(fn_name_ptr) -> i64
+    call_async:      FuncId,  // rt_call_async(fn_name_ptr, n_args) -> i64
+    rt_await:        FuncId,  // rt_await(task) -> i64
     // I/O y control
     show:            FuncId,
     is_truthy:       FuncId,
@@ -140,6 +155,17 @@ fn is_eligible(instr: &Instruction) -> bool {
             | Instruction::WriteFile(_)
             | Instruction::ReadEnv(_)
             | Instruction::UseModule(_)
+            // JIT-5: OOP
+            | Instruction::DefineShape(_)
+            | Instruction::GetAttr(_)
+            | Instruction::SetAttr(_)
+            | Instruction::IsInstance(_)
+            | Instruction::PushSelf
+            | Instruction::CallMethod(_, _)
+            // JIT-6: Closures y Async
+            | Instruction::MakeClosure(_)
+            | Instruction::CallAsync(_, _)
+            | Instruction::Await
     )
 }
 
@@ -186,13 +212,26 @@ impl JitCompiler {
         sym!("rt_set_error",           super::runtime::rt_set_error);
         sym!("rt_take_error",          super::runtime::rt_take_error);
         sym!("rt_raise_exit",          super::runtime::rt_raise_exit);
-        sym!("rt_read_input",          super::runtime::rt_read_input);
-        sym!("rt_read_input_choices",  super::runtime::rt_read_input_choices);
-        sym!("rt_read_file",           super::runtime::rt_read_file);
-        sym!("rt_write_file",          super::runtime::rt_write_file);
-        sym!("rt_read_env",            super::runtime::rt_read_env);
-        sym!("rt_use_module",          super::runtime::rt_use_module);
-        sym!("rt_show",                super::runtime::rt_show);
+        sym!("rt_read_input",              super::runtime::rt_read_input);
+        sym!("rt_read_input_choices",      super::runtime::rt_read_input_choices);
+        sym!("rt_read_file",               super::runtime::rt_read_file);
+        sym!("rt_write_file",              super::runtime::rt_write_file);
+        sym!("rt_read_env",                super::runtime::rt_read_env);
+        sym!("rt_use_module",              super::runtime::rt_use_module);
+        sym!("rt_create_instance_and_init",super::runtime_oop::rt_create_instance_and_init);
+        sym!("rt_get_attr",                super::runtime_oop::rt_get_attr);
+        sym!("rt_set_attr",                super::runtime_oop::rt_set_attr);
+        sym!("rt_is_instance",             super::runtime_oop::rt_is_instance);
+        sym!("rt_get_current_self",        super::runtime_oop::rt_get_current_self);
+        sym!("rt_push_self",               super::runtime_oop::rt_push_self);
+        sym!("rt_pop_self",                super::runtime_oop::rt_pop_self);
+        sym!("rt_get_self_field",          super::runtime_oop::rt_get_self_field);
+        sym!("rt_set_self_field",          super::runtime_oop::rt_set_self_field);
+        sym!("rt_call_method",             super::runtime_oop::rt_call_method);
+        sym!("rt_make_closure",            super::runtime::rt_make_closure);
+        sym!("rt_call_async",              super::runtime::rt_call_async);
+        sym!("rt_await",                   super::runtime::rt_await);
+        sym!("rt_show",                    super::runtime::rt_show);
         sym!("rt_is_truthy",       super::runtime::rt_is_truthy);
         sym!("rt_add",             super::runtime::rt_add);
         sym!("rt_sub",             super::runtime::rt_sub);
@@ -242,13 +281,26 @@ impl JitCompiler {
         let set_error          = decl!("rt_set_error",          [i],         []);
         let take_error         = decl!("rt_take_error",         [],          [i]);
         let raise_exit         = decl!("rt_raise_exit",         [i],         []);
-        let read_input         = decl!("rt_read_input",         [i, i],      [i]);
-        let read_input_choices = decl!("rt_read_input_choices", [i, i, i],   [i]);
-        let read_file          = decl!("rt_read_file",          [i, i],      [i]);
-        let write_file         = decl!("rt_write_file",         [i, i, i],   []);
-        let read_env           = decl!("rt_read_env",           [i, i],      [i]);
-        let use_module         = decl!("rt_use_module",         [i],         [i]);
-        let show               = decl!("rt_show",               [i],         []);
+        let read_input         = decl!("rt_read_input",              [i, i],    [i]);
+        let read_input_choices = decl!("rt_read_input_choices",      [i, i, i], [i]);
+        let read_file          = decl!("rt_read_file",               [i, i],    [i]);
+        let write_file         = decl!("rt_write_file",              [i, i, i], []);
+        let read_env           = decl!("rt_read_env",                [i, i],    [i]);
+        let use_module         = decl!("rt_use_module",              [i],       [i]);
+        let create_instance    = decl!("rt_create_instance_and_init",[i, i],    [i]);
+        let get_attr           = decl!("rt_get_attr",                [i, i],    [i]);
+        let set_attr           = decl!("rt_set_attr",                [i, i, i], []);
+        let is_instance        = decl!("rt_is_instance",             [i, i],    [i]);
+        let get_self           = decl!("rt_get_current_self",        [],        [i]);
+        let push_self          = decl!("rt_push_self",               [i],       []);
+        let pop_self           = decl!("rt_pop_self",                [],        []);
+        let get_self_field     = decl!("rt_get_self_field",          [i],       [i]);
+        let set_self_field     = decl!("rt_set_self_field",          [i, i],    []);
+        let call_method        = decl!("rt_call_method",             [i, i, i], [i]);
+        let make_closure       = decl!("rt_make_closure",            [i],       [i]);
+        let call_async         = decl!("rt_call_async",              [i, i],    [i]);
+        let rt_await           = decl!("rt_await",                   [i],       [i]);
+        let show               = decl!("rt_show",                    [i],       []);
         let is_truthy       = decl!("rt_is_truthy",       [i],         [i]);
         let add             = decl!("rt_add",             [i, i],      [i]);
         let sub             = decl!("rt_sub",             [i, i],      [i]);
@@ -272,6 +324,9 @@ impl JitCompiler {
             push_arg, make_list_n, make_dict_n, get_index, set_index,
             set_error, take_error, raise_exit,
             read_input, read_input_choices, read_file, write_file, read_env, use_module,
+            create_instance, get_attr, set_attr, is_instance,
+            get_self, push_self, pop_self, get_self_field, set_self_field, call_method,
+            make_closure, call_async, rt_await,
             show, is_truthy,
             add, sub, mul, div, rt_mod, pow, neg,
             eq, neq, lt, lteq, gt, gteq,
@@ -288,6 +343,7 @@ impl JitCompiler {
     /// - `Ok(false)` → instrucciones no elegibles → usar intérprete.
     /// - `Err(msg)`  → error real de compilación JIT.
     pub fn run_program(&mut self, bc: &OrionBytecode) -> Result<bool, String> {
+        // Elegibilidad
         for instr in &bc.main {
             if !is_eligible(instr) { return Ok(false); }
         }
@@ -296,11 +352,30 @@ impl JitCompiler {
                 if !is_eligible(instr) { return Ok(false); }
             }
         }
+        for shape in bc.shapes.values() {
+            let check_act = |body: &[Instruction]| body.iter().all(is_eligible);
+            if let Some(oc) = &shape.on_create {
+                if !check_act(&oc.body) { return Ok(false); }
+            }
+            for act in shape.acts.values() {
+                if !check_act(&act.body) { return Ok(false); }
+            }
+        }
         if bc.main.is_empty() { return Ok(true); }
 
         self.ensure_runtime()?;
 
-        // 1. Declarar todas las funciones de usuario (sin definir aún)
+        // Conjunto de nombres de shapes para dispatch en Call
+        let shape_names: HashSet<String> = bc.shapes.keys().cloned().collect();
+
+        // JIT-5: registrar info de shapes en TLS (antes de ejecutar)
+        for (sname, sdef) in &bc.shapes {
+            let fields: Vec<String> = sdef.fields.iter().map(|f| f.name.clone()).collect();
+            let parents = sdef.using.clone();
+            super::runtime_oop::register_shape_info(sname, fields, parents);
+        }
+
+        // 1. Declarar funciones de usuario
         let fn_names: Vec<String> = bc.functions.keys().cloned().collect();
         for name in &fn_names {
             let n_params = bc.functions[name].params.len();
@@ -312,45 +387,116 @@ impl JitCompiler {
             self.fn_cache.insert(name.clone(), fid);
         }
 
-        // 2. Declarar main
+        // 2. Declarar acts de shapes como funciones JIT
+        // Nombre mangling: "shape__{ShapeName}__{act_name}"
+        // Firma: (param0, param1, ...) -> i64   (self se accede via TLS)
+        struct ActEntry { jit_name: String, shape: String, act: String, params: Vec<String>, body: Vec<Instruction> }
+        let mut act_entries: Vec<ActEntry> = Vec::new();
+        for (sname, sdef) in &bc.shapes {
+            let field_names: Vec<String> = sdef.fields.iter().map(|f| f.name.clone()).collect();
+            // on_create
+            if let Some(oc) = &sdef.on_create {
+                let jit_name = format!("shape__{}__on_create", sname);
+                let mut sig = self.module.make_signature();
+                for _ in &oc.params { sig.params.push(AbiParam::new(types::I64)); }
+                sig.returns.push(AbiParam::new(types::I64));
+                let fid = self.module.declare_function(&jit_name, Linkage::Local, &sig)
+                    .map_err(|e| e.to_string())?;
+                self.fn_cache.insert(jit_name.clone(), fid);
+                act_entries.push(ActEntry {
+                    jit_name, shape: sname.clone(), act: "on_create".to_string(),
+                    params: oc.params.clone(), body: oc.body.clone(),
+                });
+            }
+            // acts regulares
+            for (aname, adef) in &sdef.acts {
+                let jit_name = format!("shape__{}__{}", sname, aname);
+                let mut sig = self.module.make_signature();
+                for _ in &adef.params { sig.params.push(AbiParam::new(types::I64)); }
+                sig.returns.push(AbiParam::new(types::I64));
+                let fid = self.module.declare_function(&jit_name, Linkage::Local, &sig)
+                    .map_err(|e| e.to_string())?;
+                self.fn_cache.insert(jit_name.clone(), fid);
+                act_entries.push(ActEntry {
+                    jit_name, shape: sname.clone(), act: aname.clone(),
+                    params: adef.params.clone(), body: adef.body.clone(),
+                });
+            }
+            let _ = field_names; // usado más abajo en fill_act_body
+        }
+
+        // 3. Declarar main
         let main_name = format!("orion_jit_main_{}", self.fn_counter);
         self.fn_counter += 1;
         let main_sig = self.module.make_signature();
         let main_id = self.module.declare_function(&main_name, Linkage::Local, &main_sig)
             .map_err(|e| e.to_string())?;
 
-        // 3. Definir cuerpos de funciones de usuario
+        // 4. Definir cuerpos de funciones de usuario
         for name in &fn_names {
             let fdef = bc.functions[name].clone();
             let fid = self.fn_cache[name];
             let n_params = fdef.params.len();
-
             let mut fn_sig = self.module.make_signature();
             for _ in 0..n_params { fn_sig.params.push(AbiParam::new(types::I64)); }
             fn_sig.returns.push(AbiParam::new(types::I64));
-
             let mut ctx = self.module.make_context();
             ctx.func.signature = fn_sig;
-            self.fill_function_body(&fdef.body, &fdef.params, &mut ctx, false)?;
+            self.fill_function_body(&fdef.body, &fdef.params, &mut ctx, false, &shape_names, None)?;
             self.module.define_function(fid, &mut ctx)
                 .map_err(|e| format!("JIT define fn '{name}': {e}"))?;
             self.module.clear_context(&mut ctx);
         }
 
-        // 4. Definir cuerpo de main
+        // 5. Definir cuerpos de acts
+        for entry in &act_entries {
+            let fid = self.fn_cache[&entry.jit_name];
+            let n_params = entry.params.len();
+            let mut fn_sig = self.module.make_signature();
+            for _ in 0..n_params { fn_sig.params.push(AbiParam::new(types::I64)); }
+            fn_sig.returns.push(AbiParam::new(types::I64));
+            // Campos del shape para este act
+            let field_names: Vec<String> = bc.shapes[&entry.shape]
+                .fields.iter().map(|f| f.name.clone()).collect();
+            let mut ctx = self.module.make_context();
+            ctx.func.signature = fn_sig;
+            self.fill_function_body(
+                &entry.body, &entry.params, &mut ctx, false,
+                &shape_names, Some(&field_names),
+            )?;
+            self.module.define_function(fid, &mut ctx)
+                .map_err(|e| format!("JIT define act '{}': {e}", entry.jit_name))?;
+            self.module.clear_context(&mut ctx);
+        }
+
+        // 6. Definir main
         let mut ctx = self.module.make_context();
         ctx.func.signature = main_sig;
-        self.fill_function_body(&bc.main, &[], &mut ctx, true)?;
+        self.fill_function_body(&bc.main, &[], &mut ctx, true, &shape_names, None)?;
         self.module.define_function(main_id, &mut ctx)
             .map_err(|e| format!("JIT define main: {e}"))?;
         self.module.clear_context(&mut ctx);
 
-        // 5. Compilar y ejecutar
+        // 7. Compilar
         self.module.finalize_definitions()
             .map_err(|e| format!("JIT finalize: {e}"))?;
 
+        // 8a. JIT-6: Registrar punteros de funciones de usuario para CallAsync / MakeClosure
+        for name in &fn_names {
+            let fid = self.fn_cache[name];
+            let fn_ptr = self.module.get_finalized_function(fid) as i64;
+            super::runtime::register_jit_fn(name, fn_ptr);
+        }
+
+        // 8b. Registrar punteros de acts en METHOD_TABLE (JIT-5)
+        for entry in &act_entries {
+            let fid = self.fn_cache[&entry.jit_name];
+            let fn_ptr = self.module.get_finalized_function(fid) as i64;
+            super::runtime_oop::register_method(&entry.shape, &entry.act, fn_ptr);
+        }
+
+        // 9. Ejecutar main
         let code_ptr = self.module.get_finalized_function(main_id);
-        // SAFETY: firma `() -> ()`, generada por Cranelift, válida mientras module vive.
         unsafe {
             let f: extern "C" fn() = std::mem::transmute(code_ptr);
             f();
@@ -358,7 +504,6 @@ impl JitCompiler {
         Ok(true)
     }
 
-    /// API de compatibilidad: solo instrucciones de main, sin funciones.
     pub fn run(&mut self, instructions: &[Instruction]) -> Result<bool, String> {
         use indexmap::IndexMap;
         let dummy = OrionBytecode {
@@ -378,6 +523,8 @@ impl JitCompiler {
         params: &[String],
         ctx: &mut cranelift_codegen::Context,
         is_main: bool,
+        shape_names: &HashSet<String>,
+        field_names: Option<&[String]>,  // Some para act bodies; activa sync-back de campos
     ) -> Result<(), String> {
         let block_starts = find_block_starts(instructions);
         let mut sorted_starts: Vec<usize> = block_starts.iter().cloned().collect();
@@ -407,6 +554,19 @@ impl JitCompiler {
         let write_file_ref         = self.module.declare_func_in_func(rt.write_file,         &mut ctx.func);
         let read_env_ref           = self.module.declare_func_in_func(rt.read_env,           &mut ctx.func);
         let use_module_ref         = self.module.declare_func_in_func(rt.use_module,         &mut ctx.func);
+        let create_instance_ref    = self.module.declare_func_in_func(rt.create_instance,    &mut ctx.func);
+        let get_attr_ref           = self.module.declare_func_in_func(rt.get_attr,           &mut ctx.func);
+        let set_attr_ref           = self.module.declare_func_in_func(rt.set_attr,           &mut ctx.func);
+        let is_instance_ref        = self.module.declare_func_in_func(rt.is_instance,        &mut ctx.func);
+        let get_self_ref           = self.module.declare_func_in_func(rt.get_self,           &mut ctx.func);
+        let push_self_ref          = self.module.declare_func_in_func(rt.push_self,          &mut ctx.func);
+        let pop_self_ref           = self.module.declare_func_in_func(rt.pop_self,           &mut ctx.func);
+        let get_self_field_ref     = self.module.declare_func_in_func(rt.get_self_field,     &mut ctx.func);
+        let set_self_field_ref     = self.module.declare_func_in_func(rt.set_self_field,     &mut ctx.func);
+        let call_method_ref        = self.module.declare_func_in_func(rt.call_method,        &mut ctx.func);
+        let make_closure_ref       = self.module.declare_func_in_func(rt.make_closure,       &mut ctx.func);
+        let call_async_ref         = self.module.declare_func_in_func(rt.call_async,         &mut ctx.func);
+        let await_ref              = self.module.declare_func_in_func(rt.rt_await,           &mut ctx.func);
         let show_ref               = self.module.declare_func_in_func(rt.show,               &mut ctx.func);
         let is_truthy_ref   = self.module.declare_func_in_func(rt.is_truthy,       &mut ctx.func);
         let add_ref         = self.module.declare_func_in_func(rt.add,             &mut ctx.func);
@@ -479,12 +639,28 @@ impl JitCompiler {
         }
         builder.switch_to_block(entry_block);
 
-        // Inicializar todas las variables a null
+        // Inicializar variables: campos desde self (act body) o null (función normal)
         for (name, &v) in &var_table {
-            if !params.contains(name) {
+            if params.contains(name) { continue; }
+            let init_val = if let Some(fields) = field_names {
+                if fields.contains(name) {
+                    // Leer el campo del self activo via TLS
+                    let mut bytes = name.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let call = builder.ins().call(get_self_field_ref, &[name_ptr]);
+                    builder.inst_results(call)[0]
+                } else {
+                    let call = builder.ins().call(make_null_ref, &[]);
+                    builder.inst_results(call)[0]
+                }
+            } else {
                 let call = builder.ins().call(make_null_ref, &[]);
-                builder.def_var(v, builder.inst_results(call)[0]);
-            }
+                builder.inst_results(call)[0]
+            };
+            builder.def_var(v, init_val);
         }
 
         // Bind de parámetros
@@ -591,6 +767,17 @@ impl JitCompiler {
                     if let Some(&var) = var_table.get(name) {
                         builder.def_var(var, val);
                     }
+                    // JIT-5: si es campo de un act, sincronizar al self activo
+                    if let Some(fields) = field_names {
+                        if fields.contains(name) {
+                            let mut bytes = name.as_bytes().to_vec();
+                            bytes.push(0u8);
+                            let raw = bytes.as_ptr() as i64;
+                            self.string_storage.push(bytes);
+                            let name_ptr = builder.ins().iconst(types::I64, raw);
+                            builder.ins().call(set_self_field_ref, &[name_ptr, val]);
+                        }
+                    }
                 }
 
                 //    Aritmética                                                
@@ -649,14 +836,34 @@ impl JitCompiler {
                 Instruction::MakeFunction(_, _, _) => { /* no-op: ya compilado */ }
                 Instruction::Call(fname, n_args) => {
                     let n = *n_args as usize;
-                    let mut args: Vec<cranelift_codegen::ir::Value> = (0..n)
-                        .map(|_| stack.pop().ok_or("Call: pila vacía"))
-                        .collect::<Result<_, _>>()?;
-                    args.reverse();
-                    let fref = *user_fn_refs.get(fname)
-                        .ok_or_else(|| format!("JIT: función '{fname}' no encontrada"))?;
-                    let call = builder.ins().call(fref, &args);
-                    stack.push(builder.inst_results(call)[0]);
+                    if shape_names.contains(fname) {
+                        // JIT-5: instanciación de shape
+                        let mut args: Vec<cranelift_codegen::ir::Value> = (0..n)
+                            .map(|_| stack.pop().ok_or("Call shape: pila vacía"))
+                            .collect::<Result<_, _>>()?;
+                        args.reverse();
+                        // push args para el on_create
+                        for &arg in &args {
+                            builder.ins().call(push_arg_ref, &[arg]);
+                        }
+                        let mut bytes = fname.as_bytes().to_vec();
+                        bytes.push(0u8);
+                        let raw = bytes.as_ptr() as i64;
+                        self.string_storage.push(bytes);
+                        let name_ptr  = builder.ins().iconst(types::I64, raw);
+                        let n_args_v  = builder.ins().iconst(types::I64, n as i64);
+                        let call = builder.ins().call(create_instance_ref, &[name_ptr, n_args_v]);
+                        stack.push(builder.inst_results(call)[0]);
+                    } else {
+                        let mut args: Vec<cranelift_codegen::ir::Value> = (0..n)
+                            .map(|_| stack.pop().ok_or("Call: pila vacía"))
+                            .collect::<Result<_, _>>()?;
+                        args.reverse();
+                        let fref = *user_fn_refs.get(fname)
+                            .ok_or_else(|| format!("JIT: función '{fname}' no encontrada"))?;
+                        let call = builder.ins().call(fref, &args);
+                        stack.push(builder.inst_results(call)[0]);
+                    }
                 }
                 Instruction::Return => {
                     if is_main {
@@ -774,6 +981,64 @@ impl JitCompiler {
                     stack.push(builder.inst_results(call)[0]);
                 }
 
+                // ── OOP — JIT-5 ─────────────────────────────────────────────
+                Instruction::DefineShape(_) => { /* no-op: shapes ya registradas en run_program */ }
+
+                Instruction::GetAttr(attr) => {
+                    let obj = stack.pop().ok_or("GetAttr: pila vacía")?;
+                    let mut bytes = attr.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let call = builder.ins().call(get_attr_ref, &[obj, name_ptr]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::SetAttr(attr) => {
+                    let val = stack.pop().ok_or("SetAttr: pila vacía (val)")?;
+                    let obj = stack.pop().ok_or("SetAttr: pila vacía (obj)")?;
+                    let mut bytes = attr.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    builder.ins().call(set_attr_ref, &[obj, name_ptr, val]);
+                }
+                Instruction::IsInstance(shape_name) => {
+                    let obj = stack.pop().ok_or("IsInstance: pila vacía")?;
+                    let mut bytes = shape_name.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let call = builder.ins().call(is_instance_ref, &[obj, name_ptr]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::PushSelf => {
+                    let call = builder.ins().call(get_self_ref, &[]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::CallMethod(method_name, n_args) => {
+                    let n = *n_args as usize;
+                    // Pop args en orden y push a ARG_BUF
+                    let mut args: Vec<cranelift_codegen::ir::Value> = (0..n)
+                        .map(|_| stack.pop().ok_or("CallMethod: pila vacía"))
+                        .collect::<Result<_, _>>()?;
+                    args.reverse();
+                    for &arg in &args {
+                        builder.ins().call(push_arg_ref, &[arg]);
+                    }
+                    let obj = stack.pop().ok_or("CallMethod: pila vacía (obj)")?;
+                    let mut bytes = method_name.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let n_val    = builder.ins().iconst(types::I64, n as i64);
+                    let call = builder.ins().call(call_method_ref, &[obj, name_ptr, n_val]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+
                 // ── I/O nativo — JIT-4 ──────────────────────────────────────
                 Instruction::ReadInput { cast, choices } => {
                     let cast_ptr = if let Some(c) = cast {
@@ -843,6 +1108,45 @@ impl JitCompiler {
                     if let Some(&var) = var_table.get(&ns_name) {
                         builder.def_var(var, module_val);
                     }
+                }
+
+                // ── JIT-6: Closures ─────────────────────────────────────────────
+                Instruction::MakeClosure(fn_name) => {
+                    // Crea un OrionVal TAG_CLOSURE con el fn_ptr de la función.
+                    // Las llamadas en JIT son estáticas; el valor sirve como marcador.
+                    let mut bytes = fn_name.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let call = builder.ins().call(make_closure_ref, &[name_ptr]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+
+                // ── JIT-6: Async ─────────────────────────────────────────────────
+                Instruction::CallAsync(fname, n_args) => {
+                    let n = *n_args as usize;
+                    // Pop args del stack en orden, revertir, pushear al ARG_BUF
+                    let mut args: Vec<cranelift_codegen::ir::Value> = (0..n)
+                        .map(|_| stack.pop().ok_or("CallAsync: pila vacía"))
+                        .collect::<Result<_, _>>()?;
+                    args.reverse();
+                    for &arg in &args {
+                        builder.ins().call(push_arg_ref, &[arg]);
+                    }
+                    let mut bytes = fname.as_bytes().to_vec();
+                    bytes.push(0u8);
+                    let raw = bytes.as_ptr() as i64;
+                    self.string_storage.push(bytes);
+                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let n_val    = builder.ins().iconst(types::I64, n as i64);
+                    let call = builder.ins().call(call_async_ref, &[name_ptr, n_val]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
+                Instruction::Await => {
+                    let val = stack.pop().ok_or("Await: pila vacía")?;
+                    let call = builder.ins().call(await_ref, &[val]);
+                    stack.push(builder.inst_results(call)[0]);
                 }
 
                 other => {

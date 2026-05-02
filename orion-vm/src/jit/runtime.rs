@@ -1,11 +1,12 @@
-//! Runtime Orion JIT — Fase JIT-4: ReadInput, ReadFile, WriteFile, ReadEnv, UseModule
+//! Runtime Orion JIT — Fase JIT-6: MakeClosure, CallAsync, Await
 //!
 //! OrionVal: valor boxeado en heap que representa cualquier valor Orion.
 //! Todas las funciones de runtime reciben y devuelven punteros como i64.
-//! Fase JIT-5 añadirá: TAG_SHAPE, TAG_CLOSURE, TAG_TASK.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write as IoWrite};
+use std::sync::{Arc, Mutex, OnceLock};
 
 //     Tags                                                                     
 
@@ -14,16 +15,15 @@ pub const TAG_INT:   u8 = 1;
 pub const TAG_FLOAT: u8 = 2;
 pub const TAG_BOOL:  u8 = 3;
 pub const TAG_STR:   u8 = 4;
-pub const TAG_LIST:  u8 = 5;  // data_i = Box::into_raw(Box<Vec<i64>>)
-pub const TAG_DICT:  u8 = 6;  // data_i = Box::into_raw(Box<Vec<(String, i64)>>)
-// Reservados JIT-5:
-// pub const TAG_SHAPE:   u8 = 7;
-// pub const TAG_CLOSURE: u8 = 8;
-// pub const TAG_TASK:    u8 = 9;
+pub const TAG_LIST:    u8 = 5;  // data_i = Box::into_raw(Box<Vec<i64>>)
+pub const TAG_DICT:    u8 = 6;  // data_i = Box::into_raw(Box<Vec<(String, i64)>>)
+// TAG_INSTANCE = 7 definido en runtime_oop
+pub const TAG_CLOSURE: u8 = 9;  // data_i = fn_ptr (i64) de la función capturada
+pub const TAG_TASK:    u8 = 10; // data_i = Box<Arc<Mutex<Option<i64>>>>
 
 // Buffer thread-local para pasar N argumentos variádicos a MakeList/MakeDict.
 thread_local! {
-    static ARG_BUF: RefCell<Vec<i64>> = RefCell::new(Vec::new());
+    pub(crate) static ARG_BUF: RefCell<Vec<i64>> = RefCell::new(Vec::new());
 }
 
 // Error activo para attempt/handle — almacena el OrionVal* del mensaje.
@@ -52,15 +52,15 @@ pub struct OrionVal {
 
 //     Helpers internos                                                         
 
-fn alloc_val(tag: u8, data_i: i64, data_f: f64) -> i64 {
+pub(crate) fn alloc_val(tag: u8, data_i: i64, data_f: f64) -> i64 {
     Box::into_raw(Box::new(OrionVal { tag, _pad: [0; 7], data_i, data_f })) as i64
 }
 
-unsafe fn val_ref(ptr: i64) -> &'static OrionVal {
+pub(crate) unsafe fn val_ref(ptr: i64) -> &'static OrionVal {
     &*(ptr as *const OrionVal)
 }
 
-unsafe fn cstr_to_str(ptr: i64) -> &'static str {
+pub(crate) unsafe fn cstr_to_str(ptr: i64) -> &'static str {
     let p = ptr as *const u8;
     if p.is_null() { return ""; }
     let mut len = 0;
@@ -69,14 +69,14 @@ unsafe fn cstr_to_str(ptr: i64) -> &'static str {
     std::str::from_utf8_unchecked(slice)
 }
 
-fn string_to_cptr(s: String) -> i64 {
+pub(crate) fn string_to_cptr(s: String) -> i64 {
     let mut bytes = s.into_bytes();
     bytes.push(0);
     let boxed = bytes.into_boxed_slice();
     Box::into_raw(boxed) as *mut u8 as i64
 }
 
-fn val_to_display(v: &OrionVal) -> String {
+pub(crate) fn val_to_display(v: &OrionVal) -> String {
     match v.tag {
         TAG_INT   => v.data_i.to_string(),
         TAG_FLOAT => format!("{}", v.data_f),
@@ -95,11 +95,13 @@ fn val_to_display(v: &OrionVal) -> String {
                 .collect();
             format!("{{{}}}", parts.join(", "))
         },
-        _         => "<valor>".to_string(),
+        TAG_CLOSURE => "<closure>".to_string(),
+        TAG_TASK    => "<task>".to_string(),
+        _           => "<valor>".to_string(),
     }
 }
 
-fn is_truthy_val(v: &OrionVal) -> bool {
+pub(crate) fn is_truthy_val(v: &OrionVal) -> bool {
     match v.tag {
         TAG_NULL  => false,
         TAG_INT   => v.data_i != 0,
@@ -107,8 +109,9 @@ fn is_truthy_val(v: &OrionVal) -> bool {
         TAG_BOOL  => v.data_i != 0,
         TAG_STR   => unsafe { !cstr_to_str(v.data_i).is_empty() },
         TAG_LIST  => unsafe { !(*(v.data_i as *const Vec<i64>)).is_empty() },
-        TAG_DICT  => unsafe { !(*(v.data_i as *const Vec<(String, i64)>)).is_empty() },
-        _         => true,
+        TAG_DICT    => unsafe { !(*(v.data_i as *const Vec<(String, i64)>)).is_empty() },
+        TAG_CLOSURE | TAG_TASK => true,
+        _           => true,
     }
 }
 
@@ -703,9 +706,123 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
     }
 }
 
+//     JIT-6: Tabla global de punteros de funciones JIT
+
+static JIT_FN_TABLE: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+
+fn jit_fn_table() -> &'static Mutex<HashMap<String, i64>> {
+    JIT_FN_TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Registra el puntero de una función JIT compilada. Llamado por run_program() tras finalize.
+pub fn register_jit_fn(name: &str, fn_ptr: i64) {
+    jit_fn_table().lock().unwrap().insert(name.to_string(), fn_ptr);
+}
+
+/// Boxea un Arc de tarea en un OrionVal TAG_TASK.
+fn alloc_task(slot: Arc<Mutex<Option<i64>>>) -> i64 {
+    let raw = Box::into_raw(Box::new(slot)) as i64;
+    alloc_val(TAG_TASK, raw, 0.0)
+}
+
+/// Invoca una función JIT con arity 0-8 de forma dinámica.
+unsafe fn call_fn_n(fn_ptr: i64, args: &[i64]) -> i64 {
+    let p = fn_ptr as usize;
+    match args.len() {
+        0 => std::mem::transmute::<usize, extern "C" fn() -> i64>(p)(),
+        1 => { type F = extern "C" fn(i64) -> i64;
+               std::mem::transmute::<usize, F>(p)(args[0]) }
+        2 => { type F = extern "C" fn(i64, i64) -> i64;
+               std::mem::transmute::<usize, F>(p)(args[0], args[1]) }
+        3 => { type F = extern "C" fn(i64, i64, i64) -> i64;
+               std::mem::transmute::<usize, F>(p)(args[0], args[1], args[2]) }
+        4 => { type F = extern "C" fn(i64, i64, i64, i64) -> i64;
+               std::mem::transmute::<usize, F>(p)(args[0], args[1], args[2], args[3]) }
+        5 => { type F = extern "C" fn(i64, i64, i64, i64, i64) -> i64;
+               std::mem::transmute::<usize, F>(p)(args[0], args[1], args[2], args[3], args[4]) }
+        6 => { type F = extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64;
+               std::mem::transmute::<usize, F>(p)(args[0], args[1], args[2], args[3], args[4], args[5]) }
+        7 => { type F = extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64;
+               std::mem::transmute::<usize, F>(p)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]) }
+        8 => { type F = extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64;
+               std::mem::transmute::<usize, F>(p)(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]) }
+        n => { eprintln!("[JIT] CallAsync: aridad {} no soportada (máx 8)", n); std::process::exit(1) }
+    }
+}
+
+//     JIT-6: Closures
+
+/// Crea un valor Closure que apunta al fn_ptr de la función capturada.
+/// En el JIT las llamadas son estáticas, por lo que el closure es solo un marcador.
+#[no_mangle]
+pub extern "C" fn rt_make_closure(fn_name_ptr: i64) -> i64 {
+    let fn_name = unsafe { cstr_to_str(fn_name_ptr).to_string() };
+    let fn_ptr = jit_fn_table().lock().unwrap().get(&fn_name).copied().unwrap_or(0);
+    alloc_val(TAG_CLOSURE, fn_ptr, 0.0)
+}
+
+//     JIT-6: Async
+
+/// Lanza la función JIT identificada por `fn_name_ptr` en un hilo nuevo.
+/// Los `n_args` argumentos se toman del ARG_BUF thread-local.
+/// Devuelve un OrionVal TAG_TASK que puede ser esperado con rt_await.
+#[no_mangle]
+pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
+    let fn_name = unsafe { cstr_to_str(fn_name_ptr).to_string() };
+    let fn_ptr = {
+        let table = jit_fn_table().lock().unwrap();
+        match table.get(&fn_name).copied() {
+            Some(p) => p,
+            None => {
+                eprintln!("[JIT] función async '{}' no registrada en JIT_FN_TABLE", fn_name);
+                std::process::exit(1);
+            }
+        }
+    };
+
+    let args: Vec<i64> = ARG_BUF.with(|b| {
+        let mut buf = b.borrow_mut();
+        let n = n_args as usize;
+        buf.drain(..n).collect()
+    });
+
+    let slot: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
+    let slot_clone = Arc::clone(&slot);
+
+    std::thread::spawn(move || {
+        let result = unsafe { call_fn_n(fn_ptr, &args) };
+        *slot_clone.lock().unwrap() = Some(result);
+    });
+
+    alloc_task(slot)
+}
+
+/// Bloquea hasta que la tarea (TAG_TASK) complete y devuelve su resultado.
+/// Si el valor no es un TAG_TASK, lo devuelve sin modificar.
+#[no_mangle]
+pub extern "C" fn rt_await(task: i64) -> i64 {
+    unsafe {
+        let v = val_ref(task);
+        if v.tag == TAG_TASK {
+            let arc = &*(v.data_i as *const Arc<Mutex<Option<i64>>>);
+            loop {
+                {
+                    let guard = arc.lock().unwrap();
+                    if let Some(result) = *guard {
+                        return result;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        } else {
+            task
+        }
+    }
+}
+
 //     Helpers privados — JIT-4
 
-fn apply_cast(raw: String, cast: &str) -> i64 {
+pub(crate) fn apply_cast(raw: String, cast: &str) -> i64 {
     match cast {
         "int"   => alloc_val(TAG_INT,  raw.parse::<i64>().unwrap_or(0),   0.0),
         "float" => alloc_val(TAG_FLOAT, 0, raw.parse::<f64>().unwrap_or(0.0)),
