@@ -97,6 +97,20 @@ impl<'a> Lexer<'a> {
                 self.skip_while(|c| c != b'\n');
                 self.next_token()
             }
+            b'/' if self.peek_at(1) == Some(b'/') && self.peek_at(2) == Some(b'/') => {
+                self.advance(); self.advance(); self.advance(); // '///'
+                // skip leading spaces
+                while self.peek() == Some(b' ') || self.peek() == Some(b'\t') {
+                    self.advance();
+                }
+                let start = self.pos;
+                self.skip_while(|c| c != b'\n');
+                let text = std::str::from_utf8(&self.src[start..self.pos])
+                    .unwrap_or("")
+                    .trim_end()
+                    .to_string();
+                tok!(crate::token::TokenKind::DocComment(text))
+            }
             b'/' if self.peek_at(1) == Some(b'/') => Err(LexError {
                 message: "Comentario inválido '//'. Usa '--' para comentarios".into(),
                 line, col,

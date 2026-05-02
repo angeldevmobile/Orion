@@ -94,6 +94,9 @@ pub enum TokenKind {
     // Identifier
     Ident(String),
 
+    // Docstring — líneas `/// texto` que documentan la siguiente declaración
+    DocComment(String),
+
     // Arithmetic operators
     Plus,       // +
     Minus,      // -

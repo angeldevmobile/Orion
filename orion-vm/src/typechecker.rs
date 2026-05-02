@@ -134,7 +134,7 @@ impl TypeChecker {
                 }
             }
 
-            Stmt::Const { name, value, line } => {
+            Stmt::Const { name, value, line, .. } => {
                 self.current_line = *line;
                 if let Some(ty) = self.infer_type(value) {
                     self.scope_set(name.clone(), ty);
@@ -142,8 +142,8 @@ impl TypeChecker {
             }
 
             // definición de función: registra firma, verifica cuerpo
-            Stmt::Fn { name, type_params, params, body, ret_type, line } |
-            Stmt::AsyncFn { name, type_params, params, body, ret_type, line } => {
+            Stmt::Fn { name, type_params, params, body, ret_type, line, .. } |
+            Stmt::AsyncFn { name, type_params, params, body, ret_type, line, .. } => {
                 self.current_line = *line;
                 let sig = FnSig {
                     type_params: type_params.clone(),
@@ -236,7 +236,7 @@ impl TypeChecker {
                 self.check_call_types(expr);
             }
 
-            Stmt::Shape { name, type_params, fields, on_create, acts, using: _, line } => {
+            Stmt::Shape { name, type_params, fields, on_create, acts, using: _, line, .. } => {
                 self.current_line = *line;
                 self.shape_type_params.insert(name.clone(), type_params.clone());
                 // Verificar on_create y acts con type params en scope

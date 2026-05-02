@@ -225,7 +225,7 @@ impl Codegen {
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::StoreVar(name));
             }
-            Stmt::Const { name, value, line } => {
+            Stmt::Const { name, value, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::StoreConst(name));
@@ -588,7 +588,7 @@ impl FnCompiler {
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::StoreVar(name.clone()));
             }
-            Stmt::Const { name, value, line } => {
+            Stmt::Const { name, value, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::StoreConst(name.clone()));

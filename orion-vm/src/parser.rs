@@ -120,7 +120,21 @@ impl Parser {
         }
     }
 
-    //   Programa                                
+    //   Docstrings
+
+    /// Consume líneas `/// texto` consecutivas y las une en un solo string.
+    fn collect_doc(&mut self) -> Option<String> {
+        let mut lines = Vec::new();
+        while let TokenKind::DocComment(text) = self.peek().clone() {
+            lines.push(text);
+            self.pos += 1;
+            // saltar semicolons/newlines entre líneas de doc
+            while matches!(self.peek(), TokenKind::Semicolon) { self.pos += 1; }
+        }
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    //   Programa
 
     fn parse_program(&mut self) -> Result<Vec<Stmt>, ParseError> {
         let mut stmts = Vec::new();
@@ -582,17 +596,20 @@ impl Parser {
     // ══════════════════════════════════════════════════════════════════════════
 
     fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
-        let line = self.current_line();
         self.skip_newlines();
+        // collect any leading docstrings before the actual statement
+        let doc = self.collect_doc();
+        self.skip_newlines();
+        let line = self.current_line();
         match self.peek().clone() {
 
-            //   const x = expr                         
+            //   const x = expr
             TokenKind::Const => {
                 self.pos += 1;
                 let name = self.expect_ident()?;
                 self.expect(&TokenKind::Assign)?;
                 let value = self.parse_expression()?;
-                Ok(Stmt::Const { name, value, line })
+                Ok(Stmt::Const { name, value, doc, line })
             }
 
             //   show expr                           
@@ -653,7 +670,7 @@ impl Parser {
                     self.parse_type_name().ok()
                 } else { None };
                 let body = self.parse_block()?;
-                Ok(Stmt::Fn { name, type_params, params, body, ret_type, line })
+                Ok(Stmt::Fn { name, type_params, params, body, ret_type, doc, line })
             }
 
             //   async fn name[T](params) -> ret { body }
@@ -668,7 +685,7 @@ impl Parser {
                     self.parse_type_name().ok()
                 } else { None };
                 let body = self.parse_block()?;
-                Ok(Stmt::AsyncFn { name, type_params, params, body, ret_type, line })
+                Ok(Stmt::AsyncFn { name, type_params, params, body, ret_type, doc, line })
             }
 
             //   if cond { } [else { }]                     
@@ -986,7 +1003,7 @@ impl Parser {
                     }
                 }
                 self.expect(&TokenKind::RBrace)?;
-                Ok(Stmt::Shape { name, type_params, fields, on_create, acts, using, line })
+                Ok(Stmt::Shape { name, type_params, fields, on_create, acts, using, doc, line })
             }
 
             //   Asignación, asignación compuesta o expresión          

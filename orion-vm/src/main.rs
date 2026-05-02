@@ -56,6 +56,8 @@ struct SymbolInfo {
     acts: Option<Vec<ActInfo>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     data_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    doc: Option<String>,
     line: u32,
 }
 
@@ -69,7 +71,7 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
     let mut out = Vec::new();
     for stmt in stmts {
         match stmt {
-            ast::Stmt::Fn { name, params, ret_type, line, .. } => {
+            ast::Stmt::Fn { name, params, ret_type, doc, line, .. } => {
                 out.push(SymbolInfo {
                     kind: "fn".into(),
                     name: name.clone(),
@@ -79,10 +81,11 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
                     }).collect()),
                     ret: ret_type.clone(),
                     fields: None, acts: None, data_type: None,
+                    doc: doc.clone(),
                     line: *line,
                 });
             }
-            ast::Stmt::AsyncFn { name, params, ret_type, line, .. } => {
+            ast::Stmt::AsyncFn { name, params, ret_type, doc, line, .. } => {
                 out.push(SymbolInfo {
                     kind: "async_fn".into(),
                     name: name.clone(),
@@ -92,10 +95,11 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
                     }).collect()),
                     ret: ret_type.clone(),
                     fields: None, acts: None, data_type: None,
+                    doc: doc.clone(),
                     line: *line,
                 });
             }
-            ast::Stmt::Shape { name, fields, acts, line, .. } => {
+            ast::Stmt::Shape { name, fields, acts, doc, line, .. } => {
                 out.push(SymbolInfo {
                     kind: "shape".into(),
                     name: name.clone(),
@@ -112,14 +116,16 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
                         }).collect(),
                     }).collect()),
                     data_type: None,
+                    doc: doc.clone(),
                     line: *line,
                 });
             }
-            ast::Stmt::Const { name, line, .. } => {
+            ast::Stmt::Const { name, doc, line, .. } => {
                 out.push(SymbolInfo {
                     kind: "const".into(),
                     name: name.clone(),
                     params: None, ret: None, fields: None, acts: None, data_type: None,
+                    doc: doc.clone(),
                     line: *line,
                 });
             }
@@ -128,6 +134,7 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
                     kind: "var".into(),
                     name: name.clone(),
                     params: None, ret: None, fields: None, acts: None, data_type: None,
+                    doc: None,
                     line: *line,
                 });
             }
@@ -137,6 +144,7 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
                     name: name.clone(),
                     params: None, ret: None, fields: None, acts: None,
                     data_type: Some(type_hint.clone()),
+                    doc: None,
                     line: *line,
                 });
             }
@@ -150,8 +158,8 @@ fn main() {
     let args: Vec<String> = std_env::args().collect();
 
     if args.len() < 2 {
-        print_help();
-        std::process::exit(1);
+        run_repl();
+        return;
     }
 
     match args[1].as_str() {
@@ -330,7 +338,24 @@ fn main() {
             pkg::update_packages(target);
         }
 
-        //    REPL                                                               
+        //    Generar documentación Markdown
+        "--docs" => {
+            if args.len() < 3 {
+                cli::banner::fail("Uso: orion --docs <archivo.orx|carpeta> [--output=<dir>]");
+                std::process::exit(1);
+            }
+            let output = args.iter()
+                .find(|a| a.starts_with("--output="))
+                .and_then(|a| a.strip_prefix("--output="))
+                .unwrap_or("docs");
+            let input = args.iter()
+                .find(|a| !a.starts_with("--") && *a != &args[0] && *a != &args[1])
+                .map(String::as_str)
+                .unwrap_or(&args[2]);
+            cli::docs::run_docs(input, output);
+        }
+
+        //    REPL
         "--repl" => run_repl(),
 
         //    Lexer                                                              
@@ -503,6 +528,7 @@ fn print_help() {
         ("--repl",                        "Modo interactivo"),
         ("--lex  <archivo.orx>",          "Imprimir tokens"),
         ("--eval <ast.json>",             "Evaluador de árbol (tree-walker)"),
+        ("--docs <archivo|carpeta>",       "Generar docs Markdown  [--output=dir]"),
         ("--add  <paquete>",              "Instalar paquete  [--force]"),
         ("--remove <paquete>",            "Desinstalar paquete"),
         ("--list",                        "Listar paquetes disponibles"),
