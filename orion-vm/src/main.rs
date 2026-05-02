@@ -18,12 +18,133 @@ mod pkg;
 mod typechecker;
 mod cli;
 mod jit;
+mod error;
 
 extern crate tiny_http;
 
 use std::env as std_env;
 use std::fs;
 use std::time::Instant;
+use serde::Serialize;
+
+// ─── Structs para --symbols-json ─────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct SymbolParam {
+    name: String,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    type_hint: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ActInfo {
+    name: String,
+    params: Vec<SymbolParam>,
+}
+
+#[derive(Serialize)]
+struct SymbolInfo {
+    kind: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<Vec<SymbolParam>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ret: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fields: Option<Vec<SymbolParam>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    acts: Option<Vec<ActInfo>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data_type: Option<String>,
+    line: u32,
+}
+
+#[derive(Serialize)]
+struct SymbolsResult {
+    ok: bool,
+    symbols: Vec<SymbolInfo>,
+}
+
+fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
+    let mut out = Vec::new();
+    for stmt in stmts {
+        match stmt {
+            ast::Stmt::Fn { name, params, ret_type, line, .. } => {
+                out.push(SymbolInfo {
+                    kind: "fn".into(),
+                    name: name.clone(),
+                    params: Some(params.iter().map(|p| SymbolParam {
+                        name: p.name.clone(),
+                        type_hint: p.type_hint.clone(),
+                    }).collect()),
+                    ret: ret_type.clone(),
+                    fields: None, acts: None, data_type: None,
+                    line: *line,
+                });
+            }
+            ast::Stmt::AsyncFn { name, params, ret_type, line, .. } => {
+                out.push(SymbolInfo {
+                    kind: "async_fn".into(),
+                    name: name.clone(),
+                    params: Some(params.iter().map(|p| SymbolParam {
+                        name: p.name.clone(),
+                        type_hint: p.type_hint.clone(),
+                    }).collect()),
+                    ret: ret_type.clone(),
+                    fields: None, acts: None, data_type: None,
+                    line: *line,
+                });
+            }
+            ast::Stmt::Shape { name, fields, acts, line, .. } => {
+                out.push(SymbolInfo {
+                    kind: "shape".into(),
+                    name: name.clone(),
+                    params: None, ret: None,
+                    fields: Some(fields.iter().map(|f| SymbolParam {
+                        name: f.name.clone(),
+                        type_hint: f.type_hint.clone(),
+                    }).collect()),
+                    acts: Some(acts.iter().map(|a| ActInfo {
+                        name: a.name.clone(),
+                        params: a.params.iter().map(|p| SymbolParam {
+                            name: p.name.clone(),
+                            type_hint: p.type_hint.clone(),
+                        }).collect(),
+                    }).collect()),
+                    data_type: None,
+                    line: *line,
+                });
+            }
+            ast::Stmt::Const { name, line, .. } => {
+                out.push(SymbolInfo {
+                    kind: "const".into(),
+                    name: name.clone(),
+                    params: None, ret: None, fields: None, acts: None, data_type: None,
+                    line: *line,
+                });
+            }
+            ast::Stmt::Assign { name, line, .. } => {
+                out.push(SymbolInfo {
+                    kind: "var".into(),
+                    name: name.clone(),
+                    params: None, ret: None, fields: None, acts: None, data_type: None,
+                    line: *line,
+                });
+            }
+            ast::Stmt::TypedAssign { name, type_hint, line, .. } => {
+                out.push(SymbolInfo {
+                    kind: "var".into(),
+                    name: name.clone(),
+                    params: None, ret: None, fields: None, acts: None,
+                    data_type: Some(type_hint.clone()),
+                    line: *line,
+                });
+            }
+            _ => {}
+        }
+    }
+    out
+}
 
 fn main() {
     let args: Vec<String> = std_env::args().collect();
@@ -43,7 +164,7 @@ fn main() {
             println!("Orion VM v0.4.0 (Rust) — pipeline completo: lexer + parser + codegen + VM");
         }
 
-        //    Verificar sintaxis                                                 
+        //    Verificar sintaxis (salida legible para humanos)
         "--check" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --check <archivo.orx> [--types]");
@@ -51,6 +172,64 @@ fn main() {
             }
             let check_types = args.iter().any(|a| a == "--types");
             cli::check::run_check(&args[2], check_types);
+        }
+
+        //    Verificar sintaxis (salida JSON para LSP / tooling)
+        "--check-json" => {
+            // El archivo puede estar en cualquier posición después de --check-json
+            // (los flags como --types pueden aparecer antes o después)
+            let src_path = match args[2..].iter().find(|a| !a.starts_with("--")) {
+                Some(p) => p.as_str(),
+                None => {
+                    let result = error::CheckResult { ok: true, diagnostics: vec![] };
+                    println!("{}", serde_json::to_string(&result).unwrap());
+                    return;
+                }
+            };
+            let src = match fs::read_to_string(src_path) {
+                Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
+                Err(e) => {
+                    let result = error::CheckResult {
+                        ok: false,
+                        diagnostics: vec![error::LspDiagnostic {
+                            severity: 1,
+                            kind: "IO".into(),
+                            message: format!("No se puede leer '{src_path}': {e}"),
+                            line: 0, col: 0, len: 0, hint: None,
+                        }],
+                    };
+                    println!("{}", serde_json::to_string(&result).unwrap());
+                    return;
+                }
+            };
+
+            let mut diagnostics: Vec<error::LspDiagnostic> = Vec::new();
+
+            // Fase 1-3: lex + parse + codegen
+            match compile_source(&src, src_path) {
+                Err(e) => {
+                    diagnostics.push(e.to_lsp_diagnostic());
+                }
+                Ok(bc) => {
+                    // Fase 4: type checker (si se solicita con --types)
+                    if args.iter().any(|a| a == "--types") {
+                        if let Ok(tokens) = lexer::lex(&src) {
+                            if let Ok(stmts) = parser::parse(tokens) {
+                                for issue in typechecker::type_check(&stmts) {
+                                    diagnostics.push(error::type_issue_to_lsp(&issue));
+                                }
+                            }
+                        }
+                    }
+                    let _ = bc;
+                }
+            }
+
+            let result = error::CheckResult {
+                ok: diagnostics.iter().all(|d| d.severity > 1),
+                diagnostics,
+            };
+            println!("{}", serde_json::to_string(&result).unwrap());
         }
 
         //    Hot reload                                                         
@@ -143,7 +322,7 @@ fn main() {
                     eprintln!("[Orion] {} tokens", tokens.len());
                 }
                 Err(e) => {
-                    cli::banner::fail(&format!("Léxico línea {}:{} — {}", e.line, e.col, e.message));
+                    eprint!("{}", error::OrionError::from(e).with_file(&args[2]).render(&src));
                     std::process::exit(1);
                 }
             }
@@ -158,7 +337,7 @@ fn main() {
             run_eval(&args[2]);
         }
 
-        //    Compile .orx → .orbc                                              
+        //    Compile .orx → .orbc
         "--compile" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --compile <archivo.orx>");
@@ -167,13 +346,16 @@ fn main() {
             let src_path = &args[2];
             let out_path = src_path.replace(".orx", ".orbc");
             let src = read_src(src_path);
-            let bc = compile_source(&src, src_path);
+            let bc = match compile_source(&src, src_path) {
+                Ok(bc) => bc,
+                Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
+            };
             let json = serde_json::to_string_pretty(&bc).expect("serializar bytecode");
             fs::write(&out_path, &json).expect("escribir .orbc");
             cli::banner::ok(&format!("Compilado → {out_path}"));
         }
 
-        //    JIT (Cranelift)                                                    
+        //    JIT (Cranelift)
         "--jit" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --jit <archivo.orx>");
@@ -182,7 +364,10 @@ fn main() {
             let src_path = &args[2];
             let t0 = Instant::now();
             let src = read_src(src_path);
-            let bc = compile_source(&src, src_path);
+            let bc = match compile_source(&src, src_path) {
+                Ok(bc) => bc,
+                Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
+            };
 
             match jit::run_program(&bc) {
                 Ok(true) => {
@@ -194,7 +379,7 @@ fn main() {
                     match machine.run() {
                         Ok(_) => {}
                         Err(e) => {
-                            eprintln!("\n  [!] Error de Orion\n  {}\n", e.replace('\n', "\n  "));
+                            eprint!("{}", error::parse_vm_error(&e, src_path).render(&src));
                             std::process::exit(1);
                         }
                     }
@@ -207,7 +392,7 @@ fn main() {
             }
         }
 
-        //    Run .orx en memoria                                                
+        //    Run .orx en memoria
         "--run" => {
             if args.len() < 3 {
                 cli::banner::fail("Uso: orion --run <archivo.orx>");
@@ -216,15 +401,15 @@ fn main() {
             let src_path = &args[2];
             let t_total = Instant::now();
             let src = read_src(src_path);
-            let bc = compile_source(&src, src_path);
+            let bc = match compile_source(&src, src_path) {
+                Ok(bc) => bc,
+                Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
+            };
             let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
             match machine.run() {
                 Ok(_) => {}
                 Err(e) => {
-                    eprintln!();
-                    eprintln!("  [!] Error de Orion");
-                    eprintln!("  {}", e.replace('\n', "\n  "));
-                    eprintln!();
+                    eprint!("{}", error::parse_vm_error(&e, src_path).render(&src));
                     std::process::exit(1);
                 }
             }
@@ -235,9 +420,14 @@ fn main() {
         path => {
             let t_total = Instant::now();
 
-            let bc = if path.ends_with(".orx") {
+            // Guardamos el source para poder renderizar errores con contexto
+            let (bc, src) = if path.ends_with(".orx") {
                 let src = read_src(path);
-                compile_source(&src, path)
+                let bc = match compile_source(&src, path) {
+                    Ok(bc) => bc,
+                    Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
+                };
+                (bc, src)
             } else {
                 let t0 = Instant::now();
                 let instructions = match bytecode::load(path) {
@@ -247,27 +437,20 @@ fn main() {
                         std::process::exit(1);
                     }
                 };
-                let t_load = t0.elapsed();
-                eprintln!("  Carga : {:.3} ms", t_load.as_secs_f64() * 1000.0);
-                instructions
+                eprintln!("  Carga : {:.3} ms", t0.elapsed().as_secs_f64() * 1000.0);
+                (instructions, String::new())
             };
 
-            let t0 = Instant::now();
             let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
             match machine.run() {
                 Ok(_) => {}
                 Err(e) => {
-                    eprintln!();
-                    eprintln!("  [!] Error de Orion");
-                    eprintln!("  {}", e.replace('\n', "\n  "));
-                    eprintln!();
+                    eprint!("{}", error::parse_vm_error(&e, path).render(&src));
                     std::process::exit(1);
                 }
             }
-            let t_exec = t0.elapsed();
 
             eprintln!("[Orion] {:.3} ms", t_total.elapsed().as_secs_f64() * 1000.0);
-            let _ = t_exec;
         }
     }
 }
@@ -313,7 +496,7 @@ fn print_help() {
 
 fn read_src(path: &str) -> String {
     match fs::read_to_string(path) {
-        Ok(s) => s,
+        Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
         Err(e) => {
             cli::banner::fail(&format!("No se puede leer '{path}': {e}"));
             std::process::exit(1);
@@ -332,29 +515,16 @@ fn parse_runs_flag(args: &[String], default: u32) -> u32 {
     default
 }
 
-/// Lex + parse + codegen. Exits on any error.
-pub fn compile_source(src: &str, path: &str) -> bytecode::OrionBytecode {
-    let tokens = match lexer::lex(src) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("[ORION LEX ERROR] {}:{}:{} — {}", path, e.line, e.col, e.message);
-            std::process::exit(1);
-        }
-    };
-    let stmts = match parser::parse(tokens) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[ORION PARSE ERROR] {}:{} — {}", path, e.line, e.message);
-            std::process::exit(1);
-        }
-    };
-    match codegen::compile(stmts) {
-        Ok(bc) => bc,
-        Err(e) => {
-            eprintln!("[ORION CODEGEN ERROR] {}:{} — {}", path, e.line, e.message);
-            std::process::exit(1);
-        }
-    }
+/// Lex + parse + codegen → OrionBytecode, o un error estructurado con span.
+pub fn compile_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, error::OrionError> {
+    let tokens = lexer::lex(src)
+        .map_err(|e| error::OrionError::from(e).with_file(path))?;
+
+    let stmts = parser::parse(tokens)
+        .map_err(|e| error::OrionError::from(e).with_file(path))?;
+
+    codegen::compile(stmts)
+        .map_err(|e| error::OrionError::from(e).with_file(path))
 }
 
 fn run_eval(ast_path: &str) {
@@ -560,34 +730,13 @@ fn repl_help() {
 }
 
 fn repl_exec(source: &str, session: &mut ReplSession) {
-    let tokens = match lexer::lex(source) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("  {RED}error léxico{RESET}  línea {} — {}",
-                e.line, e.message, RED = cli::banner::RED, RESET = cli::banner::RESET);
-            return;
-        }
-    };
-    let stmts = match parser::parse(tokens) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("  {RED}error sintáctico{RESET}  línea {} — {}",
-                e.line, e.message, RED = cli::banner::RED, RESET = cli::banner::RESET);
-            return;
-        }
-    };
-    let bc = match codegen::compile(stmts) {
+    let bc = match compile_source(source, "<repl>") {
         Ok(b) => b,
-        Err(e) => {
-            eprintln!("  {RED}error codegen{RESET}  línea {} — {}",
-                e.line, e.message, RED = cli::banner::RED, RESET = cli::banner::RESET);
-            return;
-        }
+        Err(e) => { eprint!("{}", e.render(source)); return; }
     };
     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes);
     match machine.run() {
         Ok(_) => session.record(source),
-        Err(e) => eprintln!("  {RED}error runtime{RESET}  {}",
-            e.replace('\n', "\n  "), RED = cli::banner::RED, RESET = cli::banner::RESET),
+        Err(e) => eprint!("{}", error::parse_vm_error(&e, "<repl>").render(source)),
     }
 }
