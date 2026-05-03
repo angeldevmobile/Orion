@@ -14,7 +14,7 @@ use super::banner;
 pub fn run_build(src_path: &str, output: Option<&str>) {
     banner::section("Compilación nativa AOT");
 
-    // ── 1. Lex → Parse → Codegen ─────────────────────────────────────────
+    //   1. Lex → Parse → Codegen                      
     let src = read_src(src_path);
 
     let tokens = match crate::lexer::lex(&src) {
@@ -51,7 +51,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
 
     banner::ok(&format!("Bytecode: {} bytes", bc_bytes.len()));
 
-    // ── 2. cranelift-object → .o ─────────────────────────────────────────
+    //   2. cranelift-object → .o                      
     let obj_bytes = match crate::aot::compile_to_object(&bc_bytes) {
         Ok(b) => b,
         Err(e) => {
@@ -79,13 +79,13 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
 
     banner::ok(&format!("Objeto:   {}", obj_path.display()));
 
-    // ── 3. Staticlib de orion_vm (con caché) ─────────────────────────────
+    //   3. Staticlib de orion_vm (con caché)                
     let vm_dir   = locate_vm_crate();
     let lib_path = build_staticlib(&vm_dir, &tmp_dir);
 
     banner::ok(&format!("Runtime:  {}", lib_path.display()));
 
-    // ── 4. Enlazar → ejecutable ──────────────────────────────────────────
+    //   4. Enlazar → ejecutable                      
     let exe_ext = if cfg!(windows) { ".exe" } else { "" };
     let out_path = output
         .map(PathBuf::from)
@@ -100,7 +100,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
     println!();
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+//   Helpers                                  
 
 fn read_src(path: &str) -> String {
     match fs::read_to_string(path) {

@@ -355,6 +355,19 @@ fn main() {
             cli::build_native::run_build(&args[2], output);
         }
 
+        //    Formatear código fuente
+        "--format" => {
+            let src_path = match args[2..].iter().find(|a| !a.starts_with("--")) {
+                Some(p) => p.as_str(),
+                None => {
+                    cli::banner::fail("Uso: orion --format <archivo.orx> [--write]");
+                    std::process::exit(1);
+                }
+            };
+            let write_back = args.iter().any(|a| a == "--write");
+            cli::format::run_format(src_path, write_back);
+        }
+
         //    Generar documentación Markdown
         "--docs" => {
             if args.len() < 3 {
@@ -546,6 +559,7 @@ fn print_help() {
         ("--repl",                        "Modo interactivo"),
         ("--lex  <archivo.orx>",          "Imprimir tokens"),
         ("--eval <ast.json>",             "Evaluador de árbol (tree-walker)"),
+        ("--format <archivo.orx>",          "Formatear código fuente  [--write]"),
         ("--docs <archivo|carpeta>",       "Generar docs Markdown  [--output=dir]"),
         ("--add  <paquete>",              "Instalar paquete  [--force]"),
         ("--remove <paquete>",            "Desinstalar paquete"),

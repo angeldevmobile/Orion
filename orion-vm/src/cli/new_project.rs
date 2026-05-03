@@ -65,8 +65,8 @@ fn main_template(name: &str) -> String {
 r#"-- Proyecto: {name}
 -- Punto de entrada principal
 
-fn greet(name) {{
-    print("Hola, " + name + "!")
+fn greet(nombre) {{
+    show "Hola, " + nombre + "!"
 }}
 
 greet("mundo")
@@ -82,15 +82,15 @@ r#"-- Tests para: {name}
 
 fn assert_eq(a, b, msg) {{
     if a != b {{
-        throw "AssertionError: " + msg + " — esperado: " + b + ", obtenido: " + a
+        error "AssertionError: " + msg + " — esperado: " + str(b) + ", obtenido: " + str(a)
     }}
 }}
 
--- Test básico
+-- Tests básicos
 assert_eq(1 + 1, 2, "suma básica")
 assert_eq("hola", "hola", "strings iguales")
 
-print("Tests de {name}: OK")
+show "Tests de {name}: OK"
 "#
     )
 }
