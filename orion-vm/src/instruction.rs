@@ -99,6 +99,11 @@ pub enum Instruction {
     //   Módulos
     UseModule(String),   // carga módulo por nombre/path → almacena namespace en variable
 
+    //   Debugger
+    /// Punto de pausa explícito en código fuente (emitido por `@breakpoint`).
+    /// En modo normal es no-op; en modo debug pausa la sesión.
+    Breakpoint,
+
     //   Fin
     Halt,
 }

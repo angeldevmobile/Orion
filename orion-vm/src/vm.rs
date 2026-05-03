@@ -413,6 +413,7 @@ impl VM {
                 }
             }
             Instruction::Halt => return Ok(true),
+            Instruction::Breakpoint => {} // no-op en modo normal; el debugger lo maneja por línea
 
             //    Módulos                                                       
             Instruction::UseModule(path) => {
@@ -2088,6 +2089,65 @@ impl VM {
         };
 
         Ok(result)
+    }
+
+    // ─── Interfaz pública del debugger ───────────────────────────────────────
+
+    /// Ejecuta exactamente un paso del loop principal.
+    /// Retorna `Ok(true)` cuando el programa terminó.
+    pub fn step_once(&mut self) -> Result<bool, String> {
+        self.step()
+    }
+
+    /// Línea de código fuente que se está ejecutando actualmente.
+    pub fn current_line(&self) -> u32 {
+        self.current_line
+    }
+
+    /// Número de frames en el call stack (0 = programa terminado).
+    pub fn call_depth(&self) -> usize {
+        self.call_stack.len()
+    }
+
+    /// El programa terminó (call stack vacío tras el último Return/Halt).
+    pub fn is_done(&self) -> bool {
+        self.call_stack.is_empty()
+    }
+
+    /// Frames del call stack para el debugger: `(nombre_fn, línea)` del más reciente al más antiguo.
+    pub fn debug_frames(&self) -> Vec<(String, u32)> {
+        self.call_stack.iter().rev()
+            .map(|f| (f.name.clone(), f.current_line()))
+            .collect()
+    }
+
+    /// Variables del frame más reciente (scope local actual).
+    pub fn debug_frame_vars(&self) -> Vec<(String, Value)> {
+        self.call_stack.last()
+            .map(|f| f.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default()
+    }
+
+    /// Variables de todos los frames, del más reciente al más antiguo.
+    pub fn debug_all_scopes(&self) -> Vec<Vec<(String, Value)>> {
+        self.call_stack.iter().rev()
+            .map(|f| f.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .collect()
+    }
+
+    /// Copia del value stack actual (índice 0 = bottom).
+    pub fn debug_value_stack(&self) -> Vec<Value> {
+        self.value_stack.clone()
+    }
+
+    /// Busca una variable en la cadena de scopes (local → global).
+    pub fn debug_lookup_var(&self, name: &str) -> Option<Value> {
+        for frame in self.call_stack.iter().rev() {
+            if let Some(v) = frame.vars.get(name) {
+                return Some(v.clone());
+            }
+        }
+        None
     }
 
 } // fin impl VM

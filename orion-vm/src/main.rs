@@ -21,6 +21,8 @@ mod typechecker;
 mod cli;
 mod jit;
 mod error;
+mod debugger;
+mod dap;
 
 extern crate tiny_http;
 
@@ -355,6 +357,30 @@ fn main() {
             cli::build_native::run_build(&args[2], output);
         }
 
+        //    Debugger interactivo
+        "--debug" => {
+            let src_path = match args.get(2) {
+                Some(p) if !p.starts_with("--") => p.as_str(),
+                _ => {
+                    cli::banner::fail("Uso: orion --debug <archivo.orx>");
+                    std::process::exit(1);
+                }
+            };
+            cli::debug::run_debug(src_path);
+        }
+
+        //    DAP server para VS Code
+        "--dap" => {
+            let src_path = match args.get(2) {
+                Some(p) if !p.starts_with("--") => p.as_str(),
+                _ => {
+                    eprintln!("[dap] Uso: orion --dap <archivo.orx>");
+                    std::process::exit(1);
+                }
+            };
+            dap::run_dap(src_path);
+        }
+
         //    Formatear código fuente
         "--format" => {
             let src_path = match args[2..].iter().find(|a| !a.starts_with("--")) {
@@ -551,6 +577,8 @@ fn print_help() {
         ("--compile <archivo.orx>",       "Compilar a .orbc (bytecode)"),
         ("--build <archivo.orx>",         "Compilar a ejecutable nativo  [-o salida]"),
         ("--check <archivo.orx>",         "Verificar sintaxis  [--types]"),
+        ("--debug <archivo.orx>",         "Debugger interactivo (breakpoints, step, watches)"),
+        ("--dap   <archivo.orx>",         "DAP server stdio para VS Code"),
         ("--watch <archivo.orx>",         "Hot reload automático"),
         ("--bench <archivo.orx>",         "Benchmark  [--runs=N]"),
         ("--test [carpeta]",              "Ejecutar tests (test_*.orx)"),

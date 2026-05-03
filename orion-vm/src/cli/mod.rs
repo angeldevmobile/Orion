@@ -8,3 +8,4 @@ pub mod new_project;
 pub mod docs;
 pub mod build_native;
 pub mod format;
+pub mod debug;
