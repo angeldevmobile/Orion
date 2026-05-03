@@ -936,12 +936,14 @@ impl Parser {
                             self.pos += 1;
                             let act_name = self.expect_ident()?;
                             let params = self.parse_params()?;
-                            if matches!(self.peek(), TokenKind::ThinArrow) {
+                            let ret_type = if matches!(self.peek(), TokenKind::ThinArrow) {
                                 self.pos += 1;
-                                self.parse_type_name().ok();
-                            }
+                                self.parse_type_name().ok()
+                            } else {
+                                None
+                            };
                             let body = self.parse_block()?;
-                            acts.push(ActDef { name: act_name, params, body });
+                            acts.push(ActDef { name: act_name, params, ret_type, body });
                         }
                         TokenKind::Ident(_) => {
                             // campo: name [: type] [= default]  |  name: default_expr

@@ -44,6 +44,8 @@ struct SymbolParam {
 struct ActInfo {
     name: String,
     params: Vec<SymbolParam>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ret: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -118,6 +120,7 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
                             name: p.name.clone(),
                             type_hint: p.type_hint.clone(),
                         }).collect(),
+                        ret: a.ret_type.clone(),
                     }).collect()),
                     data_type: None,
                     doc: doc.clone(),

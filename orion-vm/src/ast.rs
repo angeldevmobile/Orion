@@ -156,5 +156,6 @@ pub struct FieldDef {
 pub struct ActDef {
     pub name: String,
     pub params: Vec<Param>,
+    pub ret_type: Option<String>,
     pub body: Vec<Stmt>,
 }
