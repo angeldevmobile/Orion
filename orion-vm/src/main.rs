@@ -2,6 +2,7 @@ mod instruction;
 mod value;
 mod gc;
 mod vm;
+mod aot;
 mod bytecode;
 mod eval_value;
 mod env;
@@ -343,6 +344,17 @@ fn main() {
             pkg::publish_package();
         }
 
+        "--build" => {
+            if args.len() < 3 {
+                cli::banner::fail("Uso: orion --build <archivo.orx> [-o <salida>]");
+                std::process::exit(1);
+            }
+            let output = args.windows(2)
+                .find(|w| w[0] == "-o")
+                .map(|w| w[1].as_str());
+            cli::build_native::run_build(&args[2], output);
+        }
+
         //    Generar documentación Markdown
         "--docs" => {
             if args.len() < 3 {
@@ -523,7 +535,8 @@ fn print_help() {
     let cmds = [
         ("--run  <archivo.orx>",         "Compilar y ejecutar"),
         ("--jit  <archivo.orx>",         "Compilar y ejecutar con JIT Cranelift"),
-        ("--compile <archivo.orx>",       "Compilar a .orbc"),
+        ("--compile <archivo.orx>",       "Compilar a .orbc (bytecode)"),
+        ("--build <archivo.orx>",         "Compilar a ejecutable nativo  [-o salida]"),
         ("--check <archivo.orx>",         "Verificar sintaxis  [--types]"),
         ("--watch <archivo.orx>",         "Hot reload automático"),
         ("--bench <archivo.orx>",         "Benchmark  [--runs=N]"),

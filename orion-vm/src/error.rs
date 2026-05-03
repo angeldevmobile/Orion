@@ -102,7 +102,7 @@ impl OrionError {
     ///
     /// Produce output estilo Rust/Elm:
     ///
-    /// ```
+    /// ```text
     ///   error sintáctico  →  main.orx:5:3
     ///   Se esperaba '}' pero encontró 'else'
     ///

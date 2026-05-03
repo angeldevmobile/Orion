@@ -149,41 +149,63 @@ mod tests {
     }
 
     #[test]
-    fn test_gc_unreachable_instance_freed() {
+    fn test_gc_unreachable_non_cycle_freed_naturally() {
+        // Objetos sin ciclo se liberan solos cuando el Rc sale de scope.
+        // El GC solo limpia el Weak muerto del heap interno.
         let mut gc = Gc::new();
-        let inst = make_inst("Temp");
-        gc.register(&inst);
-        // inst se registró pero no hay root apuntando a él
-        let freed = gc.collect(&[]);
+        let weak = {
+            let inst = make_inst("Temp");
+            gc.register(&inst);
+            let w = Rc::downgrade(&inst);
+            w // inst se dropea aquí → sin ciclo → Rc.count cae a 0 → freed
+        };
 
-        assert_eq!(freed, 1);
+        // Ya fue liberado naturalmente antes de llamar al GC
+        assert!(weak.upgrade().is_none(), "debe estar liberado por Rc normal");
+
+        // El GC limpia el Weak muerto del heap
+        gc.collect(&[]);
         assert_eq!(gc.heap_size(), 0);
     }
 
     #[test]
     fn test_gc_cycle_broken() {
-        // a.ref = b, b.ref = a  → ciclo puro sin roots → ambos se deben liberar
+        // a.ref = b, b.ref = a  → ciclo puro.
+        // Sin el GC, el ciclo mantiene vivos a ambos aunque nada los referencia.
+        // El GC debe romper el ciclo vaciando los fields → Rc.count cae a 0.
         let mut gc = Gc::new();
-        let a = make_inst("A");
-        let b = make_inst("B");
 
-        // Crear ciclo: a.ref = b, b.ref = a
-        a.borrow_mut().fields.insert("ref".to_string(), Value::Instance(Rc::clone(&b)));
-        b.borrow_mut().fields.insert("ref".to_string(), Value::Instance(Rc::clone(&a)));
+        // Guardamos solo referencias débiles para comprobar al final
+        let (weak_a, weak_b) = {
+            let a = make_inst("A");
+            let b = make_inst("B");
 
-        gc.register(&a);
-        gc.register(&b);
+            // Crear el ciclo
+            a.borrow_mut().fields.insert("ref".to_string(), Value::Instance(Rc::clone(&b)));
+            b.borrow_mut().fields.insert("ref".to_string(), Value::Instance(Rc::clone(&a)));
 
-        // Sin roots — ambos son ciclo puro
+            gc.register(&a);
+            gc.register(&b);
+
+            (Rc::downgrade(&a), Rc::downgrade(&b))
+            // a y b (los Rc locales) se dropean aquí, pero el ciclo los mantiene vivos
+        };
+
+        // Sin GC ambos siguen vivos gracias al ciclo
+        assert!(weak_a.upgrade().is_some(), "ciclo debe mantener 'a' vivo");
+        assert!(weak_b.upgrade().is_some(), "ciclo debe mantener 'b' vivo");
+
+        // GC sin roots → rompe el ciclo
         let freed = gc.collect(&[]);
 
-        assert_eq!(freed, 2);
-        assert_eq!(gc.heap_size(), 0);
+        assert_eq!(freed, 2, "el GC debió liberar 2 instancias del ciclo");
+        assert!(weak_a.upgrade().is_none(), "'a' debe estar liberado tras el GC");
+        assert!(weak_b.upgrade().is_none(), "'b' debe estar liberado tras el GC");
     }
 
     #[test]
     fn test_gc_partial_cycle() {
-        // root → a → b → a (ciclo), pero root mantiene a vivo
+        // root → a → b → a (ciclo), pero root mantiene a (y b) vivos
         let mut gc = Gc::new();
         let a = make_inst("A");
         let b = make_inst("B");
@@ -194,11 +216,11 @@ mod tests {
         gc.register(&a);
         gc.register(&b);
 
-        // root apunta a 'a' — tanto a como b son alcanzables
+        // root apunta a 'a' — tanto a como b son alcanzables desde la raíz
         let roots = vec![Value::Instance(Rc::clone(&a))];
         let freed = gc.collect(&roots);
 
-        assert_eq!(freed, 0);
+        assert_eq!(freed, 0, "ninguno debe liberarse con un root activo");
         assert_eq!(gc.heap_size(), 2);
     }
 

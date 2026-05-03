@@ -7,6 +7,7 @@ description = "Orion Language Virtual Machine"
 [lib]
 name = "orion_vm"
 path = "src/lib.rs"
+crate-type = ["rlib", "staticlib"]
 
 [[bin]]
 name = "orion"
@@ -31,6 +32,7 @@ cranelift-frontend = "0.113"
 cranelift-jit      = "0.113"
 cranelift-module   = "0.113"
 cranelift-native   = "0.113"
+cranelift-object   = "0.113"
 
 # ── FFI dinámico ──────────────────────────────────────────────────────────────
 libloading = "0.8"
