@@ -3,9 +3,10 @@ pub mod runner;
 pub mod state;
 pub mod theme;
 
+use std::sync::atomic::Ordering;
 use crate::eval_value::EvalValue;
 use components::{Component, Style};
-use state::with_state;
+use state::{with_state, IS_WATCH_MODE};
 
 //     Dispatcher principal — gui.función(args)
 
@@ -20,7 +21,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        //    Tipografía — gui.heading("texto", "color?", "colorTexto?")
+        //    Tipografía — gui.heading("texto", "colorTexto?")
         "heading" => push(Component::Heading(req_str(&args, 0, "heading")?, style_args(&args, 1, 2))),
         "text"    => push(Component::Text(req_str(&args, 0, "text")?, style_args(&args, 1, 2))),
         "caption" => push(Component::Caption(req_str(&args, 0, "caption")?, style_args(&args, 1, 2))),
@@ -52,6 +53,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //    Lanzar ventana
         "run" => {
+            // En watch mode el watcher ya tiene los componentes y gestiona la ventana
+            if IS_WATCH_MODE.load(Ordering::Relaxed) {
+                return Ok(EvalValue::Null);
+            }
             let (title, width, height, components, field_vals) =
                 with_state(|s| (
                     s.title.clone(),
@@ -66,6 +71,22 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         other => Err(format!("gui.{other} no existe")),
     }
+}
+
+/// Lanza el hot-reload GUI si el script tiene componentes. Devuelve true si era un GUI script.
+/// Llamado desde cli/watch.rs después de la primera evaluación.
+pub fn try_launch_watch(path: &str) -> bool {
+    let (has_comps, title, w, h, comps, fields) = with_state(|s| (
+        !s.components.is_empty(),
+        s.title.clone(),
+        s.width,
+        s.height,
+        s.components.clone(),
+        s.field_vals.clone(),
+    ));
+    if !has_comps { return false; }
+    let _ = runner::launch_watch(path, title, w, h, comps, fields);
+    true
 }
 
 //     Helpers
@@ -94,7 +115,7 @@ fn f32_arg(args: &[EvalValue], i: usize) -> Option<f32> {
     })
 }
 
-/// Parsea un color desde un string: "#RRGGBB" o nombre ("accent", "red", etc.)
+/// Parsea "#RRGGBB" o nombre de color ("accent", "red", etc.)
 fn parse_color(s: &str) -> Option<[u8; 3]> {
     match s.to_lowercase().as_str() {
         "accent"        => return Some([108, 99,  255]),
@@ -127,7 +148,6 @@ fn color_arg(args: &[EvalValue], i: usize) -> Option<[u8; 3]> {
     str_arg(args, i).and_then(|s| parse_color(&s))
 }
 
-/// Construye un Style leyendo bg en `bg_idx` y fg en `fg_idx`
 fn style_args(args: &[EvalValue], bg_idx: usize, fg_idx: usize) -> Style {
     Style {
         bg: color_arg(args, bg_idx),

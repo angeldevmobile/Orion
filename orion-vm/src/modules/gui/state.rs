@@ -1,6 +1,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use super::components::Component;
+
+/// Cuando está en true, gui.run() no lanza eframe — el watcher maneja la ventana.
+pub static IS_WATCH_MODE: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     pub static STATE: RefCell<GuiState> = RefCell::new(GuiState::default());

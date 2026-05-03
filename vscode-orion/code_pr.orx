@@ -1,7 +1,7 @@
 use gui   
 
-gui.panel("Mi App", 900, 600)
-gui.heading("Bienvenido a Orion")
+gui.panel("Mi App en Orion", 900, 600)
+gui.heading("Bienvenido a Orion Code")
 gui.caption("Interfaz nativa de Orion")
 gui.divider()
 gui.field("Tu nombre...")

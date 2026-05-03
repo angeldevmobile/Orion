@@ -1,19 +1,32 @@
 use std::time::{Duration, Instant, SystemTime};
 use std::thread;
 use std::fs;
+use std::sync::atomic::Ordering;
 use crate::{lexer, parser, codegen, vm};
+use crate::modules::gui;
 use super::banner;
 
 pub fn run_watch(path: &str) {
     banner::info(&format!(
         "Watch activo: {BOLD}{path}{RESET}  {DIM}(Ctrl+C para detener){RESET}",
-        BOLD = banner::BOLD, RESET = banner::RESET, DIM = banner::DIM, path = path
+        BOLD = banner::BOLD, RESET = banner::RESET, DIM = banner::DIM
     ));
     println!();
 
-    let mut last_mtime = mtime(path);
+    // Activar watch mode: gui.run() no bloqueará, solo registra los componentes
+    gui::state::IS_WATCH_MODE.store(true, Ordering::Relaxed);
+
+    // Primera evaluación
     compile_and_run(path);
 
+    // Si era un script GUI, lanzamos la ventana con hot-reload integrado.
+    // launch_watch bloquea hasta que se cierra la ventana (eframe::run_native).
+    if gui::try_launch_watch(path) {
+        return;
+    }
+
+    // Script no-GUI: loop de polling tradicional
+    let mut last_mtime = mtime(path);
     loop {
         thread::sleep(Duration::from_millis(400));
         let cur = mtime(path);
