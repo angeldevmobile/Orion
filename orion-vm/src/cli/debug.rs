@@ -345,6 +345,7 @@ fn dbg_val(v: &Value) -> String {
         Value::Closure { fn_name, .. } => format!("{}‹fn {}›{}", DIM, fn_name, RST),
         Value::Task(_)         => format!("{}‹task›{}", DIM, RST),
         Value::Ptr(p)          => format!("{}0x{:x}{}", DIM, p, RST),
+        Value::Module(m)       => format!("{}‹module {}›{}", DIM, m, RST),
     }
 }
 

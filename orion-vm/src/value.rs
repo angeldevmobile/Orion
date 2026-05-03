@@ -54,6 +54,8 @@ pub enum Value {
     Task(Arc<Mutex<Option<Result<SendValue, String>>>>),
     /// Puntero opaco de C FFI (dirección de memoria como u64)
     Ptr(u64),
+    /// Módulo stdlib nativo cargado con `use`
+    Module(String),
     Null,
 }
 
@@ -98,6 +100,7 @@ impl fmt::Display for Value {
             Value::Instance(inst) => write!(f, "<{} instance>", inst.borrow().shape_name),
             Value::Closure { fn_name, .. } => write!(f, "<fn {}>", fn_name),
             Value::Task(_) => write!(f, "<tarea>"),
+            Value::Module(m) => write!(f, "<module {}>", m),
         }
     }
 }
@@ -116,6 +119,7 @@ impl Value {
             Value::Instance(i)         => i.borrow().shape_name.clone(),
             Value::Closure { .. }      => "fn".to_string(),
             Value::Task(_)             => "tarea".to_string(),
+            Value::Module(m)           => format!("module<{}>", m),
         }
     }
 
@@ -131,6 +135,7 @@ impl Value {
             Value::Instance(_)    => true,
             Value::Closure { .. } => true,
             Value::Task(_)        => true,
+            Value::Module(_)      => true,
             Value::Null           => false,
         }
     }
@@ -158,6 +163,8 @@ impl Value {
             Value::Ptr(p) => Ok(SendValue::Ptr(*p)),
             Value::Closure { fn_name, .. } =>
                 Ok(SendValue::Str(fn_name.clone())),
+            Value::Module(m) =>
+                Ok(SendValue::Str(format!("<module {}>", m))),
             Value::Instance(_) =>
                 Err("No se puede pasar una instancia a una función async".to_string()),
             Value::Task(_) =>

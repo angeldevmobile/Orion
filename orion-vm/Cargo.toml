@@ -38,3 +38,7 @@ cranelift-object   = "0.113"
 libloading = "0.8"
 libffi       = "3"
 base64       = "0.21"
+
+# ── GUI nativa (orion-gui) ────────────────────────────────────────────────────
+egui   = "0.29"
+eframe = "0.29"

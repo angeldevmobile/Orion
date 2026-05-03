@@ -456,6 +456,7 @@ fn dap_val(v: &crate::value::Value) -> String {
         Value::Closure { fn_name, .. } => format!("<fn {}>", fn_name),
         Value::Task(_)            => "<task>".into(),
         Value::Ptr(p)             => format!("0x{:x}", p),
+        Value::Module(m)          => format!("<module {}>", m),
     }
 }
 

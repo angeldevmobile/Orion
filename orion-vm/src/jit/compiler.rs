@@ -906,7 +906,7 @@ impl JitCompiler {
                     terminated = true;
                 }
 
-                // ── Manejo de errores — JIT-3 ────────────────────────────────
+                //    Manejo de errores — JIT-3                                 
                 Instruction::BeginAttempt(handler_addr) => {
                     let handler_block = *block_map.get(handler_addr)
                         .ok_or_else(|| format!("BeginAttempt: handler {handler_addr} no encontrado"))?;
@@ -938,7 +938,7 @@ impl JitCompiler {
                     terminated = true;
                 }
 
-                // ── Colecciones — JIT-2 ──────────────────────────────────────
+                //    Colecciones — JIT-2                                       
                 Instruction::MakeList(n_count) => {
                     let n = *n_count as usize;
                     // Pop N elementos del stack en orden inverso, luego revertir.
@@ -982,7 +982,7 @@ impl JitCompiler {
                     stack.push(builder.inst_results(call)[0]);
                 }
 
-                // ── OOP — JIT-5 ─────────────────────────────────────────────
+                //    OOP — JIT-5                                              
                 Instruction::DefineShape(_) => { /* no-op: shapes ya registradas en run_program */ }
 
                 Instruction::GetAttr(attr) => {
@@ -1040,7 +1040,7 @@ impl JitCompiler {
                     stack.push(builder.inst_results(call)[0]);
                 }
 
-                // ── I/O nativo — JIT-4 ──────────────────────────────────────
+                //    I/O nativo — JIT-4                                       
                 Instruction::ReadInput { cast, choices } => {
                     let cast_ptr = if let Some(c) = cast {
                         let mut bytes = c.as_bytes().to_vec();
@@ -1111,7 +1111,7 @@ impl JitCompiler {
                     }
                 }
 
-                // ── JIT-6: Closures ─────────────────────────────────────────────
+                //    JIT-6: Closures                                              
                 Instruction::MakeClosure(fn_name) => {
                     // Crea un OrionVal TAG_CLOSURE con el fn_ptr de la función.
                     // Las llamadas en JIT son estáticas; el valor sirve como marcador.
@@ -1124,7 +1124,7 @@ impl JitCompiler {
                     stack.push(builder.inst_results(call)[0]);
                 }
 
-                // ── JIT-6: Async ─────────────────────────────────────────────────
+                //    JIT-6: Async                                                  
                 Instruction::CallAsync(fname, n_args) => {
                     let n = *n_args as usize;
                     // Pop args del stack en orden, revertir, pushear al ARG_BUF

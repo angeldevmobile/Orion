@@ -1,2 +1,10 @@
-if x > 5 {
-  show x 
+use gui   
+
+gui.panel("Mi App", 900, 600)
+gui.heading("Bienvenido a Orion")
+gui.caption("Interfaz nativa de Orion")
+gui.divider()
+gui.field("Tu nombre...")
+gui.press("Continuar")
+gui.badge("Beta")
+gui.run()

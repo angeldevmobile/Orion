@@ -742,6 +742,13 @@ impl VM {
                         frame.instance_fields = field_names;
                         self.call_stack.push(frame);
                     }
+                    // ── Módulos stdlib nativos ────────────────────────────
+                    Value::Module(mod_name) => {
+                        let eval_args: Vec<crate::eval_value::EvalValue> =
+                            args.into_iter().map(value_to_eval).collect();
+                        let result = crate::modules::call(&mod_name, &method_name, eval_args)?;
+                        self.value_stack.push(eval_to_value(result));
+                    }
                     _ => return Err(format!("CallMethod '{}': no es una instancia", method_name)),
                 }
             }
@@ -1080,6 +1087,9 @@ impl VM {
         // 1) Módulos builtin Rust tienen prioridad sobre archivos
         match base_name {
             "math" => return Ok(self.builtin_math_module()),
+            name if crate::modules::is_known_module(name) => {
+                return Ok(Value::Module(name.to_string()));
+            }
             _ => {}
         }
 
@@ -2304,6 +2314,46 @@ fn ai_call_openai(prompt: String, context: Option<String>, key: String) -> Resul
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| format!("Respuesta inesperada de OpenAI: {}", json))
+}
+
+// ─── Bridge Value ↔ EvalValue (para módulos stdlib en el bytecode VM) ────────
+
+pub fn value_to_eval(v: Value) -> crate::eval_value::EvalValue {
+    use crate::eval_value::EvalValue as E;
+    match v {
+        Value::Int(n)    => E::Int(n),
+        Value::Float(f)  => E::Float(f),
+        Value::Str(s)    => E::Str(s),
+        Value::Bool(b)   => E::Bool(b),
+        Value::Null      => E::Null,
+        Value::Module(m) => E::Module(m),
+        Value::List(items) => E::List(items.into_iter().map(value_to_eval).collect()),
+        Value::Dict(map)   => {
+            let mut m = std::collections::HashMap::new();
+            for (k, v) in map { m.insert(k, value_to_eval(v)); }
+            E::Dict(m)
+        }
+        _ => E::Null,
+    }
+}
+
+pub fn eval_to_value(e: crate::eval_value::EvalValue) -> Value {
+    use crate::eval_value::EvalValue as E;
+    match e {
+        E::Int(n)    => Value::Int(n),
+        E::Float(f)  => Value::Float(f),
+        E::Str(s)    => Value::Str(s),
+        E::Bool(b)   => Value::Bool(b),
+        E::Null      => Value::Null,
+        E::Module(m) => Value::Module(m),
+        E::List(items) => Value::List(items.into_iter().map(eval_to_value).collect()),
+        E::Dict(map)   => {
+            let mut m = indexmap::IndexMap::new();
+            for (k, v) in map { m.insert(k, eval_to_value(v)); }
+            Value::Dict(m)
+        }
+        _ => Value::Null,
+    }
 }
 
 // ─── Tests unitarios de la VM ────────────────────────────────────────────────

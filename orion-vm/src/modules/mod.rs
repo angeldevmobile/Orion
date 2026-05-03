@@ -18,6 +18,9 @@ pub mod timewarp_mod;
 pub mod vision_mod;
 pub mod insight_mod;
 
+// Interfaces nativas de Orion
+pub mod gui;
+
 use crate::eval_value::EvalValue;
 
 /// Dispatcher principal: módulo → función → args.
@@ -41,6 +44,8 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "timewarp" => timewarp_mod::call(function, args),
         "vision"   => vision_mod::call(function, args),
         "insight"  => insight_mod::call(function, args),
+        // Interfaces nativas
+        "gui"      => gui::call(function, args),
         _ => Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module)),
     }
 }
@@ -53,6 +58,8 @@ pub fn is_known_module(name: &str) -> bool {
         "process" | "env" | "net" |
         // Avanzados
         "ai" | "crypto" | "matrix" | "quantum" |
-        "cosmos" | "timewarp" | "vision" | "insight"
+        "cosmos" | "timewarp" | "vision" | "insight" |
+        // Interfaces
+        "gui"
     )
 }

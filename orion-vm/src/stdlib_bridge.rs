@@ -10,6 +10,7 @@ use crate::eval_value::EvalValue;
 /// Módulos que están completamente migrados a Rust nativo.
 pub const NATIVE_MODULES: &[&str] = &[
     "fs", "json", "random", "strings", "datetime", "process", "env", "net",
+    "gui",
 ];
 
 /// Módulos avanzados que aún no han sido migrados (stdlib avanzada).
