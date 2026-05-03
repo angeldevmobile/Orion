@@ -8,6 +8,7 @@ use libloading;
 use crate::instruction::Instruction;
 use crate::value::{Value, InstanceData, SendValue, from_send};
 use crate::bytecode::{ExternFnDef, FunctionDef, ShapeDef};
+use crate::gc::Gc;
 
 struct CallFrame {
     instructions: Vec<Instruction>,
@@ -87,6 +88,8 @@ pub struct VM {
     error_handlers: Vec<ErrorHandler>,
     /// Memoria de sesión para instrucciones AiLearn / AiSense
     ai_memory: Vec<String>,
+    /// Mark-and-sweep GC para instancias con ciclos de referencias
+    gc: Gc,
 }
 
 impl VM {
@@ -107,7 +110,23 @@ impl VM {
             current_line: 0,
             error_handlers: Vec::new(),
             ai_memory: Vec::new(),
+            gc: Gc::new(),
         }
+    }
+
+    /// Recolecta instancias con ciclos usando mark-and-sweep.
+    fn gc_collect(&mut self) {
+        let mut roots: Vec<Value> = Vec::with_capacity(
+            self.value_stack.len() + self.call_stack.len() * 8,
+        );
+        roots.extend(self.value_stack.iter().cloned());
+        for frame in &self.call_stack {
+            roots.extend(frame.vars.values().cloned());
+            if let Some(ref inst) = frame.self_instance {
+                roots.push(Value::Instance(Rc::clone(inst)));
+            }
+        }
+        self.gc.collect(&roots);
     }
 
     /// Construye una cadena de stack trace con todos los frames activos.
@@ -1289,6 +1308,10 @@ impl VM {
             shape_name: shape_name.to_string(),
             fields,
         }));
+        self.gc.register(&inst_rc);
+        if self.gc.should_collect() {
+            self.gc_collect();
+        }
 
         let on_create = self.find_on_create(shape_name).cloned();
 
@@ -2221,4 +2244,329 @@ fn ai_call_openai(prompt: String, context: Option<String>, key: String) -> Resul
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| format!("Respuesta inesperada de OpenAI: {}", json))
+}
+
+// ─── Tests unitarios de la VM ────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::instruction::Instruction;
+    use indexmap::IndexMap;
+
+    /// Crea una VM mínima con solo las instrucciones dadas.
+    fn make_vm(instructions: Vec<Instruction>) -> VM {
+        let n = instructions.len();
+        VM::new(
+            instructions,
+            vec![1u32; n],
+            IndexMap::new(),
+            IndexMap::new(),
+            IndexMap::new(),
+        )
+    }
+
+    /// Ejecuta las instrucciones y devuelve el valor en el tope del stack.
+    fn run_top(instructions: Vec<Instruction>) -> Result<Value, String> {
+        let mut vm = make_vm(instructions);
+        vm.run_raw()?;
+        vm.value_stack.pop().ok_or_else(|| "Stack vacío al terminar".to_string())
+    }
+
+    // ── Literales ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_load_int() {
+        assert_eq!(run_top(vec![Instruction::LoadInt(42), Instruction::Halt]).unwrap(), Value::Int(42));
+    }
+
+    #[test]
+    fn test_load_float() {
+        assert_eq!(run_top(vec![Instruction::LoadFloat(3.14), Instruction::Halt]).unwrap(), Value::Float(3.14));
+    }
+
+    #[test]
+    fn test_load_str() {
+        assert_eq!(run_top(vec![Instruction::LoadStr("orion".into()), Instruction::Halt]).unwrap(), Value::Str("orion".into()));
+    }
+
+    #[test]
+    fn test_load_bool_true() {
+        assert_eq!(run_top(vec![Instruction::LoadBool(true), Instruction::Halt]).unwrap(), Value::Bool(true));
+    }
+
+    #[test]
+    fn test_load_null() {
+        assert_eq!(run_top(vec![Instruction::LoadNull, Instruction::Halt]).unwrap(), Value::Null);
+    }
+
+    // ── Aritmética ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_add_int() {
+        let r = run_top(vec![Instruction::LoadInt(3), Instruction::LoadInt(4), Instruction::Add, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Int(7));
+    }
+
+    #[test]
+    fn test_sub_int() {
+        let r = run_top(vec![Instruction::LoadInt(10), Instruction::LoadInt(3), Instruction::Sub, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Int(7));
+    }
+
+    #[test]
+    fn test_mul_int() {
+        let r = run_top(vec![Instruction::LoadInt(6), Instruction::LoadInt(7), Instruction::Mul, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Int(42));
+    }
+
+    #[test]
+    fn test_div_exact() {
+        let r = run_top(vec![Instruction::LoadInt(10), Instruction::LoadInt(4), Instruction::Div, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Float(2.5));
+    }
+
+    #[test]
+    fn test_div_by_zero_int() {
+        let r = run_top(vec![Instruction::LoadInt(5), Instruction::LoadInt(0), Instruction::Div, Instruction::Halt]);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_mod_op() {
+        let r = run_top(vec![Instruction::LoadInt(10), Instruction::LoadInt(3), Instruction::Mod, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Int(1));
+    }
+
+    #[test]
+    fn test_pow_op() {
+        let r = run_top(vec![Instruction::LoadInt(2), Instruction::LoadInt(10), Instruction::Pow, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Int(1024));
+    }
+
+    #[test]
+    fn test_neg_int() {
+        let r = run_top(vec![Instruction::LoadInt(5), Instruction::Neg, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Int(-5));
+    }
+
+    #[test]
+    fn test_float_add() {
+        let r = run_top(vec![Instruction::LoadFloat(1.5), Instruction::LoadFloat(2.5), Instruction::Add, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Float(4.0));
+    }
+
+    #[test]
+    fn test_string_concat() {
+        let r = run_top(vec![
+            Instruction::LoadStr("hola".into()),
+            Instruction::LoadStr(" mundo".into()),
+            Instruction::Add,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Str("hola mundo".into()));
+    }
+
+    // ── Variables ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_store_load_var() {
+        let r = run_top(vec![
+            Instruction::LoadInt(99),
+            Instruction::StoreVar("x".into()),
+            Instruction::LoadVar("x".into()),
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(99));
+    }
+
+    // ── Comparación ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_eq_true() {
+        let r = run_top(vec![Instruction::LoadInt(5), Instruction::LoadInt(5), Instruction::Eq, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_eq_false() {
+        let r = run_top(vec![Instruction::LoadInt(5), Instruction::LoadInt(6), Instruction::Eq, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_not_eq() {
+        let r = run_top(vec![Instruction::LoadInt(3), Instruction::LoadInt(5), Instruction::NotEq, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_lt_true() {
+        let r = run_top(vec![Instruction::LoadInt(3), Instruction::LoadInt(5), Instruction::Lt, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_gt_false() {
+        let r = run_top(vec![Instruction::LoadInt(3), Instruction::LoadInt(5), Instruction::Gt, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_not_op() {
+        let r = run_top(vec![Instruction::LoadBool(true), Instruction::Not, Instruction::Halt]).unwrap();
+        assert_eq!(r, Value::Bool(false));
+    }
+
+    // ── Control de flujo ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_jump_unconditional() {
+        // Salta sobre LoadInt(999) que nunca debe ejecutarse
+        let r = run_top(vec![
+            Instruction::Jump(2),         // 0 → salta a 2
+            Instruction::LoadInt(999),    // 1 (ignorado)
+            Instruction::LoadInt(42),     // 2
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(42));
+    }
+
+    #[test]
+    fn test_jump_if_false_taken() {
+        let r = run_top(vec![
+            Instruction::LoadBool(false),
+            Instruction::JumpIfFalse(3), // condición falsa → salta a 3
+            Instruction::LoadInt(999),   // ignorado
+            Instruction::LoadInt(1),     // 3
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(1));
+    }
+
+    #[test]
+    fn test_jump_if_false_not_taken() {
+        let r = run_top(vec![
+            Instruction::LoadBool(true),
+            Instruction::JumpIfFalse(3), // condición verdadera → no salta
+            Instruction::LoadInt(42),    // 2 (se ejecuta)
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(42));
+    }
+
+    // ── Stack ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_dup() {
+        let mut vm = make_vm(vec![Instruction::LoadInt(7), Instruction::Dup, Instruction::Halt]);
+        vm.run_raw().unwrap();
+        assert_eq!(vm.value_stack.len(), 2);
+        assert_eq!(vm.value_stack[0], Value::Int(7));
+        assert_eq!(vm.value_stack[1], Value::Int(7));
+    }
+
+    #[test]
+    fn test_pop() {
+        let mut vm = make_vm(vec![
+            Instruction::LoadInt(1),
+            Instruction::LoadInt(2),
+            Instruction::Pop,
+            Instruction::Halt,
+        ]);
+        vm.run_raw().unwrap();
+        assert_eq!(vm.value_stack.len(), 1);
+        assert_eq!(vm.value_stack[0], Value::Int(1));
+    }
+
+    // ── Colecciones ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_make_list() {
+        let r = run_top(vec![
+            Instruction::LoadInt(1),
+            Instruction::LoadInt(2),
+            Instruction::LoadInt(3),
+            Instruction::MakeList(3),
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
+    }
+
+    #[test]
+    fn test_get_index() {
+        let r = run_top(vec![
+            Instruction::LoadInt(10),
+            Instruction::LoadInt(20),
+            Instruction::LoadInt(30),
+            Instruction::MakeList(3),
+            Instruction::LoadInt(1), // índice 1 → 20
+            Instruction::GetIndex,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(20));
+    }
+
+    #[test]
+    fn test_get_index_out_of_bounds() {
+        let r = run_top(vec![
+            Instruction::LoadInt(1),
+            Instruction::MakeList(1),
+            Instruction::LoadInt(99),
+            Instruction::GetIndex,
+            Instruction::Halt,
+        ]);
+        assert!(r.is_err());
+    }
+
+    // ── Manejo de errores ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_attempt_catch_error() {
+        // attempt { raise "boom" } handle e { "capturado" }
+        // 0: BeginAttempt(3) — si error, salta a 3
+        // 1: LoadStr("boom")
+        // 2: Raise            — error → salta a 3, push "boom" en stack
+        // 3: StoreVar("e")    — handler: guarda el error
+        // 4: LoadStr("capturado")
+        // 5: Halt
+        let r = run_top(vec![
+            Instruction::BeginAttempt(3),
+            Instruction::LoadStr("boom".into()),
+            Instruction::Raise,
+            Instruction::StoreVar("e".into()),
+            Instruction::LoadStr("capturado".into()),
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Str("capturado".into()));
+    }
+
+    #[test]
+    fn test_attempt_no_error() {
+        // attempt { 42 } handle e { "error" }
+        // 0: BeginAttempt(3)
+        // 1: LoadInt(42)
+        // 2: EndAttempt(4)  — sin error, salta a 4
+        // 3: StoreVar("e")  — handler (no se ejecuta)
+        // 4: Halt
+        let r = run_top(vec![
+            Instruction::BeginAttempt(3),
+            Instruction::LoadInt(42),
+            Instruction::EndAttempt(4),
+            Instruction::StoreVar("e".into()),
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(42));
+    }
+
+    #[test]
+    fn test_raise_without_handler_propagates() {
+        let r = run_top(vec![
+            Instruction::LoadStr("error sin handler".into()),
+            Instruction::Raise,
+            Instruction::Halt,
+        ]);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().contains("error sin handler"));
+    }
 }

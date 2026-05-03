@@ -26,6 +26,10 @@ pub fn run_new(name: &str) {
         &root.join(".orionrc"),
         &orionrc_template(name),
     );
+    write_file(
+        &root.join("orion.json"),
+        &manifest_template(name),
+    );
 
     println!();
     banner::ok(&format!("Proyecto '{name}' creado"));
@@ -34,6 +38,7 @@ pub fn run_new(name: &str) {
     println!("    cd {name}");
     println!("    orion --run {name}.orx");
     println!("    orion --test tests/");
+    println!("    orion --publish          (cuando quieras compartirlo)");
     println!();
 }
 
@@ -96,6 +101,21 @@ r#"# Orion project config
 name = "{name}"
 version = "0.1.0"
 entry = "{name}.orx"
+"#
+    )
+}
+
+fn manifest_template(name: &str) -> String {
+    format!(
+r#"{{
+  "name": "{name}",
+  "version": "0.1.0",
+  "description": "Descripción breve del paquete {name}",
+  "author": "",
+  "license": "MIT",
+  "tags": [],
+  "file": "{name}.orx"
+}}
 "#
     )
 }

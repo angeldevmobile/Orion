@@ -1,5 +1,6 @@
 mod instruction;
 mod value;
+mod gc;
 mod vm;
 mod bytecode;
 mod eval_value;
@@ -338,6 +339,10 @@ fn main() {
             pkg::update_packages(target);
         }
 
+        "--publish" => {
+            pkg::publish_package();
+        }
+
         //    Generar documentación Markdown
         "--docs" => {
             if args.len() < 3 {
@@ -534,6 +539,7 @@ fn print_help() {
         ("--list",                        "Listar paquetes disponibles"),
         ("--search <consulta>",           "Buscar paquetes"),
         ("--update [paquete]",            "Actualizar uno o todos"),
+        ("--publish",                     "Publicar paquete al registry (requiere orion.json)"),
         ("--version",                     "Versión del runtime"),
     ];
 

@@ -1,0 +1,36 @@
+[package]
+name = "orion-vm-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.orion-vm]
+path = ".."
+
+# Compilación optimizada para fuzzing (necesario para libfuzzer)
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "fuzz_lexer"
+path = "fuzz_targets/fuzz_lexer.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_parser"
+path = "fuzz_targets/fuzz_parser.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_full_pipeline"
+path = "fuzz_targets/fuzz_full_pipeline.rs"
+test = false
+doc = false
