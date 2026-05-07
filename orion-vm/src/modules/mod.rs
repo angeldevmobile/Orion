@@ -18,6 +18,11 @@ pub mod timewarp_mod;
 pub mod vision_mod;
 pub mod insight_mod;
 
+// Módulos de datos
+pub mod csv_mod;
+pub mod excel_mod;
+pub mod regex_mod;
+
 // Interfaces nativas de Orion
 pub mod gui;
 
@@ -44,6 +49,10 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "timewarp" => timewarp_mod::call(function, args),
         "vision"   => vision_mod::call(function, args),
         "insight"  => insight_mod::call(function, args),
+        // Datos
+        "csv"      => csv_mod::call(function, args),
+        "excel"    => excel_mod::call(function, args),
+        "regex"    => regex_mod::call(function, args),
         // Interfaces nativas
         "gui"      => gui::call(function, args),
         _ => Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module)),
@@ -59,6 +68,8 @@ pub fn is_known_module(name: &str) -> bool {
         // Avanzados
         "ai" | "crypto" | "matrix" | "quantum" |
         "cosmos" | "timewarp" | "vision" | "insight" |
+        // Datos
+        "csv" | "excel" | "regex" |
         // Interfaces
         "gui"
     )
