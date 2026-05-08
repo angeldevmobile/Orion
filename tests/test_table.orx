@@ -1,0 +1,92 @@
+use "table" as tbl
+
+show "=== TEST MÓDULO TABLE ==="
+show ""
+
+show "--- 1. Cargar datos ---"
+t = tbl.load("tests/datos_ventas.csv")
+tbl.peek(t)
+
+show "--- 2. Size (dimensiones) ---"
+s = tbl.size(t)
+show "Filas: ${s.rows}   Columnas: ${s.cols}"
+show ""
+
+show "--- 3. Schema de columnas ---"
+tbl.schema(t)
+
+show "--- 4. Filtros ---"
+norte = tbl.where(t, "region == 'Norte'")
+show "Vendedores en Norte: ${tbl.count(norte)}"
+
+top_ventas = tbl.where(t, "venta > 10000 && activo == true")
+show "Ventas mayor a 10000 y activo: ${tbl.count(top_ventas)}"
+
+show ""
+show "--- 5. Columna calculada ---"
+t2 = tbl.add(t, "iva", "venta * 0.19")
+t2 = tbl.add(t2, "total_con_iva", "round(venta * 1.19, 2)")
+tbl.peek(tbl.keep(t2, ["nombre", "venta", "iva", "total_con_iva"]), 5)
+
+show "--- 6. Top 3 vendedores ---"
+top3 = tbl.top(t, "venta", 3)
+tbl.peek(tbl.keep(top3, ["nombre", "region", "venta"]), 3)
+
+show "--- 7. Bottom 3 ---"
+bot3 = tbl.bottom(t, "venta", 3)
+tbl.peek(tbl.keep(bot3, ["nombre", "region", "venta"]), 3)
+
+show "--- 8. Stats de ventas ---"
+stats = tbl.stats(t, "venta")
+show "Min:    ${stats.min}"
+show "Max:    ${stats.max}"
+show "Avg:    ${stats.avg}"
+show "Std:    ${stats.std}"
+show "P25:    ${stats.p25}"
+show "Median: ${stats.median}"
+show "P75:    ${stats.p75}"
+show ""
+
+show "--- 9. Ventas por región (sum) ---"
+por_region = tbl.group(t, "region", "venta", "sum")
+tbl.peek(tbl.sort(por_region, "venta", "desc"))
+
+show "--- 10. Forecast (proximas 5 ventas proyectadas) ---"
+sorted_t = tbl.sort(t, "venta")
+pred = tbl.forecast(sorted_t, "venta", 5)
+show "Proyeccion: ${pred}"
+show ""
+
+show "--- 11. Anomalias en ventas (IQR) ---"
+anomalias = tbl.anomalies(t, "venta")
+show "Filas anomalas detectadas: ${tbl.count(anomalias)}"
+tbl.peek(tbl.keep(anomalias, ["nombre", "region", "venta"]))
+
+show "--- 12. Correlacion edad y venta ---"
+corr = tbl.correlate(t, "edad", "venta")
+show "Pearson(edad, venta) = ${corr}"
+show ""
+
+show "--- 13. Ranking por venta ---"
+ranked = tbl.rank(t, "venta")
+top_ranked = tbl.sort(ranked, "_rank")
+tbl.peek(tbl.keep(top_ranked, ["nombre", "venta", "_rank", "_pct"]), 5)
+
+show "--- 14. Media movil de 3 periodos ---"
+sorted_ventas = tbl.sort(t, "nombre")
+con_mavg = tbl.moving_avg(sorted_ventas, "venta", 3)
+tbl.peek(tbl.keep(con_mavg, ["nombre", "venta", "_mavg"]), 6)
+
+show "--- 15. Normalizacion min-max ---"
+normalizado = tbl.normalize(t, "venta")
+top_norm = tbl.sort(normalizado, "venta", "desc")
+tbl.peek(tbl.keep(top_norm, ["nombre", "venta", "_norm"]), 5)
+
+show "--- 16. Guardar resultados ---"
+tbl.save(por_region, "tests/output_regiones.csv")
+show "Guardado: tests/output_regiones.csv"
+tbl.save(por_region, "tests/output_regiones.json")
+show "Guardado: tests/output_regiones.json"
+
+show ""
+show "=== TEST COMPLETADO ==="

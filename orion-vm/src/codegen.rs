@@ -504,9 +504,15 @@ impl Codegen {
                 self.emit(Instruction::ServeHTTP(fn_name));
             }
 
-            Stmt::Use { path, .. } => {
-                // Emitir instrucción de carga de módulo en runtime
-                self.emit(Instruction::UseModule(path.clone()));
+            Stmt::Use { path, alias, .. } => {
+                let ns = alias.clone().unwrap_or_else(|| {
+                    std::path::Path::new(path.as_str())
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(path.as_str())
+                        .to_string()
+                });
+                self.emit(Instruction::UseModule(path.clone(), ns));
             }
             Stmt::Fn { .. }      => {} // compilado en primer pase
             Stmt::AsyncFn { .. } => {} // compilado en primer pase
@@ -1091,6 +1097,8 @@ fn compile_interpolated(
     s: &str,
 ) -> Result<(), CodegenError> {
     // Parsear partes: texto literal y ${expr}
+    // El extractor es consciente de strings anidados dentro de ${ } para
+    // soportar expresiones como ${csv.column(data, "col")}.
     let mut parts: Vec<(bool, String)> = Vec::new(); // (is_expr, content)
     let mut i = 0;
     let chars: Vec<char> = s.chars().collect();
@@ -1100,14 +1108,31 @@ fn compile_interpolated(
         if chars[i] == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
             if !cur.is_empty() { parts.push((false, cur.clone())); cur.clear(); }
             i += 2;
-            let mut depth = 1;
-            let start = i;
+            let mut depth = 1usize;
+            let mut expr = String::new();
             while i < chars.len() && depth > 0 {
-                if chars[i] == '{' { depth += 1; }
-                if chars[i] == '}' { depth -= 1; }
+                let ch = chars[i];
+                if ch == '"' {
+                    // string anidado — capturarlo completo incluyendo las comillas
+                    expr.push(ch);
+                    i += 1;
+                    while i < chars.len() {
+                        let ic = chars[i];
+                        expr.push(ic);
+                        i += 1;
+                        if ic == '"' { break; }
+                    }
+                    continue;
+                }
+                if ch == '{' { depth += 1; }
+                else if ch == '}' {
+                    depth -= 1;
+                    if depth == 0 { i += 1; break; }
+                }
+                expr.push(ch);
                 i += 1;
             }
-            parts.push((true, chars[start..i - 1].iter().collect()));
+            parts.push((true, expr));
         } else {
             cur.push(chars[i]);
             i += 1;

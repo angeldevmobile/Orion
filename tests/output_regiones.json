@@ -1,0 +1,14 @@
+[
+  {
+    "region": "Norte",
+    "venta": 81800.0
+  },
+  {
+    "region": "Sur",
+    "venta": 42300.0
+  },
+  {
+    "region": "Centro",
+    "venta": 56050.0
+  }
+]

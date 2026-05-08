@@ -1,0 +1,5 @@
+activo,edad,nombre,region,venta
+true,32,Juan García,Norte,15000
+true,28,María López,Sur,8500
+false,45,Carlos Pérez,Norte,3200
+true,35,Ana Torres,Centro,22000

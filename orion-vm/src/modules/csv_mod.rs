@@ -252,7 +252,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Int(rows.len() as i64))
         }
 
-        // stats(list_of_dicts, "col") → dict { min, max, sum, avg, count }
+        // stats(list_of_dicts, "col") → dict { min, max, sum, avg, std, median, p25, p75, count }
         "stats" => {
             if args.len() < 2 {
                 return Err("csv.stats requiere (datos, columna)".into());
@@ -272,18 +272,28 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if nums.is_empty() {
                 return Err(format!("csv.stats: columna '{}' no tiene valores numéricos", col));
             }
-            let sum: f64 = nums.iter().sum();
-            let count = nums.len() as f64;
-            let min = nums.iter().cloned().fold(f64::INFINITY, f64::min);
-            let max = nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            let avg = sum / count;
+            let mut sorted = nums.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let n = sorted.len();
+            let sum: f64 = sorted.iter().sum();
+            let avg = sum / n as f64;
+            let variance = sorted.iter().map(|x| (x - avg).powi(2)).sum::<f64>() / n as f64;
+            let std = variance.sqrt();
+            let percentile = |p: f64| -> f64 {
+                let idx = (p / 100.0 * (n - 1) as f64) as usize;
+                sorted[idx.min(n - 1)]
+            };
 
             let mut result = HashMap::new();
-            result.insert("min".into(),   EvalValue::Float(min));
-            result.insert("max".into(),   EvalValue::Float(max));
-            result.insert("sum".into(),   EvalValue::Float(sum));
-            result.insert("avg".into(),   EvalValue::Float(avg));
-            result.insert("count".into(), EvalValue::Int(nums.len() as i64));
+            result.insert("min".into(),    EvalValue::Float(sorted[0]));
+            result.insert("max".into(),    EvalValue::Float(sorted[n - 1]));
+            result.insert("sum".into(),    EvalValue::Float(sum));
+            result.insert("avg".into(),    EvalValue::Float(avg));
+            result.insert("std".into(),    EvalValue::Float(std));
+            result.insert("median".into(), EvalValue::Float(percentile(50.0)));
+            result.insert("p25".into(),    EvalValue::Float(percentile(25.0)));
+            result.insert("p75".into(),    EvalValue::Float(percentile(75.0)));
+            result.insert("count".into(),  EvalValue::Int(n as i64));
             Ok(EvalValue::Dict(result))
         }
 

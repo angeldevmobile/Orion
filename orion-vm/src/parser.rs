@@ -96,8 +96,28 @@ impl Parser {
         use crate::token::TokenKind::*;
         let name = match self.peek().clone() {
             Ident(n) => n,
-            // Keywords que pueden usarse como nombres de método
-            Append => "append".to_string(),
+            // Keywords que pueden usarse como nombres de método/atributo después de un punto
+            Append   => "append".to_string(),
+            Read     => "read".to_string(),
+            Write    => "write".to_string(),
+            Env      => "env".to_string(),
+            Match    => "match".to_string(),
+            Use      => "use".to_string(),
+            In       => "in".to_string(),
+            Is       => "is".to_string(),
+            With     => "with".to_string(),
+            Send     => "send".to_string(),
+            Receive  => "receive".to_string(),
+            Sync     => "sync".to_string(),
+            Pipe     => "pipe".to_string(),
+            Task     => "task".to_string(),
+            Stream   => "stream".to_string(),
+            Train    => "train".to_string(),
+            Learn    => "learn".to_string(),
+            Predict  => "predict".to_string(),
+            Embed    => "embed".to_string(),
+            Adapt    => "adapt".to_string(),
+            Sense    => "sense".to_string(),
             _ => {
                 let line = self.current_line();
                 let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);

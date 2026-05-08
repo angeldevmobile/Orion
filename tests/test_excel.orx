@@ -1,0 +1,123 @@
+use "excel" as excel
+
+fn test_write_y_leer_count() {
+    datos = [
+        {"nombre": "Ana", "venta": 5000},
+        {"nombre": "Luis", "venta": 8500},
+        {"nombre": "Marta", "venta": 12000}
+    ]
+    excel.write("tests/output_excel_basic.xlsx", datos)
+    leido = excel.read("tests/output_excel_basic.xlsx")
+    assert_eq(len(leido), 3, "3 filas leidas del xlsx")
+}
+
+fn test_write_y_leer_string() {
+    datos = [
+        {"ciudad": "Madrid", "pais": "España"},
+        {"ciudad": "Lima", "pais": "Peru"},
+        {"ciudad": "Bogota", "pais": "Colombia"}
+    ]
+    excel.write("tests/output_excel_str.xlsx", datos)
+    leido = excel.read("tests/output_excel_str.xlsx")
+    primera = leido[0]
+    assert_eq(primera["ciudad"], "Madrid", "ciudad de la primera fila es Madrid")
+    assert_eq(primera["pais"], "España", "pais de la primera fila es España")
+}
+
+fn test_write_nombre_hoja() {
+    datos = [
+        {"producto": "Laptop", "precio": 1200},
+        {"producto": "Mouse", "precio": 25}
+    ]
+    excel.write("tests/output_excel_hoja.xlsx", datos, "Inventario")
+    hojas = excel.sheets("tests/output_excel_hoja.xlsx")
+    assert_eq(len(hojas), 1, "1 hoja en el archivo")
+    assert_eq(hojas[0], "Inventario", "hoja se llama Inventario")
+}
+
+fn test_sheets_por_defecto() {
+    datos = [{"x": 1}]
+    excel.write("tests/output_excel_def.xlsx", datos)
+    hojas = excel.sheets("tests/output_excel_def.xlsx")
+    assert_eq(len(hojas), 1, "1 hoja por defecto")
+}
+
+fn test_info_sheets_count() {
+    datos = [
+        {"a": 1, "b": 2},
+        {"a": 3, "b": 4},
+        {"a": 5, "b": 6}
+    ]
+    excel.write("tests/output_excel_info.xlsx", datos)
+    info = excel.info("tests/output_excel_info.xlsx")
+    assert_eq(info.sheets, 1, "1 hoja reportada en info")
+}
+
+fn test_info_rows_cols() {
+    datos = [
+        {"col1": "a", "col2": "b", "col3": "c"},
+        {"col1": "d", "col2": "e", "col3": "f"}
+    ]
+    excel.write("tests/output_excel_dims.xlsx", datos)
+    info = excel.info("tests/output_excel_dims.xlsx")
+    detalle = info.detail
+    hoja = detalle[0]
+    -- 1 fila cabecera + 2 filas datos = 3 filas totales
+    assert_eq(hoja.rows, 3, "3 filas totales (cabecera + 2 datos)")
+    assert_eq(hoja.cols, 3, "3 columnas")
+}
+
+fn test_write_multi_hojas() {
+    ventas = [
+        {"region": "Norte", "total": 50000},
+        {"region": "Sur", "total": 30000}
+    ]
+    gastos = [
+        {"concepto": "Alquiler", "monto": 2000},
+        {"concepto": "Sueldos", "monto": 15000},
+        {"concepto": "Servicios", "monto": 800}
+    ]
+    excel.write_multi("tests/output_excel_multi.xlsx", {"Ventas": ventas, "Gastos": gastos})
+    hojas = excel.sheets("tests/output_excel_multi.xlsx")
+    assert_eq(len(hojas), 2, "2 hojas en write_multi")
+}
+
+fn test_write_multi_y_leer_hoja() {
+    datos_a = [{"item": "X", "qty": 10}, {"item": "Y", "qty": 20}]
+    datos_b = [{"item": "Z", "qty": 5}]
+    excel.write_multi("tests/output_excel_multi2.xlsx", {"HojaA": datos_a, "HojaB": datos_b})
+    leido_a = excel.read("tests/output_excel_multi2.xlsx", "HojaA")
+    assert_eq(len(leido_a), 2, "2 filas en HojaA")
+    leido_b = excel.read("tests/output_excel_multi2.xlsx", "HojaB")
+    assert_eq(len(leido_b), 1, "1 fila en HojaB")
+}
+
+fn test_read_raw_estructura() {
+    datos = [
+        {"p": "alfa", "q": "beta"},
+        {"p": "gamma", "q": "delta"}
+    ]
+    excel.write("tests/output_excel_raw.xlsx", datos)
+    raw = excel.read_raw("tests/output_excel_raw.xlsx")
+    -- fila 0: cabeceras, filas 1-2: datos
+    assert_eq(len(raw), 3, "3 filas raw (1 cabecera + 2 datos)")
+    assert_eq(len(raw[0]), 2, "2 columnas en cada fila")
+}
+
+fn test_write_booleanos() {
+    datos = [
+        {"nombre": "Ana", "activo": yes},
+        {"nombre": "Luis", "activo": no}
+    ]
+    excel.write("tests/output_excel_bool.xlsx", datos)
+    leido = excel.read("tests/output_excel_bool.xlsx")
+    assert_eq(len(leido), 2, "2 filas con booleanos")
+}
+
+fn test_write_una_fila() {
+    datos = [{"unico": "solo"}]
+    excel.write("tests/output_excel_one.xlsx", datos)
+    leido = excel.read("tests/output_excel_one.xlsx")
+    assert_eq(len(leido), 1, "1 fila escrita y leida")
+    assert_eq(leido[0]["unico"], "solo", "valor correcto en unica fila")
+}

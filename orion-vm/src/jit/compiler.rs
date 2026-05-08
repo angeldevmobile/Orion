@@ -154,7 +154,7 @@ fn is_eligible(instr: &Instruction) -> bool {
             | Instruction::ReadFile(_)
             | Instruction::WriteFile(_)
             | Instruction::ReadEnv(_)
-            | Instruction::UseModule(_)
+            | Instruction::UseModule(_, _)
             // JIT-5: OOP
             | Instruction::DefineShape(_)
             | Instruction::GetAttr(_)
@@ -609,14 +609,9 @@ impl JitCompiler {
                 Instruction::StoreVar(n) | Instruction::StoreConst(n) | Instruction::LoadVar(n) => {
                     if !var_names.contains(n) { var_names.push(n.clone()); }
                 }
-                // JIT-4: UseModule almacena el namespace directamente en una variable
-                Instruction::UseModule(path) => {
-                    let ns_name = std::path::Path::new(path)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(path)
-                        .to_string();
-                    if !var_names.contains(&ns_name) { var_names.push(ns_name); }
+                // JIT-4: UseModule almacena el namespace bajo su alias
+                Instruction::UseModule(_, alias) => {
+                    if !var_names.contains(alias) { var_names.push(alias.clone()); }
                 }
                 _ => {}
             }
@@ -1092,12 +1087,7 @@ impl JitCompiler {
                     let call = builder.ins().call(read_env_ref, &[key, cast_ptr]);
                     stack.push(builder.inst_results(call)[0]);
                 }
-                Instruction::UseModule(path) => {
-                    let ns_name = std::path::Path::new(path)
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(path)
-                        .to_string();
+                Instruction::UseModule(path, alias) => {
                     let mut bytes = path.as_bytes().to_vec();
                     bytes.push(0u8);
                     let raw = bytes.as_ptr() as i64;
@@ -1105,8 +1095,7 @@ impl JitCompiler {
                     let path_ptr = builder.ins().iconst(types::I64, raw);
                     let call = builder.ins().call(use_module_ref, &[path_ptr]);
                     let module_val = builder.inst_results(call)[0];
-                    // Almacena el namespace en la variable (igual que la VM: no push al stack)
-                    if let Some(&var) = var_table.get(&ns_name) {
+                    if let Some(&var) = var_table.get(alias) {
                         builder.def_var(var, module_val);
                     }
                 }

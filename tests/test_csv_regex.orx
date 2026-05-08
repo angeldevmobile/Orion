@@ -1,0 +1,68 @@
+use "csv" as csv
+use "regex" as re
+
+show "=== TEST CSV Y REGEX ==="
+show ""
+
+show "--- CSV: leer y filtrar ---"
+data = csv.read("tests/datos_ventas.csv")
+show "Total filas: ${csv.count(data)}"
+
+norte = csv.filter(data, "region", "Norte")
+show "Norte: ${csv.count(norte)} filas"
+
+show ""
+show "--- CSV: stats de venta ---"
+stats = csv.stats(data, "venta")
+show "Sum: ${stats.sum}   Avg: ${stats.avg}   Min: ${stats.min}   Max: ${stats.max}"
+
+show ""
+show "--- CSV: top 3 nombres ---"
+ordenado = csv.sort(data, "venta", "desc")
+primero = csv.slice(ordenado, 0, 3)
+show "Top 3: ${csv.column(primero, "nombre")}"
+
+show ""
+show "--- CSV: deduplicar por region ---"
+uniq_regiones = csv.dedupe(data, "region")
+show "Regiones unicas: ${csv.count(uniq_regiones)}"
+
+show ""
+show "=== TEST REGEX ==="
+
+show ""
+show "--- match: email valido ---"
+es_email = re.match("usuario@ejemplo.com", "^[\\w.]+@[\\w]+\\.[\\w]+$")
+show "Es email valido: ${es_email}"
+
+show ""
+show "--- find_all: extraer numeros ---"
+texto = "Las ventas fueron 15000 en enero, 22500 en febrero y 18750 en marzo"
+numeros = re.find_all(texto, "\\d+")
+show "Numeros encontrados: ${numeros}"
+
+show ""
+show "--- replace: normalizar espacios ---"
+sucio = "Juan   Garcia   Lopez"
+limpio = re.replace(sucio, "\\s+", " ")
+show "Limpio: ${limpio}"
+
+show ""
+show "--- groups: capturar fecha ---"
+fecha_str = "2026-05-07"
+partes = re.groups(fecha_str, "(\\d{4})-(\\d{2})-(\\d{2})")
+show "Año: ${partes[0]}  Mes: ${partes[1]}  Dia: ${partes[2]}"
+
+show ""
+show "--- split por punto y coma ---"
+csv_line = "Norte;Sur;Centro;Este;Oeste"
+partes2 = re.split(csv_line, ";")
+show "Partes: ${partes2}"
+
+show ""
+show "--- count: ocurrencias ---"
+n = re.count("banana", "a")
+show "Veces que aparece a en banana: ${n}"
+
+show ""
+show "=== TEST COMPLETADO ==="

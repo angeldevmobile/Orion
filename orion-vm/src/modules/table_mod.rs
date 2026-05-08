@@ -59,9 +59,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        // shape(table) → dict { rows, cols }
-        "shape" => {
-            let rows = list_arg("shape", &args, 0)?;
+        // size(table) → dict { rows, cols }
+        "size" => {
+            let rows = list_arg("size", &args, 0)?;
             let cols = infer_headers(&rows).len();
             let mut m = HashMap::new();
             m.insert("rows".into(), EvalValue::Int(rows.len() as i64));

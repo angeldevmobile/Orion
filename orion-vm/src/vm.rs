@@ -416,16 +416,10 @@ impl VM {
             Instruction::Breakpoint => {} // no-op en modo normal; el debugger lo maneja por línea
 
             //    Módulos                                                       
-            Instruction::UseModule(path) => {
+            Instruction::UseModule(path, alias) => {
                 let module_val = self.load_module(&path)?;
-                // Determinar nombre del namespace: basename sin extensión
-                let ns_name = std::path::Path::new(&path)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or(&path)
-                    .to_string();
                 let frame = self.call_stack.last_mut().unwrap();
-                frame.vars.insert(ns_name, module_val);
+                frame.vars.insert(alias, module_val);
             }
 
             //    OOP                                                          

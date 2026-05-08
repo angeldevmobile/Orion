@@ -1,0 +1,142 @@
+use "csv" as csv
+
+fn test_leer_total_filas() {
+    data = csv.read("tests/datos_ventas.csv")
+    assert_eq(csv.count(data), 15, "15 filas en datos_ventas.csv")
+}
+
+fn test_leer_cabeceras() {
+    data = csv.read("tests/datos_ventas.csv")
+    hdrs = csv.headers(data)
+    assert_eq(len(hdrs), 5, "5 columnas en el CSV")
+}
+
+fn test_columna_nombres() {
+    data = csv.read("tests/datos_ventas.csv")
+    nombres = csv.column(data, "nombre")
+    assert_eq(len(nombres), 15, "15 nombres extraidos")
+}
+
+fn test_filtrar_region_norte() {
+    data = csv.read("tests/datos_ventas.csv")
+    norte = csv.filter(data, "region", "Norte")
+    assert_eq(csv.count(norte), 6, "6 vendedores en Norte")
+}
+
+fn test_filtrar_region_sur() {
+    data = csv.read("tests/datos_ventas.csv")
+    sur = csv.filter(data, "region", "Sur")
+    assert_eq(csv.count(sur), 5, "5 vendedores en Sur")
+}
+
+fn test_filtrar_activos() {
+    data = csv.read("tests/datos_ventas.csv")
+    activos = csv.filter(data, "activo", yes)
+    assert_eq(csv.count(activos), 12, "12 vendedores activos")
+}
+
+fn test_ordenar_venta_desc() {
+    data = csv.read("tests/datos_ventas.csv")
+    ordenado = csv.sort(data, "venta", "desc")
+    top = csv.slice(ordenado, 0, 1)
+    primer_nombre = csv.column(top, "nombre")
+    assert_eq(primer_nombre[0], "Elena Díaz", "mayor vendedor es Elena Díaz")
+}
+
+fn test_ordenar_venta_asc() {
+    data = csv.read("tests/datos_ventas.csv")
+    ordenado = csv.sort(data, "venta")
+    ultimo = csv.slice(ordenado, 14, 15)
+    ultimo_nombre = csv.column(ultimo, "nombre")
+    assert_eq(ultimo_nombre[0], "Elena Díaz", "ultimo en asc es Elena Díaz")
+}
+
+fn test_estadisticas_venta() {
+    data = csv.read("tests/datos_ventas.csv")
+    stats = csv.stats(data, "venta")
+    assert_eq(stats.min, 950.0, "venta minima 950")
+    assert_eq(stats.max, 31000.0, "venta maxima 31000")
+    assert_eq(stats.count, 15, "15 valores numericos")
+}
+
+fn test_estadisticas_extendidas() {
+    data = csv.read("tests/datos_ventas.csv")
+    stats = csv.stats(data, "venta")
+    assert(stats.sum > 0.0, "suma de ventas positiva")
+    assert(stats.avg > 0.0, "promedio de ventas positivo")
+    assert(stats.std > 0.0, "desviacion estandar positiva")
+    assert(stats.median > 0.0, "mediana positiva")
+    assert(stats.p25 <= stats.median, "p25 <= mediana")
+    assert(stats.median <= stats.p75, "mediana <= p75")
+}
+
+fn test_deduplicar_regiones() {
+    data = csv.read("tests/datos_ventas.csv")
+    unico = csv.dedupe(data, "region")
+    assert_eq(csv.count(unico), 3, "3 regiones unicas: Norte, Sur, Centro")
+}
+
+fn test_seleccionar_columnas() {
+    data = csv.read("tests/datos_ventas.csv")
+    sub = csv.select(data, ["nombre", "venta"])
+    assert_eq(csv.count(sub), 15, "mismas 15 filas al seleccionar columnas")
+    hdrs = csv.headers(sub)
+    assert_eq(len(hdrs), 2, "solo 2 columnas seleccionadas")
+}
+
+fn test_agrupar_por_region() {
+    data = csv.read("tests/datos_ventas.csv")
+    grupos = csv.group_by(data, "region")
+    norte = grupos.Norte
+    assert_eq(len(norte), 6, "6 registros en grupo Norte")
+}
+
+fn test_renombrar_columna() {
+    data = csv.read("tests/datos_ventas.csv")
+    renombrado = csv.rename(data, "nombre", "vendedor")
+    hdrs = csv.headers(renombrado)
+    assert_eq(len(hdrs), 5, "siguen siendo 5 columnas tras renombrar")
+    primera = renombrado[0]
+    assert_eq(primera["vendedor"], "Juan García", "campo renombrado correcto")
+}
+
+fn test_slice_filas() {
+    data = csv.read("tests/datos_ventas.csv")
+    parte = csv.slice(data, 5, 10)
+    assert_eq(csv.count(parte), 5, "slice de 5 elementos")
+}
+
+fn test_slice_inicio() {
+    data = csv.read("tests/datos_ventas.csv")
+    inicio = csv.slice(data, 0, 3)
+    assert_eq(csv.count(inicio), 3, "primeras 3 filas")
+}
+
+fn test_escribir_y_releer() {
+    data = csv.read("tests/datos_ventas.csv")
+    sub = csv.slice(data, 0, 4)
+    csv.write("tests/output_test_csv.csv", sub)
+    leido = csv.read("tests/output_test_csv.csv")
+    assert_eq(csv.count(leido), 4, "4 filas escritas y releidas correctamente")
+}
+
+fn test_escribir_delimiter_personalizado() {
+    data = csv.read("tests/datos_ventas.csv")
+    sub = csv.slice(data, 0, 2)
+    csv.write("tests/output_test_pipe.csv", sub, "|")
+    leido = csv.read("tests/output_test_pipe.csv", "|")
+    assert_eq(csv.count(leido), 2, "2 filas con delimiter personalizado")
+}
+
+fn test_leer_raw() {
+    raw = csv.read_raw("tests/datos_ventas.csv")
+    assert_eq(len(raw[0]), 5, "5 columnas en fila cabecera raw")
+    assert_eq(len(raw), 16, "16 filas raw (1 cabecera + 15 datos)")
+}
+
+fn test_to_json_no_vacio() {
+    data = csv.read("tests/datos_ventas.csv")
+    sub = csv.slice(data, 0, 3)
+    j = csv.to_json(sub)
+    assert(len(j) > 0, "json no debe estar vacio")
+}

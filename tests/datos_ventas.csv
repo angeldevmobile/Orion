@@ -1,0 +1,16 @@
+nombre,region,venta,edad,activo
+Juan García,Norte,15000,32,true
+María López,Sur,8500,28,true
+Carlos Pérez,Norte,3200,45,false
+Ana Torres,Centro,22000,35,true
+Pedro Ruiz,Sur,1100,22,true
+Sofía Mora,Norte,18500,38,true
+Luis Castro,Centro,950,29,false
+Carmen Vega,Sur,12000,41,true
+Diego Soto,Norte,7300,33,true
+Elena Díaz,Centro,31000,52,true
+Roberto Núñez,Sur,4200,27,true
+Isabel Ramos,Norte,9800,44,false
+Fernando Silva,Centro,2100,31,true
+Patricia Flores,Sur,16500,39,true
+Miguel Herrera,Norte,28000,47,true
