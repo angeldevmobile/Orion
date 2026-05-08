@@ -22,6 +22,7 @@ pub mod insight_mod;
 pub mod csv_mod;
 pub mod excel_mod;
 pub mod regex_mod;
+pub mod table_mod;
 
 // Interfaces nativas de Orion
 pub mod gui;
@@ -53,6 +54,7 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "csv"      => csv_mod::call(function, args),
         "excel"    => excel_mod::call(function, args),
         "regex"    => regex_mod::call(function, args),
+        "table"    => table_mod::call(function, args),
         // Interfaces nativas
         "gui"      => gui::call(function, args),
         _ => Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module)),
@@ -69,7 +71,7 @@ pub fn is_known_module(name: &str) -> bool {
         "ai" | "crypto" | "matrix" | "quantum" |
         "cosmos" | "timewarp" | "vision" | "insight" |
         // Datos
-        "csv" | "excel" | "regex" |
+        "csv" | "excel" | "regex" | "table" |
         // Interfaces
         "gui"
     )
