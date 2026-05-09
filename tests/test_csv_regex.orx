@@ -32,7 +32,7 @@ show "=== TEST REGEX ==="
 
 show ""
 show "--- match: email valido ---"
-es_email = re.match("usuario@ejemplo.com", "^[\\w.]+@[\\w]+\\.[\\w]+$")
+es_email = re.is_match("usuario@ejemplo.com", "^[\\w.]+@[\\w]+\\.[\\w]+$")
 show "Es email valido: ${es_email}"
 
 show ""

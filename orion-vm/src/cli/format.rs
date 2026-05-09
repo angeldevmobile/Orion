@@ -5,7 +5,7 @@ use super::banner;
 
 const INDENT: &str = "    ";
 
-// ─── Punto de entrada ─────────────────────────────────────────────────────────
+//   Punto de entrada                    
 
 pub fn run_format(path: &str, write_back: bool) {
     let src = match fs::read_to_string(path) {
@@ -55,7 +55,7 @@ pub fn format_source(src: &str) -> Result<String, String> {
     Ok(format_program(&stmts))
 }
 
-// ─── Núcleo del formatter ─────────────────────────────────────────────────────
+//   Núcleo del formatter                  ──
 
 pub fn format_program(stmts: &[Stmt]) -> String {
     let mut f = Formatter::new();
@@ -98,7 +98,7 @@ impl Formatter {
         self.nl();
     }
 
-    // ─── Nivel superior: agrupa `use` primero, blank lines entre declaraciones ──
+    //   Nivel superior: agrupa `use` primero, blank lines entre declaraciones ──
 
     fn write_top_level(&mut self, stmts: &[Stmt]) {
         let mut uses: Vec<&Stmt> = Vec::new();
@@ -119,7 +119,7 @@ impl Formatter {
         }
     }
 
-    // ─── Cuerpo de función/bloque ─────────────────────────────────────────────
+    //   Cuerpo de función/bloque                
 
     fn write_body(&mut self, stmts: &[Stmt]) {
         let mut prev_block = false;
@@ -131,7 +131,7 @@ impl Formatter {
         }
     }
 
-    // ─── Declaraciones ────────────────────────────────────────────────────────
+    //   Declaraciones                   ──
 
     fn write_stmt(&mut self, stmt: &Stmt) {
         match stmt {
@@ -347,7 +347,7 @@ impl Formatter {
         }
     }
 
-    // ─── Helpers de bloque ────────────────────────────────────────────────────
+    //   Helpers de bloque                  ─
 
     fn write_else_chain(&mut self, else_body: &[Stmt]) {
         if else_body.is_empty() {
@@ -412,7 +412,7 @@ impl Formatter {
         }
     }
 
-    // ─── Micro-helpers ────────────────────────────────────────────────────────
+    //   Micro-helpers                   ──
 
     fn write_doc(&mut self, doc: &Option<String>) {
         if let Some(d) = doc {
@@ -440,7 +440,7 @@ impl Formatter {
     }
 }
 
-// ─── Formatter de expresiones (puro, sin estado) ──────────────────────────────
+//   Formatter de expresiones (puro, sin estado)           
 
 pub fn fmt_expr(expr: &Expr) -> String {
     match expr {
@@ -533,7 +533,7 @@ pub fn fmt_expr(expr: &Expr) -> String {
     }
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+//   Helpers                       
 
 #[derive(Clone, Copy)]
 enum Side { Left, Right }

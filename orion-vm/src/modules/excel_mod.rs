@@ -269,7 +269,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers                       
 
 fn cell_to_eval(cell: &Data) -> EvalValue {
     match cell {

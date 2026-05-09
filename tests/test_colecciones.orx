@@ -19,3 +19,10 @@ fn test_lista_mutation() {
     nums[0] = 99
     assert_eq(nums[0], 99, "list mutation")
 }
+
+-- llamar las funciones de prueba
+show "Ejecutando pruebas de colecciones..."
+test_dict_mutation()
+show "test_dict_mutation pasó"
+test_range_loop()
+test_lista_mutation()

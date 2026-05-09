@@ -3,11 +3,11 @@ use regex::Regex;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // match(text, pattern) → bool
-        "match" => {
-            let text    = str_arg("match", &args, 0)?;
-            let pattern = str_arg("match", &args, 1)?;
-            let re = compile(&pattern, "match")?;
+        // is_match(text, pattern) → bool
+        "is_match" => {
+            let text    = str_arg("is_match", &args, 0)?;
+            let pattern = str_arg("is_match", &args, 1)?;
+            let re = compile(&pattern, "is_match")?;
             Ok(EvalValue::Bool(re.is_match(&text)))
         }
 

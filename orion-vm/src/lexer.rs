@@ -287,39 +287,70 @@ impl<'a> Lexer<'a> {
 
     fn lex_string(&mut self, line: u32, col: u32) -> Result<TokenKind, LexError> {
         self.advance(); // '"'
-        let start = self.pos;
-        let mut interp_depth: u32 = 0; // profundidad dentro de ${ ... }
+        let mut content = String::new();
+        let mut interp_depth: u32 = 0;
 
         while let Some(c) = self.peek() {
             if c == b'"' && interp_depth == 0 {
-                break; // cierre del string externo
+                break;
             }
-            if c == b'$' && self.peek_at(1) == Some(b'{') {
-                // entramos a una interpolación
+
+            // Inicio de interpolación ${
+            if c == b'$' && self.peek_at(1) == Some(b'{') && interp_depth == 0 {
                 interp_depth += 1;
-                self.advance(); // $
-                self.advance(); // {
+                content.push('$');
+                self.advance();
+                content.push('{');
+                self.advance();
                 continue;
             }
+
+            // Dentro de interpolación: copiar verbatim
             if interp_depth > 0 {
-                if c == b'{' {
-                    interp_depth += 1;
-                } else if c == b'}' {
-                    interp_depth -= 1;
-                } else if c == b'"' {
-                    // string anidado dentro de ${ } — saltarlo completo
-                    self.advance(); // " de apertura (no se incluye en el outer content todavía)
+                if c == b'{' { interp_depth += 1; }
+                else if c == b'}' { interp_depth -= 1; }
+                else if c == b'"' {
+                    // string anidado dentro de ${ } — copiar verbatim
+                    content.push('"');
+                    self.advance();
                     while let Some(ic) = self.peek() {
+                        content.push(ic as char);
                         self.advance();
-                        if ic == b'"' { break; } // " de cierre del nested
+                        if ic == b'"' { break; }
                     }
                     continue;
                 }
+                content.push(c as char);
+                self.advance();
+                continue;
             }
+
+            // Fuera de interpolación: procesar secuencias de escape
+            if c == b'\\' {
+                self.advance(); // consume '\'
+                match self.peek() {
+                    Some(b'n')  => { content.push('\n'); self.advance(); }
+                    Some(b't')  => { content.push('\t'); self.advance(); }
+                    Some(b'r')  => { content.push('\r'); self.advance(); }
+                    Some(b'\\') => { content.push('\\'); self.advance(); }
+                    Some(b'"')  => { content.push('"');  self.advance(); }
+                    Some(b'0')  => { content.push('\0'); self.advance(); }
+                    Some(b'$')  => { content.push('$');  self.advance(); }
+                    Some(other) => {
+                        // escape no reconocido: conservar backslash + char
+                        content.push('\\');
+                        content.push(other as char);
+                        self.advance();
+                    }
+                    None => { content.push('\\'); }
+                }
+                continue;
+            }
+
+            content.push(c as char);
             self.advance();
         }
 
-        let content = std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string();
         if self.advance() != Some(b'"') {
             return Err(LexError { message: "String sin cerrar".into(), line, col });
         }
