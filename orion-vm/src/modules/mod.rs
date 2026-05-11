@@ -27,6 +27,27 @@ pub mod table_mod;
 // Interfaces nativas de Orion
 pub mod gui;
 
+// ── Backend core ──────────────────────────────────────────────────────────────
+pub mod db_mod;
+pub mod auth_mod;
+pub mod cache_mod;
+pub mod mail_mod;
+
+// ── Automatización ────────────────────────────────────────────────────────────
+pub mod tarea_mod;
+pub mod cola_mod;
+pub mod watch_mod;
+
+// ── Validación ────────────────────────────────────────────────────────────────
+pub mod validate_mod;
+
+// ── Utilidades modernas ───────────────────────────────────────────────────────
+pub mod ws_mod;
+pub mod template_mod;
+pub mod formato_mod;
+pub mod grafo_mod;
+pub mod pdf_mod;
+
 use crate::eval_value::EvalValue;
 
 /// Dispatcher principal: módulo → función → args.
@@ -57,6 +78,23 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "table"    => table_mod::call(function, args),
         // Interfaces nativas
         "gui"      => gui::call(function, args),
+        // Backend core
+        "db"       => db_mod::call(function, args),
+        "auth"     => auth_mod::call(function, args),
+        "cache"    => cache_mod::call(function, args),
+        "mail"     => mail_mod::call(function, args),
+        // Automatización
+        "tarea"    => tarea_mod::call(function, args),
+        "cola"     => cola_mod::call(function, args),
+        "watch"    => watch_mod::call(function, args),
+        // Validación
+        "validate" => validate_mod::call(function, args),
+        // Utilidades modernas
+        "ws"       => ws_mod::call(function, args),
+        "template" => template_mod::call(function, args),
+        "formato"  => formato_mod::call(function, args),
+        "grafo"    => grafo_mod::call(function, args),
+        "pdf"      => pdf_mod::call(function, args),
         _ => Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module)),
     }
 }
@@ -73,6 +111,14 @@ pub fn is_known_module(name: &str) -> bool {
         // Datos
         "csv" | "excel" | "regex" | "table" |
         // Interfaces
-        "gui"
+        "gui" |
+        // Backend core
+        "db" | "auth" | "cache" | "mail" |
+        // Automatización
+        "tarea" | "cola" | "watch" |
+        // Validación
+        "validate" |
+        // Utilidades modernas
+        "ws" | "template" | "formato" | "grafo" | "pdf"
     )
 }
