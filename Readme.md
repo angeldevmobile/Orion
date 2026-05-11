@@ -591,7 +591,7 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 
 ---
 
-## Estado de componentes
+## Estado del runtime
 
 | Componente | Estado | Tecnología |
 |---|---|---|
@@ -599,7 +599,7 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 | Parser | ✅ Completo | Rust |
 | Type checker | ✅ Completo | Rust |
 | Compilador bytecode | ✅ Completo | Rust |
-| VM (ejecución) | ✅ Funcional | Rust |
+| VM (ejecución) | ✅ Completo | Rust |
 | OOP (shape, act, using, is) | ✅ Completo | Rust |
 | Type hints opcionales | ✅ Completo | Rust |
 | Manejo de errores (attempt/handle) | ✅ Completo | Rust |
@@ -607,43 +607,167 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 | REPL interactivo | ✅ Completo | Rust |
 | Servidor HTTP nativo | ✅ Completo | Rust |
 | IA nativa (think/learn/sense) | ✅ Completo | Rust |
-| Módulos stdlib | ✅ 20 módulos | Rust |
-| CLI (new/build/check/watch/bench/test/doctor) | ✅ Completo | Rust |
-| Extensión VSCode | ✅ Completa con binario bundleado | JavaScript |
+| Errores con span y contexto visual | ✅ Completo | Rust |
+| Debugger interactivo (breakpoints, step, watches) | ✅ Completo | Rust |
+| DAP — Debug Adapter Protocol (VSCode) | ✅ Completo | Rust |
+| LSP — diagnósticos en tiempo real | ✅ Completo | Rust |
+| JIT — Cranelift (I/O, módulos, OOP) | ✅ Completo | Cranelift |
+| AOT — compilación a ejecutable nativo | ✅ Completo | Cranelift |
+| FFI — librerías nativas externas | ✅ Completo | libloading |
+| Package manager (add/remove/list/search/publish) | ✅ Completo | Rust |
+| Registry oficial en GitHub | ✅ Completo | GitHub API |
+| Módulos stdlib | ✅ 35+ módulos | Rust |
+| CLI completo | ✅ Completo | Rust |
+| Extensión VSCode con binario bundleado | ✅ Completo | TypeScript |
 
 ---
 
-## Roadmap
+## Stdlib completa (35+ módulos)
 
-### ✅ Completado
-- Pipeline completo Rust: lexer → parser → type checker → codegen → VM
-- 20 módulos stdlib: fs, csv, excel, json, table, regex, net, env, strings, datetime, random, process, crypto, ai, vision, insight, matrix, quantum, cosmos, timewarp
-- OOP con shapes, composición, type hints, async/await, manejo de errores
-- CLI completo, REPL, servidor HTTP, IA nativa
-- Extensión VSCode con binario bundleado (zero-config)
-- Escape sequences estándar en strings (`\n`, `\t`, `\\`, `\"`)
+### Core
+`fs` `json` `strings` `datetime` `random` `regex` `env` `process` `crypto`
 
-### 🔜 Próximas fases
+### Red
+`net` `ws` `serve`
 
-**Fase 6 — Funcionalidades modernas propias**
-- [ ] Pipeline operator `|>` nativo completo con lambdas en cadena
-- [ ] Scheduler nativo (`cada 5min { }`, `cada dia { }`)
-- [ ] Queue de trabajos nativa (`cola.enviar`, `cola.procesar`)
-- [ ] Validación de inputs en frontera (rutas HTTP con esquema)
-- [ ] Rate limiting nativo en `serve`
-- [ ] `db` — módulo de base de datos unificado (SQLite, PostgreSQL, MySQL)
-- [ ] `auth` — JWT y bcrypt nativos
-- [ ] `cache` — caché en memoria con TTL
+### Backend
+`db` `auth` `cache` `mail` `validate`
 
-**Fase 7 — Compilación nativa (Cranelift)**
-- [ ] `.orx` compilado a binario nativo sin VM
-- [ ] `orion compile archivo.orx -o salida`
-- [ ] Rendimiento objetivo: comparable a Go
+### Automatización
+`tarea` `cola` `watch`
 
-**Fase 8 — Ecosistema**
-- [ ] Registro de paquetes online (`orion publish` / `orion add <pkg>`)
-- [ ] Documentación oficial interactiva
-- [ ] Comunidad y showcase de proyectos reales
+### Datos
+`csv` `excel` `table` `matrix`
+
+### Utilidades modernas
+`template` `formato` `grafo` `pdf`
+
+### Avanzado
+`ai` `vision` `insight` `gui` `quantum` `cosmos` `timewarp`
+
+---
+
+## Ecosistema — Roadmap de librerías modernas
+
+> Orion no copia Python. Cada módulo está diseñado para 2025: API simple, rápida y sin configuración.
+
+### Por qué Orion gana a Python aquí
+
+| | Python | Orion |
+|---|---|---|
+| Velocidad | lento (GIL) | Rust nativo + JIT |
+| Arranque | 150-400 ms | < 1 ms |
+| AI integrada | pip install | stdlib |
+| Compilación nativa | no | `orion --build` |
+| Package manager | pip (lento) | `orion --add` (instantáneo) |
+| API | legado de los 90s | diseñada en 2025 |
+
+---
+
+### Bloque D — Sistema moderno
+*Base de cualquier aplicación real. Sin estas, cualquier app queda incompleta.*
+
+| # | Módulo | Descripción | Crate Rust | Estado |
+|---|--------|-------------|------------|--------|
+| 1 | `use "zip"` | Comprimir/descomprimir gzip, zip, tar | `flate2` + `zip` | pendiente |
+| 2 | `use "secret"` | Leer `.env`, secrets seguros con validación | `dotenvy` | pendiente |
+| 3 | `use "log"` | Logging estructurado con niveles, colores y archivos | nativo | pendiente |
+| 4 | `use "config"` | Cargar TOML / YAML / JSON como configuración tipada | `toml` + `serde_yaml` | pendiente |
+| 5 | `use "crypto2"` | AES-256, RSA, firma de datos, certificados | `aes` + `rsa` | pendiente |
+| 6 | `use "stream"` | Pipelines lazy: map, filter, reduce sobre datos infinitos | nativo | pendiente |
+
+---
+
+### Bloque B — Web moderna
+*Más allá del `serve` básico: middleware, routing avanzado, protocolos modernos.*
+
+| # | Módulo | Descripción | Crate Rust | Estado |
+|---|--------|-------------|------------|--------|
+| 7 | `use "router"` | Routing declarativo con parámetros, grupos y middleware | `matchit` | pendiente |
+| 8 | `use "middleware"` | Rate limit, CORS, logging, auth en cadena | nativo | pendiente |
+| 9 | `use "sse"` | Server-Sent Events para streaming HTTP en tiempo real | nativo | pendiente |
+| 10 | `use "proto"` | Serialización binaria rápida (MessagePack) — 10x más rápido que JSON | `rmp-serde` | pendiente |
+
+---
+
+### Bloque C — AI nativa
+*La diferenciación más fuerte de Orion. AI de primera clase, sin pip, sin configuración.*
+
+| # | Módulo | Descripción | Crate Rust | Estado |
+|---|--------|-------------|------------|--------|
+| 11 | `use "llm"` | Llamadas a OpenAI / Anthropic / Ollama / Gemini en 1 línea | `ureq` | pendiente |
+| 12 | `use "embed"` | Embeddings de texto, similitud coseno, búsqueda semántica | math nativo | pendiente |
+| 13 | `use "vector"` | Base de datos vectorial en memoria con HNSW | `hnsw_rs` | pendiente |
+
+```orion
+-- Ejemplo del futuro
+use "llm"
+use "vector"
+
+respuesta = llm.ask("gpt-4o", "Resume este contrato en 3 puntos: " + contrato)
+embedding = llm.embed("text-embedding-3-small", texto)
+similares = vector.buscar(db_vectores, embedding, top: 5)
+```
+
+---
+
+### Bloque A — Datos modernos
+*El reemplazo de pandas/numpy: más rápido, API más simple, en español.*
+
+| # | Módulo | Descripción | Crate Rust | Estado |
+|---|--------|-------------|------------|--------|
+| 14 | `use "tabla"` v2 | DataFrames columnar, groupby, join, pivot, lazy eval | `polars` | pendiente |
+| 15 | `use "serie"` | Series de tiempo, ventanas deslizantes, resample, OHLCV | `polars` | pendiente |
+| 16 | `use "stat"` | Estadística moderna: percentil, correlación, regresión lineal | `statrs` | pendiente |
+| 17 | `use "num"` | Tensores N-dim, álgebra lineal, FFT, convolución | `ndarray` | pendiente |
+
+```orion
+-- Orion vs pandas: mismo resultado, la mitad de líneas
+use "tabla"
+
+ventas = tabla.cargar("ventas.csv")
+reporte = ventas
+    |> tabla.filtrar("region", "Norte")
+    |> tabla.agrupar("producto")
+    |> tabla.suma("venta")
+    |> tabla.ordenar("venta", "desc")
+    |> tabla.top(10)
+tabla.mostrar(reporte)
+```
+
+---
+
+### Bloque E — Cloud native
+*Sin pip, sin npm. Cloud como stdlib.*
+
+| # | Módulo | Descripción | Crate Rust | Estado |
+|---|--------|-------------|------------|--------|
+| 18 | `use "s3"` | Subir/bajar archivos a S3 / R2 / MinIO | `rusty-s3` | pendiente |
+| 19 | `use "ssh"` | Ejecutar comandos remotos via SSH, tunnel, SCP | `ssh2` | pendiente |
+| 20 | `use "docker"` | Controlar contenedores Docker via API REST | `ureq` | pendiente |
+
+---
+
+### Orden de implementación
+
+```
+Bloque D → Bloque B → Bloque C → Bloque A → Bloque E
+  (base)     (web)      (AI)      (datos)    (cloud)
+```
+
+---
+
+## Contribuir al ecosistema
+
+```bash
+# Agregar un módulo a la stdlib
+# 1. Crear orion-vm/src/modules/mi_modulo.rs
+# 2. Registrar en orion-vm/src/modules/mod.rs
+# 3. Agregar dependencia en orion-vm/Cargo.toml
+
+# Publicar un paquete .orx al registry oficial
+orion --publish   # requiere orion.json + ORION_GITHUB_TOKEN
+```
 
 ---
 
