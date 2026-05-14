@@ -6,7 +6,7 @@ use rust_xlsxwriter::{Workbook, Format, Color};
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
 
-        // ── Carga ────────────────────────────────────────────────────────────
+        //    Carga                                                             
 
         // load(path) → table   auto-detecta .csv .xlsx .xls .ods .json
         "load" => {
@@ -49,7 +49,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(t))
         }
 
-        // ── Exploración ──────────────────────────────────────────────────────
+        //    Exploración                                                       
 
         // peek(table) o peek(table, n) → null  imprime tabla bonita en consola
         "peek" => {
@@ -111,7 +111,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Dict(profile))
         }
 
-        // ── Selección de columnas ────────────────────────────────────────────
+        //    Selección de columnas                                             
 
         // keep(table, ["col1", "col2"]) → table con solo esas columnas
         "keep" => {
@@ -172,7 +172,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // ── Filtros y ordenación ─────────────────────────────────────────────
+        //    Filtros y ordenación                                              
 
         // where(table, "col > 100 && region == 'Norte'") → table filtrada
         "where" => {
@@ -256,7 +256,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // ── Transformación ───────────────────────────────────────────────────
+        //    Transformación                                                    
 
         // add(table, "nueva_col", "expresion") → table con columna calculada
         // Expresiones soportadas: "precio * 1.19", "nombre + ' extra'",
@@ -276,7 +276,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // ── Agregación ───────────────────────────────────────────────────────
+        //    Agregación                                                        
 
         // group(table, "por_col", "valor_col", "sum"|"avg"|"count"|"min"|"max")
         // → list of dicts {by_col, result}
@@ -386,7 +386,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
 
-        // ── Combinación ──────────────────────────────────────────────────────
+        //    Combinación                                                       
 
         // join(table1, table2, "key_col") → inner join por columna clave
         "join" => {
@@ -431,7 +431,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(t1))
         }
 
-        // ── Analítica avanzada ───────────────────────────────────────────────
+        //    Analítica avanzada                                                
 
         // forecast(table, "col", n) → list de n valores futuros (regresión lineal)
         "forecast" => {
@@ -600,7 +600,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // ── Streaming para archivos enormes ──────────────────────────────────
+        //    Streaming para archivos enormes                                   
 
         // stream(path, condicion) → filas que cumplen la condición, sin cargar todo en RAM
         "stream" => {
@@ -635,7 +635,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // ── IA nativa ────────────────────────────────────────────────────────
+        //    IA nativa                                                         
 
         // describe_ai(table) → string descripción en lenguaje natural
         "describe_ai" => {
@@ -686,7 +686,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
 
-        // ── Exportación ──────────────────────────────────────────────────────
+        //    Exportación                                                       
 
         // save(table, path) → null   auto-detecta formato por extensión
         "save" => {
@@ -710,7 +710,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── Loaders ──────────────────────────────────────────────────────────────────
+//    Loaders                                                                   
 
 fn load_csv(path: &str) -> Result<EvalValue, String> {
     // Auto-detect delimiter
@@ -790,7 +790,7 @@ fn load_json(path: &str) -> Result<EvalValue, String> {
     }
 }
 
-// ── Savers ───────────────────────────────────────────────────────────────────
+//    Savers                                                                    
 
 fn save_csv(rows: &[EvalValue], path: &str) -> Result<EvalValue, String> {
     let headers = infer_headers(rows);
@@ -854,7 +854,7 @@ fn save_json(rows: &[EvalValue], path: &str) -> Result<EvalValue, String> {
     Ok(EvalValue::Null)
 }
 
-// ── Display bonito ────────────────────────────────────────────────────────────
+//    Display bonito                                                             
 
 fn pretty_print(rows: &[EvalValue], n: usize) {
     if rows.is_empty() { println!("  tabla vacía"); return; }
@@ -875,12 +875,12 @@ fn pretty_print(rows: &[EvalValue], n: usize) {
 
     // Cabecera
     println!();
-    println!("  ┌{:─<width$}┐", "", width = total_w - 2);
+    println!("  ┌{: <width$}┐", "", width = total_w - 2);
     println!("  │ {:width$} │",
         format!("tabla  ·  {} filas  ×  {} columnas", rows.len(), headers.len()),
         width = total_w - 4);
     println!("  ├{}┤", headers.iter().enumerate()
-        .map(|(i, _)| format!("{:─<w$}", "", w = col_widths[i] + 2))
+        .map(|(i, _)| format!("{: <w$}", "", w = col_widths[i] + 2))
         .collect::<Vec<_>>().join("┬"));
 
     // Cabeceras
@@ -890,7 +890,7 @@ fn pretty_print(rows: &[EvalValue], n: usize) {
     println!("  │{}│", header_row);
 
     println!("  ├{}┤", headers.iter().enumerate()
-        .map(|(i, _)| format!("{:─<w$}", "", w = col_widths[i] + 2))
+        .map(|(i, _)| format!("{: <w$}", "", w = col_widths[i] + 2))
         .collect::<Vec<_>>().join("┼"));
 
     // Datos
@@ -912,7 +912,7 @@ fn pretty_print(rows: &[EvalValue], n: usize) {
             width = total_w - 4);
     }
     println!("  └{}┘", headers.iter().enumerate()
-        .map(|(i, _)| format!("{:─<w$}", "", w = col_widths[i] + 2))
+        .map(|(i, _)| format!("{: <w$}", "", w = col_widths[i] + 2))
         .collect::<Vec<_>>().join("┴"));
     println!();
 }
@@ -922,10 +922,10 @@ fn print_schema(rows: &[EvalValue]) {
     let headers = infer_headers(rows);
 
     println!();
-    println!("  ┌{:─<14}┬{:─<10}┬{:─<8}┬{:─<8}┬{:─<26}┐", "", "", "", "", "");
+    println!("  ┌{: <14}┬{: <10}┬{: <8}┬{: <8}┬{: <26}┐", "", "", "", "", "");
     println!("  │ {:<12} │ {:<8} │ {:<6} │ {:<6} │ {:<24} │",
         "columna", "tipo", "nulos", "únicos", "muestra");
-    println!("  ├{:─<14}┼{:─<10}┼{:─<8}┼{:─<8}┼{:─<26}┤", "", "", "", "", "");
+    println!("  ├{: <14}┼{: <10}┼{: <8}┼{: <8}┼{: <26}┤", "", "", "", "", "");
 
     for col in &headers {
         let vals = column_values(rows, col);
@@ -947,11 +947,11 @@ fn print_schema(rows: &[EvalValue]) {
         println!("  │ {:<12} │ {:<8} │ {:<6} │ {:<6} │ {:<24} │",
             trunc(col, 12), tipo, nulls, uniq.len(), trunc(&sample, 24));
     }
-    println!("  └{:─<14}┴{:─<10}┴{:─<8}┴{:─<8}┴{:─<26}┘", "", "", "", "", "");
+    println!("  └{: <14}┴{: <10}┴{: <8}┴{: <8}┴{: <26}┘", "", "", "", "", "");
     println!();
 }
 
-// ── Evaluador de condiciones ──────────────────────────────────────────────────
+//    Evaluador de condiciones                                                   
 
 fn eval_condition(row: &HashMap<String, EvalValue>, expr: &str) -> bool {
     let expr = expr.trim();
@@ -1026,7 +1026,7 @@ fn parse_literal(s: &str) -> EvalValue {
     EvalValue::Str(s.to_string())
 }
 
-// ── Evaluador de expresiones de columna ──────────────────────────────────────
+//    Evaluador de expresiones de columna                                       
 
 fn eval_expr(row: &HashMap<String, EvalValue>, expr: &str) -> EvalValue {
     let expr = expr.trim();
@@ -1116,7 +1116,7 @@ fn smart_num(f: f64) -> EvalValue {
     else { EvalValue::Float(f) }
 }
 
-// ── Algoritmos de analítica ───────────────────────────────────────────────────
+//    Algoritmos de analítica                                                    
 
 struct Stats { min: f64, max: f64, avg: f64, std: f64, p25: f64, median: f64, p75: f64 }
 
@@ -1175,7 +1175,7 @@ fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
     if dx == 0.0 || dy == 0.0 { 0.0 } else { num / (dx * dy) }
 }
 
-// ── IA ────────────────────────────────────────────────────────────────────────
+//    IA                                                                         
 
 fn build_table_summary(rows: &[EvalValue]) -> String {
     let headers = infer_headers(rows);
@@ -1251,7 +1251,7 @@ fn ai_call(prompt: &str) -> Result<EvalValue, String> {
     }
 }
 
-// ── Helpers generales ────────────────────────────────────────────────────────
+//    Helpers generales                                                         
 
 fn infer_headers(rows: &[EvalValue]) -> Vec<String> {
     match rows.first() {

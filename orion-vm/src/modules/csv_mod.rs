@@ -365,7 +365,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+//   Helpers                       
 
 fn infer_value(s: &str) -> EvalValue {
     if let Ok(n) = s.parse::<i64>() { return EvalValue::Int(n); }

@@ -148,7 +148,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+//    Helpers                                                                   
 
 fn compile(pattern: &str, fn_name: &str) -> Result<Regex, String> {
     Regex::new(pattern)

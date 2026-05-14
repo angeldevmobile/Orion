@@ -31,7 +31,7 @@ use std::fs;
 use std::time::Instant;
 use serde::Serialize;
 
-// ─── Structs para --symbols-json ─────────────────────────────────────────────
+//     Structs para --symbols-json                                              
 
 #[derive(Serialize)]
 struct SymbolParam {

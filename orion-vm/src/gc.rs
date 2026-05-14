@@ -55,13 +55,13 @@ impl Gc {
             return 0;
         }
 
-        // ── Mark ────────────────────────────────────────────────────────────
+        //    Mark                                                             
         let mut marked: HashSet<*const RefCell<InstanceData>> = HashSet::new();
         for root in roots {
             mark_value(root, &mut marked);
         }
 
-        // ── Sweep ───────────────────────────────────────────────────────────
+        //    Sweep                                                            
         // Vaciar fields de instancias no alcanzables → rompe ciclos → Rc.count cae
         for weak in &self.heap {
             if let Some(rc) = weak.upgrade() {

@@ -382,7 +382,7 @@ pub fn update_packages(pkg_name: Option<&str>) {
     }
 }
 
-//    orion --publish ────────────────────────────────────────────────────────────
+//    orion --publish                                                             
 
 const GITHUB_API:    &str = "https://api.github.com";
 const REPO_OWNER:    &str = "angeldevmobile";
@@ -432,7 +432,7 @@ fn read_manifest() -> Result<PackageManifest, String> {
     })
 }
 
-// ── Helpers de GitHub API ────────────────────────────────────────────────────
+//    Helpers de GitHub API                                                     
 
 fn gh_get(url: &str, token: &str) -> Result<serde_json::Value, String> {
     ureq::get(url)
@@ -484,7 +484,7 @@ fn gh_create_branch(api_base: &str, token: &str, branch: &str, sha: &str) -> Res
     }
 }
 
-// ── Función pública ──────────────────────────────────────────────────────────
+//    Función pública                                                           
 
 pub fn publish_package() {
     let m = match read_manifest() {

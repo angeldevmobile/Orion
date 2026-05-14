@@ -72,3 +72,10 @@ petgraph = "0.6"
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
 lopdf = "0.32"
+
+# ── Bloque D ──────────────────────────────────────────────────────────────────
+toml    = "0.8"                                      # config_mod: parseo TOML
+zip     = "2"                                        # zip_mod: crear/extraer .zip
+flate2  = "1"                                        # zip_mod: gzip/gunzip
+aes-gcm = "0.10"                                     # crypto2_mod: AES-256-GCM
+rsa     = { version = "0.9", features = ["pem", "sha2"] }  # crypto2_mod: RSA + PEM + SHA2 OID

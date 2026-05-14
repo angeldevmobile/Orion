@@ -19,7 +19,7 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 ///
 /// Devuelve los bytes del objeto (.o / .obj) listos para escribir a disco.
 pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    // ── ISA nativa ──────────────────────────────────────────────────────────
+    //    ISA nativa                                                           
     let mut flag_builder = settings::builder();
     flag_builder.set("use_colocated_libcalls", "false").unwrap();
     flag_builder.set("is_pic", "false").unwrap();
@@ -31,7 +31,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .finish(settings::Flags::new(flag_builder))
         .map_err(|e| format!("Error construyendo ISA: {e}"))?;
 
-    // ── ObjectModule ────────────────────────────────────────────────────────
+    //    ObjectModule                                                         
     let obj_builder = ObjectBuilder::new(
         isa,
         "orion_program",
@@ -40,7 +40,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     let mut module = ObjectModule::new(obj_builder);
 
-    // ── Sección RODATA: bytecode ─────────────────────────────────────────
+    //    Sección RODATA: bytecode                                          
     //    _orion_bc  — los bytes del bytecode serializado (JSON)
     let bc_id = module
         .declare_data("_orion_bc", Linkage::Export, false, false)
@@ -52,7 +52,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .define_data(bc_id, &bc_desc)
         .map_err(|e| format!("Error definiendo _orion_bc: {e}"))?;
 
-    // ── Sección DATA: longitud del bytecode ──────────────────────────────
+    //    Sección DATA: longitud del bytecode                               
     //    _orion_bc_len  — u64 con el número de bytes
     let len_id = module
         .declare_data("_orion_bc_len", Linkage::Export, false, false)
@@ -65,7 +65,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .define_data(len_id, &len_desc)
         .map_err(|e| format!("Error definiendo _orion_bc_len: {e}"))?;
 
-    // ── Declarar orion_rt_exec (símbolo externo, lo provee la staticlib) ──
+    //    Declarar orion_rt_exec (símbolo externo, lo provee la staticlib)   
     let mut rt_sig = module.make_signature();
     rt_sig.params.push(AbiParam::new(types::I64)); // bytecode_ptr
     rt_sig.params.push(AbiParam::new(types::I64)); // bytecode_len
@@ -75,7 +75,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .declare_function("orion_rt_exec", Linkage::Import, &rt_sig)
         .map_err(|e| format!("Error declarando orion_rt_exec: {e}"))?;
 
-    // ── Función main() ────────────────────────────────────────────────────
+    //    Función main()                                                     
     //    Signature: fn() -> i32  (C ABI)
     let mut main_sig = module.make_signature();
     main_sig.returns.push(AbiParam::new(types::I32));
@@ -130,7 +130,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
         .define_function(main_id, &mut ctx)
         .map_err(|e| format!("Error compilando main(): {e}"))?;
 
-    // ── Emitir el objeto ─────────────────────────────────────────────────
+    //    Emitir el objeto                                                  
     let product = module.finish();
     product
         .object

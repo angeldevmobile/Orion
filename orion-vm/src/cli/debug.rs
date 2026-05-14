@@ -27,7 +27,7 @@ use crate::error::OrionError;
 use crate::value::Value;
 use super::banner;
 
-// ─── Paleta ANSI ─────────────────────────────────────────────────────────────
+//   Paleta ANSI   
 
 const GRN:  &str = "\x1b[32m";
 const YLW:  &str = "\x1b[33m";
@@ -37,7 +37,7 @@ const DIM:  &str = "\x1b[2m";
 const BLD:  &str = "\x1b[1m";
 const RST:  &str = "\x1b[0m";
 
-// ─── Entrada principal ───────────────────────────────────────────────────────
+//  Entrada principal 
 
 pub fn run_debug(path: &str) {
     let src = match std::fs::read_to_string(path) {
@@ -175,7 +175,7 @@ pub fn run_debug(path: &str) {
     }
 }
 
-// ─── Helpers de ejecución ────────────────────────────────────────────────────
+//  Helpers de ejecución 
 
 fn step_action(session: &mut DebugSession, action: fn(&mut DebugSession)) {
     action(session);
@@ -193,7 +193,7 @@ fn print_context(session: &DebugSession, radius: u32) {
     }
 }
 
-// ─── Displays de estado ───────────────────────────────────────────────────────
+//  Displays de estado 
 
 fn show_pause(session: &DebugSession) {
     let line = session.vm.current_line();
@@ -320,7 +320,7 @@ fn show_help() {
     println!();
 }
 
-// ─── Formato de valores ──────────────────────────────────────────────────────
+//  Formato de valores 
 
 fn dbg_val(v: &Value) -> String {
     match v {
@@ -349,7 +349,7 @@ fn dbg_val(v: &Value) -> String {
     }
 }
 
-// ─── Pipeline de compilación local ───────────────────────────────────────────
+//  Pipeline de compilación local 
 
 fn compile_src(src: &str, path: &str) -> Result<crate::bytecode::OrionBytecode, OrionError> {
     let tokens = crate::lexer::lex(src)

@@ -7,7 +7,7 @@ use crate::vm::VM;
 use crate::bytecode::OrionBytecode;
 use crate::value::Value;
 
-// ─── Tipos públicos ───────────────────────────────────────────────────────────
+//     Tipos públicos                                                            
 
 /// Un punto de pausa definido por número de línea.
 #[derive(Debug, Clone)]
@@ -56,7 +56,7 @@ pub struct DebugFrame {
     pub line: u32,
 }
 
-// ─── DebugSession ─────────────────────────────────────────────────────────────
+//     DebugSession                                                              
 
 pub struct DebugSession {
     pub vm:           VM,
@@ -87,7 +87,7 @@ impl DebugSession {
         }
     }
 
-    // ─── Gestión de breakpoints ───────────────────────────────────────────────
+    //     Gestión de breakpoints                                                
 
     pub fn add_breakpoint(&mut self, line: u32, condition: Option<String>) -> usize {
         let id = self.next_bp_id;
@@ -134,7 +134,7 @@ impl DebugSession {
         None
     }
 
-    // ─── Ejecución controlada ────────────────────────────────────────────────
+    //     Ejecución controlada                                                 
 
     /// Ejecuta el programa hasta el próximo punto de pausa:
     /// breakpoint, step completado, error, o fin del programa.
@@ -206,7 +206,7 @@ impl DebugSession {
         Ok(())
     }
 
-    // ─── Comandos de control ─────────────────────────────────────────────────
+    //     Comandos de control                                                  
 
     pub fn do_continue(&mut self) {
         self.step_mode = StepMode::Continue;
@@ -231,7 +231,7 @@ impl DebugSession {
         self.paused = false;
     }
 
-    // ─── Introspección ───────────────────────────────────────────────────────
+    //     Introspección                                                        
 
     /// Líneas de contexto alrededor de `line` (±`radius`).
     /// Devuelve `(número_línea, texto, es_la_línea_actual)`.
@@ -264,7 +264,7 @@ impl DebugSession {
         self.vm.debug_lookup_var(name)
     }
 
-    // ─── Watches ─────────────────────────────────────────────────────────────
+    //     Watches                                                              
 
     pub fn add_watch(&mut self, expr: String) -> bool {
         if !self.watches.contains(&expr) {

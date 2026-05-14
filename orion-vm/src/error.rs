@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 
-// ─── Tipos públicos ───────────────────────────────────────────────────────────
+//     Tipos públicos                                                            
 
 #[derive(Debug, Clone)]
 pub struct Span {
@@ -127,7 +127,7 @@ impl OrionError {
         let mut out = String::new();
         out.push('\n');
 
-        // ── Cabecera ──────────────────────────────────────────────────────────
+        //    Cabecera                                                           
         out.push_str(&format!("  {color}{BOLD}{label}{RST}"));
         if !self.file.is_empty() && self.span.line > 0 {
             out.push_str(&format!(
@@ -139,10 +139,10 @@ impl OrionError {
         }
         out.push('\n');
 
-        // ── Mensaje principal ─────────────────────────────────────────────────
+        //    Mensaje principal                                                  
         out.push_str(&format!("  {BOLD}{}{RST}\n", self.message));
 
-        // ── Fragmento del código fuente ───────────────────────────────────────
+        //    Fragmento del código fuente                                        
         if self.span.line > 0 && !source.is_empty() {
             let source_lines: Vec<&str> = source.lines().collect();
             let line_idx = (self.span.line as usize).saturating_sub(1);
@@ -167,7 +167,7 @@ impl OrionError {
             }
         }
 
-        // ── Stack frames (errores de runtime) ────────────────────────────────
+        //    Stack frames (errores de runtime)                                 
         if !self.frames.is_empty() {
             out.push('\n');
             for frame in &self.frames {
@@ -175,7 +175,7 @@ impl OrionError {
             }
         }
 
-        // ── Hint ──────────────────────────────────────────────────────────────
+        //    Hint                                                               
         if let Some(hint) = &self.hint {
             out.push('\n');
             out.push_str(&format!("  {YELLOW}={RST} {YELLOW}ayuda:{RST} {hint}\n"));
@@ -186,7 +186,7 @@ impl OrionError {
     }
 }
 
-// ─── Conversiones desde tipos de error existentes ────────────────────────────
+//     Conversiones desde tipos de error existentes                             
 
 impl From<crate::token::LexError> for OrionError {
     fn from(e: crate::token::LexError) -> Self {
@@ -218,7 +218,7 @@ impl From<crate::codegen::CodegenError> for OrionError {
     }
 }
 
-// ─── Parseo de errores del VM (que vienen como String) ───────────────────────
+//     Parseo de errores del VM (que vienen como String)                        
 
 /// Convierte el string de error del VM en un OrionError estructurado.
 ///
@@ -254,7 +254,7 @@ pub fn parse_vm_error(raw: &str, file: &str) -> OrionError {
         .with_frames(frames)
 }
 
-// ─── Tipos serializables para --check-json (LSP diagnostics) ─────────────────
+//     Tipos serializables para --check-json (LSP diagnostics)                  
 
 /// Un diagnóstico en formato LSP-compatible, serializable a JSON.
 #[derive(Serialize)]

@@ -736,7 +736,7 @@ impl VM {
                         frame.instance_fields = field_names;
                         self.call_stack.push(frame);
                     }
-                    // ── Módulos stdlib nativos ────────────────────────────
+                    //    Módulos stdlib nativos                             
                     Value::Module(mod_name) => {
                         let eval_args: Vec<crate::eval_value::EvalValue> =
                             args.into_iter().map(value_to_eval).collect();
@@ -1886,7 +1886,7 @@ impl VM {
             other => Err(format!("Función '{}' no definida", other)),
         }
     }
-    // ─── C FFI ───────────────────────────────────────────────────────────────
+    //     C FFI                                                                
 
     fn call_extern_fn(&mut self, name: &str, args: Vec<Value>) -> Result<Value, String> {
         use libffi::middle::{Arg, Cif, CodePtr, Type};
@@ -1919,7 +1919,7 @@ impl VM {
             }
         };
 
-        // ── Almacenamiento tipado (deben vivir hasta que termine la llamada) ───
+        //    Almacenamiento tipado (deben vivir hasta que termine la llamada)    
         let mut s_i32:  Vec<i32>        = Vec::new();
         let mut s_i64:  Vec<i64>        = Vec::new();
         let mut s_u32:  Vec<u32>        = Vec::new();
@@ -1933,7 +1933,7 @@ impl VM {
         let mut arg_kinds: Vec<AK>  = Vec::new();
         let mut ffi_types: Vec<Type> = Vec::new();
 
-        // ── Convertir cada argumento ──────────────────────────────────────────
+        //    Convertir cada argumento                                           
         for (pt, arg) in def.params.iter().zip(args.iter()) {
             match pt.as_str() {
                 "int" | "i32" => {
@@ -2020,7 +2020,7 @@ impl VM {
             }
         }
 
-        // ── Tipo de retorno ───────────────────────────────────────────────────
+        //    Tipo de retorno                                                    
         let ffi_ret = match def.ret_type.as_str() {
             "void" | ""              => Type::void(),
             "int"  | "i32" | "bool" => Type::i32(),
@@ -2035,7 +2035,7 @@ impl VM {
         let cif  = Cif::new(ffi_types.into_iter(), ffi_ret);
         let code = CodePtr(fn_ptr_raw as *mut _);
 
-        // ── Construir lista de Arg (después de todos los push — sin más realloc) ─
+        //    Construir lista de Arg (después de todos los push — sin más realloc)  
         let ffi_args: Vec<Arg> = arg_kinds.iter().map(|ak| match ak {
             AK::I32(i) => Arg::new(&s_i32[*i]),
             AK::I64(i) => Arg::new(&s_i64[*i]),
@@ -2046,7 +2046,7 @@ impl VM {
             AK::Ptr(i) => Arg::new(&s_ptr[*i]),
         }).collect();
 
-        // ── Llamar y convertir resultado ─────────────────────────────────────
+        //    Llamar y convertir resultado                                      
         let result = match def.ret_type.as_str() {
             "void" | "" => {
                 unsafe { cif.call::<()>(code, &ffi_args) };
@@ -2095,7 +2095,7 @@ impl VM {
         Ok(result)
     }
 
-    // ─── Interfaz pública del debugger ───────────────────────────────────────
+    //     Interfaz pública del debugger                                        
 
     /// Ejecuta exactamente un paso del loop principal.
     /// Retorna `Ok(true)` cuando el programa terminó.
@@ -2310,7 +2310,7 @@ fn ai_call_openai(prompt: String, context: Option<String>, key: String) -> Resul
         .ok_or_else(|| format!("Respuesta inesperada de OpenAI: {}", json))
 }
 
-// ─── Bridge Value ↔ EvalValue (para módulos stdlib en el bytecode VM) ────────
+//     Bridge Value ↔ EvalValue (para módulos stdlib en el bytecode VM)         
 
 pub fn value_to_eval(v: Value) -> crate::eval_value::EvalValue {
     use crate::eval_value::EvalValue as E;
@@ -2350,7 +2350,7 @@ pub fn eval_to_value(e: crate::eval_value::EvalValue) -> Value {
     }
 }
 
-// ─── Tests unitarios de la VM ────────────────────────────────────────────────
+//     Tests unitarios de la VM                                                 
 
 #[cfg(test)]
 mod tests {
@@ -2377,7 +2377,7 @@ mod tests {
         vm.value_stack.pop().ok_or_else(|| "Stack vacío al terminar".to_string())
     }
 
-    // ── Literales ────────────────────────────────────────────────────────────
+    //    Literales                                                             
 
     #[test]
     fn test_load_int() {
@@ -2404,7 +2404,7 @@ mod tests {
         assert_eq!(run_top(vec![Instruction::LoadNull, Instruction::Halt]).unwrap(), Value::Null);
     }
 
-    // ── Aritmética ───────────────────────────────────────────────────────────
+    //    Aritmética                                                            
 
     #[test]
     fn test_add_int() {
@@ -2471,7 +2471,7 @@ mod tests {
         assert_eq!(r, Value::Str("hola mundo".into()));
     }
 
-    // ── Variables ────────────────────────────────────────────────────────────
+    //    Variables                                                             
 
     #[test]
     fn test_store_load_var() {
@@ -2484,7 +2484,7 @@ mod tests {
         assert_eq!(r, Value::Int(99));
     }
 
-    // ── Comparación ──────────────────────────────────────────────────────────
+    //    Comparación                                                           
 
     #[test]
     fn test_eq_true() {
@@ -2522,7 +2522,7 @@ mod tests {
         assert_eq!(r, Value::Bool(false));
     }
 
-    // ── Control de flujo ─────────────────────────────────────────────────────
+    //    Control de flujo                                                      
 
     #[test]
     fn test_jump_unconditional() {
@@ -2559,7 +2559,7 @@ mod tests {
         assert_eq!(r, Value::Int(42));
     }
 
-    // ── Stack ────────────────────────────────────────────────────────────────
+    //    Stack                                                                 
 
     #[test]
     fn test_dup() {
@@ -2583,7 +2583,7 @@ mod tests {
         assert_eq!(vm.value_stack[0], Value::Int(1));
     }
 
-    // ── Colecciones ──────────────────────────────────────────────────────────
+    //    Colecciones                                                           
 
     #[test]
     fn test_make_list() {
@@ -2623,7 +2623,7 @@ mod tests {
         assert!(r.is_err());
     }
 
-    // ── Manejo de errores ────────────────────────────────────────────────────
+    //    Manejo de errores                                                     
 
     #[test]
     fn test_attempt_catch_error() {

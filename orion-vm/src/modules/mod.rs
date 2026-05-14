@@ -8,6 +8,14 @@ pub mod process_mod;
 pub mod env_mod;
 pub mod net_mod;
 
+// Bloque D — Sistema moderno
+pub mod log_mod;
+pub mod config_mod;
+pub mod secret_mod;
+pub mod zip_mod;
+pub mod stream_mod;
+pub mod crypto2_mod;
+
 // Módulos stdlib avanzados
 pub mod ai_mod;
 pub mod crypto_mod;
@@ -27,21 +35,21 @@ pub mod table_mod;
 // Interfaces nativas de Orion
 pub mod gui;
 
-// ── Backend core ──────────────────────────────────────────────────────────────
+//   Backend core                                
 pub mod db_mod;
 pub mod auth_mod;
 pub mod cache_mod;
 pub mod mail_mod;
 
-// ── Automatización ────────────────────────────────────────────────────────────
+//   Automatización                               
 pub mod tarea_mod;
 pub mod cola_mod;
 pub mod watch_mod;
 
-// ── Validación ────────────────────────────────────────────────────────────────
+//   Validación                                 
 pub mod validate_mod;
 
-// ── Utilidades modernas ───────────────────────────────────────────────────────
+//   Utilidades modernas                             
 pub mod ws_mod;
 pub mod template_mod;
 pub mod formato_mod;
@@ -95,6 +103,13 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "formato"  => formato_mod::call(function, args),
         "grafo"    => grafo_mod::call(function, args),
         "pdf"      => pdf_mod::call(function, args),
+        // Bloque D — Sistema moderno
+        "log"      => log_mod::call(function, args),
+        "config"   => config_mod::call(function, args),
+        "secret"   => secret_mod::call(function, args),
+        "zip"      => zip_mod::call(function, args),
+        "stream"   => stream_mod::call(function, args),
+        "crypto2"  => crypto2_mod::call(function, args),
         _ => Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module)),
     }
 }
@@ -119,6 +134,8 @@ pub fn is_known_module(name: &str) -> bool {
         // Validación
         "validate" |
         // Utilidades modernas
-        "ws" | "template" | "formato" | "grafo" | "pdf"
+        "ws" | "template" | "formato" | "grafo" | "pdf" |
+        // Bloque D
+        "log" | "config" | "secret" | "zip" | "stream" | "crypto2"
     )
 }

@@ -26,7 +26,7 @@ pub mod eval;
 pub mod ai;
 pub mod jit;
 
-// ── Punto de entrada C-ABI para ejecutables AOT ──────────────────────────────
+//    Punto de entrada C-ABI para ejecutables AOT                               
 //
 // El compilador AOT (aot.rs) genera un main() en Cranelift IR que llama a
 // esta función con el bytecode embebido. La staticlib de orion_vm provee el
@@ -63,7 +63,7 @@ pub extern "C" fn orion_rt_exec(bytecode_ptr: *const u8, bytecode_len: usize) ->
     }
 }
 
-// ── Funciones de fuzzing ──────────────────────────────────────────────────────
+//    Funciones de fuzzing                                                       
 
 /// Tokeniza `src`. Nunca debe hacer panic — los errores son Err.
 pub fn lexer_fuzz(src: &str) -> Result<Vec<token::Token>, String> {

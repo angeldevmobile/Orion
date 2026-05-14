@@ -21,14 +21,14 @@ use serde_json::{json, Value};
 use crate::debugger::{DebugSession, PauseReason};
 use crate::error::OrionError;
 
-// ─── Constantes DAP ──────────────────────────────────────────────────────────
+//     Constantes DAP                                                           
 
 /// variablesReference base para scopes locales de cada frame (frame_id + BASE_REF).
 const LOCALS_REF_BASE: u64 = 1000;
 /// variablesReference para el value stack de la VM.
 const STACK_REF: u64 = 9999;
 
-// ─── I/O DAP ─────────────────────────────────────────────────────────────────
+//     I/O DAP                                                                  
 
 /// Lee un mensaje DAP completo desde un BufReader.
 fn read_message(stdin: &mut impl BufRead) -> Option<Value> {
@@ -80,7 +80,7 @@ fn send_event(seq: u64, event: &str, body: Value) {
     }));
 }
 
-// ─── Canal de comandos entre hilo-stdin y hilo-VM ─────────────────────────────
+//     Canal de comandos entre hilo-stdin y hilo-VM                              
 
 #[derive(Debug)]
 enum DapCmd {
@@ -90,7 +90,7 @@ enum DapCmd {
     Disconnect,
 }
 
-// ─── Punto de entrada ────────────────────────────────────────────────────────
+//     Punto de entrada                                                         
 
 pub fn run_dap(path: &str) {
     // Compilar fuente
@@ -134,7 +134,7 @@ pub fn run_dap(path: &str) {
 
     // Bucle principal DAP
     loop {
-        // ── Esperar mensaje del cliente ──────────────────────────────────────
+        //    Esperar mensaje del cliente                                       
         let msg = match rx.recv() {
             Ok(DapCmd::Message(m)) => m,
             Ok(DapCmd::Disconnect) | Err(_) => break,
@@ -148,7 +148,7 @@ pub fn run_dap(path: &str) {
 
         match cmd.as_str() {
 
-            // ── initialize ───────────────────────────────────────────────────
+            //    initialize                                                    
             "initialize" => {
                 send_response(seq, req_seq, "initialize", true, json!({
                     "supportsConfigurationDoneRequest": true,
@@ -165,7 +165,7 @@ pub fn run_dap(path: &str) {
                 send_event(seq, "initialized", json!({}));
             }
 
-            // ── launch ───────────────────────────────────────────────────────
+            //    launch                                                        
             "launch" => {
                 if let Some(p) = args["program"].as_str() {
                     source_path = p.to_string();
@@ -173,7 +173,7 @@ pub fn run_dap(path: &str) {
                 send_response(seq, req_seq, "launch", true, json!({}));
             }
 
-            // ── setBreakpoints ───────────────────────────────────────────────
+            //    setBreakpoints                                                
             "setBreakpoints" => {
                 let lines: Vec<u32> = args["breakpoints"]
                     .as_array()
@@ -193,7 +193,7 @@ pub fn run_dap(path: &str) {
                 }));
             }
 
-            // ── configurationDone ────────────────────────────────────────────
+            //    configurationDone                                             
             "configurationDone" => {
                 configured = true;
                 send_response(seq, req_seq, "configurationDone", true, json!({}));
@@ -216,14 +216,14 @@ pub fn run_dap(path: &str) {
                 }
             }
 
-            // ── threads ──────────────────────────────────────────────────────
+            //    threads                                                       
             "threads" => {
                 send_response(seq, req_seq, "threads", true, json!({
                     "threads": [{ "id": 1, "name": "main" }],
                 }));
             }
 
-            // ── stackTrace ───────────────────────────────────────────────────
+            //    stackTrace                                                    
             "stackTrace" => {
                 let frames: Vec<Value> = session.debug_frames().iter().map(|f| {
                     json!({
@@ -240,7 +240,7 @@ pub fn run_dap(path: &str) {
                 }));
             }
 
-            // ── scopes ───────────────────────────────────────────────────────
+            //    scopes                                                        
             "scopes" => {
                 let frame_id = args["frameId"].as_u64().unwrap_or(0) as usize;
                 let vars = session.frame_vars(frame_id);
@@ -264,7 +264,7 @@ pub fn run_dap(path: &str) {
                 }));
             }
 
-            // ── variables ────────────────────────────────────────────────────
+            //    variables                                                     
             "variables" => {
                 let vref = args["variablesReference"].as_u64().unwrap_or(0);
 
@@ -300,7 +300,7 @@ pub fn run_dap(path: &str) {
                 }));
             }
 
-            // ── evaluate ─────────────────────────────────────────────────────
+            //    evaluate                                                      
             "evaluate" => {
                 let expr = args["expression"].as_str().unwrap_or("").trim();
                 let result = session.lookup_var(expr)
@@ -312,7 +312,7 @@ pub fn run_dap(path: &str) {
                 }));
             }
 
-            // ── continue ─────────────────────────────────────────────────────
+            //    continue                                                      
             "continue" => {
                 send_response(seq, req_seq, "continue", true, json!({
                     "allThreadsContinued": true,
@@ -330,7 +330,7 @@ pub fn run_dap(path: &str) {
                 send_stopped_or_terminated(&mut seq, &session, &source_path);
             }
 
-            // ── next (step over) ──────────────────────────────────────────────
+            //    next (step over)                                               
             "next" => {
                 send_response(seq, req_seq, "next", true, json!({}));
                 session.do_step_over();
@@ -343,7 +343,7 @@ pub fn run_dap(path: &str) {
                 send_stopped_or_terminated(&mut seq, &session, &source_path);
             }
 
-            // ── stepIn ───────────────────────────────────────────────────────
+            //    stepIn                                                        
             "stepIn" => {
                 send_response(seq, req_seq, "stepIn", true, json!({}));
                 session.do_step_into();
@@ -356,7 +356,7 @@ pub fn run_dap(path: &str) {
                 send_stopped_or_terminated(&mut seq, &session, &source_path);
             }
 
-            // ── stepOut ──────────────────────────────────────────────────────
+            //    stepOut                                                       
             "stepOut" => {
                 send_response(seq, req_seq, "stepOut", true, json!({}));
                 session.do_step_out();
@@ -369,7 +369,7 @@ pub fn run_dap(path: &str) {
                 send_stopped_or_terminated(&mut seq, &session, &source_path);
             }
 
-            // ── pause ─────────────────────────────────────────────────────────
+            //    pause                                                          
             "pause" => {
                 send_response(seq, req_seq, "pause", true, json!({}));
                 // La ejecución ya está detenida en el loop; simplemente reportamos
@@ -381,7 +381,7 @@ pub fn run_dap(path: &str) {
                 }));
             }
 
-            // ── terminate / disconnect ────────────────────────────────────────
+            //    terminate / disconnect                                         
             "terminate" | "disconnect" => {
                 send_response(seq, req_seq, &cmd, true, json!({}));
                 seq += 1;
@@ -408,7 +408,7 @@ pub fn run_dap(path: &str) {
     send_event(seq, "terminated", json!({}));
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+//     Helpers                                                                  
 
 fn send_stopped_or_terminated(seq: &mut u64, session: &DebugSession, _source: &str) {
     if session.done {
