@@ -616,16 +616,19 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 | FFI — librerías nativas externas | ✅ Completo | libloading |
 | Package manager (add/remove/list/search/publish) | ✅ Completo | Rust |
 | Registry oficial en GitHub | ✅ Completo | GitHub API |
-| Módulos stdlib | ✅ 35+ módulos | Rust |
+| Módulos stdlib | ✅ 41+ módulos | Rust |
 | CLI completo | ✅ Completo | Rust |
 | Extensión VSCode con binario bundleado | ✅ Completo | TypeScript |
 
 ---
 
-## Stdlib completa (35+ módulos)
+## Stdlib completa (41+ módulos)
 
 ### Core
 `fs` `json` `strings` `datetime` `random` `regex` `env` `process` `crypto`
+
+### Sistema moderno
+`log` `config` `secret` `zip` `stream` `crypto2`
 
 ### Red
 `net` `ws` `serve`
@@ -664,17 +667,86 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 
 ---
 
-### Bloque D — Sistema moderno
+### Bloque D — Sistema moderno ✅
 *Base de cualquier aplicación real. Sin estas, cualquier app queda incompleta.*
 
 | # | Módulo | Descripción | Crate Rust | Estado |
 |---|--------|-------------|------------|--------|
-| 1 | `use "zip"` | Comprimir/descomprimir gzip, zip, tar | `flate2` + `zip` | pendiente |
-| 2 | `use "secret"` | Leer `.env`, secrets seguros con validación | `dotenvy` | pendiente |
-| 3 | `use "log"` | Logging estructurado con niveles, colores y archivos | nativo | pendiente |
-| 4 | `use "config"` | Cargar TOML / YAML / JSON como configuración tipada | `toml` + `serde_yaml` | pendiente |
-| 5 | `use "crypto2"` | AES-256, RSA, firma de datos, certificados | `aes` + `rsa` | pendiente |
-| 6 | `use "stream"` | Pipelines lazy: map, filter, reduce sobre datos infinitos | nativo | pendiente |
+| 1 | `use "zip"` | Comprimir/descomprimir gzip, zip, tar | `flate2` + `zip` | ✅ Completo |
+| 2 | `use "secret"` | Leer `.env`, secrets seguros con validación | nativo | ✅ Completo |
+| 3 | `use "log"` | Logging estructurado con niveles, colores, timers y archivos | nativo | ✅ Completo |
+| 4 | `use "config"` | Cargar TOML / JSON como configuración tipada | `toml` | ✅ Completo |
+| 5 | `use "crypto2"` | AES-256-GCM, RSA, firma y verificación de datos | `aes-gcm` + `rsa` | ✅ Completo |
+| 6 | `use "stream"` | Pipelines de datos: filter, pluck, sum, avg, unique, flatten | nativo | ✅ Completo |
+
+```orion
+-- log — logging estructurado con tags, timers y separadores
+use "log"
+
+log.divider("inicio")
+log.info("Servidor iniciando en puerto 8080", "startup")
+log.timer("db")
+log.info("Conectando a base de datos...", "DB")
+log.ok("Conexion establecida", "DB")
+log.elapsed("db", "conexion")       -- OK  [db]  conexion completado en 12ms
+log.warn("Token expirando pronto", "auth")
+log.err("Usuario no encontrado", "auth")
+log.level("debug")                  -- activa mensajes debug
+log.debug("Request: GET /api/v1/users", "net")
+log.divider()
+
+-- config — cargar TOML / JSON como configuración tipada
+use "config"
+
+cfg  = config.load("orion.toml")
+port = config.get(cfg, "server.port")
+cfg2 = config.merge(cfg, "local.toml")   -- local.toml sobreescribe
+
+-- secret — secrets seguros desde .env
+use "secret"
+
+secret.load(".env")
+db_url = secret.require("DATABASE_URL")   -- error claro si falta
+api_key = secret.get("API_KEY", "dev")
+show secret.mask(api_key)                 -- "sk***y"
+
+-- zip — comprimir y descomprimir
+use "zip"
+
+zip.compress("src/", "release.zip")      -- comprime carpeta entera
+n = zip.decompress("release.zip", "out/")
+entradas = zip.list("release.zip")       -- [{name, size, is_dir}, ...]
+zip.gzip("datos.csv", "datos.csv.gz")
+zip.gunzip("datos.csv.gz", "datos.csv")
+
+-- stream — pipelines de datos sin dependencias
+use "stream" as st
+
+usuarios = [
+    {"nombre": "Ana",  "activo": yes, "venta": 4200},
+    {"nombre": "Luis", "activo": no,  "venta": 1800},
+    {"nombre": "Eva",  "activo": yes, "venta": 3100}
+]
+
+activos = st.where_(usuarios, "activo", yes)
+nombres = st.pluck(activos, "nombre")     -- ["Ana", "Eva"]
+total   = st.sum(st.pluck(activos, "venta"))  -- 7300
+top3    = st.take(st.reverse(st.range(1, 100)), 3)  -- [99, 98, 97]
+
+-- crypto2 — AES-256-GCM y RSA
+use "crypto2"
+
+-- AES-256-GCM (cifrado simétrico autenticado)
+cifrado = crypto2.aes_encrypt("datos sensibles", "mi-clave-secreta")
+texto   = crypto2.aes_decrypt(cifrado, "mi-clave-secreta")
+
+-- RSA (cifrado asimétrico + firma digital)
+claves  = crypto2.rsa_keygen()            -- {public_key, private_key}
+c       = crypto2.rsa_encrypt("mensaje", claves.public_key)
+m       = crypto2.rsa_decrypt(c, claves.private_key)
+firma   = crypto2.rsa_sign("contrato", claves.private_key)
+valido  = crypto2.rsa_verify("contrato", firma, claves.public_key)  -- yes
+```
 
 ---
 
@@ -751,8 +823,8 @@ tabla.mostrar(reporte)
 ### Orden de implementación
 
 ```
-Bloque D → Bloque B → Bloque C → Bloque A → Bloque E
-  (base)     (web)      (AI)      (datos)    (cloud)
+Bloque D ✅ → Bloque B → Bloque C → Bloque A → Bloque E
+  (base)        (web)      (AI)      (datos)    (cloud)
 ```
 
 ---

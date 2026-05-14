@@ -1,0 +1,28 @@
+use "log"
+
+log.divider("inicio de app")
+
+log.info("Servidor iniciando en puerto 8080", "startup")
+log.info("Cargando configuracion...", "config")
+log.ok("Configuracion cargada", "config")
+
+log.divider("base de datos")
+
+log.timer("db")
+log.info("Conectando a la base de datos...", "DB")
+log.ok("Conexion establecida", "DB")
+log.elapsed("db", "conexion a DB")
+
+log.divider("autenticacion")
+
+log.warn("Token expirando en 5 minutos", "auth")
+log.err("Usuario no encontrado: angel@orion.dev", "auth")
+
+log.divider("debug")
+
+log.level("debug")
+log.debug("Peticion recibida: GET /api/users", "net")
+log.debug("Tiempo de respuesta: 23ms", "perf")
+
+log.divider()
+log.ok("Todo listo")
