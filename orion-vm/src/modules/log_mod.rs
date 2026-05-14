@@ -12,7 +12,7 @@ static TIMERS:    Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // ── Niveles estándar ────────────────────────────────────────────────────
+        //   Niveles estándar                           
         "info" | "warn" | "err" | "debug" | "ok" => {
             if args.is_empty() {
                 return Err(format!("log.{} requiere (msg, tag?)", function));
@@ -24,7 +24,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        // ── Configuración ───────────────────────────────────────────────────────
+        //   Configuración                             
         "level" => {
             if args.is_empty() {
                 return Err("log.level requiere (\"debug\"|\"info\"|\"warn\"|\"error\")".into());
@@ -38,7 +38,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        // ── Separador visual ────────────────────────────────────────────────────
+        //   Separador visual                           
         // divider(label?) → imprime una línea separadora
         "divider" | "separator" => {
             let label = if args.is_empty() { String::new() } else { to_str(&args[0]) };
@@ -46,7 +46,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        // ── Timers ──────────────────────────────────────────────────────────────
+        //   Timers                                
         // timer(name) → inicia un temporizador nombrado
         "timer" | "start" => {
             if args.is_empty() { return Err("log.timer requiere (name)".into()); }
@@ -74,7 +74,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
 
-        // ── Impresión explícita ─────────────────────────────────────────────────
+        //   Impresión explícita                          
         "print" => {
             if args.len() < 2 { return Err("log.print requiere (level, msg, tag?)".into()); }
             let level = to_str(&args[0]);
@@ -88,7 +88,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── Render ────────────────────────────────────────────────────────────────────
+//   Render                                   
 
 fn write_log(level: &str, msg: &str, tag: Option<&str>) {
     if level_num(level) < LOG_LEVEL.load(Ordering::Relaxed) { return; }
@@ -130,25 +130,25 @@ fn write_log(level: &str, msg: &str, tag: Option<&str>) {
 fn print_divider(label: &str) {
     let width = 60usize;
     let line = if label.is_empty() {
-        "\x1b[90m".to_string() + &"─".repeat(width) + "\x1b[0m"
+        "\x1b[90m".to_string() + &" ".repeat(width) + "\x1b[0m"
     } else {
         let pad = width.saturating_sub(label.len() + 2);
         let left = pad / 2;
         let right = pad - left;
         format!(
             "\x1b[90m{} {} {}\x1b[0m",
-            "─".repeat(left),
+            " ".repeat(left),
             label,
-            "─".repeat(right)
+            " ".repeat(right)
         )
     };
     println!("{}", line);
     if let Ok(guard) = LOG_FILE.lock() {
         if let Some(path) = guard.as_ref() {
             let plain = if label.is_empty() {
-                format!("{}\n", "─".repeat(width))
+                format!("{}\n", " ".repeat(width))
             } else {
-                format!("── {} {}\n", label, "─".repeat(width.saturating_sub(label.len() + 4)))
+                format!("  {} {}\n", label, " ".repeat(width.saturating_sub(label.len() + 4)))
             };
             let _ = std::fs::OpenOptions::new()
                 .create(true).append(true).open(path)
@@ -157,7 +157,7 @@ fn print_divider(label: &str) {
     }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+//   Helpers                                   
 
 fn level_badge(level: &str) -> &'static str {
     match level {

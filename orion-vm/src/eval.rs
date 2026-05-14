@@ -1350,19 +1350,88 @@ fn serve_http(port: i64, handler: EvalValue, env: &mut Env) -> Result<Flow, Stri
 
         // Dict de request
         let mut req: HashMap<String, EvalValue> = HashMap::new();
-        req.insert("path".into(),   EvalValue::Str(path));
-        req.insert("method".into(), EvalValue::Str(method));
+        req.insert("path".into(),   EvalValue::Str(path.clone()));
+        req.insert("method".into(), EvalValue::Str(method.clone()));
         req.insert("body".into(),   EvalValue::Str(body_str));
         req.insert("params".into(), EvalValue::Dict(params));
 
-        // Llamar handler
-        let resp_val = match call_function(handler.clone(), vec![EvalValue::Dict(req)], vec![], env) {
-            Ok(v)  => v,
-            Err(e) => {
-                let mut err: HashMap<String, EvalValue> = HashMap::new();
-                err.insert("status".into(), EvalValue::Int(500));
-                err.insert("body".into(),   EvalValue::Str(e));
-                EvalValue::Dict(err)
+        // ── Router dispatch ───────────────────────────────────────────────────
+        let resp_val = if let Some(dispatch) = crate::modules::router_mod::try_dispatch(&method, &path) {
+            // Mezclar params del router en req.params
+            if let Some(EvalValue::Dict(ref mut pmap)) = req.get_mut("params") {
+                for (k, v) in &dispatch.params {
+                    pmap.insert(k.clone(), EvalValue::Str(v.clone()));
+                }
+            } else {
+                let pmap: HashMap<String, EvalValue> = dispatch.params.iter()
+                    .map(|(k, v)| (k.clone(), EvalValue::Str(v.clone())))
+                    .collect();
+                req.insert("params".into(), EvalValue::Dict(pmap));
+            }
+
+            // Correr middlewares — si alguno devuelve Dict con "status", cortar
+            let mut early_resp: Option<EvalValue> = None;
+            for mw in &dispatch.middlewares {
+                match call_function(mw.clone(), vec![EvalValue::Dict(req.clone())], vec![], env) {
+                    Ok(EvalValue::Dict(ref d)) if d.contains_key("status") => {
+                        early_resp = Some(EvalValue::Dict(d.clone()));
+                        break;
+                    }
+                    Ok(_)  => {}
+                    Err(e) => {
+                        let mut err = HashMap::new();
+                        err.insert("status".into(), EvalValue::Int(500));
+                        err.insert("body".into(),   EvalValue::Str(e));
+                        early_resp = Some(EvalValue::Dict(err));
+                        break;
+                    }
+                }
+            }
+
+            if let Some(resp) = early_resp {
+                resp
+            } else {
+                // Resolver handler: Function directa o Str (nombre en env)
+                let fn_val = match &dispatch.handler {
+                    EvalValue::Str(name) => env.get(name.as_str())
+                        .ok_or_else(|| format!("router: handler '{}' no definido en el entorno", name)),
+                    other => Ok(other.clone()),
+                };
+
+                match fn_val {
+                    Ok(f) => match call_function(f, vec![EvalValue::Dict(req)], vec![], env) {
+                        Ok(v)  => v,
+                        Err(e) => {
+                            let mut err = HashMap::new();
+                            err.insert("status".into(), EvalValue::Int(500));
+                            err.insert("body".into(),   EvalValue::Str(e));
+                            EvalValue::Dict(err)
+                        }
+                    },
+                    Err(e) => {
+                        let mut err = HashMap::new();
+                        err.insert("status".into(), EvalValue::Int(500));
+                        err.insert("body".into(),   EvalValue::Str(e));
+                        EvalValue::Dict(err)
+                    }
+                }
+            }
+        } else if crate::modules::router_mod::is_active() {
+            // Hay un router activo pero ninguna ruta coincidió → 404
+            let mut d = HashMap::new();
+            d.insert("status".into(), EvalValue::Int(404));
+            d.insert("body".into(),   EvalValue::Str(format!("Cannot {} {}", method, path)));
+            EvalValue::Dict(d)
+        } else {
+            // Sin router activo → handler por defecto
+            match call_function(handler.clone(), vec![EvalValue::Dict(req)], vec![], env) {
+                Ok(v)  => v,
+                Err(e) => {
+                    let mut err = HashMap::new();
+                    err.insert("status".into(), EvalValue::Int(500));
+                    err.insert("body".into(),   EvalValue::Str(e));
+                    EvalValue::Dict(err)
+                }
             }
         };
 

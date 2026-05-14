@@ -750,15 +750,92 @@ valido  = crypto2.rsa_verify("contrato", firma, claves.public_key)  -- yes
 
 ---
 
-### Bloque B — Web moderna
+### Bloque B — Web moderna ✅
 *Más allá del `serve` básico: middleware, routing avanzado, protocolos modernos.*
 
 | # | Módulo | Descripción | Crate Rust | Estado |
 |---|--------|-------------|------------|--------|
-| 7 | `use "router"` | Routing declarativo con parámetros, grupos y middleware | `matchit` | pendiente |
-| 8 | `use "middleware"` | Rate limit, CORS, logging, auth en cadena | nativo | pendiente |
-| 9 | `use "sse"` | Server-Sent Events para streaming HTTP en tiempo real | nativo | pendiente |
-| 10 | `use "proto"` | Serialización binaria rápida (MessagePack) — 10x más rápido que JSON | `rmp-serde` | pendiente |
+| 7 | `use "router"` | Routing declarativo con parámetros `:id` y wildcards `*` | nativo | ✅ Completo |
+| 8 | `use "middleware"` | Rate limit, CORS, logging, auth JWT en cadena | nativo | ✅ Completo |
+| 9 | `use "sse"` | Server-Sent Events para streaming HTTP en tiempo real | nativo | ✅ Completo |
+| 10 | `use "proto"` | Serialización binaria MessagePack — 10x más compacto que JSON | nativo | ✅ Completo |
+
+```orion
+-- router + serve integrado — el combo completo
+use "router"
+use "middleware"
+
+r       = router.new()
+limiter = middleware.rate_limit(100, 60)   -- 100 req / 60 seg
+
+-- Middleware global: rate limit + logging
+router.use_middleware(r, fn(req) {
+    if not middleware.check_rate(limiter, req.method) {
+        return {status: 429, body: "Too Many Requests"}
+    }
+    middleware.log_req(req.method, req.path, 200, 0)
+    return null   -- null = continuar al handler
+})
+
+-- Rutas con handlers inline (lambdas)
+router.get(r, "/usuarios/:id", fn(req) {
+    id = req.params.id
+    return {status: 200, body: "Usuario: " + id, content_type: "application/json"}
+})
+
+router.post(r, "/usuarios", fn(req) {
+    return {status: 201, body: req.body}
+})
+
+router.get(r, "/archivos/*ruta", fn(req) {
+    return {status: 200, body: "Archivo: " + req.params.ruta}
+})
+
+router.attach(r)   -- activa el router para el siguiente serve
+
+serve en 8080 { }  -- el router despacha automáticamente; 404 si no hay match
+
+-- También se puede usar router.match() manualmente
+match = router.match(r, "GET", "/usuarios/42")
+-- {handler: "<fn>", params: {id: "42"}, method: "GET", path: "/usuarios/42"}
+
+show router.routes(r)   -- lista todas las rutas registradas
+
+-- middleware — rate limit, CORS, auth JWT
+use "middleware"
+
+limiter = middleware.rate_limit(100, 60)   -- 100 req / 60 seg
+ok = middleware.check_rate(limiter, "192.168.1.1")   -- yes / no
+
+cors_headers = middleware.cors("https://miapp.com", "GET, POST", "Authorization")
+resultado = middleware.auth_bearer(token, "mi-secreto")
+-- {valid: yes, sub: "user123", payload: {rol: "admin", exp: 1800000000}}
+
+middleware.log_req("GET", "/api/usuarios", 200, 12)
+-- 14:32:01  GET     /api/usuarios   200  12ms
+
+-- sse — Server-Sent Events
+use "sse"
+
+headers = sse.headers()   -- {Content-Type: "text/event-stream", ...}
+ev = sse.event("mensaje de prueba")              -- "data: mensaje de prueba\n\n"
+ev = sse.named("update", "datos nuevos")        -- "event: update\ndata: datos nuevos\n\n"
+ev = sse.json_event("usuarios", [{nombre: "Ana"}])
+ev = sse.retry(3000)                             -- "retry: 3000\n\n"
+ev = sse.keep_alive()                            -- ": keep-alive\n\n"
+
+-- proto — serialización binaria MessagePack
+use "proto"
+
+datos = {nombre: "Ana", edad: 25, activo: yes}
+bytes = proto.encode(datos)        -- List de ints (bytes)
+b64   = proto.encode_b64(datos)    -- String base64
+show proto.size(datos)             -- tamaño en bytes (más pequeño que JSON)
+show proto.json_size(datos)        -- tamaño como JSON para comparar
+
+recuperado = proto.decode(bytes)
+recuperado = proto.decode_b64(b64)
+```
 
 ---
 
@@ -823,8 +900,8 @@ tabla.mostrar(reporte)
 ### Orden de implementación
 
 ```
-Bloque D ✅ → Bloque B → Bloque C → Bloque A → Bloque E
-  (base)        (web)      (AI)      (datos)    (cloud)
+Bloque D ✅ → Bloque B ✅ → Bloque C → Bloque A → Bloque E
+  (base)         (web)        (AI)      (datos)    (cloud)
 ```
 
 ---

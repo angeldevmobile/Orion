@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // ── Fuentes ─────────────────────────────────────────────────────────────
+        //    Fuentes                                                              
         // from(list) → devuelve la lista tal cual (documenta intención de pipeline)
         "from" => {
             if args.is_empty() { return Err("stream.from requiere (list)".into()); }
@@ -28,7 +28,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(out))
         }
 
-        // ── Filtros ──────────────────────────────────────────────────────────────
+        //    Filtros                                                               
         // where_(s, key, val) / filter_eq → filtra dicts donde dict[key] == val
         "where_" | "filter_eq" | "where" => {
             if args.len() < 3 { return Err("stream.where requiere (list, key, value)".into()); }
@@ -65,7 +65,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             filter_list(&args[0], |item| item.to_f64().map(|v| v <= n).unwrap_or(false))
         }
 
-        // ── Proyecciones ─────────────────────────────────────────────────────────
+        //    Proyecciones                                                          
         // pluck(s, key) → extrae un campo de cada dict
         "pluck" => {
             if args.len() < 2 { return Err("stream.pluck requiere (list, key)".into()); }
@@ -93,7 +93,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             })
         }
 
-        // ── Slicing ──────────────────────────────────────────────────────────────
+        //    Slicing                                                               
         // take(s, n) → primeros N elementos
         "take" => {
             if args.len() < 2 { return Err("stream.take requiere (list, n)".into()); }
@@ -113,7 +113,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
 
-        // ── Transformaciones ─────────────────────────────────────────────────────
+        //    Transformaciones                                                      
         // reverse(s) → lista invertida
         "reverse" => {
             if args.is_empty() { return Err("stream.reverse requiere (list)".into()); }
@@ -172,7 +172,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
 
-        // ── Agregaciones ─────────────────────────────────────────────────────────
+        //    Agregaciones                                                          
         // collect(s) → materializa el stream (passthrough)
         "collect" => {
             if args.is_empty() { return Err("stream.collect requiere (list)".into()); }
@@ -231,7 +231,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+//    Helpers                                                                   
 
 fn filter_list<F>(val: &EvalValue, pred: F) -> Result<EvalValue, String>
 where F: Fn(&EvalValue) -> bool

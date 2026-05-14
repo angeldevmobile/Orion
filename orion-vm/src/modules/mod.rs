@@ -16,6 +16,12 @@ pub mod zip_mod;
 pub mod stream_mod;
 pub mod crypto2_mod;
 
+// Bloque B — Web moderna
+pub mod router_mod;
+pub mod middleware_mod;
+pub mod sse_mod;
+pub mod proto_mod;
+
 // Módulos stdlib avanzados
 pub mod ai_mod;
 pub mod crypto_mod;
@@ -110,6 +116,11 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "zip"      => zip_mod::call(function, args),
         "stream"   => stream_mod::call(function, args),
         "crypto2"  => crypto2_mod::call(function, args),
+        // Bloque B — Web moderna
+        "router"     => router_mod::call(function, args),
+        "middleware" => middleware_mod::call(function, args),
+        "sse"        => sse_mod::call(function, args),
+        "proto"      => proto_mod::call(function, args),
         _ => Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module)),
     }
 }
@@ -136,6 +147,8 @@ pub fn is_known_module(name: &str) -> bool {
         // Utilidades modernas
         "ws" | "template" | "formato" | "grafo" | "pdf" |
         // Bloque D
-        "log" | "config" | "secret" | "zip" | "stream" | "crypto2"
+        "log" | "config" | "secret" | "zip" | "stream" | "crypto2" |
+        // Bloque B
+        "router" | "middleware" | "sse" | "proto"
     )
 }
