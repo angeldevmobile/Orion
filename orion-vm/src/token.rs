@@ -78,10 +78,6 @@ pub enum TokenKind {
     Think,
     Learn,
     Sense,
-    Adapt,
-    Embed,
-    Predict,
-    Train,
 
     // Keywords – communication
     Sync,

@@ -22,6 +22,11 @@ pub mod middleware_mod;
 pub mod sse_mod;
 pub mod proto_mod;
 
+// Bloque C — AI nativa avanzada
+pub mod llm_mod;
+pub mod embed_mod;
+pub mod vector_mod;
+
 // Módulos stdlib avanzados
 pub mod ai_mod;
 pub mod crypto_mod;
@@ -89,7 +94,7 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "csv"      => csv_mod::call(function, args),
         "excel"    => excel_mod::call(function, args),
         "regex"    => regex_mod::call(function, args),
-        "table"    => table_mod::call(function, args),
+        "table" | "df" => table_mod::call(function, args),
         // Interfaces nativas
         "gui"      => gui::call(function, args),
         // Backend core
@@ -121,6 +126,10 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "middleware" => middleware_mod::call(function, args),
         "sse"        => sse_mod::call(function, args),
         "proto"      => proto_mod::call(function, args),
+        // Bloque C — AI nativa avanzada
+        "llm"                  => llm_mod::call(function, args),
+        "embed" | "embeddings" => embed_mod::call(function, args),
+        "vector"               => vector_mod::call(function, args),
         _ => Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module)),
     }
 }
@@ -135,7 +144,7 @@ pub fn is_known_module(name: &str) -> bool {
         "ai" | "crypto" | "matrix" | "quantum" |
         "cosmos" | "timewarp" | "vision" | "insight" |
         // Datos
-        "csv" | "excel" | "regex" | "table" |
+        "csv" | "excel" | "regex" | "table" | "df" |
         // Interfaces
         "gui" |
         // Backend core
@@ -149,6 +158,8 @@ pub fn is_known_module(name: &str) -> bool {
         // Bloque D
         "log" | "config" | "secret" | "zip" | "stream" | "crypto2" |
         // Bloque B
-        "router" | "middleware" | "sse" | "proto"
+        "router" | "middleware" | "sse" | "proto" |
+        // Bloque C
+        "llm" | "embed" | "embeddings" | "vector"
     )
 }

@@ -1,0 +1,126 @@
+-- test_llm.orx  — prueba del módulo llm (Bloque C)
+use "llm"
+use "embeddings" as emb
+use "vector"
+
+show "=== TEST LLM / EMBEDDINGS / VECTOR ==="
+show ""
+
+-- ── 1. Providers detectados ──────────────────────────────────────────────────
+show "1. Proveedores configurados:"
+providers = llm.providers()
+show providers
+show ""
+
+-- ── 2. Modelos disponibles ───────────────────────────────────────────────────
+show "2. Modelos disponibles (llm.models):"
+modelos = llm.models()
+show modelos
+show ""
+
+-- ── 3. Query simple ──────────────────────────────────────────────────────────
+show "3. llm.query — auto provider:"
+attempt {
+    r = llm.query("auto", "Di solo: FUNCIONA")
+    show "Respuesta: " + r
+} handle err {
+    show "  Sin API key: " + err
+}
+show ""
+
+-- ── 4. Query con modelo explícito ────────────────────────────────────────────
+show "4. llm.query — claude:"
+attempt {
+    r = llm.query("claude-haiku-4-5-20251001", "Di solo: CLAUDE OK")
+    show "Respuesta: " + r
+} handle err {
+    show "  Sin clave Anthropic: " + err
+}
+show ""
+
+-- ── 5. Query con system prompt ───────────────────────────────────────────────
+show "5. llm.query_with — system prompt:"
+attempt {
+    r = llm.query_with("auto", "cuanto es 3+3", "Responde solo con el número.")
+    show "Respuesta: " + r
+} handle err {
+    show "  Sin API key: " + err
+}
+show ""
+
+-- ── 6. Chat multi-turn ───────────────────────────────────────────────────────
+show "6. llm.chat — conversación:"
+attempt {
+    msgs = [
+        {"role": "user",      "content": "Hola, cuanto es 2 + 2"},
+        {"role": "assistant", "content": "4"},
+        {"role": "user",      "content": "y el doble de eso"}
+    ]
+    r = llm.chat("auto", msgs)
+    show "Chat resp: " + r
+} handle err {
+    show "  Sin API key: " + err
+}
+show ""
+
+-- ── 7. embeddings.similarity — sin API ──────────────────────────────────────
+show "7. emb.similarity — sin API:"
+v1 = [1.0, 0.0, 0.0]
+v2 = [1.0, 0.0, 0.0]
+v3 = [0.0, 1.0, 0.0]
+show "  sim(v1, v1) = " + emb.similarity(v1, v2)
+show "  sim(v1, v3) = " + emb.similarity(v1, v3)
+show "  dist(v1,v3) = " + emb.distance(v1, v3)
+show "  norm([3,4]) = " + emb.normalize([3.0, 4.0])
+show ""
+
+-- ── 8. vector DB con vectores manuales ──────────────────────────────────────
+show "8. vector DB — sin API:"
+db = vector.new()
+vector.add(db, "doc-1", [1.0, 0.0, 0.0], "Manzanas")
+vector.add(db, "doc-2", [0.9, 0.1, 0.0], "Peras")
+vector.add(db, "doc-3", [0.0, 0.0, 1.0], "Coches")
+show "  Entradas: " + vector.size(db)
+
+resultados = vector.buscar(db, [1.0, 0.0, 0.0], 2)
+show "  Buscar [1,0,0] top-2:"
+for r in resultados {
+    show "    id=" + r.id + "  score=" + r.score + "  meta=" + r.metadata
+}
+show ""
+
+-- ── 9. vector save / load ────────────────────────────────────────────────────
+show "9. vector.save / load:"
+attempt {
+    vector.save(db, "test_vdb.json")
+    show "  Guardado OK"
+    db2 = vector.load("test_vdb.json")
+    show "  Cargado — entradas: " + vector.size(db2)
+} handle err {
+    show "  Error: " + err
+}
+show ""
+
+-- ── 10. emb.text + vector (requiere API) ─────────────────────────────────────
+show "10. emb.text + vector.buscar (requiere OPENAI_API_KEY u Ollama):"
+attempt {
+    docs = ["El cielo es azul", "Los coches son rapidos", "Me gustan las manzanas"]
+    db3  = vector.new()
+    i    = 0
+    for doc in docs {
+        e = emb.text(doc)
+        vector.add(db3, "doc-" + i, e, doc)
+        i = i + 1
+    }
+    qemb = emb.text("frutas y alimentos")
+    res  = vector.buscar(db3, qemb, 2)
+    show "  Buscar 'frutas y alimentos':"
+    for r in res {
+        show "    " + r.metadata + "  score=" + r.score
+    }
+} handle err {
+    show "  Sin proveedor embed: " + err
+}
+show ""
+
+show "=== FIN ==="

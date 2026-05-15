@@ -645,8 +645,11 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 ### Utilidades modernas
 `template` `formato` `grafo` `pdf`
 
+### AI nativa (Bloque C)
+`llm` `embed` `vector` `ai`
+
 ### Avanzado
-`ai` `vision` `insight` `gui` `quantum` `cosmos` `timewarp`
+`vision` `insight` `gui` `quantum` `cosmos` `timewarp`
 
 ---
 
@@ -839,49 +842,127 @@ recuperado = proto.decode_b64(b64)
 
 ---
 
-### Bloque C — AI nativa
+### Bloque C — AI nativa ✅
 *La diferenciación más fuerte de Orion. AI de primera clase, sin pip, sin configuración.*
 
 | # | Módulo | Descripción | Crate Rust | Estado |
 |---|--------|-------------|------------|--------|
-| 11 | `use "llm"` | Llamadas a OpenAI / Anthropic / Ollama / Gemini en 1 línea | `ureq` | pendiente |
-| 12 | `use "embed"` | Embeddings de texto, similitud coseno, búsqueda semántica | math nativo | pendiente |
-| 13 | `use "vector"` | Base de datos vectorial en memoria con HNSW | `hnsw_rs` | pendiente |
+| 11 | `use "llm"` | Llamadas a OpenAI / Anthropic / Ollama / Gemini en 1 línea | `ureq` | ✅ Completo |
+| 12 | `use "embed"` | Embeddings de texto, similitud coseno, búsqueda semántica | math nativo | ✅ Completo |
+| 13 | `use "vector"` | Base de datos vectorial en memoria con cosine similarity | nativo | ✅ Completo |
+
+> **Separación de responsabilidades:**
+> - `ai.*` → alto nivel, sin elegir modelo (summarize, classify, sentiment, translate)
+> - `llm.*` → control directo del modelo (query con provider explícito, chat multi-turn)
+> - `embed.*` → solo vectores (text → embedding, similarity, search semántico)
 
 ```orion
--- Ejemplo del futuro
 use "llm"
+use "embed"    -- alias de "embeddings"
 use "vector"
 
-respuesta = llm.ask("gpt-4o", "Resume este contrato en 3 puntos: " + contrato)
-embedding = llm.embed("text-embedding-3-small", texto)
-similares = vector.buscar(db_vectores, embedding, top: 5)
+-- Multi-provider: claude, gpt, gemini, ollama
+respuesta = llm.query("gpt-4o", "Resume este contrato en 3 puntos: " + contrato)
+respuesta = llm.query("claude-sonnet-4-6", prompt)
+respuesta = llm.query("ollama:llama3", prompt)
+respuesta = llm.query("gemini-2.0-flash", prompt)
+respuesta = llm.query("auto", prompt)   -- detecta el proveedor configurado
+
+-- Con system prompt
+r = llm.query_with("gpt-4o", pregunta, "Eres un experto legal.")
+
+-- Chat multi-turn
+msgs = [
+    {"role": "user",      "content": "Hola"},
+    {"role": "assistant", "content": "¡Hola!"},
+    {"role": "user",      "content": "¿Cuánto es 2+2?"}
+]
+r = llm.chat("claude-haiku-4-5-20251001", msgs)
+
+-- Embeddings
+vec = llm.embed("text-embedding-3-small", texto)   -- List<float>
+
+-- Búsqueda semántica sobre corpus pequeño (sin vector DB)
+resultados = embed.search("¿Cuándo fue fundada?", documentos, top: 3)
+-- → [{text: "...", score: 0.91, index: 4}, ...]
+
+-- Similitud coseno entre dos vectores
+sim = embed.similarity(emb1, emb2)   -- 0.0 .. 1.0
+dist = embed.distance(emb1, emb2)
+norm = embed.normalize(emb1)
+
+-- Base de datos vectorial en memoria
+db = vector.new()
+for doc in corpus {
+    v = embed.text(doc.texto)
+    vector.add(db, doc.id, v, doc.titulo)
+}
+query_vec  = embed.text("¿Cuándo fue fundada la empresa?")
+resultados = vector.buscar(db, query_vec, 5)
+-- → [{id: "doc-12", score: 0.934, metadata: "Historia"}, ...]
+vector.save(db, "corpus.vdb.json")   -- persistir a JSON
+db2 = vector.load("corpus.vdb.json") -- cargar
+
+-- Proveedores disponibles
+show llm.providers()   -- ["anthropic", "openai", "gemini", "ollama"]
+show llm.models()      -- ["claude-haiku-4-5-20251001", "gpt-4o", "ollama:llama3:latest", ...]
 ```
 
 ---
 
 ### Bloque A — Datos modernos
-*El reemplazo de pandas/numpy: más rápido, API más simple, en español.*
+*El reemplazo de pandas: más rápido, API más simple, sin dependencias pesadas.*
 
-| # | Módulo | Descripción | Crate Rust | Estado |
-|---|--------|-------------|------------|--------|
-| 14 | `use "tabla"` v2 | DataFrames columnar, groupby, join, pivot, lazy eval | `polars` | pendiente |
-| 15 | `use "serie"` | Series de tiempo, ventanas deslizantes, resample, OHLCV | `polars` | pendiente |
-| 16 | `use "stat"` | Estadística moderna: percentil, correlación, regresión lineal | `statrs` | pendiente |
-| 17 | `use "num"` | Tensores N-dim, álgebra lineal, FFT, convolución | `ndarray` | pendiente |
+| # | Módulo | Descripción | Implementación | Estado |
+|---|--------|-------------|----------------|--------|
+| 14 | `use "table"` / `use "df"` | DataFrames: load, filter, group, join, pivot, forecast, anomalías | Vec nativo (sin polars) | ✅ Completo |
+| 15 | `use "serie"` | Series de tiempo, ventanas deslizantes, resample, OHLCV | pendiente | 🔲 Roadmap |
+| 16 | `use "stat"` | Estadística: percentil, correlación, regresión lineal | pendiente | 🔲 Roadmap |
+| 17 | `use "num"` | Tensores N-dim, álgebra lineal, FFT | `ndarray` | 🔲 Roadmap |
+
+> `table` usa `Vec<HashMap>` nativo — sin polars, startup < 1ms, compila en segundos.
 
 ```orion
--- Orion vs pandas: mismo resultado, la mitad de líneas
-use "tabla"
+use "table"     -- o: use "df"
 
-ventas = tabla.cargar("ventas.csv")
-reporte = ventas
-    |> tabla.filtrar("region", "Norte")
-    |> tabla.agrupar("producto")
-    |> tabla.suma("venta")
-    |> tabla.ordenar("venta", "desc")
-    |> tabla.top(10)
-tabla.mostrar(reporte)
+-- Cargar: auto-detecta CSV / Excel / JSON
+t = table.load("ventas.csv")
+table.peek(t, 5)       -- imprime las primeras 5 filas
+table.schema(t)        -- tipos por columna
+table.profile(t)       -- estadísticas completas
+
+-- Filtrar, seleccionar, ordenar
+norte  = table.where(t, "region == 'Norte' && activo == yes")
+top10  = table.top(t, "venta", 10)
+t2     = table.keep(t, ["nombre", "region", "venta"])
+t3     = table.sort(t, "venta", "desc")
+
+-- Columna calculada
+t4 = table.add(t, "total", "venta * 1.19")
+
+-- Agregación
+por_region = table.group(t, "region", "venta", "sum")
+stats      = table.stats(t, "venta")   -- {min, max, avg, std, p25, median, p75}
+
+-- Combinar
+unido = table.join(t, t2, "id")
+todo  = table.concat(t, t2)
+
+-- Analytics
+pred      = table.forecast(t, "venta", 5)     -- proyección lineal
+anomalias = table.anomalies(t, "venta")       -- outliers IQR
+corr      = table.correlate(t, "edad", "venta")  -- Pearson
+ranked    = table.rank(t, "venta")            -- agrega _rank y _pct
+mavg      = table.moving_avg(t, "venta", 3)   -- media móvil
+
+-- Guardar: auto-detecta formato por extensión
+table.save(t, "reporte.csv")
+table.save(t, "reporte.xlsx")
+table.save(t, "reporte.json")
+
+-- Integración AI
+table.describe_ai(t)       -- descripción generada por AI
+resp = table.ask(t, "¿Qué región vende más en verano?")
 ```
 
 ---
@@ -900,8 +981,8 @@ tabla.mostrar(reporte)
 ### Orden de implementación
 
 ```
-Bloque D ✅ → Bloque B ✅ → Bloque C → Bloque A → Bloque E
-  (base)         (web)        (AI)      (datos)    (cloud)
+Bloque D ✅ → Bloque B ✅ → Bloque C ✅ → Bloque A ✅ → Bloque E
+  (base)         (web)         (AI)        (table/df)    (cloud)
 ```
 
 ---

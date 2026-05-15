@@ -453,10 +453,6 @@ fn keyword_or_ident(word: &str) -> TokenKind {
         "think"   => TokenKind::Think,
         "learn"   => TokenKind::Learn,
         "sense"   => TokenKind::Sense,
-        "adapt"   => TokenKind::Adapt,
-        "embed"   => TokenKind::Embed,
-        "predict" => TokenKind::Predict,
-        "train"   => TokenKind::Train,
 
         "sync"    => TokenKind::Sync,
         "send"    => TokenKind::Send,

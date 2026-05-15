@@ -112,11 +112,7 @@ impl Parser {
             Pipe     => "pipe".to_string(),
             Task     => "task".to_string(),
             Stream   => "stream".to_string(),
-            Train    => "train".to_string(),
             Learn    => "learn".to_string(),
-            Predict  => "predict".to_string(),
-            Embed    => "embed".to_string(),
-            Adapt    => "adapt".to_string(),
             Sense    => "sense".to_string(),
             _ => {
                 let line = self.current_line();
