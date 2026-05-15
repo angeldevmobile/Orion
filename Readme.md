@@ -915,12 +915,22 @@ show llm.models()      -- ["claude-haiku-4-5-20251001", "gpt-4o", "ollama:llama3
 
 | # | Módulo | Descripción | Implementación | Estado |
 |---|--------|-------------|----------------|--------|
-| 14 | `use "table"` / `use "df"` | DataFrames: load, filter, group, join, pivot, forecast, anomalías | Vec nativo | ✅ Completo |
-| 15 | `use "stat"` | Estadística: mean, std, percentil, correlación, regresión, z-score, histograma | Vec nativo | ✅ Completo |
-| 16 | `use "serie"` | Series de tiempo: moving_avg, diff, pct_change, forecast, trend, anomalías, smooth | Vec nativo | ✅ Completo |
-| 17 | `use "num"` | Tensores N-dim, álgebra lineal, FFT | ver `matrix` | 🔲 Roadmap |
+| 14 | `use "table"` / `use "df"` | DataFrames row-oriented: load, filter, group, join, forecast | Vec nativo | ✅ Completo |
+| 15 | `use "frame"` | DataFrames **columnar**: 10x menos RAM, chunk streaming, scan sin cargar | Vec columnar | ✅ Completo |
+| 16 | `use "stat"` | Estadística: mean, std, percentil, correlación, regresión, z-score, histograma | Vec nativo | ✅ Completo |
+| 17 | `use "serie"` | Series de tiempo: moving_avg, diff, pct_change, forecast, trend, smooth | Vec nativo | ✅ Completo |
+| 18 | `use "search"` | Búsqueda rápida en TXT/CSV/Excel/dir — streaming, regex, contexto, multi-col | BufReader nativo | ✅ Completo |
 
-> Los tres módulos de datos usan Rust puro (`Vec` nativo) — sin polars, sin ndarray, sin dependencias pesadas.
+> Sin polars, sin ndarray, sin dependencias pesadas. Arquitectura: `table` para exploración rápida, `frame` para producción y grandes volúmenes.
+
+#### Cuándo usar qué
+
+| Volumen | Módulo | Por qué |
+|---------|--------|---------|
+| < 50K filas | `table` | API más rica, exploración, AI integrada |
+| 50K – 5M filas | `frame` | Columnar, 10x menos RAM, ops directas sobre `Vec<f64>` |
+| > 5M filas | `frame.each_chunk` / `frame.scan_stats` | Nunca carga todo, procesa por bloques |
+| Buscar en archivos | `search` | Streaming, para al primer match, multi-archivo |
 
 ```orion
 use "table"     -- o: use "df"
@@ -963,6 +973,85 @@ table.save(t, "reporte.json")
 -- Integración AI
 table.describe_ai(t)       -- descripción generada por AI
 resp = table.ask(t, "¿Qué región vende más en verano?")
+```
+
+#### `frame` — DataFrames columnar para grandes volúmenes
+
+```orion
+use "frame"
+
+-- Carga columnar: 1M filas usa ~40MB en lugar de ~800MB
+f = frame.open("ventas_1M.csv")
+frame.schema(f)          -- tipos inferidos por columna
+frame.peek(f, 5)         -- tabla bonita sin cargar todo
+frame.size(f)            -- {rows: 1000000, cols: 8}
+
+-- Stats directas sobre Vec<f64> — sin hash lookups
+frame.mean(f, "venta")
+frame.stats(f, "venta")  -- {count, mean, std, min, p25, median, p75, max}
+
+-- Filtrar, seleccionar, ordenar
+norte  = frame.where_(f, "region", "Norte")
+top    = frame.sort(f, "venta", "desc")
+simple = frame.keep(f, ["nombre", "region", "venta"])
+
+-- Agregación columnar
+por_region = frame.group(f, "region", "venta", "sum")
+
+-- Grandes archivos: procesar en chunks de 10K sin cargar todo
+chunks = frame.each_chunk("ventas_100M.csv", 10000)
+for chunk in chunks {
+    stats = frame.stats(chunk, "venta")
+    show "Chunk media: ${stats.mean}"
+}
+
+-- Scan completo de una columna sin cargar el archivo
+stats = frame.scan_stats("ventas_100M.csv", "venta")
+-- → {count, mean, std, min, max, sum} — solo itera esa columna
+```
+
+#### `search` — Búsqueda rápida en cualquier archivo
+
+```orion
+use "search"
+
+-- TXT / LOG — streaming, nunca carga todo en RAM
+errores    = search.text("app.log", "ERROR")
+-- → [{line: 42, content: "ERROR: conexión rechazada"}, ...]
+
+-- Regex con grupos capturados
+fechas = search.regex("archivo.txt", "(\\d{4}-\\d{2}-\\d{2})")
+-- → [{line, content, matches: ["2026-05-15"]}, ...]
+
+-- CSV — busca por columna sin cargar el archivo
+clientes = search.csv("clientes.csv", "ciudad", "Monterrey")
+-- → [{nombre: "Ana", ciudad: "Monterrey", ...}, ...]
+
+-- CSV — busca en múltiples columnas
+hits = search.columns("productos.csv", ["nombre", "descripcion"], "orion")
+
+-- Excel — busca en toda la hoja
+filas = search.excel("reporte.xlsx", "pendiente")
+filas = search.excel("reporte.xlsx", "Norte", "Ventas Q1")  -- hoja específica
+
+-- Auto-detecta tipo por extensión
+result = search.in_file("datos.csv", "Ana")     -- CSV auto
+result = search.in_file("notas.txt", "urgente") -- texto auto
+result = search.in_file("base.xlsx", "error")   -- Excel auto
+
+-- Contar sin materializar (muy rápido en archivos grandes)
+n = search.count("logs/app.log", "CRITICAL")
+
+-- Primer match y para (ideal para verificación)
+primero = search.first("clientes.csv", "Ana García")
+
+-- Buscar en todos los archivos de un directorio
+hits = search.in_dir("logs/", "timeout")           -- todos los archivos
+hits = search.in_dir("data/", "Norte", "csv")      -- solo .csv
+
+-- Contexto — N líneas antes/después (como grep -C)
+ctx = search.context("deploy.log", "FAILED", 3)
+-- → [{line, content, before: [...], after: [...]}]
 ```
 
 ---
