@@ -42,6 +42,8 @@ pub mod csv_mod;
 pub mod excel_mod;
 pub mod regex_mod;
 pub mod table_mod;
+pub mod stat_mod;
+pub mod serie_mod;
 
 // Interfaces nativas de Orion
 pub mod gui;
@@ -95,6 +97,8 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "excel"    => excel_mod::call(function, args),
         "regex"    => regex_mod::call(function, args),
         "table" | "df" => table_mod::call(function, args),
+        "stat"         => stat_mod::call(function, args),
+        "serie"        => serie_mod::call(function, args),
         // Interfaces nativas
         "gui"      => gui::call(function, args),
         // Backend core
@@ -144,7 +148,7 @@ pub fn is_known_module(name: &str) -> bool {
         "ai" | "crypto" | "matrix" | "quantum" |
         "cosmos" | "timewarp" | "vision" | "insight" |
         // Datos
-        "csv" | "excel" | "regex" | "table" | "df" |
+        "csv" | "excel" | "regex" | "table" | "df" | "stat" | "serie" |
         // Interfaces
         "gui" |
         // Backend core

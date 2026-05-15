@@ -915,12 +915,12 @@ show llm.models()      -- ["claude-haiku-4-5-20251001", "gpt-4o", "ollama:llama3
 
 | # | Módulo | Descripción | Implementación | Estado |
 |---|--------|-------------|----------------|--------|
-| 14 | `use "table"` / `use "df"` | DataFrames: load, filter, group, join, pivot, forecast, anomalías | Vec nativo (sin polars) | ✅ Completo |
-| 15 | `use "serie"` | Series de tiempo, ventanas deslizantes, resample, OHLCV | pendiente | 🔲 Roadmap |
-| 16 | `use "stat"` | Estadística: percentil, correlación, regresión lineal | pendiente | 🔲 Roadmap |
-| 17 | `use "num"` | Tensores N-dim, álgebra lineal, FFT | `ndarray` | 🔲 Roadmap |
+| 14 | `use "table"` / `use "df"` | DataFrames: load, filter, group, join, pivot, forecast, anomalías | Vec nativo | ✅ Completo |
+| 15 | `use "stat"` | Estadística: mean, std, percentil, correlación, regresión, z-score, histograma | Vec nativo | ✅ Completo |
+| 16 | `use "serie"` | Series de tiempo: moving_avg, diff, pct_change, forecast, trend, anomalías, smooth | Vec nativo | ✅ Completo |
+| 17 | `use "num"` | Tensores N-dim, álgebra lineal, FFT | ver `matrix` | 🔲 Roadmap |
 
-> `table` usa `Vec<HashMap>` nativo — sin polars, startup < 1ms, compila en segundos.
+> Los tres módulos de datos usan Rust puro (`Vec` nativo) — sin polars, sin ndarray, sin dependencias pesadas.
 
 ```orion
 use "table"     -- o: use "df"
