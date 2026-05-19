@@ -37,10 +37,13 @@ jobs:
             libxkbcommon-x11-dev \
             pkg-config
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: orion-vm
 
       - name: cargo test (unit)
         run: cargo test --lib
