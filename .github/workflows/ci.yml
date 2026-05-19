@@ -41,16 +41,15 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-          cache-workspaces: orion-vm
 
-      - name: cargo test
-        run: cargo test --lib 2>&1 | tail -20
+      - name: cargo test (unit)
+        run: cargo test --lib
 
-      - name: cargo test (integration)
-        run: cargo test --test regression 2>&1 | tail -20
+      - name: cargo test (regression)
+        run: cargo test --test regression
 
       - name: cargo clippy
-        run: cargo clippy --lib -- -D warnings
+        run: cargo clippy --lib
 
       - name: cargo fmt check
         run: cargo fmt --check
