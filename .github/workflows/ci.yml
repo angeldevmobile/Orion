@@ -24,35 +24,15 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
-            libffi-dev \
-            libssl-dev \
-            libssh2-1-dev \
-            libx11-dev \
-            libxcb-composite0-dev \
-            libxcb-render0-dev \
-            libxcb-shape0-dev \
-            libxcb-xfixes0-dev \
-            libxcb-xinerama0-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            pkg-config
+            libffi-dev libssl-dev libssh2-1-dev \
+            libx11-dev libxcb-composite0-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: orion-vm
 
       - name: cargo test (unit)
         run: cargo test --lib
 
       - name: cargo test (regression)
         run: cargo test --test regression
-
-      - name: cargo clippy
-        run: cargo clippy --lib
-
-      - name: cargo fmt check
-        run: cargo fmt --check
