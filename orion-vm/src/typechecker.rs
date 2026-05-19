@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use crate::ast::{Expr, Stmt, Handler};
 
-//    Resultado                                                                  
+//    Resultado
 
 #[derive(Debug, Clone)]
 pub struct TypeIssue {
@@ -13,6 +13,9 @@ pub struct TypeIssue {
 impl TypeIssue {
     fn error(msg: impl Into<String>, line: u32) -> Self {
         TypeIssue { message: msg.into(), kind: "error", line }
+    }
+    fn warning(msg: impl Into<String>, line: u32) -> Self {
+        TypeIssue { message: msg.into(), kind: "warning", line }
     }
 }
 
@@ -30,9 +33,12 @@ struct FnSig {
 pub struct TypeChecker {
     issues: Vec<TypeIssue>,
     fn_sigs: HashMap<String, FnSig>,
+    shape_names: HashSet<String>,
     shape_type_params: HashMap<String, Vec<String>>, // shape → sus type params
     scope_stack: Vec<HashMap<String, String>>,
     current_line: u32,
+    /// Variables asignadas pero nunca leídas en el scope actual
+    written_not_read: Vec<HashMap<String, u32>>,
 }
 
 impl TypeChecker {
@@ -40,9 +46,11 @@ impl TypeChecker {
         TypeChecker {
             issues: Vec::new(),
             fn_sigs: HashMap::new(),
+            shape_names: HashSet::new(),
             shape_type_params: HashMap::new(),
             scope_stack: vec![HashMap::new()],
             current_line: 0,
+            written_not_read: vec![HashMap::new()],
         }
     }
 
@@ -54,7 +62,20 @@ impl TypeChecker {
 
     //    Scope                                                                   
 
-    fn scope_get(&self, name: &str) -> Option<String> {
+    fn scope_get(&mut self, name: &str) -> Option<String> {
+        // Marcar como leída en written_not_read
+        for usage in self.written_not_read.iter_mut().rev() {
+            usage.remove(name);
+        }
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(t) = scope.get(name) {
+                return Some(t.clone());
+            }
+        }
+        None
+    }
+
+    fn scope_get_no_mark(&self, name: &str) -> Option<String> {
         for scope in self.scope_stack.iter().rev() {
             if let Some(t) = scope.get(name) {
                 return Some(t.clone());
@@ -65,12 +86,33 @@ impl TypeChecker {
 
     fn scope_set(&mut self, name: String, ty: String) {
         if let Some(top) = self.scope_stack.last_mut() {
-            top.insert(name, ty);
+            top.insert(name.clone(), ty);
+        }
+        if let Some(top) = self.written_not_read.last_mut() {
+            top.insert(name, self.current_line);
         }
     }
 
-    fn push_scope(&mut self) { self.scope_stack.push(HashMap::new()); }
-    fn pop_scope(&mut self)  { self.scope_stack.pop(); }
+    fn push_scope(&mut self) {
+        self.scope_stack.push(HashMap::new());
+        self.written_not_read.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scope_stack.pop();
+        // Variables escritas y nunca leídas en este scope → warning
+        if let Some(unused) = self.written_not_read.pop() {
+            for (name, line) in unused {
+                // Ignorar variables con _ prefix (convención de descarte)
+                if !name.starts_with('_') {
+                    self.issues.push(TypeIssue::warning(
+                        format!("Variable '{name}' asignada pero nunca usada"),
+                        line,
+                    ));
+                }
+            }
+        }
+    }
 
     fn report(&mut self, msg: impl Into<String>, line: u32) {
         self.issues.push(TypeIssue::error(msg, line));
@@ -93,7 +135,14 @@ impl TypeChecker {
                     self.fn_sigs.insert(name.clone(), sig);
                 }
                 Stmt::Shape { name, type_params, .. } => {
+                    self.shape_names.insert(name.clone());
                     self.shape_type_params.insert(name.clone(), type_params.clone());
+                    // Registrar el shape como constructor callable
+                    self.fn_sigs.entry(name.clone()).or_insert(FnSig {
+                        type_params: type_params.clone(),
+                        params: vec![],
+                        return_type: Some(name.clone()),
+                    });
                 }
                 _ => {}
             }
@@ -129,8 +178,13 @@ impl TypeChecker {
             // asignación sin tipo: registra el tipo inferido en scope
             Stmt::Assign { name, value, line } => {
                 self.current_line = *line;
-                if let Some(ty) = self.infer_type(value) {
-                    self.scope_set(name.clone(), ty);
+                // Inferir primero (puede leer 'name' en el lado derecho, ej: x = x + 1)
+                let ty = self.infer_type(value);
+                if let Some(t) = ty {
+                    self.scope_set(name.clone(), t);
+                } else {
+                    // Tipo desconocido: registrar como "any" para no bloquear
+                    self.scope_set(name.clone(), "any".into());
                 }
             }
 
@@ -206,9 +260,16 @@ impl TypeChecker {
                 self.pop_scope();
             }
 
-            Stmt::For { var: _, iter: _, body, line } => {
+            Stmt::For { var, iter, body, line } => {
                 self.current_line = *line;
+                // Inferir el tipo del elemento a partir del iterador
+                let elem_type = self.infer_iter_elem_type(iter);
                 self.push_scope();
+                self.scope_set(var.clone(), elem_type);
+                // La variable del for-loop siempre se "usa" (no reportar como unused)
+                if let Some(top) = self.written_not_read.last_mut() {
+                    top.remove(var);
+                }
                 self.check_stmts(body, return_type);
                 self.pop_scope();
             }
@@ -319,6 +380,30 @@ impl TypeChecker {
 
     //    Inferencia de tipos                                                    
 
+    /// Infiere el tipo de los elementos de un iterador (para `for x in iter`)
+    fn infer_iter_elem_type(&mut self, iter: &Expr) -> String {
+        match iter {
+            Expr::Str(_) => "string".into(),
+            Expr::List(items) => {
+                // Inferir tipo del primer elemento homogéneo
+                if let Some(first) = items.first() {
+                    self.infer_type(first).unwrap_or("any".into())
+                } else { "any".into() }
+            }
+            Expr::Ident(name) => {
+                match self.scope_get_no_mark(name).as_deref() {
+                    Some("list")   => "any".into(),
+                    Some("string") => "string".into(),
+                    Some(other)    => other.to_string(),
+                    None           => "any".into(),
+                }
+            }
+            // rango 1..10 → int
+            Expr::BinaryOp { op, .. } if op == ".." => "int".into(),
+            _ => "any".into(),
+        }
+    }
+
     fn infer_type(&mut self, expr: &Expr) -> Option<String> {
         match expr {
             Expr::Int(_)       => Some("int".into()),
@@ -330,7 +415,18 @@ impl TypeChecker {
             Expr::Dict(_)      => Some("dict".into()),
             Expr::Lambda { .. } => Some("fn".into()),
 
-            Expr::Ident(name)  => self.scope_get(name),
+            Expr::Ident(name)  => {
+                // Detectar variables no definidas (excluir builtins conocidos)
+                let ty = self.scope_get(name);
+                if ty.is_none() && !is_builtin(name) && !self.fn_sigs.contains_key(name) && !self.shape_names.contains(name) {
+                    let line = self.current_line;
+                    self.issues.push(TypeIssue::warning(
+                        format!("Variable '{name}' usada pero no definida en este scope"),
+                        line,
+                    ));
+                }
+                ty
+            }
 
             Expr::BinaryOp { op, left, right } => {
                 let lt = self.infer_type(left);
@@ -395,6 +491,23 @@ impl TypeChecker {
 }
 
 //    Helpers de tipos                                                          
+
+/// Builtins que siempre existen sin declaración explícita
+fn is_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "show" | "print" | "len" | "type" | "int" | "float" | "str" | "bool"
+        | "list" | "dict" | "range" | "input" | "read" | "write" | "append"
+        | "push" | "pop" | "keys" | "values" | "items" | "contains" | "remove"
+        | "sort" | "reverse" | "map" | "filter" | "reduce" | "zip" | "enumerate"
+        | "min" | "max" | "sum" | "abs" | "round" | "floor" | "ceil"
+        | "split" | "join" | "trim" | "upper" | "lower" | "replace" | "starts_with"
+        | "ends_with" | "find" | "slice" | "format" | "parse"
+        | "spawn" | "await" | "task" | "sleep"
+        | "yes" | "no" | "null" | "true" | "false"
+        | "self" | "super"
+    )
+}
 
 fn normalize(t: &str) -> String {
     match t {

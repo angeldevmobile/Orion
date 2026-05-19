@@ -3,6 +3,9 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use crate::instruction::Instruction;
 
+/// Magic number que identifica archivos .orbc en formato binario
+const MAGIC: &[u8] = b"ORBC";
+
 /// Definición de una función de usuario
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDef {
@@ -43,11 +46,8 @@ pub struct ShapeDef {
 /// Definición de una función C externa (FFI)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternFnDef {
-    /// Tipos de los parámetros: "int", "ptr", "string", "bool"
     pub params: Vec<String>,
-    /// Tipo de retorno: "int", "ptr", "string", "bool", "void"
     pub ret_type: String,
-    /// Nombre de la librería dinámica, ej: "sqlite3"
     pub lib: String,
 }
 
@@ -64,10 +64,41 @@ pub struct OrionBytecode {
     pub extern_fns: IndexMap<String, ExternFnDef>,
 }
 
+/// Carga bytecode desde disco.
+/// Detecta automáticamente el formato: binario (ORBC magic) o JSON legacy.
 pub fn load(path: &str) -> Result<OrionBytecode, String> {
-    let content = fs::read_to_string(path)
+    let bytes = fs::read(path)
         .map_err(|e| format!("No se pudo leer '{}': {}", path, e))?;
 
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Error leyendo bytecode: {}", e))
+    if bytes.starts_with(MAGIC) {
+        // Formato binario: saltar los 4 bytes del magic
+        bincode::deserialize(&bytes[MAGIC.len()..])
+            .map_err(|e| format!("Error leyendo bytecode binario: {}", e))
+    } else {
+        // Formato JSON legado
+        let text = String::from_utf8(bytes)
+            .map_err(|e| format!("Bytecode no es UTF-8 válido: {}", e))?;
+        serde_json::from_str(&text)
+            .map_err(|e| format!("Error leyendo bytecode JSON: {}", e))
+    }
+}
+
+/// Guarda bytecode en formato binario eficiente (.orbc).
+/// ~10-50x más rápido de deserializar que JSON.
+pub fn save(bc: &OrionBytecode, path: &str) -> Result<(), String> {
+    let payload = bincode::serialize(bc)
+        .map_err(|e| format!("Error serializando bytecode: {}", e))?;
+    let mut out = Vec::with_capacity(MAGIC.len() + payload.len());
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&payload);
+    fs::write(path, out)
+        .map_err(|e| format!("No se pudo escribir '{}': {}", path, e))
+}
+
+/// Guarda bytecode en formato JSON (útil para depuración / inspección humana).
+pub fn save_json(bc: &OrionBytecode, path: &str) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(bc)
+        .map_err(|e| format!("Error serializando bytecode JSON: {}", e))?;
+    fs::write(path, text)
+        .map_err(|e| format!("No se pudo escribir '{}': {}", path, e))
 }

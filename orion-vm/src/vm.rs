@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use indexmap::IndexMap;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -90,6 +90,8 @@ pub struct VM {
     ai_memory: Vec<String>,
     /// Mark-and-sweep GC para instancias con ciclos de referencias
     gc: Gc,
+    /// Contadores de llamadas por función (hotspot detection)
+    call_counts: HashMap<String, u64>,
 }
 
 impl VM {
@@ -111,7 +113,19 @@ impl VM {
             error_handlers: Vec::new(),
             ai_memory: Vec::new(),
             gc: Gc::new(),
+            call_counts: HashMap::new(),
         }
+    }
+
+    /// Devuelve las funciones más llamadas, ordenadas de mayor a menor.
+    /// Útil para profiling y para decidir qué compilar con JIT.
+    pub fn hotspots(&self, top_n: usize) -> Vec<(&str, u64)> {
+        let mut v: Vec<(&str, u64)> = self.call_counts.iter()
+            .map(|(k, &c)| (k.as_str(), c))
+            .collect();
+        v.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+        v.truncate(top_n);
+        v
     }
 
     /// Recolecta instancias con ciclos usando mark-and-sweep.
@@ -379,6 +393,8 @@ impl VM {
                     let inst_rc = self.instantiate_shape(&resolved_name, args)?;
                     self.value_stack.push(Value::Instance(inst_rc));
                 } else if let Some(func) = self.functions.get(&resolved_name).cloned() {
+                    // Hotspot counter: registra cuántas veces se llama cada función
+                    *self.call_counts.entry(resolved_name.clone()).or_insert(0) += 1;
                     if args.len() != func.params.len() {
                         return Err(format!(
                             "'{}' espera {} argumento(s), recibió {}",

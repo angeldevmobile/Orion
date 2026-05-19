@@ -616,13 +616,14 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 | FFI — librerías nativas externas | ✅ Completo | libloading |
 | Package manager (add/remove/list/search/publish) | ✅ Completo | Rust |
 | Registry oficial en GitHub | ✅ Completo | GitHub API |
-| Módulos stdlib | ✅ 41+ módulos | Rust |
+| Módulos stdlib | ✅ 44+ módulos | Rust |
+| Cloud native (S3 / SSH / Docker) | ✅ Completo | Rust |
 | CLI completo | ✅ Completo | Rust |
 | Extensión VSCode con binario bundleado | ✅ Completo | TypeScript |
 
 ---
 
-## Stdlib completa (41+ módulos)
+## Stdlib completa (44+ módulos)
 
 ### Core
 `fs` `json` `strings` `datetime` `random` `regex` `env` `process` `crypto`
@@ -650,6 +651,9 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 
 ### Avanzado
 `vision` `insight` `gui` `quantum` `cosmos` `timewarp`
+
+### Cloud native (Bloque E)
+`s3` `ssh` `docker`
 
 ---
 
@@ -1056,21 +1060,126 @@ ctx = search.context("deploy.log", "FAILED", 3)
 
 ---
 
-### Bloque E — Cloud native
+### Bloque E — Cloud native ✅
 *Sin pip, sin npm. Cloud como stdlib.*
 
 | # | Módulo | Descripción | Crate Rust | Estado |
 |---|--------|-------------|------------|--------|
-| 18 | `use "s3"` | Subir/bajar archivos a S3 / R2 / MinIO | `rusty-s3` | pendiente |
-| 19 | `use "ssh"` | Ejecutar comandos remotos via SSH, tunnel, SCP | `ssh2` | pendiente |
-| 20 | `use "docker"` | Controlar contenedores Docker via API REST | `ureq` | pendiente |
+| 18 | `use "s3"` | Subir/bajar archivos a S3 / R2 / MinIO | `ureq` + AWS Sig V4 | ✅ Completo |
+| 19 | `use "ssh"` | Ejecutar comandos remotos via SSH, SCP | `ssh2` | ✅ Completo |
+| 20 | `use "docker"` | Controlar contenedores Docker via API REST | `ureq` | ✅ Completo |
+
+```orion
+-- s3 — compatible con AWS S3, Cloudflare R2 y MinIO
+use "s3"
+
+s3.config("https://s3.amazonaws.com", env.pull("AWS_KEY"), env.pull("AWS_SECRET"), "us-east-1")
+
+-- Subir archivo
+r = s3.upload("mi-bucket", "backups/reporte.csv", "reporte.csv")
+show r.url   -- https://s3.amazonaws.com/mi-bucket/backups/reporte.csv
+
+-- Bajar archivo
+s3.download("mi-bucket", "backups/reporte.csv", "local/reporte.csv")
+
+-- Listar objetos
+archivos = s3.list("mi-bucket", "backups/")
+for f in archivos { show f.key + "  " + f.size }
+
+-- Verificar existencia y eliminar
+if s3.exists("mi-bucket", "backups/viejo.csv") {
+    s3.delete("mi-bucket", "backups/viejo.csv")
+}
+
+-- MinIO / R2 — mismo API, diferente endpoint
+s3.config("http://localhost:9000", "minio", "minio123", "us-east-1")
+s3.upload("datos", "archivo.json", "salida.json")
+
+-- Cloudflare R2
+s3.config("https://<account>.r2.cloudflarestorage.com", env.pull("R2_KEY"), env.pull("R2_SECRET"), "auto")
+
+
+-- ssh — conexión remota con contraseña o clave
+use "ssh"
+
+-- Contraseña
+s = ssh.connect("192.168.1.10", 22, "deploy", "secreto")
+
+-- Clave privada
+s = ssh.connect_key("servidor.com", 22, "ubuntu", "/home/user/.ssh/id_rsa")
+
+-- Ejecutar comandos
+r = ssh.exec(s, "df -h")
+show r.out    -- espacio en disco
+show r.code   -- 0 = éxito
+
+r = ssh.exec(s, "systemctl status nginx")
+show r.out
+
+-- Subir y bajar archivos (SCP)
+ssh.upload(s, "dist/app.tar.gz", "/opt/app/app.tar.gz")
+ssh.download(s, "/var/log/app.log", "logs/app.log")
+
+-- Verificar conexión
+if ssh.test(s) { show "servidor accesible" }
+
+ssh.close(s)
+
+
+-- docker — control del daemon via REST API
+use "docker"
+
+-- Configurar endpoint (default: http://localhost:2375)
+docker.config("http://localhost:2375")
+
+-- Verificar daemon
+if docker.ping() { show "Docker activo" }
+show docker.version()   -- {version, api_version, os, arch}
+
+-- Contenedores
+cs = docker.containers()           -- solo los activos
+cs = docker.containers(yes)        -- todos (incluyendo detenidos)
+for c in cs { show c.name + "  " + c.status }
+
+-- Ciclo de vida
+docker.start("mi-api")
+docker.stop("mi-api", 10)    -- 10s de gracia
+docker.restart("mi-api")
+docker.kill("mi-api")
+docker.remove("mi-api", yes)  -- force=yes
+
+-- Logs
+show docker.logs("mi-api", 50)    -- últimas 50 líneas
+
+-- Inspeccionar
+info = docker.inspect("mi-api")
+show info.State.Status
+
+-- Lanzar contenedor nuevo
+c = docker.run("nginx:latest", {
+    name: "web",
+    env:  ["PORT=8080", "ENV=prod"],
+    cmd:  ["nginx", "-g", "daemon off;"]
+})
+show "Iniciado: " + c.id
+
+-- Imágenes
+imgs = docker.images()
+for i in imgs { show i.tags }
+docker.pull("redis:7")
+
+-- Métricas en tiempo real
+st = docker.stats("mi-api")
+show "CPU: " + st.cpu_pct + "%"
+show "RAM: " + st.mem_usage + " / " + st.mem_limit
+```
 
 ---
 
 ### Orden de implementación
 
 ```
-Bloque D ✅ → Bloque B ✅ → Bloque C ✅ → Bloque A ✅ → Bloque E
+Bloque D ✅ → Bloque B ✅ → Bloque C ✅ → Bloque A ✅ → Bloque E ✅
   (base)         (web)         (AI)        (table/df)    (cloud)
 ```
 

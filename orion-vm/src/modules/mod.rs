@@ -27,6 +27,11 @@ pub mod llm_mod;
 pub mod embed_mod;
 pub mod vector_mod;
 
+// Bloque E — Cloud native
+pub mod s3_mod;
+pub mod ssh_mod;
+pub mod docker_mod;
+
 // Módulos stdlib avanzados
 pub mod ai_mod;
 pub mod crypto_mod;
@@ -138,6 +143,10 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "llm"                  => llm_mod::call(function, args),
         "embed" | "embeddings" => embed_mod::call(function, args),
         "vector"               => vector_mod::call(function, args),
+        // Bloque E — Cloud native
+        "s3"     => s3_mod::call(function, args),
+        "ssh"    => ssh_mod::call(function, args),
+        "docker" => docker_mod::call(function, args),
         _ => Err(format!("Módulo '{}' no encontrado en la stdlib de Orion.", module)),
     }
 }
@@ -168,6 +177,8 @@ pub fn is_known_module(name: &str) -> bool {
         // Bloque B
         "router" | "middleware" | "sse" | "proto" |
         // Bloque C
-        "llm" | "embed" | "embeddings" | "vector"
+        "llm" | "embed" | "embeddings" | "vector" |
+        // Bloque E
+        "s3" | "ssh" | "docker"
     )
 }

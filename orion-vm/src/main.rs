@@ -460,9 +460,19 @@ fn main() {
                 Ok(bc) => bc,
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
-            let json = serde_json::to_string_pretty(&bc).expect("serializar bytecode");
-            fs::write(&out_path, &json).expect("escribir .orbc");
-            cli::banner::ok(&format!("Compilado → {out_path}"));
+            // Formato binario: ~10-50x más rápido de cargar que JSON
+            let use_json = args.iter().any(|a| a == "--json");
+            if use_json {
+                bytecode::save_json(&bc, &out_path).unwrap_or_else(|e| {
+                    cli::banner::fail(&e); std::process::exit(1);
+                });
+            } else {
+                bytecode::save(&bc, &out_path).unwrap_or_else(|e| {
+                    cli::banner::fail(&e); std::process::exit(1);
+                });
+            }
+            cli::banner::ok(&format!("Compilado → {out_path}{}",
+                if use_json { " (JSON)" } else { " (binario)" }));
         }
 
         //    JIT (Cranelift)
@@ -515,6 +525,7 @@ fn main() {
                 Ok(bc) => bc,
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
+            let profile = args.iter().any(|a| a == "--profile");
             let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
             match machine.run() {
                 Ok(_) => {}
@@ -524,6 +535,7 @@ fn main() {
                 }
             }
             eprintln!("[Orion] {:.3} ms", t_total.elapsed().as_secs_f64() * 1000.0);
+            if profile { print_hotspots(&machine); }
         }
 
         //    Ejecutar .orx directamente o cargar .orbc
@@ -551,6 +563,7 @@ fn main() {
                 (instructions, String::new())
             };
 
+            let profile = args.iter().any(|a| a == "--profile");
             let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
             match machine.run() {
                 Ok(_) => {}
@@ -561,8 +574,21 @@ fn main() {
             }
 
             eprintln!("[Orion] {:.3} ms", t_total.elapsed().as_secs_f64() * 1000.0);
+            if profile { print_hotspots(&machine); }
         }
     }
+}
+
+fn print_hotspots(machine: &vm::VM) {
+    let spots = machine.hotspots(10);
+    if spots.is_empty() { return; }
+    eprintln!("\n  Hotspots (funciones más llamadas):");
+    eprintln!("  {:<30} {:>8}", "Función", "Llamadas");
+    eprintln!("  {}", "-".repeat(42));
+    for (name, count) in spots {
+        eprintln!("  {:<30} {:>8}", name, count);
+    }
+    eprintln!("  Tip: usa 'orion --jit <archivo.orx>' para compilar con Cranelift.");
 }
 
 //    Helpers                                                                   

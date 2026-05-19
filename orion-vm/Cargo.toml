@@ -80,3 +80,9 @@ zip     = "2"                                        # zip_mod: crear/extraer .z
 flate2  = "1"                                        # zip_mod: gzip/gunzip
 aes-gcm = "0.10"                                     # crypto2_mod: AES-256-GCM
 rsa     = { version = "0.9", features = ["pem", "sha2"] }  # crypto2_mod: RSA + PEM + SHA2 OID
+
+# ── Bloque E — Cloud native ────────────────────────────────────────────────────
+ssh2 = "0.9"                                         # ssh_mod: SSH/SCP (libssh2)
+
+# ── Bytecode binario ──────────────────────────────────────────────────────────
+bincode = "1.3"                                      # bytecode: serialización binaria eficiente
