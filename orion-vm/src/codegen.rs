@@ -215,12 +215,12 @@ impl Codegen {
 
     fn compile_stmt(&mut self, stmt: Stmt) -> Result<(), CodegenError> {
         match stmt {
-            Stmt::Assign { name, value, line } => {
+            Stmt::Assign { name, value, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::StoreVar(name));
             }
-            Stmt::TypedAssign { name, type_hint: _, value, line } => {
+            Stmt::TypedAssign { name, type_hint: _, value, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::StoreVar(name));
@@ -230,14 +230,14 @@ impl Codegen {
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::StoreConst(name));
             }
-            Stmt::AugAssign { name, op, value, line } => {
+            Stmt::AugAssign { name, op, value, line, .. } => {
                 self.current_line = line;
                 self.emit(Instruction::LoadVar(name.clone()));
                 self.compile_expr_main(&value)?;
                 self.emit(op_instr(&op));
                 self.emit(Instruction::StoreVar(name));
             }
-            Stmt::AssignIndex { object, index, value, line } => {
+            Stmt::AssignIndex { object, index, value, line, .. } => {
                 self.current_line = line;
                 let var_name = if let Expr::Ident(n) = &object { Some(n.clone()) } else { None };
                 self.compile_expr_main(&object)?;
@@ -249,18 +249,18 @@ impl Codegen {
                     None => { self.emit(Instruction::Pop); }
                 }
             }
-            Stmt::AssignAttr { object, attr, value, line } => {
+            Stmt::AssignAttr { object, attr, value, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&object)?;
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::SetAttr(attr));
             }
-            Stmt::Show { value, line } => {
+            Stmt::Show { value, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::Show);
             }
-            Stmt::Return { value, line } => {
+            Stmt::Return { value, line, .. } => {
                 self.current_line = line;
                 if let Some(v) = value {
                     self.compile_expr_main(&v)?;
@@ -272,7 +272,7 @@ impl Codegen {
             Stmt::Break { .. }    => { self.emit(Instruction::Jump(0)); } // parchado por el contexto del bucle
             Stmt::Continue { .. } => { self.emit(Instruction::Jump(0)); }
 
-            Stmt::If { cond, then_body, else_body, line } => {
+            Stmt::If { cond, then_body, else_body, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&cond)?;
                 let jf = self.emit(Instruction::JumpIfFalse(0));
@@ -290,7 +290,7 @@ impl Codegen {
                 }
             }
 
-            Stmt::While { cond, body, line } => {
+            Stmt::While { cond, body, line, .. } => {
                 self.current_line = line;
                 let loop_start = self.addr();
                 self.compile_expr_main(&cond)?;
@@ -301,7 +301,7 @@ impl Codegen {
                 self.patch(jf, Instruction::JumpIfFalse(end));
             }
 
-            Stmt::For { var, iter, body, line } => {
+            Stmt::For { var, iter, body, line, .. } => {
                 self.current_line = line;
                 let ctr = self.for_counter;
                 self.for_counter += 1;
@@ -368,7 +368,7 @@ impl Codegen {
                 self.patch(jf, Instruction::JumpIfFalse(end));
             }
 
-            Stmt::Match { expr, arms, line } => {
+            Stmt::Match { expr, arms, line, .. } => {
                 self.current_line = line;
                 let ctr = self.match_counter;
                 self.match_counter += 1;
@@ -392,7 +392,7 @@ impl Codegen {
                 for j in end_jumps { self.patch(j, Instruction::Jump(end)); }
             }
 
-            Stmt::Attempt { body, handler, line } => {
+            Stmt::Attempt { body, handler, line, .. } => {
                 self.current_line = line;
                 let begin_patch = self.emit(Instruction::BeginAttempt(0));
                 for s in body { self.compile_stmt(s)?; }
@@ -411,32 +411,32 @@ impl Codegen {
                 self.patch(end_patch, Instruction::EndAttempt(end));
             }
 
-            Stmt::ErrorStmt { msg, line } => {
+            Stmt::ErrorStmt { msg, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&msg)?;
                 self.emit(Instruction::Raise);
             }
 
-            Stmt::Think { prompt, line } => {
+            Stmt::Think { prompt, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&prompt)?;
                 self.emit(Instruction::AiAsk);
                 self.emit(Instruction::Show);
             }
-            Stmt::Learn { text, line } => {
+            Stmt::Learn { text, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&text)?;
                 self.emit(Instruction::AiLearn);
                 self.emit(Instruction::Show);
             }
-            Stmt::Sense { query, line } => {
+            Stmt::Sense { query, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&query)?;
                 self.emit(Instruction::AiSense);
                 self.emit(Instruction::Show);
             }
 
-            Stmt::Spawn { call, line } => {
+            Stmt::Spawn { call, line, .. } => {
                 self.current_line = line;
                 if let Expr::Call { callee, args, .. } = &call {
                     if let Expr::Ident(fn_name) = callee.as_ref() {
@@ -450,7 +450,7 @@ impl Codegen {
                 self.emit(Instruction::Pop);
             }
 
-            Stmt::Await { expr, var, line } => {
+            Stmt::Await { expr, var, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&expr)?;
                 self.emit(Instruction::Await);
@@ -461,7 +461,7 @@ impl Codegen {
                 }
             }
 
-            Stmt::Ask { prompt, var, cast, choices, line } => {
+            Stmt::Ask { prompt, var, cast, choices, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&prompt)?;
                 if let Some(choices_expr) = choices {
@@ -473,28 +473,28 @@ impl Codegen {
                 self.emit(Instruction::StoreVar(var));
             }
 
-            Stmt::Read { path, var, line } => {
+            Stmt::Read { path, var, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&path)?;
                 self.emit(Instruction::ReadFile("text".into()));
                 self.emit(Instruction::StoreVar(var));
             }
 
-            Stmt::Write { path, content, line } => {
+            Stmt::Write { path, content, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&path)?;
                 self.compile_expr_main(&content)?;
                 self.emit(Instruction::WriteFile("write".into()));
             }
 
-            Stmt::Append { path, content, line } => {
+            Stmt::Append { path, content, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&path)?;
                 self.compile_expr_main(&content)?;
                 self.emit(Instruction::WriteFile("append".into()));
             }
 
-            Stmt::Serve { port, routes, line } => {
+            Stmt::Serve { port, routes, line, .. } => {
                 self.current_line = line;
                 // El handler es el primer statement si es una función
                 let fn_name = routes.first().and_then(|s| {
@@ -521,7 +521,7 @@ impl Codegen {
                 self.emit(Instruction::DefineShape(name));
             }
 
-            Stmt::Expr { expr, line } => {
+            Stmt::Expr { expr, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&expr)?;
                 self.emit(Instruction::Pop);
@@ -584,12 +584,12 @@ impl FnCompiler {
 
     fn compile_stmt(&mut self, stmt: &Stmt, async_fns: &std::collections::HashSet<String>) -> Result<(), CodegenError> {
         match stmt {
-            Stmt::Assign { name, value, line } => {
+            Stmt::Assign { name, value, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::StoreVar(name.clone()));
             }
-            Stmt::TypedAssign { name, type_hint: _, value, line } => {
+            Stmt::TypedAssign { name, type_hint: _, value, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::StoreVar(name.clone()));
@@ -599,14 +599,14 @@ impl FnCompiler {
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::StoreConst(name.clone()));
             }
-            Stmt::AugAssign { name, op, value, line } => {
+            Stmt::AugAssign { name, op, value, line, .. } => {
                 self.current_line = *line;
                 self.emit(Instruction::LoadVar(name.clone()));
                 self.compile_expr(value, async_fns)?;
                 self.emit(op_instr(op));
                 self.emit(Instruction::StoreVar(name.clone()));
             }
-            Stmt::AssignIndex { object, index, value, line } => {
+            Stmt::AssignIndex { object, index, value, line, .. } => {
                 self.current_line = *line;
                 let var_name = if let Expr::Ident(n) = object { Some(n.clone()) } else { None };
                 self.compile_expr(object, async_fns)?;
@@ -618,18 +618,18 @@ impl FnCompiler {
                     None => { self.emit(Instruction::Pop); }
                 }
             }
-            Stmt::AssignAttr { object, attr, value, line } => {
+            Stmt::AssignAttr { object, attr, value, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(object, async_fns)?;
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::SetAttr(attr.clone()));
             }
-            Stmt::Show { value, line } => {
+            Stmt::Show { value, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::Show);
             }
-            Stmt::Return { value, line } => {
+            Stmt::Return { value, line, .. } => {
                 self.current_line = *line;
                 if let Some(v) = value {
                     self.compile_expr(v, async_fns)?;
@@ -641,7 +641,7 @@ impl FnCompiler {
             Stmt::Break { .. }    => { self.emit(Instruction::Jump(0)); }
             Stmt::Continue { .. } => { self.emit(Instruction::Jump(0)); }
 
-            Stmt::If { cond, then_body, else_body, line } => {
+            Stmt::If { cond, then_body, else_body, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(cond, async_fns)?;
                 let jf = self.emit(Instruction::JumpIfFalse(0));
@@ -659,7 +659,7 @@ impl FnCompiler {
                 }
             }
 
-            Stmt::While { cond, body, line } => {
+            Stmt::While { cond, body, line, .. } => {
                 self.current_line = *line;
                 let loop_start = self.addr();
                 self.compile_expr(cond, async_fns)?;
@@ -670,7 +670,7 @@ impl FnCompiler {
                 self.patch(jf, Instruction::JumpIfFalse(end));
             }
 
-            Stmt::For { var, iter, body, line } => {
+            Stmt::For { var, iter, body, line, .. } => {
                 self.current_line = *line;
                 let ctr = self.for_counter;
                 self.for_counter += 1;
@@ -737,7 +737,7 @@ impl FnCompiler {
                 self.patch(jf, Instruction::JumpIfFalse(end));
             }
 
-            Stmt::Match { expr, arms, line } => {
+            Stmt::Match { expr, arms, line, .. } => {
                 self.current_line = *line;
                 let ctr = self.match_counter;
                 self.match_counter += 1;
@@ -761,7 +761,7 @@ impl FnCompiler {
                 for j in end_jumps { self.patch(j, Instruction::Jump(end)); }
             }
 
-            Stmt::Attempt { body, handler, line } => {
+            Stmt::Attempt { body, handler, line, .. } => {
                 self.current_line = *line;
                 let begin_patch = self.emit(Instruction::BeginAttempt(0));
                 for s in body { self.compile_stmt(s, async_fns)?; }
@@ -780,32 +780,32 @@ impl FnCompiler {
                 self.patch(end_patch, Instruction::EndAttempt(end));
             }
 
-            Stmt::ErrorStmt { msg, line } => {
+            Stmt::ErrorStmt { msg, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(msg, async_fns)?;
                 self.emit(Instruction::Raise);
             }
 
-            Stmt::Think { prompt, line } => {
+            Stmt::Think { prompt, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(prompt, async_fns)?;
                 self.emit(Instruction::AiAsk);
                 self.emit(Instruction::Show);
             }
-            Stmt::Learn { text, line } => {
+            Stmt::Learn { text, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(text, async_fns)?;
                 self.emit(Instruction::AiLearn);
                 self.emit(Instruction::Show);
             }
-            Stmt::Sense { query, line } => {
+            Stmt::Sense { query, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(query, async_fns)?;
                 self.emit(Instruction::AiSense);
                 self.emit(Instruction::Show);
             }
 
-            Stmt::Spawn { call, line } => {
+            Stmt::Spawn { call, line, .. } => {
                 self.current_line = *line;
                 if let Expr::Call { callee, args, .. } = call {
                     if let Expr::Ident(fn_name) = callee.as_ref() {
@@ -819,7 +819,7 @@ impl FnCompiler {
                 self.emit(Instruction::Pop);
             }
 
-            Stmt::Await { expr, var, line } => {
+            Stmt::Await { expr, var, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(expr, async_fns)?;
                 self.emit(Instruction::Await);
@@ -830,7 +830,7 @@ impl FnCompiler {
                 }
             }
 
-            Stmt::Ask { prompt, var, cast, choices, line } => {
+            Stmt::Ask { prompt, var, cast, choices, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(prompt, async_fns)?;
                 if let Some(choices_expr) = choices {
@@ -842,28 +842,28 @@ impl FnCompiler {
                 self.emit(Instruction::StoreVar(var.clone()));
             }
 
-            Stmt::Read { path, var, line } => {
+            Stmt::Read { path, var, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(path, async_fns)?;
                 self.emit(Instruction::ReadFile("text".into()));
                 self.emit(Instruction::StoreVar(var.clone()));
             }
 
-            Stmt::Write { path, content, line } => {
+            Stmt::Write { path, content, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(path, async_fns)?;
                 self.compile_expr(content, async_fns)?;
                 self.emit(Instruction::WriteFile("write".into()));
             }
 
-            Stmt::Append { path, content, line } => {
+            Stmt::Append { path, content, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(path, async_fns)?;
                 self.compile_expr(content, async_fns)?;
                 self.emit(Instruction::WriteFile("append".into()));
             }
 
-            Stmt::Serve { port, routes, line } => {
+            Stmt::Serve { port, routes, line, .. } => {
                 self.current_line = *line;
                 let fn_name = routes.first().and_then(|s| {
                     if let Stmt::Expr { expr: Expr::Ident(n), .. } = s { Some(n.clone()) } else { None }
@@ -903,7 +903,7 @@ impl FnCompiler {
                 self.emit(Instruction::StoreVar(fn_name));
             }
 
-            Stmt::Expr { expr, line } => {
+            Stmt::Expr { expr, line, .. } => {
                 self.current_line = *line;
                 self.compile_expr(expr, async_fns)?;
                 self.emit(Instruction::Pop);

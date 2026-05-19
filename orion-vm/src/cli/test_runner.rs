@@ -129,6 +129,7 @@ fn run_test_file(
                 kwargs: vec![],
             },
             line: 0,
+            col: 0,
         });
 
         match run_stmts(run_stmts_with_call) {

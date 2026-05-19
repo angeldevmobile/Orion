@@ -50,26 +50,26 @@ pub enum Expr {
 #[derive(Debug, Clone)]
 pub enum Stmt {
     // Asignación
-    Assign      { name: String, value: Expr, line: u32 },
-    TypedAssign { name: String, type_hint: String, value: Expr, line: u32 },
-    AssignIndex { object: Expr, index: Expr, value: Expr, line: u32 },
-    AssignAttr  { object: Expr, attr: String, value: Expr, line: u32 },
-    AugAssign   { name: String, op: String, value: Expr, line: u32 },
-    Const   { name: String, value: Expr, doc: Option<String>, line: u32 },
+    Assign      { name: String, value: Expr, line: u32, col: u32 },
+    TypedAssign { name: String, type_hint: String, value: Expr, line: u32, col: u32 },
+    AssignIndex { object: Expr, index: Expr, value: Expr, line: u32, col: u32 },
+    AssignAttr  { object: Expr, attr: String, value: Expr, line: u32, col: u32 },
+    AugAssign   { name: String, op: String, value: Expr, line: u32, col: u32 },
+    Const   { name: String, value: Expr, doc: Option<String>, line: u32, col: u32 },
 
     // Control de flujo
-    If      { cond: Expr, then_body: Vec<Stmt>, else_body: Vec<Stmt>, line: u32 },
-    While   { cond: Expr, body: Vec<Stmt>, line: u32 },
-    For     { var: String, iter: Expr, body: Vec<Stmt>, line: u32 },
-    Match   { expr: Expr, arms: Vec<MatchArm>, line: u32 },
-    Return  { value: Option<Expr>, line: u32 },
-    Break   { line: u32 },
-    Continue { line: u32 },
+    If      { cond: Expr, then_body: Vec<Stmt>, else_body: Vec<Stmt>, line: u32, col: u32 },
+    While   { cond: Expr, body: Vec<Stmt>, line: u32, col: u32 },
+    For     { var: String, iter: Expr, body: Vec<Stmt>, line: u32, col: u32 },
+    Match   { expr: Expr, arms: Vec<MatchArm>, line: u32, col: u32 },
+    Return  { value: Option<Expr>, line: u32, col: u32 },
+    Break   { line: u32, col: u32 },
+    Continue { line: u32, col: u32 },
 
     // Funciones / clases
-    Fn      { name: String, type_params: Vec<String>, params: Vec<Param>, body: Vec<Stmt>, ret_type: Option<String>, doc: Option<String>, line: u32 },
-    AsyncFn { name: String, type_params: Vec<String>, params: Vec<Param>, body: Vec<Stmt>, ret_type: Option<String>, doc: Option<String>, line: u32 },
-    Shape   { name: String, type_params: Vec<String>, fields: Vec<FieldDef>, on_create: Option<(Vec<Param>, Vec<Stmt>)>, acts: Vec<ActDef>, using: Vec<String>, doc: Option<String>, line: u32 },
+    Fn      { name: String, type_params: Vec<String>, params: Vec<Param>, body: Vec<Stmt>, ret_type: Option<String>, doc: Option<String>, line: u32, col: u32 },
+    AsyncFn { name: String, type_params: Vec<String>, params: Vec<Param>, body: Vec<Stmt>, ret_type: Option<String>, doc: Option<String>, line: u32, col: u32 },
+    Shape   { name: String, type_params: Vec<String>, fields: Vec<FieldDef>, on_create: Option<(Vec<Param>, Vec<Stmt>)>, acts: Vec<ActDef>, using: Vec<String>, doc: Option<String>, line: u32, col: u32 },
 
     // FFI — declaración de función C externa
     ExternFn {
@@ -78,39 +78,40 @@ pub enum Stmt {
         ret_type: Option<String>,
         lib: String,
         line: u32,
+        col: u32,
     },
 
     // Módulos
-    Use     { path: String, alias: Option<String>, selective: Option<Vec<String>>, line: u32 },
+    Use     { path: String, alias: Option<String>, selective: Option<Vec<String>>, line: u32, col: u32 },
 
     // Salida
-    Show    { value: Expr, line: u32 },
+    Show    { value: Expr, line: u32, col: u32 },
 
     // Errores
-    ErrorStmt { msg: Expr, line: u32 },
-    Attempt   { body: Vec<Stmt>, handler: Option<Handler>, line: u32 },
+    ErrorStmt { msg: Expr, line: u32, col: u32 },
+    Attempt   { body: Vec<Stmt>, handler: Option<Handler>, line: u32, col: u32 },
 
     // I/O nativo
-    Ask     { prompt: Expr, var: String, cast: Option<String>, choices: Option<Expr>, line: u32 },
-    Read    { path: Expr, var: String, line: u32 },
-    Write   { path: Expr, content: Expr, line: u32 },
-    Append  { path: Expr, content: Expr, line: u32 },
+    Ask     { prompt: Expr, var: String, cast: Option<String>, choices: Option<Expr>, line: u32, col: u32 },
+    Read    { path: Expr, var: String, line: u32, col: u32 },
+    Write   { path: Expr, content: Expr, line: u32, col: u32 },
+    Append  { path: Expr, content: Expr, line: u32, col: u32 },
 
     // Servidor / red
-    Serve   { port: Expr, routes: Vec<Stmt>, line: u32 },
-    Route   { method: String, path: String, body: Vec<Stmt>, line: u32 },
+    Serve   { port: Expr, routes: Vec<Stmt>, line: u32, col: u32 },
+    Route   { method: String, path: String, body: Vec<Stmt>, line: u32, col: u32 },
 
     // IA / simbiótico
-    Think   { prompt: Expr, line: u32 },
-    Learn   { text: Expr, line: u32 },
-    Sense   { query: Expr, line: u32 },
+    Think   { prompt: Expr, line: u32, col: u32 },
+    Learn   { text: Expr, line: u32, col: u32 },
+    Sense   { query: Expr, line: u32, col: u32 },
 
     // Concurrencia
-    Spawn   { call: Expr, line: u32 },
-    Await   { expr: Expr, var: Option<String>, line: u32 },
+    Spawn   { call: Expr, line: u32, col: u32 },
+    Await   { expr: Expr, var: Option<String>, line: u32, col: u32 },
 
     // Expresión como declaración (llamadas de función sueltas, etc.)
-    Expr    { expr: Expr, line: u32 },
+    Expr    { expr: Expr, line: u32, col: u32 },
 }
 
 //   Tipos auxiliares                              

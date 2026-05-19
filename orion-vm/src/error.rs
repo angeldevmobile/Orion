@@ -301,7 +301,7 @@ pub fn type_issue_to_lsp(issue: &crate::typechecker::TypeIssue) -> LspDiagnostic
         kind:    "Type".into(),
         message: issue.message.clone(),
         line:    issue.line,
-        col:     1,
+        col:     issue.col.max(1),
         len:     1,
         hint:    None,
     }

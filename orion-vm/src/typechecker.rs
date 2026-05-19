@@ -8,14 +8,15 @@ pub struct TypeIssue {
     pub message: String,
     pub kind: &'static str,   // "error" | "warning"
     pub line: u32,
+    pub col:  u32,
 }
 
 impl TypeIssue {
-    fn error(msg: impl Into<String>, line: u32) -> Self {
-        TypeIssue { message: msg.into(), kind: "error", line }
+    fn error(msg: impl Into<String>, line: u32, col: u32) -> Self {
+        TypeIssue { message: msg.into(), kind: "error", line, col }
     }
-    fn warning(msg: impl Into<String>, line: u32) -> Self {
-        TypeIssue { message: msg.into(), kind: "warning", line }
+    fn warning(msg: impl Into<String>, line: u32, col: u32) -> Self {
+        TypeIssue { message: msg.into(), kind: "warning", line, col }
     }
 }
 
@@ -37,6 +38,7 @@ pub struct TypeChecker {
     shape_type_params: HashMap<String, Vec<String>>, // shape → sus type params
     scope_stack: Vec<HashMap<String, String>>,
     current_line: u32,
+    current_col:  u32,
     /// Variables asignadas pero nunca leídas en el scope actual
     written_not_read: Vec<HashMap<String, u32>>,
 }
@@ -50,6 +52,7 @@ impl TypeChecker {
             shape_type_params: HashMap::new(),
             scope_stack: vec![HashMap::new()],
             current_line: 0,
+            current_col:  0,
             written_not_read: vec![HashMap::new()],
         }
     }
@@ -107,15 +110,15 @@ impl TypeChecker {
                 if !name.starts_with('_') {
                     self.issues.push(TypeIssue::warning(
                         format!("Variable '{name}' asignada pero nunca usada"),
-                        line,
+                        line, 1,
                     ));
                 }
             }
         }
     }
 
-    fn report(&mut self, msg: impl Into<String>, line: u32) {
-        self.issues.push(TypeIssue::error(msg, line));
+    fn report(&mut self, msg: impl Into<String>, line: u32, col: u32) {
+        self.issues.push(TypeIssue::error(msg, line, col));
     }
 
     //    Recolección de firmas (primer pase)                                     
@@ -161,14 +164,15 @@ impl TypeChecker {
         match stmt {
 
             // variable con type hint: nombre: tipo = valor
-            Stmt::TypedAssign { name, type_hint, value, line } => {
+            Stmt::TypedAssign { name, type_hint, value, line, col } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 let actual = self.infer_type(value);
                 if let Some(actual_ty) = &actual {
                     if !types_compatible(type_hint, actual_ty) {
                         self.report(
                             format!("'{name}: {type_hint}' — se asignó valor de tipo '{actual_ty}'"),
-                            *line,
+                            *line, *col,
                         );
                     }
                 }
@@ -176,29 +180,30 @@ impl TypeChecker {
             }
 
             // asignación sin tipo: registra el tipo inferido en scope
-            Stmt::Assign { name, value, line } => {
+            Stmt::Assign { name, value, line, col } => {
                 self.current_line = *line;
-                // Inferir primero (puede leer 'name' en el lado derecho, ej: x = x + 1)
+                self.current_col  = *col;
                 let ty = self.infer_type(value);
                 if let Some(t) = ty {
                     self.scope_set(name.clone(), t);
                 } else {
-                    // Tipo desconocido: registrar como "any" para no bloquear
                     self.scope_set(name.clone(), "any".into());
                 }
             }
 
-            Stmt::Const { name, value, line, .. } => {
+            Stmt::Const { name, value, line, col, .. } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 if let Some(ty) = self.infer_type(value) {
                     self.scope_set(name.clone(), ty);
                 }
             }
 
             // definición de función: registra firma, verifica cuerpo
-            Stmt::Fn { name, type_params, params, body, ret_type, line, .. } |
-            Stmt::AsyncFn { name, type_params, params, body, ret_type, line, .. } => {
+            Stmt::Fn { name, type_params, params, body, ret_type, line, col, .. } |
+            Stmt::AsyncFn { name, type_params, params, body, ret_type, line, col, .. } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 let sig = FnSig {
                     type_params: type_params.clone(),
                     params: params.iter()
@@ -208,13 +213,11 @@ impl TypeChecker {
                 };
                 self.fn_sigs.insert(name.clone(), sig);
                 self.push_scope();
-                // Los type params se registran como tipo "any" dentro del cuerpo
                 for tp in type_params {
                     self.scope_set(tp.clone(), "any".to_string());
                 }
                 for p in params {
                     if let Some(th) = &p.type_hint {
-                        // Si el type hint es un type param (T, U...), registrar como "any"
                         let resolved = if type_params.contains(th) { "any".to_string() } else { normalize(th) };
                         self.scope_set(p.name.clone(), resolved);
                     }
@@ -223,15 +226,16 @@ impl TypeChecker {
                 self.pop_scope();
             }
 
-            Stmt::Return { value, line } => {
+            Stmt::Return { value, line, col } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 if let (Some(rt), Some(expr)) = (return_type, value) {
                     if rt != "void" && rt != "any" {
                         if let Some(actual) = self.infer_type(expr) {
                             if !types_compatible(rt, &actual) {
                                 self.report(
                                     format!("RETURN: se esperaba '{rt}', pero es de tipo '{actual}'"),
-                                    *line,
+                                    *line, *col,
                                 );
                             }
                         }
@@ -239,8 +243,9 @@ impl TypeChecker {
                 }
             }
 
-            Stmt::If { cond, then_body, else_body, line } => {
+            Stmt::If { cond, then_body, else_body, line, col } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 self.infer_type(cond);
                 self.push_scope();
                 self.check_stmts(then_body, return_type);
@@ -252,21 +257,21 @@ impl TypeChecker {
                 }
             }
 
-            Stmt::While { cond, body, line } => {
+            Stmt::While { cond, body, line, col } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 self.infer_type(cond);
                 self.push_scope();
                 self.check_stmts(body, return_type);
                 self.pop_scope();
             }
 
-            Stmt::For { var, iter, body, line } => {
+            Stmt::For { var, iter, body, line, col } => {
                 self.current_line = *line;
-                // Inferir el tipo del elemento a partir del iterador
+                self.current_col  = *col;
                 let elem_type = self.infer_iter_elem_type(iter);
                 self.push_scope();
                 self.scope_set(var.clone(), elem_type);
-                // La variable del for-loop siempre se "usa" (no reportar como unused)
                 if let Some(top) = self.written_not_read.last_mut() {
                     top.remove(var);
                 }
@@ -274,8 +279,9 @@ impl TypeChecker {
                 self.pop_scope();
             }
 
-            Stmt::Attempt { body, handler, line } => {
+            Stmt::Attempt { body, handler, line, col } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 self.push_scope();
                 self.check_stmts(body, return_type);
                 self.pop_scope();
@@ -287,18 +293,21 @@ impl TypeChecker {
                 }
             }
 
-            Stmt::Show { value, line } => {
+            Stmt::Show { value, line, col } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 self.infer_type(value);
             }
 
-            Stmt::Expr { expr, line } => {
+            Stmt::Expr { expr, line, col } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 self.check_call_types(expr);
             }
 
-            Stmt::Shape { name, type_params, fields, on_create, acts, using: _, line, .. } => {
+            Stmt::Shape { name, type_params, fields, on_create, acts, using: _, line, col, .. } => {
                 self.current_line = *line;
+                self.current_col  = *col;
                 self.shape_type_params.insert(name.clone(), type_params.clone());
                 // Verificar on_create y acts con type params en scope
                 let check_with_type_params = |checker: &mut TypeChecker, params: &[crate::ast::Param], body: &[Stmt]| {
@@ -337,11 +346,11 @@ impl TypeChecker {
                         let bindings = self.unify_type_params(&sig, args);
                         for (idx, arg) in args.iter().enumerate() {
                             if let Some((pname, Some(declared))) = sig.params.get(idx) {
-                                // Resolver el declared con los bindings de generics
                                 let resolved = resolve_generic(declared, &bindings);
                                 if let Some(actual) = self.infer_type(arg) {
                                     if !types_compatible(&resolved, &actual) {
                                         let line = self.current_line;
+                                        let col  = self.current_col;
                                         self.report(
                                             format!(
                                                 "Llamada a '{fn_name}': argumento #{} \
@@ -349,7 +358,7 @@ impl TypeChecker {
                                                  '{resolved}', se recibió '{actual}'",
                                                 idx + 1
                                             ),
-                                            line,
+                                            line, col,
                                         );
                                     }
                                 }
@@ -416,13 +425,13 @@ impl TypeChecker {
             Expr::Lambda { .. } => Some("fn".into()),
 
             Expr::Ident(name)  => {
-                // Detectar variables no definidas (excluir builtins conocidos)
                 let ty = self.scope_get(name);
                 if ty.is_none() && !is_builtin(name) && !self.fn_sigs.contains_key(name) && !self.shape_names.contains(name) {
                     let line = self.current_line;
+                    let col  = self.current_col;
                     self.issues.push(TypeIssue::warning(
                         format!("Variable '{name}' usada pero no definida en este scope"),
-                        line,
+                        line, col,
                     ));
                 }
                 ty
@@ -472,13 +481,13 @@ impl TypeChecker {
                 if type_param_set.contains(declared.as_str()) {
                     if let Some(arg) = args.get(idx) {
                         if let Some(actual) = self.infer_type(arg) {
-                            // Solo ligar si no hay conflicto
                             let entry = bindings.entry(declared.clone()).or_insert_with(|| actual.clone());
                             if *entry != actual && actual != "any" {
                                 let line = self.current_line;
+                                let col  = self.current_col;
                                 self.report(
                                     format!("Generic '{declared}' usado como '{}' y '{}' en la misma llamada", entry, actual),
-                                    line,
+                                    line, col,
                                 );
                             }
                         }

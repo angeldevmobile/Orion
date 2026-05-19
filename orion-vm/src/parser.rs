@@ -50,6 +50,10 @@ impl Parser {
         self.tokens.get(self.pos).map(|t| t.line).unwrap_or(0)
     }
 
+    fn current_col(&self) -> u32 {
+        self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0)
+    }
+
     fn advance(&mut self) -> &TokenKind {
         let kind = &self.tokens[self.pos].kind;
         self.pos += 1;
@@ -361,7 +365,9 @@ impl Parser {
             self.parse_block()?
         } else {
             let expr = self.parse_expression()?;
-            vec![Stmt::Expr { expr, line: self.current_line() }]
+            let line = self.current_line();
+            let col = self.current_col();
+            vec![Stmt::Expr { expr, line, col }]
         };
         Ok(Expr::Lambda { params, body })
     }
@@ -617,6 +623,7 @@ impl Parser {
         let doc = self.collect_doc();
         self.skip_newlines();
         let line = self.current_line();
+        let col  = self.current_col();
         match self.peek().clone() {
 
             //   const x = expr
@@ -625,30 +632,30 @@ impl Parser {
                 let name = self.expect_ident()?;
                 self.expect(&TokenKind::Assign)?;
                 let value = self.parse_expression()?;
-                Ok(Stmt::Const { name, value, doc, line })
+                Ok(Stmt::Const { name, value, doc, line, col })
             }
 
-            //   show expr                           
+            //   show expr
             TokenKind::Show => {
                 self.pos += 1;
                 let value = self.parse_expression()?;
-                Ok(Stmt::Show { value, line })
+                Ok(Stmt::Show { value, line, col })
             }
 
-            //   return [expr]                         
+            //   return [expr]
             TokenKind::Return => {
                 self.pos += 1;
                 let value = if !matches!(self.peek(), TokenKind::RBrace | TokenKind::Semicolon | TokenKind::Eof) {
                     Some(self.parse_expression()?)
                 } else { None };
-                Ok(Stmt::Return { value, line })
+                Ok(Stmt::Return { value, line, col })
             }
 
-            //   break                             
-            TokenKind::Break    => { self.pos += 1; Ok(Stmt::Break { line }) }
+            //   break
+            TokenKind::Break    => { self.pos += 1; Ok(Stmt::Break { line, col }) }
 
-            //   continue                            
-            TokenKind::Continue => { self.pos += 1; Ok(Stmt::Continue { line }) }
+            //   continue
+            TokenKind::Continue => { self.pos += 1; Ok(Stmt::Continue { line, col }) }
 
             //   extern fn name(params) -> ret from "lib"
             TokenKind::Extern => {
@@ -672,7 +679,7 @@ impl Parser {
                         }
                     } else { String::new() }
                 } else { String::new() };
-                Ok(Stmt::ExternFn { name, params, ret_type, lib, line })
+                Ok(Stmt::ExternFn { name, params, ret_type, lib, line, col })
             }
 
             //   fn name[T, U](params) -> ret { body }
@@ -686,7 +693,7 @@ impl Parser {
                     self.parse_type_name().ok()
                 } else { None };
                 let body = self.parse_block()?;
-                Ok(Stmt::Fn { name, type_params, params, body, ret_type, doc, line })
+                Ok(Stmt::Fn { name, type_params, params, body, ret_type, doc, line, col })
             }
 
             //   async fn name[T](params) -> ret { body }
@@ -701,10 +708,10 @@ impl Parser {
                     self.parse_type_name().ok()
                 } else { None };
                 let body = self.parse_block()?;
-                Ok(Stmt::AsyncFn { name, type_params, params, body, ret_type, doc, line })
+                Ok(Stmt::AsyncFn { name, type_params, params, body, ret_type, doc, line, col })
             }
 
-            //   if cond { } [else { }]                     
+            //   if cond { } [else { }]
             TokenKind::If => {
                 self.pos += 1;
                 let cond = self.parse_expression()?;
@@ -718,28 +725,28 @@ impl Parser {
                         self.parse_block()?
                     }
                 } else { Vec::new() };
-                Ok(Stmt::If { cond, then_body, else_body, line })
+                Ok(Stmt::If { cond, then_body, else_body, line, col })
             }
 
-            //   while cond { }                         
+            //   while cond { }
             TokenKind::While => {
                 self.pos += 1;
                 let cond = self.parse_expression()?;
                 let body = self.parse_block()?;
-                Ok(Stmt::While { cond, body, line })
+                Ok(Stmt::While { cond, body, line, col })
             }
 
-            //   for var in expr { }                      
+            //   for var in expr { }
             TokenKind::For => {
                 self.pos += 1;
                 let var = self.expect_ident()?;
                 self.expect(&TokenKind::In)?;
                 let iter = self.parse_expression()?;
                 let body = self.parse_block()?;
-                Ok(Stmt::For { var, iter, body, line })
+                Ok(Stmt::For { var, iter, body, line, col })
             }
 
-            //   match expr { pattern { } ... }                 
+            //   match expr { pattern { } ... }
             TokenKind::Match => {
                 self.pos += 1;
                 let expr = self.parse_expression()?;
@@ -753,10 +760,10 @@ impl Parser {
                     arms.push(MatchArm { pattern, body });
                 }
                 self.expect(&TokenKind::RBrace)?;
-                Ok(Stmt::Match { expr, arms, line })
+                Ok(Stmt::Match { expr, arms, line, col })
             }
 
-            //   use "path" [as alias] [take [fn1, fn2]]            
+            //   use "path" [as alias] [take [fn1, fn2]]
             TokenKind::Use => {
                 self.pos += 1;
                 let path = match self.peek().clone() {
@@ -779,10 +786,10 @@ impl Parser {
                     self.expect(&TokenKind::RBracket)?;
                     Some(names)
                 } else { None };
-                Ok(Stmt::Use { path, alias, selective, line })
+                Ok(Stmt::Use { path, alias, selective, line, col })
             }
 
-            //   attempt { } handle err { }                   
+            //   attempt { } handle err { }
             TokenKind::Attempt => {
                 self.pos += 1;
                 let body = self.parse_block()?;
@@ -795,45 +802,45 @@ impl Parser {
                     let hbody = self.parse_block()?;
                     Some(Handler { err_name, body: hbody })
                 } else { None };
-                Ok(Stmt::Attempt { body, handler, line })
+                Ok(Stmt::Attempt { body, handler, line, col })
             }
 
-            //   error expr                           
+            //   error expr
             TokenKind::ErrorKw => {
                 self.pos += 1;
                 let msg = self.parse_expression()?;
-                Ok(Stmt::ErrorStmt { msg, line })
+                Ok(Stmt::ErrorStmt { msg, line, col })
             }
 
-            //   think expr                           
+            //   think expr
             TokenKind::Think => {
                 self.pos += 1;
                 let prompt = self.parse_expression()?;
-                Ok(Stmt::Think { prompt, line })
+                Ok(Stmt::Think { prompt, line, col })
             }
 
-            //   learn expr                           
+            //   learn expr
             TokenKind::Learn => {
                 self.pos += 1;
                 let text = self.parse_expression()?;
-                Ok(Stmt::Learn { text, line })
+                Ok(Stmt::Learn { text, line, col })
             }
 
-            //   sense expr                           
+            //   sense expr
             TokenKind::Sense => {
                 self.pos += 1;
                 let query = self.parse_expression()?;
-                Ok(Stmt::Sense { query, line })
+                Ok(Stmt::Sense { query, line, col })
             }
 
-            //   spawn expr                           
+            //   spawn expr
             TokenKind::Spawn => {
                 self.pos += 1;
                 let call = self.parse_expression()?;
-                Ok(Stmt::Spawn { call, line })
+                Ok(Stmt::Spawn { call, line, col })
             }
 
-            //   ask "msg" [as type] [choices expr] -> var           
+            //   ask "msg" [as type] [choices expr] -> var
             TokenKind::Ask => {
                 self.pos += 1;
                 let prompt = self.parse_expression()?;
@@ -850,10 +857,10 @@ impl Parser {
                 }
                 self.expect(&TokenKind::ThinArrow)?;
                 let var = self.expect_ident()?;
-                Ok(Stmt::Ask { prompt, var, cast, choices, line })
+                Ok(Stmt::Ask { prompt, var, cast, choices, line, col })
             }
 
-            //   read "path" [as type] -> var                  
+            //   read "path" [as type] -> var
             TokenKind::Read => {
                 self.pos += 1;
                 let path = self.parse_expression()?;
@@ -863,10 +870,10 @@ impl Parser {
                 }
                 self.expect(&TokenKind::ThinArrow)?;
                 let var = self.expect_ident()?;
-                Ok(Stmt::Read { path, var, line })
+                Ok(Stmt::Read { path, var, line, col })
             }
 
-            //   write "path" with|append expr                 
+            //   write "path" with|append expr
             TokenKind::Write => {
                 self.pos += 1;
                 let path = self.parse_expression()?;
@@ -877,19 +884,19 @@ impl Parser {
                     self.expect(&TokenKind::With)?;
                     self.parse_expression()?
                 };
-                Ok(Stmt::Write { path, content, line })
+                Ok(Stmt::Write { path, content, line, col })
             }
 
-            //   append "path" with expr                     
+            //   append "path" with expr
             TokenKind::Append => {
                 self.pos += 1;
                 let path = self.parse_expression()?;
                 self.expect(&TokenKind::With)?;
                 let content = self.parse_expression()?;
-                Ok(Stmt::Append { path, content, line })
+                Ok(Stmt::Append { path, content, line, col })
             }
 
-            //   serve port handler                       
+            //   serve port handler
             TokenKind::Serve => {
                 self.pos += 1;
                 let port = self.parse_expression()?;
@@ -898,9 +905,9 @@ impl Parser {
                     self.parse_block()?
                 } else {
                     let fn_expr = self.parse_expression()?;
-                    vec![Stmt::Expr { expr: fn_expr, line }]
+                    vec![Stmt::Expr { expr: fn_expr, line, col }]
                 };
-                Ok(Stmt::Serve { port, routes, line })
+                Ok(Stmt::Serve { port, routes, line, col })
             }
 
             //   shape Name[T, U] { fields, on_create, acts }
@@ -1021,10 +1028,10 @@ impl Parser {
                     }
                 }
                 self.expect(&TokenKind::RBrace)?;
-                Ok(Stmt::Shape { name, type_params, fields, on_create, acts, using, doc, line })
+                Ok(Stmt::Shape { name, type_params, fields, on_create, acts, using, doc, line, col })
             }
 
-            //   Asignación, asignación compuesta o expresión          
+            //   Asignación, asignación compuesta o expresión
             _ => {
                 let expr = self.parse_expression()?;
 
@@ -1049,7 +1056,7 @@ impl Parser {
                             } else {
                                 Expr::Null
                             };
-                            return Ok(Stmt::TypedAssign { name: vname, type_hint, value, line });
+                            return Ok(Stmt::TypedAssign { name: vname, type_hint, value, line, col });
                         }
                     }
                 }
@@ -1058,17 +1065,14 @@ impl Parser {
                 if matches!(self.peek(), TokenKind::Assign) {
                     self.pos += 1;
                     let value = self.parse_expression()?;
-                    // Si el lado izquierdo es un simple Ident
                     if let Expr::Ident(name) = expr {
-                        return Ok(Stmt::Assign { name, value, line });
+                        return Ok(Stmt::Assign { name, value, line, col });
                     }
-                    // expr[i] = value
                     if let Expr::Index { object, index } = expr {
-                        return Ok(Stmt::AssignIndex { object: *object, index: *index, value, line });
+                        return Ok(Stmt::AssignIndex { object: *object, index: *index, value, line, col });
                     }
-                    // expr.attr = value
                     if let Expr::AttrAccess { object, attr } = expr {
-                        return Ok(Stmt::AssignAttr { object: *object, attr, value, line });
+                        return Ok(Stmt::AssignAttr { object: *object, attr, value, line, col });
                     }
                     return Err(self.err("Objetivo de asignación inválido"));
                 }
@@ -1088,17 +1092,17 @@ impl Parser {
                     self.pos += 1;
                     let value = self.parse_expression()?;
                     if let Expr::Ident(name) = expr {
-                        return Ok(Stmt::AugAssign { name, op, value, line });
+                        return Ok(Stmt::AugAssign { name, op, value, line, col });
                     }
                     return Err(self.err("Se esperaba un identificador en asignación compuesta"));
                 }
 
                 // await var = await future
                 if let Expr::Await(inner) = expr {
-                    return Ok(Stmt::Await { expr: *inner, var: None, line });
+                    return Ok(Stmt::Await { expr: *inner, var: None, line, col });
                 }
 
-                Ok(Stmt::Expr { expr, line })
+                Ok(Stmt::Expr { expr, line, col })
             }
         }
     }
