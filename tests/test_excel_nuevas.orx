@@ -1,0 +1,106 @@
+use "excel" as excel
+
+-- ── TEST: cruzar (join inner) ─────────────────────────────────────────────────
+fn test_cruzar_inner() {
+    vendedores = [
+        {"id": 1, "nombre": "Ana"},
+        {"id": 2, "nombre": "Luis"},
+        {"id": 3, "nombre": "Marta"}
+    ]
+    ventas = [
+        {"id": 1, "monto": 5000},
+        {"id": 2, "monto": 8500},
+        {"id": 4, "monto": 3000}
+    ]
+    resultado = excel.cruzar(vendedores, ventas, "id")
+    assert_eq(len(resultado), 2, "inner join: solo 2 coincidencias (id 1 y 2)")
+    assert_eq(resultado[0]["nombre"], "Ana", "primer cruce es Ana")
+    assert_eq(resultado[0]["monto"], 5000, "monto de Ana es 5000")
+}
+
+-- ── TEST: cruzar (join left) ─────────────────────────────────────────────────
+fn test_cruzar_left() {
+    vendedores = [
+        {"id": 1, "nombre": "Ana"},
+        {"id": 2, "nombre": "Luis"},
+        {"id": 3, "nombre": "Marta"}
+    ]
+    ventas = [
+        {"id": 1, "monto": 5000},
+        {"id": 2, "monto": 8500}
+    ]
+    resultado = excel.cruzar(vendedores, ventas, "id", "left")
+    assert_eq(len(resultado), 3, "left join: todos los vendedores (3)")
+}
+
+-- ── TEST: deduplicar por campo ───────────────────────────────────────────────
+fn test_deduplicar_por_campo() {
+    data = [
+        {"region": "Norte", "monto": 1000},
+        {"region": "Sur",   "monto": 2000},
+        {"region": "Norte", "monto": 3000},
+        {"region": "Centro","monto": 500}
+    ]
+    unico = excel.deduplicar(data, ["region"])
+    assert_eq(len(unico), 3, "3 regiones unicas tras deduplicar")
+}
+
+-- ── TEST: deduplicar fila completa ───────────────────────────────────────────
+fn test_deduplicar_completo() {
+    data = [
+        {"a": 1, "b": 2},
+        {"a": 1, "b": 2},
+        {"a": 3, "b": 4}
+    ]
+    unico = excel.deduplicar(data)
+    assert_eq(len(unico), 2, "2 filas unicas al deduplicar fila completa")
+}
+
+-- ── TEST: estadisticas ───────────────────────────────────────────────────────
+fn test_estadisticas_basicas() {
+    data = [
+        {"venta": 100},
+        {"venta": 200},
+        {"venta": 300},
+        {"venta": 400},
+        {"venta": 500}
+    ]
+    s = excel.estadisticas(data, "venta")
+    assert_eq(s.count, 5, "5 valores")
+    assert_eq(s.sum, 1500.0, "suma es 1500")
+    assert_eq(s.min, 100.0, "minimo es 100")
+    assert_eq(s.max, 500.0, "maximo es 500")
+    assert_eq(s.avg, 300.0, "promedio es 300")
+    assert_eq(s.mediana, 300.0, "mediana es 300")
+}
+
+-- ── TEST: estadisticas campo vacio ───────────────────────────────────────────
+fn test_estadisticas_vacias() {
+    data = [{"nombre": "Ana"}, {"nombre": "Luis"}]
+    s = excel.estadisticas(data, "venta")
+    assert_eq(s.count, 0, "count 0 sin valores numericos")
+}
+
+-- ── TEST: renombrar_col ───────────────────────────────────────────────────────
+fn test_renombrar_col() {
+    data = [
+        {"nombre": "Ana", "venta": 5000},
+        {"nombre": "Luis", "venta": 8500}
+    ]
+    renombrado = excel.renombrar_col(data, "venta", "total")
+    assert_eq(renombrado[0]["total"], 5000, "campo renombrado a 'total'")
+    assert_eq(renombrado[1]["total"], 8500, "segundo registro con campo 'total'")
+}
+
+-- ── TEST: rellenar nulos ─────────────────────────────────────────────────────
+fn test_rellenar_nulos() {
+    data = [
+        {"nombre": "Ana",  "region": "Norte"},
+        {"nombre": "Luis", "region": null},
+        {"nombre": "Eva",  "region": ""}
+    ]
+    relleno = excel.rellenar(data, "region", "Sin región")
+    assert_eq(relleno[0]["region"], "Norte", "Norte se mantiene")
+    assert_eq(relleno[1]["region"], "Sin región", "null reemplazado")
+    assert_eq(relleno[2]["region"], "Sin región", "vacio reemplazado")
+}

@@ -425,6 +425,86 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
+        // cruzar(data1, data2, clave, tipo?) → join por campo clave
+        // tipo: "inner" (default) | "left" | "right" | "full"
+        "cruzar" | "join" => {
+            if args.len() < 3 {
+                return Err("excel.cruzar requiere (data1, data2, clave, tipo?)".into());
+            }
+            let left  = list_arg("cruzar", &args, 0)?;
+            let right = list_arg("cruzar", &args, 1)?;
+            let clave = str_arg("cruzar", &args, 2)?;
+            let tipo  = args.get(3)
+                .and_then(|v| if let EvalValue::Str(s) = v { Some(s.clone()) } else { None })
+                .unwrap_or_else(|| "inner".to_string());
+            join_datasets(left, right, clave, &tipo)
+        }
+
+        // deduplicar(data, campos?) → filas únicas
+        // campos: lista de campos clave — si se omite, usa todos los campos
+        "deduplicar" | "dedupe" => {
+            if args.is_empty() {
+                return Err("excel.deduplicar requiere (data, [campos]?)".into());
+            }
+            let rows = list_arg("deduplicar", &args, 0)?;
+            let campos: Option<Vec<String>> = match args.get(1) {
+                Some(EvalValue::List(l)) => Some(l.iter().map(|v| to_str_val(v)).collect()),
+                _ => None,
+            };
+            deduplicate(rows, campos)
+        }
+
+        // estadisticas(data, campo) → dict { min, max, sum, avg, count, std, mediana }
+        "estadisticas" | "stats" => {
+            if args.len() < 2 {
+                return Err("excel.estadisticas requiere (data, campo)".into());
+            }
+            let rows  = list_arg("estadisticas", &args, 0)?;
+            let campo = str_arg("estadisticas", &args, 1)?;
+            compute_stats(rows, campo)
+        }
+
+        // renombrar_col(data, viejo, nuevo) → lista con columna renombrada
+        "renombrar_col" | "rename_col" => {
+            if args.len() < 3 {
+                return Err("excel.renombrar_col requiere (data, viejo, nuevo)".into());
+            }
+            let rows  = list_arg("renombrar_col", &args, 0)?;
+            let viejo = str_arg("renombrar_col", &args, 1)?;
+            let nuevo = str_arg("renombrar_col", &args, 2)?;
+            let result: Vec<EvalValue> = rows.into_iter().map(|row| {
+                if let EvalValue::Dict(mut m) = row {
+                    if let Some(v) = m.remove(&viejo) {
+                        m.insert(nuevo.clone(), v);
+                    }
+                    EvalValue::Dict(m)
+                } else { row }
+            }).collect();
+            Ok(EvalValue::List(result))
+        }
+
+        // rellenar(data, campo, valor) → reemplaza nulos/vacíos en campo con valor
+        "rellenar" | "fill_null" => {
+            if args.len() < 3 {
+                return Err("excel.rellenar requiere (data, campo, valor)".into());
+            }
+            let rows  = list_arg("rellenar", &args, 0)?;
+            let campo = str_arg("rellenar", &args, 1)?;
+            let valor = args[2].clone();
+            let result: Vec<EvalValue> = rows.into_iter().map(|row| {
+                if let EvalValue::Dict(mut m) = row {
+                    let is_empty = match m.get(&campo) {
+                        None | Some(EvalValue::Null) => true,
+                        Some(EvalValue::Str(s)) if s.trim().is_empty() => true,
+                        _ => false,
+                    };
+                    if is_empty { m.insert(campo.clone(), valor.clone()); }
+                    EvalValue::Dict(m)
+                } else { row }
+            }).collect();
+            Ok(EvalValue::List(result))
+        }
+
         f => Err(format!("excel.{}: función no encontrada", f)),
     }
 }
@@ -860,6 +940,141 @@ fn pivot_table(
     }).collect();
 
     Ok(EvalValue::List(result))
+}
+
+// ─── join / dedupe / stats ────────────────────────────────────────────────────
+
+fn join_datasets(
+    left: Vec<EvalValue>,
+    right: Vec<EvalValue>,
+    clave: String,
+    tipo: &str,
+) -> Result<EvalValue, String> {
+    // Build lookup: clave → list of right rows (one key may appear N times)
+    let mut right_map: HashMap<String, Vec<HashMap<String, EvalValue>>> = HashMap::new();
+    for row in &right {
+        if let EvalValue::Dict(m) = row {
+            let k = to_str_val(m.get(&clave).unwrap_or(&EvalValue::Null));
+            right_map.entry(k).or_default().push(m.clone());
+        }
+    }
+
+    let mut result: Vec<EvalValue> = Vec::new();
+    let mut matched_right_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for lrow in &left {
+        if let EvalValue::Dict(lm) = lrow {
+            let k = to_str_val(lm.get(&clave).unwrap_or(&EvalValue::Null));
+            match right_map.get(&k) {
+                Some(rrows) => {
+                    matched_right_keys.insert(k.clone());
+                    for rm in rrows {
+                        let mut merged = lm.clone();
+                        for (rk, rv) in rm {
+                            if rk != &clave { merged.insert(rk.clone(), rv.clone()); }
+                        }
+                        result.push(EvalValue::Dict(merged));
+                    }
+                }
+                None => {
+                    // left / full: include left row with nulls for right fields
+                    if tipo == "left" || tipo == "full" {
+                        result.push(EvalValue::Dict(lm.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    // right / full: include unmatched right rows
+    if tipo == "right" || tipo == "full" {
+        for row in &right {
+            if let EvalValue::Dict(rm) = row {
+                let k = to_str_val(rm.get(&clave).unwrap_or(&EvalValue::Null));
+                if !matched_right_keys.contains(&k) {
+                    result.push(EvalValue::Dict(rm.clone()));
+                }
+            }
+        }
+    }
+
+    Ok(EvalValue::List(result))
+}
+
+fn deduplicate(rows: Vec<EvalValue>, campos: Option<Vec<String>>) -> Result<EvalValue, String> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut result: Vec<EvalValue> = Vec::new();
+    for row in rows {
+        let key = match &row {
+            EvalValue::Dict(m) => {
+                match &campos {
+                    Some(cols) => {
+                        let mut parts: Vec<String> = cols.iter()
+                            .map(|c| to_str_val(m.get(c).unwrap_or(&EvalValue::Null)))
+                            .collect();
+                        parts.join("||")
+                    }
+                    None => {
+                        let mut pairs: Vec<String> = m.iter()
+                            .map(|(k, v)| format!("{}={}", k, to_str_val(v)))
+                            .collect();
+                        pairs.sort();
+                        pairs.join("||")
+                    }
+                }
+            }
+            other => to_str_val(other),
+        };
+        if seen.insert(key) {
+            result.push(row);
+        }
+    }
+    Ok(EvalValue::List(result))
+}
+
+fn compute_stats(rows: Vec<EvalValue>, campo: String) -> Result<EvalValue, String> {
+    let mut vals: Vec<f64> = rows.iter()
+        .filter_map(|r| to_f64_val(&dict_get(r, &campo)))
+        .collect();
+
+    if vals.is_empty() {
+        let mut m = HashMap::new();
+        m.insert("count".into(), EvalValue::Int(0));
+        m.insert("sum".into(),   EvalValue::Float(0.0));
+        m.insert("min".into(),   EvalValue::Null);
+        m.insert("max".into(),   EvalValue::Null);
+        m.insert("avg".into(),   EvalValue::Null);
+        m.insert("std".into(),   EvalValue::Null);
+        m.insert("mediana".into(), EvalValue::Null);
+        return Ok(EvalValue::Dict(m));
+    }
+
+    let count = vals.len() as f64;
+    let sum: f64 = vals.iter().sum();
+    let avg = sum / count;
+    let min = vals.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+    let variance = vals.iter().map(|v| (v - avg).powi(2)).sum::<f64>() / count;
+    let std = variance.sqrt();
+
+    vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = vals.len() / 2;
+    let mediana = if vals.len() % 2 == 0 {
+        (vals[mid - 1] + vals[mid]) / 2.0
+    } else {
+        vals[mid]
+    };
+
+    let mut m = HashMap::new();
+    m.insert("count".into(),   EvalValue::Int(vals.len() as i64));
+    m.insert("sum".into(),     EvalValue::Float(sum));
+    m.insert("min".into(),     EvalValue::Float(min));
+    m.insert("max".into(),     EvalValue::Float(max));
+    m.insert("avg".into(),     EvalValue::Float(avg));
+    m.insert("std".into(),     EvalValue::Float(std));
+    m.insert("mediana".into(), EvalValue::Float(mediana));
+    Ok(EvalValue::Dict(m))
 }
 
 // ─── Tiny utilities ───────────────────────────────────────────────────────────

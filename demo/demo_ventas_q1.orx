@@ -1,0 +1,221 @@
+use "excel" as excel
+
+-- ═══════════════════════════════════════════════════════════════════════
+--  ORION LANGUAGE — Demo Showcase
+--  Automatización Excel: Reporte de Ventas Q1 2026
+--  Genera dos archivos .xlsx con análisis completo de datos de ventas
+-- ═══════════════════════════════════════════════════════════════════════
+
+show "╔══════════════════════════════════════════════╗"
+show "║   Orion · Automatización Excel               ║"
+show "║   Reporte de Ventas Q1 2026                  ║"
+show "╚══════════════════════════════════════════════╝"
+show ""
+
+-- ── 1. DATOS FUENTE ──────────────────────────────────────────────────
+
+vendedores = [
+    {"id": 1,  "nombre": "Ana García",     "region": "Norte",  "producto": "CRM Pro",         "venta": 85000,  "meta": 80000,  "activo": yes, "meses": 24},
+    {"id": 2,  "nombre": "Luis Martínez",  "region": "Sur",    "producto": "Analytics Suite", "venta": 62000,  "meta": 70000,  "activo": yes, "meses": 18},
+    {"id": 3,  "nombre": "Marta López",    "region": "Norte",  "producto": "Cloud Storage",   "venta": 91000,  "meta": 85000,  "activo": yes, "meses": 36},
+    {"id": 4,  "nombre": "Carlos Ruiz",    "region": "Centro", "producto": "Security Pack",   "venta": 74000,  "meta": 75000,  "activo": yes, "meses": 12},
+    {"id": 5,  "nombre": "Elena Díaz",     "region": "Oeste",  "producto": "DevOps Tools",    "venta": 110000, "meta": 90000,  "activo": yes, "meses": 48},
+    {"id": 6,  "nombre": "Pedro Sánchez",  "region": "Sur",    "producto": "CRM Pro",         "venta": 55000,  "meta": 65000,  "activo": yes, "meses": 8},
+    {"id": 7,  "nombre": "Isabel Torres",  "region": "Norte",  "producto": "Analytics Suite", "venta": 78000,  "meta": 75000,  "activo": yes, "meses": 30},
+    {"id": 8,  "nombre": "Miguel Flores",  "region": "Centro", "producto": "Cloud Storage",   "venta": 43000,  "meta": 60000,  "activo": no,  "meses": 6},
+    {"id": 9,  "nombre": "Laura Vega",     "region": "Oeste",  "producto": "Security Pack",   "venta": 96000,  "meta": 88000,  "activo": yes, "meses": 42},
+    {"id": 10, "nombre": "Roberto Silva",  "region": "Norte",  "producto": "DevOps Tools",    "venta": 67000,  "meta": 70000,  "activo": yes, "meses": 15},
+    {"id": 11, "nombre": "Carmen Medina",  "region": "Sur",    "producto": "CRM Pro",         "venta": 81000,  "meta": 78000,  "activo": yes, "meses": 22},
+    {"id": 12, "nombre": "Javier Castro",  "region": "Centro", "producto": "Analytics Suite", "venta": 58000,  "meta": 65000,  "activo": yes, "meses": 10},
+    {"id": 13, "nombre": "Patricia Mora",  "region": "Oeste",  "producto": "Cloud Storage",   "venta": 72000,  "meta": 70000,  "activo": yes, "meses": 28},
+    {"id": 14, "nombre": "Andrés Reyes",   "region": "Norte",  "producto": "Security Pack",   "venta": 49000,  "meta": 55000,  "activo": no,  "meses": 5},
+    {"id": 15, "nombre": "Sofía Vargas",   "region": "Sur",    "producto": "DevOps Tools",    "venta": 88000,  "meta": 80000,  "activo": yes, "meses": 33},
+    {"id": 16, "nombre": "Diego Herrera",  "region": "Centro", "producto": "CRM Pro",         "venta": 95000,  "meta": 85000,  "activo": yes, "meses": 40},
+    {"id": 17, "nombre": "Valentina Cruz", "region": "Oeste",  "producto": "Analytics Suite", "venta": 63000,  "meta": 68000,  "activo": yes, "meses": 14},
+    {"id": 18, "nombre": "Héctor Romero",  "region": "Norte",  "producto": "Cloud Storage",   "venta": 77000,  "meta": 72000,  "activo": yes, "meses": 26},
+    {"id": 19, "nombre": "Adriana Ponce",  "region": "Sur",    "producto": "Security Pack",   "venta": 41000,  "meta": 58000,  "activo": no,  "meses": 4},
+    {"id": 20, "nombre": "Francisco Ríos", "region": "Centro", "producto": "DevOps Tools",    "venta": 102000, "meta": 95000,  "activo": yes, "meses": 52}
+]
+
+presupuestos = [
+    {"region": "Norte",  "presupuesto": 350000, "obj_clientes": 45},
+    {"region": "Sur",    "presupuesto": 280000, "obj_clientes": 38},
+    {"region": "Centro", "presupuesto": 320000, "obj_clientes": 42},
+    {"region": "Oeste",  "presupuesto": 260000, "obj_clientes": 35}
+]
+
+-- ── 2. ENRIQUECER: calcular cumplimiento y estado por vendedor ────────
+
+show "[1/6] Calculando cumplimiento por vendedor..."
+
+datos = []
+for v in vendedores {
+    pct = (v["venta"] * 100) / v["meta"]
+    estado = "Cumple"
+    if v["venta"] < v["meta"] {
+        estado = "Bajo meta"
+    }
+    v["cumplimiento"] = pct
+    v["estado"] = estado
+    datos = datos + [v]
+}
+
+-- ── 3. CRUZAR vendedores con presupuestos por región (LEFT JOIN) ──────
+
+show "[2/6] Cruzando con presupuestos regionales..."
+
+datos_full = excel.cruzar(datos, presupuestos, "region", "left")
+
+-- ── 4. SEGMENTAR ──────────────────────────────────────────────────────
+
+show "[3/6] Segmentando datos..."
+
+activos    = excel.filtrar(datos_full, "activo", "==", yes)
+bajo_meta  = excel.filtrar(datos_full, "estado", "==", "Bajo meta")
+sobre_meta = excel.filtrar(datos_full, "estado", "==", "Cumple")
+
+-- ── 5. ANÁLISIS POR REGIÓN ────────────────────────────────────────────
+
+show "[4/6] Agrupando y calculando estadísticas..."
+
+por_region = excel.agrupar(activos, "region", {
+    "suma":     ["venta", "meta"],
+    "conteo":   yes,
+    "promedio": ["cumplimiento"]
+})
+por_region = excel.renombrar_col(por_region, "venta_suma",          "total_venta")
+por_region = excel.renombrar_col(por_region, "meta_suma",           "total_meta")
+por_region = excel.renombrar_col(por_region, "cumplimiento_promedio", "avg_cumplimiento")
+por_region = excel.renombrar_col(por_region, "conteo",              "num_vendedores")
+por_region = excel.cruzar(por_region, presupuestos, "region", "left")
+
+-- Estadísticas globales
+stats = excel.estadisticas(datos_full, "venta")
+
+-- ── 6. RANKINGS Y PIVOT ───────────────────────────────────────────────
+
+show "[5/6] Generando rankings y tabla pivot..."
+
+-- Top 10 vendedores por venta
+ordenado   = excel.ordenar(datos_full, "venta", "desc")
+top_10     = []
+contador   = 0
+pos        = 1
+for row in ordenado {
+    if contador < 10 {
+        row["posicion"] = pos
+        top_10   = top_10 + [row]
+        pos      = pos + 1
+    }
+    contador = contador + 1
+}
+top_10 = excel.seleccionar(top_10, ["posicion", "nombre", "region", "producto", "venta", "meta", "cumplimiento", "estado"])
+
+-- Resumen ejecutivo
+total_venta = stats.sum
+total_meta  = excel.estadisticas(datos_full, "meta").sum
+pct_global  = (total_venta * 100) / total_meta
+
+resumen = [
+    {"metrica": "Total vendedores",       "valor": len(datos_full),   "unidad": "personas"},
+    {"metrica": "Vendedores activos",     "valor": len(activos),      "unidad": "personas"},
+    {"metrica": "Cumplen su meta",        "valor": len(sobre_meta),   "unidad": "personas"},
+    {"metrica": "Bajo meta",              "valor": len(bajo_meta),    "unidad": "personas"},
+    {"metrica": "Venta total Q1",         "valor": stats.sum,         "unidad": "USD"},
+    {"metrica": "Meta total Q1",          "valor": total_meta,        "unidad": "USD"},
+    {"metrica": "Cumplimiento global",    "valor": pct_global,        "unidad": "%"},
+    {"metrica": "Venta máxima",           "valor": stats.max,         "unidad": "USD"},
+    {"metrica": "Venta mínima",           "valor": stats.min,         "unidad": "USD"},
+    {"metrica": "Promedio por vendedor",  "valor": stats.avg,         "unidad": "USD"},
+    {"metrica": "Mediana de ventas",      "valor": stats.mediana,     "unidad": "USD"},
+    {"metrica": "Desviación estándar",    "valor": stats.std,         "unidad": "USD"}
+]
+
+-- Pivot: ventas por región y producto
+pivot = excel.pivot(datos_full, "region", "producto", "venta")
+
+-- ── 7. EXPORTAR: Reporte con múltiples hojas ─────────────────────────
+
+show "[6/6] Generando archivos Excel..."
+
+excel.write_multi("demo/reporte_analisis.xlsx", {
+    "Resumen":         resumen,
+    "Por Region":      por_region,
+    "Top 10":          top_10,
+    "Bajo Meta":       bajo_meta,
+    "Pivot Reg x Prod": pivot
+})
+
+-- ── 8. EXPORTAR: Detalle completo con estilos avanzados ──────────────
+
+detalle = excel.seleccionar(
+    excel.ordenar(datos_full, "region"),
+    ["id", "nombre", "region", "producto", "venta", "meta", "cumplimiento", "estado", "activo", "meses"]
+)
+
+excel.write_styled("demo/reporte_detalle.xlsx", detalle, {
+    "hoja":    "Detalle Ventas Q1 2026",
+    "titulo":  "Reporte de Ventas Q1 2026 — Detalle por Vendedor",
+    "cabecera": {"fondo": "#1B4F72", "texto": "#FFFFFF"},
+    "alternar":    yes,
+    "freeze":      yes,
+    "autofilter":  yes,
+    "totales": ["venta", "meta"],
+    "anchos": {
+        "id":          6,
+        "nombre":     22,
+        "region":     13,
+        "producto":   18,
+        "venta":      14,
+        "meta":       14,
+        "cumplimiento": 16,
+        "estado":     13,
+        "activo":     10,
+        "meses":      10
+    },
+    "formatos": {
+        "venta": {
+            "numero": "#,##0",
+            "condicional": [
+                {"op": ">=", "valor": 90000, "fondo": "#D5F5E3", "texto": "#1E8449"},
+                {"op": "<",  "valor": 55000, "fondo": "#FADBD8", "texto": "#922B21"}
+            ]
+        },
+        "meta": {
+            "numero": "#,##0"
+        },
+        "cumplimiento": {
+            "numero": "0.0",
+            "condicional": [
+                {"op": ">=", "valor": 100, "fondo": "#D5F5E3", "texto": "#1E8449", "bold": yes},
+                {"op": "<",  "valor": 85,  "fondo": "#FEF9E7", "texto": "#9A7D0A"},
+                {"op": "<",  "valor": 75,  "fondo": "#FADBD8", "texto": "#922B21"}
+            ]
+        },
+        "estado": {
+            "condicional": [
+                {"op": "==", "valor": "Cumple",    "fondo": "#D5F5E3", "texto": "#1E8449"},
+                {"op": "==", "valor": "Bajo meta", "fondo": "#FADBD8", "texto": "#922B21"}
+            ]
+        }
+    }
+})
+
+-- ── 9. RESUMEN EN CONSOLA ─────────────────────────────────────────────
+
+show ""
+show "╔══════════════════════════════════════════════╗"
+show "║   Resultados Q1 2026                         ║"
+show "╠══════════════════════════════════════════════╣"
+show "║  Vendedores totales   : " + len(datos_full)
+show "║  Activos              : " + len(activos)
+show "║  Cumplen meta         : " + len(sobre_meta)
+show "║  Bajo meta            : " + len(bajo_meta)
+show "║  Venta total          : " + stats.sum
+show "║  Cumplimiento global  : " + pct_global + "%"
+show "║  Mayor venta          : " + stats.max
+show "╠══════════════════════════════════════════════╣"
+show "║  Archivos generados:                         ║"
+show "║  → demo/reporte_analisis.xlsx  (5 hojas)     ║"
+show "║  → demo/reporte_detalle.xlsx   (con estilos) ║"
+show "╚══════════════════════════════════════════════╝"
