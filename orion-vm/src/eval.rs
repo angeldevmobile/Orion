@@ -1436,6 +1436,55 @@ fn serve_http(port: i64, handler: EvalValue, env: &mut Env) -> Result<Flow, Stri
         };
 
         // Parsear respuesta
+        // Si el dict tiene "file" → servir el archivo directamente como bytes
+        if let EvalValue::Dict(ref m) = resp_val {
+            if let Some(file_val) = m.get("file") {
+                let file_path = format!("{}", file_val);
+                let sc = m.get("status").and_then(|v| v.to_i64().ok()).unwrap_or(200) as u16;
+                let ct = m.get("content_type").map(|v| format!("{}", v))
+                    .unwrap_or_else(|| "application/octet-stream".into());
+
+                match std::fs::read(&file_path) {
+                    Ok(bytes) => {
+                        let mut resp = tiny_http::Response::from_data(bytes)
+                            .with_status_code(tiny_http::StatusCode(sc))
+                            .with_header(
+                                tiny_http::Header::from_bytes("Content-Type", ct.as_bytes())
+                                    .unwrap_or_else(|_| tiny_http::Header::from_bytes(
+                                        "Content-Type", b"application/octet-stream").unwrap()),
+                            );
+                        // Content-Disposition opcional
+                        if let Some(cd) = m.get("disposition") {
+                            let cd_str = format!("{}", cd);
+                            if let Ok(h) = tiny_http::Header::from_bytes(
+                                "Content-Disposition", cd_str.as_bytes()) {
+                                resp = resp.with_header(h);
+                            }
+                        } else {
+                            // Default: attachment con el nombre del archivo
+                            let fname = std::path::Path::new(&file_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("archivo");
+                            let cd = format!("attachment; filename=\"{}\"", fname);
+                            if let Ok(h) = tiny_http::Header::from_bytes(
+                                "Content-Disposition", cd.as_bytes()) {
+                                resp = resp.with_header(h);
+                            }
+                        }
+                        request.respond(resp).ok();
+                    }
+                    Err(e) => {
+                        let body = format!("Archivo no encontrado: {}", e);
+                        let resp = tiny_http::Response::from_string(body)
+                            .with_status_code(tiny_http::StatusCode(404));
+                        request.respond(resp).ok();
+                    }
+                }
+                continue;
+            }
+        }
+
         let (status_code, resp_body, content_type) = match &resp_val {
             EvalValue::Dict(m) => {
                 let sc = m.get("status").and_then(|v| v.to_i64().ok()).unwrap_or(200) as u16;
