@@ -6,8 +6,10 @@ pub fn call_builtin(name: &str, args: Vec<EvalValue>) -> Result<EvalValue, Strin
     match name {
         //   I/O                               
         "show" | "print" => {
-            let parts: Vec<String> = args.iter().map(|a| format!("{}", a)).collect();
-            println!("{}", parts.join(" "));
+            let text = args.iter().map(|a| format!("{}", a)).collect::<Vec<_>>().join(" ");
+            use std::io::Write;
+            let mut out = std::io::stdout().lock();
+            let _ = out.write_all(format!("{}\n", text).as_bytes());
             Ok(EvalValue::Null)
         }
 

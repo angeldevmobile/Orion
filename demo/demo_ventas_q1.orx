@@ -4,6 +4,11 @@ use "excel" as excel
 --  ORION LANGUAGE — Demo Showcase
 --  Automatización Excel: Reporte de Ventas Q1 2026
 --  Genera dos archivos .xlsx con análisis completo de datos de ventas
+--
+--  Uso: orion demo/demo_ventas_q1.orx
+--  (ejecutar desde la raíz del proyecto)
+--  Salida: demo/reporte_analisis.xlsx  — 5 hojas de análisis
+--          demo/reporte_detalle.xlsx   — hoja estilizada con formato condicional
 -- ═══════════════════════════════════════════════════════════════════════
 
 show "╔══════════════════════════════════════════════╗"
@@ -50,7 +55,7 @@ show "[1/6] Calculando cumplimiento por vendedor..."
 
 datos = []
 for v in vendedores {
-    pct = (v["venta"] * 100) / v["meta"]
+    pct = round((v["venta"] * 100) / v["meta"], 1)
     estado = "Cumple"
     if v["venta"] < v["meta"] {
         estado = "Bajo meta"
@@ -114,21 +119,21 @@ top_10 = excel.seleccionar(top_10, ["posicion", "nombre", "region", "producto", 
 -- Resumen ejecutivo
 total_venta = stats.sum
 total_meta  = excel.estadisticas(datos_full, "meta").sum
-pct_global  = (total_venta * 100) / total_meta
+pct_global  = round((total_venta * 100) / total_meta, 1)
 
 resumen = [
     {"metrica": "Total vendedores",       "valor": len(datos_full),   "unidad": "personas"},
     {"metrica": "Vendedores activos",     "valor": len(activos),      "unidad": "personas"},
     {"metrica": "Cumplen su meta",        "valor": len(sobre_meta),   "unidad": "personas"},
     {"metrica": "Bajo meta",              "valor": len(bajo_meta),    "unidad": "personas"},
-    {"metrica": "Venta total Q1",         "valor": stats.sum,         "unidad": "USD"},
-    {"metrica": "Meta total Q1",          "valor": total_meta,        "unidad": "USD"},
-    {"metrica": "Cumplimiento global",    "valor": pct_global,        "unidad": "%"},
-    {"metrica": "Venta máxima",           "valor": stats.max,         "unidad": "USD"},
-    {"metrica": "Venta mínima",           "valor": stats.min,         "unidad": "USD"},
-    {"metrica": "Promedio por vendedor",  "valor": stats.avg,         "unidad": "USD"},
-    {"metrica": "Mediana de ventas",      "valor": stats.mediana,     "unidad": "USD"},
-    {"metrica": "Desviación estándar",    "valor": stats.std,         "unidad": "USD"}
+    {"metrica": "Venta total Q1",         "valor": stats.sum,                   "unidad": "USD"},
+    {"metrica": "Meta total Q1",          "valor": total_meta,                  "unidad": "USD"},
+    {"metrica": "Cumplimiento global",    "valor": pct_global,                  "unidad": "%"},
+    {"metrica": "Venta máxima",           "valor": stats.max,                   "unidad": "USD"},
+    {"metrica": "Venta mínima",           "valor": stats.min,                   "unidad": "USD"},
+    {"metrica": "Promedio por vendedor",  "valor": round(stats.avg, 0),         "unidad": "USD"},
+    {"metrica": "Mediana de ventas",      "valor": round(stats.mediana, 0),     "unidad": "USD"},
+    {"metrica": "Desviación estándar",    "valor": round(stats.std, 0),         "unidad": "USD"}
 ]
 
 -- Pivot: ventas por región y producto
@@ -211,9 +216,9 @@ show "║  Vendedores totales   : " + len(datos_full)
 show "║  Activos              : " + len(activos)
 show "║  Cumplen meta         : " + len(sobre_meta)
 show "║  Bajo meta            : " + len(bajo_meta)
-show "║  Venta total          : " + stats.sum
+show "║  Venta total          : USD " + stats.sum
 show "║  Cumplimiento global  : " + pct_global + "%"
-show "║  Mayor venta          : " + stats.max
+show "║  Mayor venta          : USD " + stats.max
 show "╠══════════════════════════════════════════════╣"
 show "║  Archivos generados:                         ║"
 show "║  → demo/reporte_analisis.xlsx  (5 hojas)     ║"

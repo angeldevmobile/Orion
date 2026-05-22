@@ -162,6 +162,18 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
 }
 
 fn main() {
+    // Forzar UTF-8 en la consola de Windows para que show/print muestre
+    // correctamente tildes, eñes y caracteres especiales.
+    #[cfg(windows)]
+    unsafe {
+        extern "system" {
+            fn SetConsoleOutputCP(wCodePageID: u32) -> i32;
+            fn SetConsoleCP(wCodePageID: u32) -> i32;
+        }
+        SetConsoleOutputCP(65001);
+        SetConsoleCP(65001);
+    }
+
     let args: Vec<String> = std_env::args().collect();
 
     if args.len() < 2 {

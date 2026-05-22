@@ -939,10 +939,11 @@ impl VM {
                 }
             }
 
-            //    I/O                                                           
+            //    I/O
             Instruction::Show => {
                 let val = self.pop()?;
-                println!("{}", val);
+                let mut out = io::stdout().lock();
+                let _ = out.write_all(format!("{}\n", val).as_bytes());
             }
 
             //    IO nativo: ask / read / write / env                            
@@ -1260,7 +1261,17 @@ impl VM {
             },
             "floor"     => Ok(Value::Int(to_f64(&args[0])?.floor() as i64)),
             "ceil"      => Ok(Value::Int(to_f64(&args[0])?.ceil() as i64)),
-            "round"     => Ok(Value::Int(to_f64(&args[0])?.round() as i64)),
+            "round"     => {
+                let f = to_f64(&args[0])?;
+                match args.get(1) {
+                    Some(d) => {
+                        let digits = to_f64(d)? as i32;
+                        let factor = 10_f64.powi(digits);
+                        Ok(Value::Float((f * factor).round() / factor))
+                    }
+                    None => Ok(Value::Int(f.round() as i64)),
+                }
+            }
             "sin"       => Ok(Value::Float(to_f64(&args[0])?.sin())),
             "cos"       => Ok(Value::Float(to_f64(&args[0])?.cos())),
             "tan"       => Ok(Value::Float(to_f64(&args[0])?.tan())),
@@ -1616,8 +1627,9 @@ impl VM {
                 Ok(Some(Value::Str(val.type_name())))
             }
             "show" => {
-                for arg in args { print!("{} ", arg); }
-                println!();
+                let text = args.iter().map(|a| format!("{}", a)).collect::<Vec<_>>().join(" ");
+                let mut out = io::stdout().lock();
+                let _ = out.write_all(format!("{}\n", text).as_bytes());
                 Ok(None)
             }
             //    Listas                                                        
