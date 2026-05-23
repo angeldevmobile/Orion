@@ -749,6 +749,10 @@ pub fn eval_expr(node: &Json, env: &mut Env) -> Result<EvalValue, String> {
                     let obj = eval_expr(&arr[2], env)?;
                     // Dispatch a módulos nativos Rust
                     if let EvalValue::Module(ref mod_name) = obj {
+                        // excel.compute necesita llamar lambdas — se intercepta aquí
+                        if mod_name == "excel" && method == "compute" {
+                            return eval_excel_compute(args, env);
+                        }
                         return modules::call(mod_name, method, args);
                     }
                     call_method(obj, method, args)
@@ -969,6 +973,47 @@ fn instantiate_shape(shape: EvalValue, args: Vec<EvalValue>, env: &mut Env) -> R
         }
         _ => Err("instantiate_shape: no es un Shape".into()),
     }
+}
+
+// ─── excel.compute ───────────────────────────────────────────────────────────
+// excel.compute(data, { "col": fn row => expr, ... }) → list con nuevas columnas
+// Interceptado en eval.rs porque necesita llamar EvalValue::Function.
+fn eval_excel_compute(args: Vec<EvalValue>, env: &mut Env) -> Result<EvalValue, String> {
+    let data = match args.get(0) {
+        Some(EvalValue::List(l)) => l.clone(),
+        Some(other) => return Err(format!(
+            "excel.compute: primer argumento debe ser lista, se recibió {}", other.type_name()
+        )),
+        None => return Err("excel.compute: requiere (data, spec)".into()),
+    };
+    let spec = match args.get(1) {
+        Some(EvalValue::Dict(m)) => m.clone(),
+        Some(other) => return Err(format!(
+            "excel.compute: segundo argumento debe ser dict de funciones, se recibió {}", other.type_name()
+        )),
+        None => return Err("excel.compute: requiere (data, spec)".into()),
+    };
+
+    // Orden determinístico de las columnas nuevas
+    let mut col_names: Vec<String> = spec.keys().cloned().collect();
+    col_names.sort();
+
+    let mut result = Vec::with_capacity(data.len());
+    for row in &data {
+        let mut new_row = match row {
+            EvalValue::Dict(m) => m.clone(),
+            other => return Err(format!(
+                "excel.compute: cada fila debe ser un dict, se recibió {}", other.type_name()
+            )),
+        };
+        for col_name in &col_names {
+            let fn_val = spec[col_name].clone();
+            let computed = call_function(fn_val, vec![row.clone()], vec![], env)?;
+            new_row.insert(col_name.clone(), computed);
+        }
+        result.push(EvalValue::Dict(new_row));
+    }
+    Ok(EvalValue::List(result))
 }
 
 fn call_function(

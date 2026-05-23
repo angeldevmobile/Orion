@@ -312,32 +312,80 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // agrupar(datos, campo, config?) → list agrupada
         // config: {"suma": ["col1","col2"], "conteo": yes, "promedio": ["col1"]}
+        // group(data, campo, spec) — multi-agg
+        // spec: { "col": ["sum","avg","max","min","count","first","last","std","median"],
+        //         "count": yes }
         "agrupar" | "group" => {
             if args.len() < 2 {
-                return Err("excel.agrupar requiere (datos, campo, config?)".into());
+                return Err("excel.group requiere (datos, campo, spec?)".into());
             }
-            let rows  = list_arg("agrupar", &args, 0)?;
-            let campo = str_arg("agrupar", &args, 1)?;
-            let cfg   = match args.get(2) {
+            let rows  = list_arg("group", &args, 0)?;
+            let campo = str_arg("group", &args, 1)?;
+            let spec  = match args.get(2) {
                 Some(EvalValue::Dict(m)) => m.clone(),
                 _ => HashMap::new(),
             };
-            group_by(rows, campo, cfg)
+            group_by_multi(rows, campo, spec)
         }
 
         // ordenar(datos, campo, dir?) → sorted — dir: "asc" (default) | "desc"
-        "ordenar" | "sort_by" => {
+        // sort(data, criterios...) — multi-columna
+        // Formas:
+        //   excel.sort(data, "col+")              → col asc
+        //   excel.sort(data, "col-")              → col desc
+        //   excel.sort(data, "region+", "sales-") → multi-col shorthand
+        //   excel.sort(data, [{by:"col",dir:"asc"}, ...]) → explícito
+        //   excel.sort(data, "col", "asc"|"desc") → compat. 1-col anterior
+        "ordenar" | "sort_by" | "sort" => {
             if args.len() < 2 {
-                return Err("excel.ordenar requiere (datos, campo, dir?)".into());
+                return Err("excel.sort requiere (datos, criterio...)".into());
             }
-            let mut rows = list_arg("ordenar", &args, 0)?;
-            let campo    = str_arg("ordenar", &args, 1)?;
-            let desc     = matches!(args.get(2), Some(EvalValue::Str(s)) if s == "desc");
+            let mut rows = list_arg("sort", &args, 0)?;
+            // Construir lista de (campo, desc)
+            let criteria: Vec<(String, bool)> = match &args[1] {
+                // Estilo explícito: lista de dicts [{by, dir}]
+                EvalValue::List(specs) => {
+                    specs.iter().map(|s| match s {
+                        EvalValue::Dict(m) => {
+                            let col  = cfg_str(m, "by").unwrap_or_default();
+                            let desc = cfg_str(m, "dir").map(|d| d == "desc").unwrap_or(false);
+                            (col, desc)
+                        }
+                        EvalValue::Str(s) => parse_sort_key(s),
+                        _ => (String::new(), false),
+                    }).filter(|(c, _)| !c.is_empty()).collect()
+                }
+                // Estilo corto: uno o más strings "col+" / "col-"
+                EvalValue::Str(s) => {
+                    // Si el siguiente arg es "asc"/"desc" → modo compat 1-col
+                    let is_dir_arg = matches!(args.get(2),
+                        Some(EvalValue::Str(d)) if d == "asc" || d == "desc");
+                    if is_dir_arg {
+                        let desc = matches!(args.get(2), Some(EvalValue::Str(d)) if d == "desc");
+                        vec![(s.clone(), desc)]
+                    } else {
+                        // Recoger todos los strings restantes como criterios
+                        let mut crit = vec![parse_sort_key(s)];
+                        for extra in args[2..].iter() {
+                            if let EvalValue::Str(k) = extra { crit.push(parse_sort_key(k)); }
+                        }
+                        crit
+                    }
+                }
+                other => return Err(format!(
+                    "excel.sort: criterio inválido ({})", other.type_name()
+                )),
+            };
+
             rows.sort_by(|a, b| {
-                let va = dict_get(a, &campo);
-                let vb = dict_get(b, &campo);
-                let ord = compare_eval_order(&va, &vb);
-                if desc { ord.reverse() } else { ord }
+                for (col, desc) in &criteria {
+                    let va = dict_get(a, col);
+                    let vb = dict_get(b, col);
+                    let ord = compare_eval_order(&va, &vb);
+                    let ord = if *desc { ord.reverse() } else { ord };
+                    if ord != std::cmp::Ordering::Equal { return ord; }
+                }
+                std::cmp::Ordering::Equal
             });
             Ok(EvalValue::List(rows))
         }
@@ -425,19 +473,27 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // cruzar(data1, data2, clave, tipo?) → join por campo clave
+        // cruzar / join — una o múltiples claves
+        // join(data1, data2, "clave", tipo?)
+        // join(data1, data2, ["clave1","clave2"], tipo?)
         // tipo: "inner" (default) | "left" | "right" | "full"
         "cruzar" | "join" => {
             if args.len() < 3 {
-                return Err("excel.cruzar requiere (data1, data2, clave, tipo?)".into());
+                return Err("excel.join requiere (data1, data2, clave|[claves], tipo?)".into());
             }
-            let left  = list_arg("cruzar", &args, 0)?;
-            let right = list_arg("cruzar", &args, 1)?;
-            let clave = str_arg("cruzar", &args, 2)?;
-            let tipo  = args.get(3)
+            let left  = list_arg("join", &args, 0)?;
+            let right = list_arg("join", &args, 1)?;
+            let claves: Vec<String> = match &args[2] {
+                EvalValue::Str(s)  => vec![s.clone()],
+                EvalValue::List(l) => l.iter().map(|v| to_str_val(v)).collect(),
+                other => return Err(format!(
+                    "excel.join: clave debe ser string o lista, se recibió {}", other.type_name()
+                )),
+            };
+            let tipo = args.get(3)
                 .and_then(|v| if let EvalValue::Str(s) = v { Some(s.clone()) } else { None })
                 .unwrap_or_else(|| "inner".to_string());
-            join_datasets(left, right, clave, &tipo)
+            join_multi(left, right, claves, &tipo)
         }
 
         // deduplicar(data, campos?) → filas únicas
@@ -854,24 +910,14 @@ fn apply_text_cf(
 
 // ─── Data pipeline helpers ────────────────────────────────────────────────────
 
-fn group_by(
+fn group_by_multi(
     rows: Vec<EvalValue>,
     campo: String,
-    cfg: HashMap<String, EvalValue>,
+    spec: HashMap<String, EvalValue>,
 ) -> Result<EvalValue, String> {
-    let do_conteo  = cfg_bool(&cfg, "conteo");
-    let cols_suma: Vec<String> = match cfg.get("suma") {
-        Some(EvalValue::List(l)) => l.iter().map(|v| to_str_val(v)).collect(),
-        _ => vec![],
-    };
-    let cols_prom: Vec<String> = match cfg.get("promedio") {
-        Some(EvalValue::List(l)) => l.iter().map(|v| to_str_val(v)).collect(),
-        _ => vec![],
-    };
-
+    // Agrupar filas por clave
     let mut groups: HashMap<String, Vec<EvalValue>> = HashMap::new();
     let mut key_order: Vec<String> = Vec::new();
-
     for row in rows {
         let k = to_str_val(&dict_get(&row, &campo));
         if !groups.contains_key(&k) { key_order.push(k.clone()); }
@@ -882,22 +928,66 @@ fn group_by(
         let group = &groups[k];
         let mut m = HashMap::new();
         m.insert(campo.clone(), EvalValue::Str(k.clone()));
-        if do_conteo {
-            m.insert("conteo".to_string(), EvalValue::Int(group.len() as i64));
-        }
-        for col in &cols_suma {
-            let s: f64 = group.iter()
-                .map(|r| to_f64_val(&dict_get(r, col)).unwrap_or(0.0))
-                .sum();
-            m.insert(format!("{}_suma", col), EvalValue::Float(s));
-        }
-        for col in &cols_prom {
+
+        for (col, agg_spec) in &spec {
+            // "count": yes  →  añade "count"
+            if col == "count" && matches!(agg_spec, EvalValue::Bool(true)) {
+                m.insert("count".to_string(), EvalValue::Int(group.len() as i64));
+                continue;
+            }
+
+            // recoger funciones pedidas
+            let fns: Vec<String> = match agg_spec {
+                EvalValue::List(l) => l.iter().map(|v| to_str_val(v)).collect(),
+                EvalValue::Str(s)  => vec![s.clone()],
+                EvalValue::Bool(true) if col != "count" => vec!["count".to_string()],
+                _ => continue,
+            };
+
             let vals: Vec<f64> = group.iter()
                 .filter_map(|r| to_f64_val(&dict_get(r, col)))
                 .collect();
-            let avg = if vals.is_empty() { 0.0 }
-                      else { vals.iter().sum::<f64>() / vals.len() as f64 };
-            m.insert(format!("{}_promedio", col), EvalValue::Float(avg));
+
+            for f in &fns {
+                let out_key = format!("{}_{}", col, f);
+                let v = match f.as_str() {
+                    "sum" => EvalValue::Float(vals.iter().sum()),
+                    "avg" => {
+                        if vals.is_empty() { EvalValue::Null }
+                        else { EvalValue::Float(vals.iter().sum::<f64>() / vals.len() as f64) }
+                    }
+                    "max" => vals.iter().cloned().reduce(f64::max)
+                        .map(EvalValue::Float).unwrap_or(EvalValue::Null),
+                    "min" => vals.iter().cloned().reduce(f64::min)
+                        .map(EvalValue::Float).unwrap_or(EvalValue::Null),
+                    "count" => EvalValue::Int(vals.len() as i64),
+                    "first" => group.first()
+                        .map(|r| dict_get(r, col)).unwrap_or(EvalValue::Null),
+                    "last"  => group.last()
+                        .map(|r| dict_get(r, col)).unwrap_or(EvalValue::Null),
+                    "std" => {
+                        if vals.len() < 2 { EvalValue::Float(0.0) }
+                        else {
+                            let mean = vals.iter().sum::<f64>() / vals.len() as f64;
+                            let var  = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>()
+                                       / vals.len() as f64;
+                            EvalValue::Float(var.sqrt())
+                        }
+                    }
+                    "median" => {
+                        if vals.is_empty() { EvalValue::Null }
+                        else {
+                            let mut s = vals.clone();
+                            s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                            let mid = s.len() / 2;
+                            let med = if s.len() % 2 == 0 { (s[mid-1] + s[mid]) / 2.0 } else { s[mid] };
+                            EvalValue::Float(med)
+                        }
+                    }
+                    _ => EvalValue::Null,
+                };
+                m.insert(out_key, v);
+            }
         }
         EvalValue::Dict(m)
     }).collect();
@@ -944,40 +1034,45 @@ fn pivot_table(
 
 // ─── join / dedupe / stats ────────────────────────────────────────────────────
 
-fn join_datasets(
+fn join_multi(
     left: Vec<EvalValue>,
     right: Vec<EvalValue>,
-    clave: String,
+    claves: Vec<String>,
     tipo: &str,
 ) -> Result<EvalValue, String> {
-    // Build lookup: clave → list of right rows (one key may appear N times)
+    // Clave compuesta: concat de valores separados por '\x00'
+    let composite_key = |m: &HashMap<String, EvalValue>| -> String {
+        claves.iter()
+            .map(|c| to_str_val(m.get(c).unwrap_or(&EvalValue::Null)))
+            .collect::<Vec<_>>()
+            .join("\x00")
+    };
+
     let mut right_map: HashMap<String, Vec<HashMap<String, EvalValue>>> = HashMap::new();
     for row in &right {
         if let EvalValue::Dict(m) = row {
-            let k = to_str_val(m.get(&clave).unwrap_or(&EvalValue::Null));
-            right_map.entry(k).or_default().push(m.clone());
+            right_map.entry(composite_key(m)).or_default().push(m.clone());
         }
     }
 
     let mut result: Vec<EvalValue> = Vec::new();
-    let mut matched_right_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut matched_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for lrow in &left {
         if let EvalValue::Dict(lm) = lrow {
-            let k = to_str_val(lm.get(&clave).unwrap_or(&EvalValue::Null));
+            let k = composite_key(lm);
             match right_map.get(&k) {
                 Some(rrows) => {
-                    matched_right_keys.insert(k.clone());
+                    matched_keys.insert(k.clone());
                     for rm in rrows {
                         let mut merged = lm.clone();
                         for (rk, rv) in rm {
-                            if rk != &clave { merged.insert(rk.clone(), rv.clone()); }
+                            if !claves.contains(rk) { merged.insert(rk.clone(), rv.clone()); }
                         }
                         result.push(EvalValue::Dict(merged));
                     }
                 }
                 None => {
-                    // left / full: include left row with nulls for right fields
                     if tipo == "left" || tipo == "full" {
                         result.push(EvalValue::Dict(lm.clone()));
                     }
@@ -986,12 +1081,10 @@ fn join_datasets(
         }
     }
 
-    // right / full: include unmatched right rows
     if tipo == "right" || tipo == "full" {
         for row in &right {
             if let EvalValue::Dict(rm) = row {
-                let k = to_str_val(rm.get(&clave).unwrap_or(&EvalValue::Null));
-                if !matched_right_keys.contains(&k) {
+                if !matched_keys.contains(&composite_key(rm)) {
                     result.push(EvalValue::Dict(rm.clone()));
                 }
             }
@@ -1118,6 +1211,13 @@ fn compare_values(a: &EvalValue, op: &str, b: &EvalValue) -> bool {
         "termina" | "ends_with"  => sa.ends_with(&sb),
         _                        => false,
     }
+}
+
+// "col+" → (col, false)  "col-" → (col, true)  "col" → (col, false)
+fn parse_sort_key(s: &str) -> (String, bool) {
+    if let Some(col) = s.strip_suffix('+') { (col.to_string(), false) }
+    else if let Some(col) = s.strip_suffix('-') { (col.to_string(), true) }
+    else { (s.to_string(), false) }
 }
 
 fn compare_eval_order(a: &EvalValue, b: &EvalValue) -> std::cmp::Ordering {

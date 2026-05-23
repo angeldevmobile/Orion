@@ -1261,6 +1261,245 @@ Bloque D ✅ → Bloque B ✅ → Bloque C ✅ → Bloque A ✅ → Bloque E ✅
 
 ---
 
+## Roadmap — Excel & Automation 2026
+
+> Orion no copia pandas ni openpyxl. Cada feature tiene nombre propio, API más limpia y funciona con `|>`.
+
+### Estado actual del módulo `excel`
+
+```orion
+use "excel" as excel
+
+-- Lo que ya funciona hoy
+data  = excel.read("sales.xlsx")
+data  = excel.filter(data, "active", "==", yes)
+data  = excel.group(data, "region", { "sales": "sum", "count": yes })
+data  = excel.sort(data, "region")          -- solo una columna
+data  = excel.join(data, targets, "region") -- solo una clave
+stats = excel.stats(data, "sales")
+excel.write_styled("report.xlsx", data, { ... })
+```
+
+### Lo que viene — 9 features con API diseñada
+
+| # | Feature | Pandas equivalente | Estado |
+|---|---|---|---|
+| 1 | `compute` | `df["col"].apply(fn)` | ✅ Completo |
+| 2 | `sort` multi-columna | `sort_values(["a","b"])` | ✅ Completo |
+| 3 | `group` multi-agg | `groupby().agg({...})` | ✅ Completo |
+| 4 | `long` | `df.melt(...)` | Próximo |
+| 5 | `dates` + `date_parts` | `pd.to_datetime(...)` | Próximo |
+| 6 | `join` multi-clave | `merge(on=["a","b"])` | ✅ Completo |
+| 7 | `chart` | openpyxl charts | Próximo |
+| 8 | `formula` | `ws["A1"] = "=SUM(...)"` | Próximo |
+| 9 | `sheet` builder | openpyxl cell-level | Próximo |
+
+---
+
+### F-1 `compute` — columnas calculadas
+
+El lambda recibe la fila completa — acceso cruzado entre campos. Múltiples columnas en una pasada.
+
+```orion
+data = excel.compute(data, {
+    "bonus":    fn row => row["sales"] * 0.05,
+    "tier":     fn row => if row["sales"] > 90000 { "A" } or if row["sales"] > 70000 { "B" } else { "C" },
+    "on_track": fn row => row["sales"] >= row["target"]
+})
+```
+
+---
+
+### F-2 `sort` — múltiples columnas
+
+```orion
+-- Estilo explícito
+data = excel.sort(data, [
+    { by: "region", dir: "asc" },
+    { by: "sales",  dir: "desc" }
+])
+
+-- Estilo corto Orion: + es asc, - es desc
+data = excel.sort(data, "region+", "sales-", "name+")
+```
+
+---
+
+### F-3 `group` — múltiples agregaciones por campo
+
+```orion
+by_region = excel.group(data, "region", {
+    "sales":  ["sum", "avg", "max", "min"],
+    "months": ["avg"],
+    "count":  yes
+})
+-- Genera: sales_sum, sales_avg, sales_max, sales_min, months_avg, count
+```
+
+Funciones disponibles: `sum` `avg` `max` `min` `count` `first` `last` `std` `median`
+
+---
+
+### F-4 `long` — wide to long (unpivot)
+
+Convierte formato ancho en formato largo. Nombre claro: `long`, no `melt`.
+
+```orion
+-- Antes (ancho):  region | CRM Pro | Analytics | Cloud
+-- Después (largo): region | product | sales
+
+long_data = excel.long(wide_data,
+    keep: ["region", "seller"],
+    var:  "product",
+    val:  "sales"
+)
+```
+
+---
+
+### F-5 `dates` y `date_parts`
+
+Integrado con el módulo `datetime`. Funciona en pipeline con `|>`.
+
+```orion
+data = data
+    |> excel.dates("sale_date", "DD/MM/YYYY")
+    |> excel.date_parts("sale_date", ["year", "month", "quarter", "weekday"])
+    |> excel.group("quarter", { "sales": ["sum", "avg"] })
+```
+
+Formatos: `"DD/MM/YYYY"` `"MM/DD/YYYY"` `"YYYY-MM-DD"` `"auto"`
+
+Partes: `"year"` `"month"` `"day"` `"quarter"` `"weekday"` `"week"` `"hour"`
+
+---
+
+### F-6 `join` — múltiples claves
+
+```orion
+-- Una clave (sin cambios)
+data = excel.join(sellers, targets, "region", "left")
+
+-- Múltiples claves
+data = excel.join(sellers, targets, ["region", "product"], "left")
+```
+
+---
+
+### F-7 `chart` — gráficos declarativos en Excel
+
+Sin objetos intermedios, sin series manuales. Una llamada.
+
+```orion
+excel.chart("report.xlsx", by_region, {
+    type:  "bars",
+    x:     "region",
+    y:     "sales_sum",
+    title: "Sales by Region Q1",
+    sheet: "Charts"
+})
+
+-- Múltiples series
+excel.chart("report.xlsx", by_month, {
+    type:  "lines",
+    x:     "month",
+    y:     ["sales_sum", "target_sum"],
+    title: "Sales vs Target"
+})
+```
+
+Tipos: `"bars"` `"stacked_bars"` `"lines"` `"area"` `"pie"` `"scatter"`
+
+---
+
+### F-8 `formula` — fórmulas vivas en Excel
+
+Orion no expone strings de fórmulas Excel. En cambio, un builder con nombres claros.
+Las columnas marcadas como fórmulas quedan vivas en el archivo — se recalculan al abrir en Excel.
+
+```orion
+f = excel.f
+
+excel.write_styled("report.xlsx", data, {
+    formulas: {
+        "bonus":   f.pct("sales", 5),
+        "total":   f.sum("sales"),
+        "rank":    f.rank("sales", "desc"),
+        "ratio":   f.ratio("sales", "target")
+    }
+})
+```
+
+Funciones: `f.sum` `f.avg` `f.pct` `f.ratio` `f.rank` `f.cumulative` `f.if_`
+
+---
+
+### F-9 `sheet` — control total celda por celda
+
+Builder declarativo. Sin iterar celdas manualmente.
+
+```orion
+sheet = excel.sheet("Sales Report")
+
+sheet.put("A1", "Q1 2026 — Sales Report", { bold: yes, size: 16, merge: "A1:F1" })
+sheet.put("A2", "Generated: " + datetime.today(), { color: "#888888" })
+sheet.data("A4", sellers, { header: yes, stripe: yes })
+sheet.chart("H4", { type: "bars", x: "region", y: "sales", width: 400, height: 300 })
+sheet.style("A4:F4", { bg: "#1B4F72", color: "#FFFFFF", bold: yes })
+sheet.freeze("A5")
+sheet.autofilter("A4:F4")
+
+excel.save(sheet, "custom_report.xlsx")
+```
+
+---
+
+### Pipeline completo — lo que Orion hace que Python no hace en una sola API
+
+```orion
+use "excel" as excel
+
+excel.read("sales_q1.xlsx")
+    |> excel.filter("active", "==", yes)
+    |> excel.dates("sale_date", "DD/MM/YYYY")
+    |> excel.date_parts("sale_date", ["month", "quarter"])
+    |> excel.compute({
+        "bonus": fn row => row["sales"] * 0.05,
+        "tier":  fn row => if row["sales"] > 90000 { "A" } else { "B" }
+    })
+    |> excel.group("quarter", { "sales": ["sum", "avg"], "count": yes })
+    |> excel.sort("quarter+")
+    |> excel.write_styled("q1_report.xlsx", {
+        title:      "Q1 Sales Analysis",
+        stripe:     yes,
+        freeze:     yes,
+        autofilter: yes
+    })
+
+excel.chart("q1_report.xlsx", by_quarter, {
+    type:  "bars",
+    x:     "quarter",
+    y:     "sales_sum",
+    title: "Sales by Quarter"
+})
+```
+
+### Orden de implementación
+
+| # | Feature | Impacto | Tiempo estimado |
+|---|---|---|---|
+| 1 | `compute` | Muy alto | 2-3h |
+| 2 | `sort` multi | Alto | 1-2h |
+| 3 | `group` multi-agg | Alto | 3-4h |
+| 4 | `join` multi-clave | Medio | 1-2h |
+| 5 | `dates` + `date_parts` | Alto | 3-4h |
+| 6 | `long` | Medio | 2-3h |
+| 7 | `chart` | Muy alto | 4-6h |
+| 8 | `formula` | Medio | 3-4h |
+| 9 | `sheet` builder | Alto | 6-8h |
+
+---
+
 ## Contribuir al ecosistema
 
 ```bash

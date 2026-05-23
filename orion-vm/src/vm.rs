@@ -787,12 +787,18 @@ impl VM {
                         frame.instance_fields = field_names;
                         self.call_stack.push(frame);
                     }
-                    //    Módulos stdlib nativos                             
+                    //    Módulos stdlib nativos
                     Value::Module(mod_name) => {
-                        let eval_args: Vec<crate::eval_value::EvalValue> =
-                            args.into_iter().map(value_to_eval).collect();
-                        let result = crate::modules::call(&mod_name, &method_name, eval_args)?;
-                        self.value_stack.push(eval_to_value(result));
+                        // excel.compute necesita llamar closures desde la VM
+                        if mod_name == "excel" && method_name == "compute" {
+                            let result = self.excel_compute(args)?;
+                            self.value_stack.push(result);
+                        } else {
+                            let eval_args: Vec<crate::eval_value::EvalValue> =
+                                args.into_iter().map(value_to_eval).collect();
+                            let result = crate::modules::call(&mod_name, &method_name, eval_args)?;
+                            self.value_stack.push(eval_to_value(result));
+                        }
                     }
                     _ => return Err(format!("CallMethod '{}': no es una instancia", method_name)),
                 }
@@ -1275,6 +1281,43 @@ impl VM {
             if done { break; }
         }
         Ok(self.value_stack.pop().unwrap_or(Value::Null))
+    }
+
+    // excel.compute(data, { "col": fn(row) { expr }, ... }) → list con nuevas columnas
+    fn excel_compute(&mut self, args: Vec<Value>) -> Result<Value, String> {
+        let data = match args.get(0) {
+            Some(Value::List(l)) => l.clone(),
+            Some(other) => return Err(format!(
+                "excel.compute: primer argumento debe ser lista, se recibió {:?}", other
+            )),
+            None => return Err("excel.compute: requiere (data, spec)".into()),
+        };
+        let spec = match args.get(1) {
+            Some(Value::Dict(m)) => m.clone(),
+            Some(other) => return Err(format!(
+                "excel.compute: segundo argumento debe ser dict de funciones, se recibió {:?}", other
+            )),
+            None => return Err("excel.compute: requiere (data, spec)".into()),
+        };
+
+        let col_names: Vec<String> = spec.keys().cloned().collect(); // IndexMap → insertion order
+
+        let mut result = Vec::with_capacity(data.len());
+        for row in &data {
+            let mut new_row = match row {
+                Value::Dict(m) => m.clone(),
+                other => return Err(format!(
+                    "excel.compute: cada fila debe ser un dict, se recibió {:?}", other
+                )),
+            };
+            for col_name in &col_names {
+                let fn_val = spec[col_name].clone();
+                let computed = self.call_value(fn_val, vec![row.clone()])?;
+                new_row.insert(col_name.clone(), computed);
+            }
+            result.push(Value::Dict(new_row));
+        }
+        Ok(Value::List(result))
     }
 
     /// Dispatch de funciones math builtin
