@@ -440,6 +440,51 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             pivot_table(rows, campo_fila, campo_col, campo_valor)
         }
 
+        // long(datos, keep: [campos], var: "nombre_col", val: "nombre_val")
+        // Convierte formato ancho a largo (unpivot / melt).
+        // Las columnas no listadas en `keep` se convierten en filas.
+        "long" | "melt" | "unpivot" => {
+            if args.len() < 4 {
+                return Err("excel.long requiere (datos, keep:[cols], var:\"nombre\", val:\"nombre\")".into());
+            }
+            let rows = list_arg("long", &args, 0)?;
+            let keep_cols: Vec<String> = match &args[1] {
+                EvalValue::List(l) => l.iter().map(|v| to_str_val(v)).collect(),
+                EvalValue::Str(s)  => vec![s.clone()],
+                _ => return Err("excel.long: `keep` debe ser lista de columnas o string".into()),
+            };
+            let var_col = str_arg("long", &args, 2)?;
+            let val_col = str_arg("long", &args, 3)?;
+
+            let mut result: Vec<EvalValue> = Vec::new();
+            for row in &rows {
+                if let EvalValue::Dict(m) = row {
+                    // Columnas que se convierten en filas = todas menos las de keep
+                    let value_cols: Vec<String> = m.keys()
+                        .filter(|k| !keep_cols.contains(k))
+                        .cloned()
+                        .collect();
+
+                    for col in &value_cols {
+                        let mut new_row: HashMap<String, EvalValue> = HashMap::new();
+                        // Copiar las columnas fijas
+                        for k in &keep_cols {
+                            if let Some(v) = m.get(k) {
+                                new_row.insert(k.clone(), v.clone());
+                            }
+                        }
+                        // Insertar nombre de la columna y su valor
+                        new_row.insert(var_col.clone(), EvalValue::Str(col.clone()));
+                        new_row.insert(val_col.clone(), m.get(col).cloned().unwrap_or(EvalValue::Null));
+                        result.push(EvalValue::Dict(new_row));
+                    }
+                } else {
+                    return Err("excel.long: cada fila debe ser un dict".into());
+                }
+            }
+            Ok(EvalValue::List(result))
+        }
+
         // seleccionar(datos, [campos]) → lista con solo esas columnas
         "seleccionar" | "select_cols" => {
             if args.len() < 2 {

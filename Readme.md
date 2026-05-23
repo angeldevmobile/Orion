@@ -1287,8 +1287,8 @@ excel.write_styled("report.xlsx", data, { ... })
 | 1 | `compute` | `df["col"].apply(fn)` | ✅ Completo |
 | 2 | `sort` multi-columna | `sort_values(["a","b"])` | ✅ Completo |
 | 3 | `group` multi-agg | `groupby().agg({...})` | ✅ Completo |
-| 4 | `long` | `df.melt(...)` | Próximo |
-| 5 | `dates` + `date_parts` | `pd.to_datetime(...)` | Próximo |
+| 4 | `long` | `df.melt(...)` | ✅ Completo |
+| 5 | `dates` + `date_parts` | `pd.to_datetime(...)` | ✅ Completo |
 | 6 | `join` multi-clave | `merge(on=["a","b"])` | ✅ Completo |
 | 7 | `chart` | openpyxl charts | Próximo |
 | 8 | `formula` | `ws["A1"] = "=SUM(...)"` | Próximo |
