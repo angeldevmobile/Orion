@@ -2,9 +2,25 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use super::components::Component;
+use crate::eval_value::EvalValue;
 
-/// Cuando está en true, gui.run() no lanza eframe — el watcher maneja la ventana.
-pub static IS_WATCH_MODE: AtomicBool = AtomicBool::new(false);
+/// En true, gui.run() no lanza eframe — el watcher maneja la ventana.
+pub static IS_WATCH_MODE:    AtomicBool = AtomicBool::new(false);
+/// En true, el script está corriendo como re-evaluación reactiva (evento de UI).
+pub static IS_REACTIVE_MODE: AtomicBool = AtomicBool::new(false);
+
+thread_local! {
+    /// Ruta del script actual — necesaria para re-evaluación reactiva.
+    static SCRIPT_PATH: RefCell<String> = RefCell::new(String::new());
+}
+
+pub fn set_script_path(path: &str) {
+    SCRIPT_PATH.with(|p| *p.borrow_mut() = path.to_string());
+}
+
+pub fn get_script_path() -> String {
+    SCRIPT_PATH.with(|p| p.borrow().clone())
+}
 
 thread_local! {
     pub static STATE: RefCell<GuiState> = RefCell::new(GuiState::default());
@@ -12,11 +28,20 @@ thread_local! {
 
 #[derive(Default, Clone)]
 pub struct GuiState {
-    pub title:      String,
-    pub width:      f32,
-    pub height:     f32,
-    pub components: Vec<Component>,
-    pub field_vals: HashMap<String, String>,
+    pub title:           String,
+    pub width:           f32,
+    pub height:          f32,
+    pub components:      Vec<Component>,
+    pub field_vals:      HashMap<String, String>,
+    pub container_stack: Vec<(String, usize)>,
+
+    // UI-3 — Estado reactivo
+    /// Valores que persisten entre re-ejecuciones del script
+    pub state_store:     HashMap<String, EvalValue>,
+    /// Nombre del último evento disparado (botón pulsado, toggle, pick)
+    pub last_event:      String,
+    /// true cuando el script está corriendo como re-evaluación reactiva
+    pub is_reactive:     bool,
 }
 
 pub fn with_state<F, R>(f: F) -> R

@@ -2,9 +2,11 @@ use eframe::egui;
 use std::collections::HashMap;
 use std::fs;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, SystemTime};
 use super::components::{Component, render};
+use super::state::{with_state, IS_REACTIVE_MODE};
 use super::theme;
 
 //    Lanzador normal                                                            
@@ -100,8 +102,57 @@ fn mtime(path: &str) -> Option<SystemTime> {
     fs::metadata(path).ok()?.modified().ok()
 }
 
-/// Re-evalúa el script Orion en el hilo actual (thread-local GUI state fresco).
-/// Devuelve los nuevos componentes, o None si hubo error (el error se imprime en stderr).
+/// Re-evalúa el script Orion preservando state_store y field_vals.
+/// `event` se inyecta como last_event antes de correr el script.
+fn rerun_script(
+    path:       &str,
+    event:      String,
+    field_vals: HashMap<String, String>,
+) -> Option<(Vec<Component>, HashMap<String, String>)> {
+    use crate::{lexer, parser, codegen, vm};
+
+    let raw = fs::read_to_string(path).ok()?;
+    let src = raw.strip_prefix('\u{FEFF}').unwrap_or(&raw);
+
+    let tokens = match lexer::lex(src) {
+        Ok(t) => t,
+        Err(e) => { eprintln!("  [!] Léxico  {}:{} — {}", e.line, e.col, e.message); return None; }
+    };
+    let stmts = match parser::parse(tokens) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("  [!] Parse   línea {} — {}", e.line, e.message); return None; }
+    };
+    let bc = match codegen::compile(stmts) {
+        Ok(b) => b,
+        Err(e) => { eprintln!("  [!] Codegen línea {} — {}", e.line, e.message); return None; }
+    };
+
+    // Preparar estado: preservar state_store, inyectar event, restaurar field_vals
+    with_state(|s| {
+        s.components.clear();
+        s.container_stack.clear();
+        s.last_event  = event;
+        s.field_vals  = field_vals;
+        s.is_reactive = true;
+    });
+    IS_REACTIVE_MODE.store(true, Ordering::Relaxed);
+
+    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
+    if let Err(e) = machine.run() {
+        eprintln!("  [!] Runtime — {e}");
+    }
+
+    IS_REACTIVE_MODE.store(false, Ordering::Relaxed);
+
+    let (comps, fields) = with_state(|s| {
+        s.last_event = String::new();
+        (s.components.clone(), s.field_vals.clone())
+    });
+    if comps.is_empty() { return None; }
+    Some((comps, fields))
+}
+
+/// Versión para watch-mode (no reactivo): limpia todo excepto state_store.
 fn reload_script(path: &str) -> Option<Vec<Component>> {
     use crate::{lexer, parser, codegen, vm};
 
@@ -121,8 +172,11 @@ fn reload_script(path: &str) -> Option<Vec<Component>> {
         Err(e) => { eprintln!("  [!] Codegen línea {} — {}", e.line, e.message); return None; }
     };
 
-    // Limpiar el estado GUI de ESTE hilo antes de re-evaluar
-    super::state::with_state(|s| { s.components.clear(); s.field_vals.clear(); });
+    with_state(|s| {
+        s.components.clear();
+        s.container_stack.clear();
+        s.field_vals.clear();
+    });
 
     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
     if let Err(e) = machine.run() {
@@ -130,7 +184,7 @@ fn reload_script(path: &str) -> Option<Vec<Component>> {
         return None;
     }
 
-    let comps = super::state::with_state(|s| s.components.clone());
+    let comps = with_state(|s| s.components.clone());
     if comps.is_empty() { return None; }
     Some(comps)
 }
@@ -148,8 +202,9 @@ impl eframe::App for OrionApp {
             ui.add_space(24.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.set_max_width(640.0);
+                let mut event: Option<String> = None;
                 for comp in &self.components {
-                    render(ui, comp, &mut self.field_vals);
+                    render(ui, comp, &mut self.field_vals, &mut event);
                     ui.add_space(6.0);
                 }
             });
@@ -177,8 +232,9 @@ impl eframe::App for OrionAppWatch {
             ui.add_space(24.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.set_max_width(640.0);
+                let mut event: Option<String> = None;
                 for comp in &self.components {
-                    render(ui, comp, &mut self.field_vals);
+                    render(ui, comp, &mut self.field_vals, &mut event);
                     ui.add_space(6.0);
                 }
             });
@@ -198,5 +254,85 @@ impl eframe::App for OrionAppWatch {
         // Polling activo: eframe verifica el bus cada 300ms sin depender
         // de que request_repaint() desde el watcher thread lo despierte.
         ctx.request_repaint_after(Duration::from_millis(300));
+    }
+}
+
+//    Reactive app — re-corre el script en cada evento de UI
+
+/// Lanza la ventana en modo reactivo: cada click/toggle/pick re-corre el script.
+/// El state_store persiste entre re-ejecuciones; field_vals se restaura también.
+pub fn launch_reactive(
+    title:      String,
+    width:      f32,
+    height:     f32,
+    components: Vec<Component>,
+    field_vals: HashMap<String, String>,
+    path:       String,
+) -> Result<(), String> {
+    let opts = native_opts(&title, width, height);
+    eframe::run_native(
+        &title,
+        opts,
+        Box::new(move |cc| {
+            theme::apply(&cc.egui_ctx);
+            Ok(Box::new(OrionAppReactive {
+                path,
+                components,
+                field_vals,
+                pending: Arc::new(Mutex::new(None)),
+            }))
+        }),
+    )
+    .map_err(|e| format!("gui.run: {e}"))
+}
+
+/// Payload que devuelve el hilo de re-evaluación al hilo de UI.
+type ReactivePayload = (Vec<Component>, HashMap<String, String>);
+
+struct OrionAppReactive {
+    path:       String,
+    components: Vec<Component>,
+    field_vals: HashMap<String, String>,
+    /// Canal entre hilo de re-evaluación y el hilo de UI
+    pending:    Arc<Mutex<Option<ReactivePayload>>>,
+}
+
+impl eframe::App for OrionAppReactive {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Aplicar resultado de re-evaluación si llegó
+        if let Ok(mut lock) = self.pending.try_lock() {
+            if let Some((new_comps, new_fields)) = lock.take() {
+                self.components = new_comps;
+                self.field_vals = new_fields;
+            }
+        }
+
+        let mut fired_event: Option<String> = None;
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add_space(24.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.set_max_width(640.0);
+                for comp in &self.components {
+                    render(ui, comp, &mut self.field_vals, &mut fired_event);
+                    ui.add_space(6.0);
+                }
+            });
+        });
+
+        // Si se disparó un evento, re-evaluar el script en un hilo separado
+        if let Some(ev) = fired_event {
+            let path_clone   = self.path.clone();
+            let fields_clone = self.field_vals.clone();
+            let bus          = self.pending.clone();
+            let ctx_clone    = ctx.clone();
+
+            thread::spawn(move || {
+                if let Some(payload) = rerun_script(&path_clone, ev, fields_clone) {
+                    *bus.lock().unwrap() = Some(payload);
+                    ctx_clone.request_repaint();
+                }
+            });
+        }
     }
 }

@@ -1,5 +1,6 @@
 use crate::eval_value::EvalValue;
 use std::collections::HashMap;
+use chrono::{Datelike, NaiveDate};
 use calamine::{Reader, open_workbook_auto, Data};
 use rust_xlsxwriter::{Workbook, Format, Color, Formula};
 use rust_xlsxwriter::conditional_format::{
@@ -270,7 +271,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Dict(result))
         }
 
-        // ── write_styled ─────────────────────────────────────────────────────────
+        //   write_styled                              
         // write_styled(path, datos, config?) → xlsx con formato avanzado por columna
         // config: {
         //   hoja, titulo, cabecera:{fondo,texto}, alternar, freeze, autofilter,
@@ -289,7 +290,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             write_styled_impl(&path, rows, config)
         }
 
-        // ── Data pipeline ─────────────────────────────────────────────────────────
+        //   Data pipeline                              
 
         // filtrar(datos, campo, op, valor) → lista filtrada
         // op: ">" | "<" | ">=" | "<=" | "==" | "!=" | "contiene" | "empieza" | "termina"
@@ -561,6 +562,76 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
+        // F-5: dates(data, col, format?) → normaliza strings de fecha a YYYY-MM-DD
+        // Formatos: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD" | "auto"
+        "dates" => {
+            if args.len() < 2 {
+                return Err("excel.dates requiere (data, col, formato?)".into());
+            }
+            let rows = list_arg("dates", &args, 0)?;
+            let col  = str_arg("dates", &args, 1)?;
+            let fmt  = match args.get(2) {
+                Some(EvalValue::Str(s)) => s.clone(),
+                _ => "auto".to_string(),
+            };
+
+            let result: Vec<EvalValue> = rows.into_iter().map(|row| {
+                if let EvalValue::Dict(mut m) = row {
+                    if let Some(val) = m.get(&col).cloned() {
+                        let raw = to_str_val(&val);
+                        if let Some(iso) = parse_date_str(&raw, &fmt) {
+                            m.insert(col.clone(), EvalValue::Str(iso));
+                        }
+                    }
+                    EvalValue::Dict(m)
+                } else { row }
+            }).collect();
+            Ok(EvalValue::List(result))
+        }
+
+        // F-5: date_parts(data, col, [partes]) → agrega columnas col_year, col_month, etc.
+        // Partes: "year" | "month" | "day" | "quarter" | "weekday" | "week" | "hour"
+        "date_parts" => {
+            if args.len() < 3 {
+                return Err("excel.date_parts requiere (data, col, [partes])".into());
+            }
+            let rows  = list_arg("date_parts", &args, 0)?;
+            let col   = str_arg("date_parts", &args, 1)?;
+            let parts: Vec<String> = match &args[2] {
+                EvalValue::List(l) => l.iter().map(|v| to_str_val(v)).collect(),
+                EvalValue::Str(s)  => vec![s.clone()],
+                other => return Err(format!(
+                    "excel.date_parts: partes debe ser lista, se recibió {}", other.type_name()
+                )),
+            };
+
+            let result: Vec<EvalValue> = rows.into_iter().map(|row| {
+                if let EvalValue::Dict(mut m) = row {
+                    if let Some(val) = m.get(&col).cloned() {
+                        let raw = to_str_val(&val);
+                        if let Ok(date) = NaiveDate::parse_from_str(&raw, "%Y-%m-%d") {
+                            for part in &parts {
+                                let key = format!("{}_{}", col, part);
+                                let v = match part.as_str() {
+                                    "year"    => EvalValue::Int(date.year() as i64),
+                                    "month"   => EvalValue::Int(date.month() as i64),
+                                    "day"     => EvalValue::Int(date.day() as i64),
+                                    "quarter" => EvalValue::Int(((date.month() - 1) / 3 + 1) as i64),
+                                    "weekday" => EvalValue::Str(format!("{}", date.weekday())),
+                                    "week"    => EvalValue::Int(date.iso_week().week() as i64),
+                                    "hour"    => EvalValue::Int(0),
+                                    _         => EvalValue::Null,
+                                };
+                                m.insert(key, v);
+                            }
+                        }
+                    }
+                    EvalValue::Dict(m)
+                } else { row }
+            }).collect();
+            Ok(EvalValue::List(result))
+        }
+
         f => Err(format!("excel.{}: función no encontrada", f)),
     }
 }
@@ -619,7 +690,7 @@ fn list_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<Vec<EvalVal
     }
 }
 
-// ─── write_styled ────────────────────────────────────────────────────────────
+//    write_styled                               
 
 fn write_styled_impl(
     path: &str,
@@ -696,7 +767,7 @@ fn write_styled_impl(
         let last_col = (headers.len() - 1) as u16;
         let mut cur: u32 = 0;
 
-        // ── Título (fila mergeada)
+        //   Título (fila mergeada)
         if let Some(ref t) = titulo {
             let title_fmt = Format::new()
                 .set_bold()
@@ -721,7 +792,7 @@ fn write_styled_impl(
         cur += 1;
         let data_start = cur;
 
-        // ── Filas de datos
+        //   Filas de datos
         let mut totals: HashMap<String, f64> = HashMap::new();
         for row in &rows {
             if let EvalValue::Dict(m) = row {
@@ -738,7 +809,7 @@ fn write_styled_impl(
         }
         let data_end = cur.saturating_sub(1);
 
-        // ── Formato condicional por columna
+        //   Formato condicional por columna
         for (ci, key) in headers.iter().enumerate() {
             if let Some(EvalValue::Dict(cfg)) = formatos.get(key) {
                 if let Some(EvalValue::List(conds)) = cfg.get("condicional") {
@@ -755,7 +826,7 @@ fn write_styled_impl(
             }
         }
 
-        // ── Filas alternadas vía conditional format (no pisa formato de número)
+        //   Filas alternadas vía conditional format (no pisa formato de número)
         if alternar && data_end >= data_start {
             let alt_fmt = Format::new().set_background_color(Color::RGB(0xF2F7FC));
             let formula = format!("=MOD(ROW()-{},2)=0", header_row + 1);
@@ -766,7 +837,7 @@ fn write_styled_impl(
                 .map_err(|e| format!("excel.write_styled alternar: {}", e))?;
         }
 
-        // ── Fila de totales
+        //   Fila de totales
         if !totales_cols.is_empty() && data_end >= data_start {
             let totals_base = Format::new()
                 .set_bold()
@@ -788,19 +859,19 @@ fn write_styled_impl(
             }
         }
 
-        // ── Freeze (congela hasta la fila de cabecera)
+        //   Freeze (congela hasta la fila de cabecera)
         if do_freeze {
             ws.set_freeze_panes(header_row + 1, 0)
                 .map_err(|e| format!("excel.write_styled freeze: {}", e))?;
         }
 
-        // ── Autofilter en cabecera
+        //   Autofilter en cabecera
         if do_filter && data_end >= data_start {
             ws.autofilter(header_row, 0, data_end, last_col)
                 .map_err(|e| format!("excel.write_styled autofilter: {}", e))?;
         }
 
-        // ── Anchos de columna
+        //   Anchos de columna
         for (ci, key) in headers.iter().enumerate() {
             let w = match anchos.get(key) {
                 Some(EvalValue::Int(n))   => *n as f64,
@@ -908,7 +979,7 @@ fn apply_text_cf(
     }
 }
 
-// ─── Data pipeline helpers ────────────────────────────────────────────────────
+//    Data pipeline helpers                           
 
 fn group_by_multi(
     rows: Vec<EvalValue>,
@@ -1032,7 +1103,7 @@ fn pivot_table(
     Ok(EvalValue::List(result))
 }
 
-// ─── join / dedupe / stats ────────────────────────────────────────────────────
+//    join / dedupe / stats                           
 
 fn join_multi(
     left: Vec<EvalValue>,
@@ -1170,7 +1241,7 @@ fn compute_stats(rows: Vec<EvalValue>, campo: String) -> Result<EvalValue, Strin
     Ok(EvalValue::Dict(m))
 }
 
-// ─── Tiny utilities ───────────────────────────────────────────────────────────
+//    Tiny utilities                               
 
 fn write_cell_fmt(
     ws: &mut rust_xlsxwriter::Worksheet,
@@ -1290,4 +1361,37 @@ fn to_f64_val(v: &EvalValue) -> Option<f64> {
         EvalValue::Str(s)   => s.parse::<f64>().ok(),
         _                   => None,
     }
+}
+
+// Parsea un string de fecha en el formato dado y devuelve ISO "YYYY-MM-DD".
+// Formatos soportados: "DD/MM/YYYY" "MM/DD/YYYY" "YYYY-MM-DD" "auto" + formato genérico.
+fn parse_date_str(s: &str, fmt: &str) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() { return None; }
+
+    let date = match fmt {
+        "DD/MM/YYYY" => NaiveDate::parse_from_str(s, "%d/%m/%Y").ok(),
+        "MM/DD/YYYY" => NaiveDate::parse_from_str(s, "%m/%d/%Y").ok(),
+        "YYYY-MM-DD" => NaiveDate::parse_from_str(s, "%Y-%m-%d").ok(),
+        "auto" => {
+            NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .or_else(|_| NaiveDate::parse_from_str(s, "%d/%m/%Y"))
+                .or_else(|_| NaiveDate::parse_from_str(s, "%m/%d/%Y"))
+                .or_else(|_| NaiveDate::parse_from_str(s, "%d-%m-%Y"))
+                .or_else(|_| NaiveDate::parse_from_str(s, "%Y/%m/%d"))
+                .or_else(|_| NaiveDate::parse_from_str(s, "%d.%m.%Y"))
+                .ok()
+        }
+        // Formato genérico: convierte notación Orion a strftime
+        other => {
+            let chrono_fmt = other
+                .replace("DD", "%d")
+                .replace("MM", "%m")
+                .replace("YYYY", "%Y")
+                .replace("YY", "%y");
+            NaiveDate::parse_from_str(s, &chrono_fmt).ok()
+        }
+    };
+
+    date.map(|d| d.format("%Y-%m-%d").to_string())
 }

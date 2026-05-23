@@ -576,6 +576,10 @@ fn main() {
             };
 
             let profile = args.iter().any(|a| a == "--profile");
+            // Registrar ruta para que gui.run() pueda re-evaluar en modo reactivo
+            if path.ends_with(".orx") {
+                modules::gui::state::set_script_path(path);
+            }
             let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
             match machine.run() {
                 Ok(_) => {}

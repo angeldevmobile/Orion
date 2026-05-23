@@ -44,6 +44,10 @@ base64       = "0.21"
 egui   = "0.29"
 eframe = "0.29"
 
+# ── TUI terminal (orion-tui) ──────────────────────────────────────────────────
+ratatui   = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
 # ── Data processing ───────────────────────────────────────────────────────────
 csv            = "1"
 calamine       = "0.24"

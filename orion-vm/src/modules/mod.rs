@@ -54,6 +54,7 @@ pub mod search_mod;
 
 // Interfaces nativas de Orion
 pub mod gui;
+pub mod tui;
 
 //   Backend core                                
 pub mod db_mod;
@@ -110,6 +111,7 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "search"       => search_mod::call(function, args),
         // Interfaces nativas
         "gui"      => gui::call(function, args),
+        "tui"      => tui::call(function, args),
         // Backend core
         "db"       => db_mod::call(function, args),
         "auth"     => auth_mod::call(function, args),
@@ -163,7 +165,7 @@ pub fn is_known_module(name: &str) -> bool {
         // Datos
         "csv" | "excel" | "regex" | "table" | "df" | "stat" | "serie" | "frame" | "search" |
         // Interfaces
-        "gui" |
+        "gui" | "tui" |
         // Backend core
         "db" | "auth" | "cache" | "mail" |
         // Automatización
