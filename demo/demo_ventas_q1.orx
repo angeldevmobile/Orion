@@ -4,9 +4,7 @@ use "excel" as excel
 --  ORION LANGUAGE — Demo Showcase
 --  Automatización Excel: Reporte de Ventas Q1 2026
 --  Genera dos archivos .xlsx con análisis completo de datos de ventas
---
 --  Uso: orion demo/demo_ventas_q1.orx
---  (ejecutar desde la raíz del proyecto)
 --  Salida: demo/reporte_analisis.xlsx  — 5 hojas de análisis
 --          demo/reporte_detalle.xlsx   — hoja estilizada con formato condicional
 -- ═══════════════════════════════════════════════════════════════════════
@@ -17,7 +15,7 @@ show "║   Reporte de Ventas Q1 2026                  ║"
 show "╚══════════════════════════════════════════════╝"
 show ""
 
--- ── 1. DATOS FUENTE ──────────────────────────────────────────────────
+--   1. DATOS FUENTE                          
 
 vendedores = [
     {"id": 1,  "nombre": "Ana García",     "region": "Norte",  "producto": "CRM Pro",         "venta": 85000,  "meta": 80000,  "activo": yes, "meses": 24},
@@ -49,7 +47,7 @@ presupuestos = [
     {"region": "Oeste",  "presupuesto": 260000, "obj_clientes": 35}
 ]
 
--- ── 2. ENRIQUECER: calcular cumplimiento y estado por vendedor ────────
+--   2. ENRIQUECER: calcular cumplimiento y estado por vendedor     
 
 show "[1/6] Calculando cumplimiento por vendedor..."
 
@@ -65,13 +63,13 @@ for v in vendedores {
     datos = datos + [v]
 }
 
--- ── 3. CRUZAR vendedores con presupuestos por región (LEFT JOIN) ──────
+--   3. CRUZAR vendedores con presupuestos por región (LEFT JOIN)    
 
 show "[2/6] Cruzando con presupuestos regionales..."
 
 datos_full = excel.cruzar(datos, presupuestos, "region", "left")
 
--- ── 4. SEGMENTAR ──────────────────────────────────────────────────────
+--   4. SEGMENTAR                            
 
 show "[3/6] Segmentando datos..."
 
@@ -79,7 +77,7 @@ activos    = excel.filtrar(datos_full, "activo", "==", yes)
 bajo_meta  = excel.filtrar(datos_full, "estado", "==", "Bajo meta")
 sobre_meta = excel.filtrar(datos_full, "estado", "==", "Cumple")
 
--- ── 5. ANÁLISIS POR REGIÓN ────────────────────────────────────────────
+--   5. ANÁLISIS POR REGIÓN                       
 
 show "[4/6] Agrupando y calculando estadísticas..."
 
@@ -97,7 +95,7 @@ por_region = excel.cruzar(por_region, presupuestos, "region", "left")
 -- Estadísticas globales
 stats = excel.estadisticas(datos_full, "venta")
 
--- ── 6. RANKINGS Y PIVOT ───────────────────────────────────────────────
+--   6. RANKINGS Y PIVOT                         
 
 show "[5/6] Generando rankings y tabla pivot..."
 
@@ -139,7 +137,7 @@ resumen = [
 -- Pivot: ventas por región y producto
 pivot = excel.pivot(datos_full, "region", "producto", "venta")
 
--- ── 7. EXPORTAR: Reporte con múltiples hojas ─────────────────────────
+--   7. EXPORTAR: Reporte con múltiples hojas              
 
 show "[6/6] Generando archivos Excel..."
 
@@ -151,7 +149,7 @@ excel.write_multi("demo/reporte_analisis.xlsx", {
     "Pivot Reg x Prod": pivot
 })
 
--- ── 8. EXPORTAR: Detalle completo con estilos avanzados ──────────────
+--   8. EXPORTAR: Detalle completo con estilos avanzados        
 
 detalle = excel.seleccionar(
     excel.ordenar(datos_full, "region"),
@@ -206,7 +204,7 @@ excel.write_styled("demo/reporte_detalle.xlsx", detalle, {
     }
 })
 
--- ── 9. RESUMEN EN CONSOLA ─────────────────────────────────────────────
+--   9. RESUMEN EN CONSOLA                        
 
 show ""
 show "╔══════════════════════════════════════════════╗"

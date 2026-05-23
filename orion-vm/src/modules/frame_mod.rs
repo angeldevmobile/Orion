@@ -13,7 +13,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-// ── tipos columna ─────────────────────────────────────────────────────────────
+//   tipos columna                               ─
 
 #[derive(Clone)]
 enum Col {
@@ -47,7 +47,7 @@ impl Col {
     }
 }
 
-// ── frame en memoria ──────────────────────────────────────────────────────────
+//   frame en memoria                              
 
 struct Frame {
     cols: Vec<(String, Col)>,
@@ -72,7 +72,7 @@ impl Frame {
     }
 }
 
-// ── store estático ────────────────────────────────────────────────────────────
+//   store estático                               
 
 static FRAMES:  Mutex<Option<HashMap<String, Frame>>> = Mutex::new(None);
 static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -88,7 +88,7 @@ fn new_handle() -> String {
     format!("frame_{}", COUNTER.fetch_add(1, Ordering::SeqCst))
 }
 
-// ── parsing CSV ───────────────────────────────────────────────────────────────
+//   parsing CSV                                ─
 
 fn parse_csv_chunk(reader: &mut BufReader<File>, limit: usize) -> (Vec<String>, Vec<Vec<String>>) {
     let mut headers = Vec::new();
@@ -134,7 +134,7 @@ fn infer_columns(headers: &[String], rows: &[Vec<String>]) -> Vec<(String, Col)>
     }).collect()
 }
 
-// ── dispatcher ────────────────────────────────────────────────────────────────
+//   dispatcher                                 
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
@@ -178,7 +178,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── carga ─────────────────────────────────────────────────────────────────────
+//   carga                                   ─
 
 fn fn_open(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let path = match args.first() {
@@ -227,7 +227,7 @@ fn fn_from_list(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── exploración ───────────────────────────────────────────────────────────────
+//   exploración                                ─
 
 fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
@@ -317,7 +317,7 @@ fn fn_to_list(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-// ── selección ─────────────────────────────────────────────────────────────────
+//   selección                                 ─
 
 fn fn_keep(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.keep(handle, [cols])".into()); }
@@ -364,7 +364,7 @@ fn fn_rename(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-// ── filtrado ──────────────────────────────────────────────────────────────────
+//   filtrado                                  
 
 fn fn_where(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 3 { return Err("frame.where_(handle, columna, valor)".into()); }
@@ -476,7 +476,7 @@ fn fn_sort(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-// ── estadísticas columnar (directo sobre Vec<f64>) ────────────────────────────
+//   estadísticas columnar (directo sobre Vec<f64>)               
 
 fn fn_col_stat(args: Vec<EvalValue>, stat: &str) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err(format!("frame.{}(handle, columna)", stat)); }
@@ -535,7 +535,7 @@ fn fn_count(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-// ── agregación ────────────────────────────────────────────────────────────────
+//   agregación                                 
 
 fn fn_group(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 4 { return Err("frame.group(handle, by, valor_col, op)".into()); }
@@ -579,7 +579,7 @@ fn fn_group(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-// ── columna calculada ─────────────────────────────────────────────────────────
+//   columna calculada                             ─
 
 fn fn_add_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 3 { return Err("frame.add_col(handle, nombre, lista_valores)".into()); }
@@ -611,7 +611,7 @@ fn fn_add_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-// ── chunked — grandes volúmenes sin cargar todo en RAM ────────────────────────
+//   chunked — grandes volúmenes sin cargar todo en RAM             
 
 /// frame.each_chunk(ruta, chunk_size, fn(frame_handle) → cualquier_cosa)
 /// Lee el CSV en bloques de chunk_size filas, llama fn por cada bloque.
@@ -699,7 +699,7 @@ fn fn_scan_stats(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     Ok(EvalValue::Dict(map))
 }
 
-// ── persistencia ──────────────────────────────────────────────────────────────
+//   persistencia                                
 
 fn fn_save(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.save(handle, ruta)".into()); }
@@ -724,7 +724,7 @@ fn fn_save(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-// ── arg helpers ───────────────────────────────────────────────────────────────
+//   arg helpers                                ─
 
 fn arg_handle(args: &[EvalValue], pos: usize) -> Result<String, String> {
     match args.get(pos) {

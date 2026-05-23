@@ -10,6 +10,41 @@ use crate::value::{Value, InstanceData, SendValue, from_send};
 use crate::bytecode::{ExternFnDef, FunctionDef, ShapeDef};
 use crate::gc::Gc;
 
+fn write_utf8_line(s: &str) {
+    #[cfg(windows)]
+    {
+        use std::ffi::c_void;
+        extern "system" {
+            fn GetStdHandle(nStdHandle: u32) -> *mut c_void;
+            fn WriteConsoleW(hConsoleOutput: *mut c_void, lpBuffer: *const u16,
+                             nNumberOfCharsToWrite: u32, lpNumberOfCharsWritten: *mut u32,
+                             lpReserved: *const c_void) -> i32;
+            fn GetConsoleMode(hConsoleHandle: *mut c_void, lpMode: *mut u32) -> i32;
+        }
+        unsafe {
+            let handle = GetStdHandle(0xFFFFFFF5u32); // STD_OUTPUT_HANDLE = -11
+            let handle_isize = handle as isize;
+            let mut mode: u32 = 0;
+            let is_console = handle_isize != -1 && !handle.is_null()
+                             && GetConsoleMode(handle, &mut mode) != 0;
+
+            let line = format!("{s}\n");
+            let utf16: Vec<u16> = line.encode_utf16().collect();
+
+            if is_console {
+                let mut written: u32 = 0;
+                let ok = WriteConsoleW(handle, utf16.as_ptr(), utf16.len() as u32,
+                                       &mut written, std::ptr::null());
+                if ok != 0 { return; }
+            }
+        }
+    }
+    // Fallback: bytes UTF-8 crudos (pipe / Output Channel de VS Code)
+    let line = format!("{s}\n");
+    let _ = io::stdout().lock().write_all(line.as_bytes());
+    let _ = io::stdout().lock().flush();
+}
+
 struct CallFrame {
     instructions: Vec<Instruction>,
     lines: Vec<u32>,
@@ -942,8 +977,7 @@ impl VM {
             //    I/O
             Instruction::Show => {
                 let val = self.pop()?;
-                let mut out = io::stdout().lock();
-                let _ = out.write_all(format!("{}\n", val).as_bytes());
+                write_utf8_line(&format!("{}", val));
             }
 
             //    IO nativo: ask / read / write / env                            
@@ -1628,8 +1662,7 @@ impl VM {
             }
             "show" => {
                 let text = args.iter().map(|a| format!("{}", a)).collect::<Vec<_>>().join(" ");
-                let mut out = io::stdout().lock();
-                let _ = out.write_all(format!("{}\n", text).as_bytes());
+                write_utf8_line(&text);
                 Ok(None)
             }
             //    Listas                                                        
@@ -1860,6 +1893,66 @@ impl VM {
                     Value::Float(f) => Ok(Some(Value::Float(f.sqrt()))),
                     Value::Int(n)   => Ok(Some(Value::Float((n as f64).sqrt()))),
                     _ => Err("sqrt(): requiere un número".to_string()),
+                }
+            }
+            "round" => {
+                let mut it = args.into_iter();
+                let val = it.next().ok_or("round() requiere al menos un argumento")?;
+                let f = match val {
+                    Value::Float(f) => f,
+                    Value::Int(n)   => n as f64,
+                    _ => return Err("round(): requiere un número".to_string()),
+                };
+                match it.next() {
+                    Some(d) => {
+                        let digits = match d { Value::Int(n) => n, Value::Float(f) => f as i64, _ => 0 };
+                        let factor = 10_f64.powi(digits as i32);
+                        Ok(Some(Value::Float((f * factor).round() / factor)))
+                    }
+                    None => Ok(Some(Value::Int(f.round() as i64))),
+                }
+            }
+            "pow" => {
+                let mut it = args.into_iter();
+                let base = it.next().ok_or("pow() requiere 2 argumentos")?;
+                let exp  = it.next().ok_or("pow() requiere 2 argumentos")?;
+                let b = match base { Value::Float(f) => f, Value::Int(n) => n as f64, _ => return Err("pow(): requiere números".into()) };
+                let e = match exp  { Value::Float(f) => f, Value::Int(n) => n as f64, _ => return Err("pow(): requiere números".into()) };
+                Ok(Some(Value::Float(b.powf(e))))
+            }
+            "sum" => {
+                let items = match args.into_iter().next().unwrap_or(Value::List(vec![])) {
+                    Value::List(v) => v,
+                    other => vec![other],
+                };
+                let mut total = 0.0_f64;
+                let mut all_int = true;
+                for item in &items {
+                    match item {
+                        Value::Int(n)   => total += *n as f64,
+                        Value::Float(f) => { total += f; all_int = false; }
+                        _ => return Err("sum(): la lista debe contener números".to_string()),
+                    }
+                }
+                if all_int { Ok(Some(Value::Int(total as i64))) }
+                else       { Ok(Some(Value::Float(total))) }
+            }
+            "bool" => {
+                let val = args.into_iter().next().ok_or("bool() requiere un argumento")?;
+                Ok(Some(Value::Bool(val.is_truthy())))
+            }
+            "sort" => {
+                let val = args.into_iter().next().ok_or("sort() requiere una lista")?;
+                match val {
+                    Value::List(mut v) => {
+                        v.sort_by(|a, b| {
+                            let fa = match a { Value::Int(n) => *n as f64, Value::Float(f) => *f, _ => 0.0 };
+                            let fb = match b { Value::Int(n) => *n as f64, Value::Float(f) => *f, _ => 0.0 };
+                            fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        Ok(Some(Value::List(v)))
+                    }
+                    _ => Err("sort(): requiere una lista".to_string()),
                 }
             }
             //    I/O                                                          

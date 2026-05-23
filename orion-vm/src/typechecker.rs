@@ -88,11 +88,26 @@ impl TypeChecker {
     }
 
     fn scope_set(&mut self, name: String, ty: String) {
-        if let Some(top) = self.scope_stack.last_mut() {
-            top.insert(name.clone(), ty);
-        }
-        if let Some(top) = self.written_not_read.last_mut() {
-            top.insert(name, self.current_line);
+        let n = self.scope_stack.len();
+        // Si la variable ya existe en un scope externo, actualizar allí
+        let outer_idx = if n > 1 {
+            self.scope_stack[..n - 1].iter().rposition(|s| s.contains_key(&name))
+        } else {
+            None
+        };
+
+        if let Some(idx) = outer_idx {
+            self.scope_stack[idx].insert(name.clone(), ty);
+            if let Some(tracking) = self.written_not_read.get_mut(idx) {
+                tracking.insert(name, self.current_line);
+            }
+        } else {
+            if let Some(top) = self.scope_stack.last_mut() {
+                top.insert(name.clone(), ty);
+            }
+            if let Some(top) = self.written_not_read.last_mut() {
+                top.insert(name, self.current_line);
+            }
         }
     }
 
@@ -291,6 +306,31 @@ impl TypeChecker {
                     self.check_stmts(hbody, return_type);
                     self.pop_scope();
                 }
+            }
+
+            Stmt::AssignIndex { object, index, value, line, col } => {
+                self.current_line = *line;
+                self.current_col  = *col;
+                self.infer_type(object);
+                self.infer_type(index);
+                self.infer_type(value);
+            }
+
+            Stmt::AssignAttr { object, value, line, col, .. } => {
+                self.current_line = *line;
+                self.current_col  = *col;
+                self.infer_type(object);
+                self.infer_type(value);
+            }
+
+            Stmt::AugAssign { name, op: _, value, line, col } => {
+                self.current_line = *line;
+                self.current_col  = *col;
+                // Leer la variable antes de actualizar
+                self.scope_get(name);
+                self.infer_type(value);
+                let ty = self.scope_get_no_mark(name).unwrap_or("any".into());
+                self.scope_set(name.clone(), ty);
             }
 
             Stmt::Show { value, line, col } => {

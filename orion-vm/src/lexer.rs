@@ -8,6 +8,17 @@ pub fn lex(source: &str) -> Result<Vec<Token>, LexError> {
 
 //   Lexer                                    
 
+/// Returns the byte length of a UTF-8 sequence given its leading byte.
+fn utf8_char_len(b: u8) -> usize {
+    match b {
+        0x00..=0x7F => 1,
+        0xC0..=0xDF => 2,
+        0xE0..=0xEF => 3,
+        0xF0..=0xF7 => 4,
+        _ => 1, // continuation byte or invalid — consume one byte
+    }
+}
+
 struct Lexer<'a> {
     src: &'a [u8],
     pos: usize,
@@ -314,8 +325,17 @@ impl<'a> Lexer<'a> {
                     content.push('"');
                     self.advance();
                     while let Some(ic) = self.peek() {
-                        content.push(ic as char);
-                        self.advance();
+                        let clen = utf8_char_len(ic);
+                        let cstart = self.pos;
+                        let cend = (cstart + clen).min(self.src.len());
+                        let mut buf = [0u8; 4];
+                        let actual = cend - cstart;
+                        buf[..actual].copy_from_slice(&self.src[cstart..cend]);
+                        match std::str::from_utf8(&buf[..actual]) {
+                            Ok(s) => content.push_str(s),
+                            Err(_) => content.push(char::REPLACEMENT_CHARACTER),
+                        }
+                        for _ in 0..clen { self.advance(); }
                         if ic == b'"' { break; }
                     }
                     continue;
@@ -347,8 +367,18 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
-            content.push(c as char);
-            self.advance();
+            // Carácter UTF-8 regular: leer la secuencia completa
+            let clen = utf8_char_len(c);
+            let cstart = self.pos;
+            let cend = (cstart + clen).min(self.src.len());
+            let mut buf = [0u8; 4];
+            let actual = cend - cstart;
+            buf[..actual].copy_from_slice(&self.src[cstart..cend]);
+            match std::str::from_utf8(&buf[..actual]) {
+                Ok(s) => content.push_str(s),
+                Err(_) => content.push(char::REPLACEMENT_CHARACTER),
+            }
+            for _ in 0..clen { self.advance(); }
         }
 
         if self.advance() != Some(b'"') {

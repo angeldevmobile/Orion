@@ -3,6 +3,7 @@ name = "orion-vm"
 version = "0.1.0"
 edition = "2021"
 description = "Orion Language Virtual Machine"
+build = "build.rs"
 
 [lib]
 name = "orion_vm"
@@ -86,3 +87,6 @@ ssh2 = "0.9"                                         # ssh_mod: SSH/SCP (libssh2
 
 # ── Bytecode binario ──────────────────────────────────────────────────────────
 bincode = "1.3"                                      # bytecode: serialización binaria eficiente
+
+[build-dependencies]
+embed-resource = "2"                                 # embebe orion.rc (manifest UTF-8) en el .exe
