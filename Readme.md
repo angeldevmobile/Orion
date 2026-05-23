@@ -1,9 +1,47 @@
 # Orion Language
 
 Orion es un lenguaje de programación moderno orientado a backend y automatización.
-Sintaxis limpia, tipado opcional, OOP nativa, 20 módulos integrados y pipeline completo en Rust.
+Sintaxis limpia, tipado opcional, OOP nativa, 44+ módulos integrados y pipeline completo en Rust.
 
 > Construido por **Angel Zapata** · 2025–2026
+
+---
+
+## Demo
+
+![Demo - Terminal](assets/demo_terminal.jpeg)
+
+```orion
+-- demo/demo_ventas_q1.orx  —  70 líneas · 67 ms
+use "excel" as excel
+
+datos_full = excel.cruzar(vendedores, presupuestos, "region", "left")
+pivot      = excel.pivot(datos_full, "region", "producto", "venta")
+
+excel.write_multi("reporte_analisis.xlsx", {
+    "Resumen":    resumen,
+    "Por Region": por_region,
+    "Top 10":     top_10,
+    "Pivot":      pivot
+})
+```
+
+```
+╔══════════════════════════════════════════════╗
+║   Resultados Q1 2026                         ║
+╠══════════════════════════════════════════════╣
+║  Vendedores totales   : 20                   ║
+║  Venta total          : USD 1487000          ║
+║  Cumplimiento global  : 100.2%               ║
+║  Mayor venta          : USD 110000           ║
+╠══════════════════════════════════════════════╣
+║  → demo/reporte_analisis.xlsx  (5 hojas)     ║
+║  → demo/reporte_detalle.xlsx   (con estilos) ║
+╚══════════════════════════════════════════════╝
+[Orion] 67.700 ms
+```
+
+![Demo - Excel Output](assets/demo_excel.jpeg)
 
 ---
 
@@ -30,6 +68,42 @@ cargo build --release --manifest-path orion-vm/Cargo.toml
 **Extensión VSCode** — incluye el binario bundleado, zero-config:
 1. Instalar `orion-lang` desde el marketplace
 2. Abrir cualquier `.orx` — funciona de inmediato
+
+---
+
+## Quick Start
+
+Crea un archivo `hola.orx` y ejecútalo:
+
+```orion
+nombre  = "Orion"
+version = 1
+
+show "Hola desde ${nombre} v${version}"
+
+for i in 1..5 {
+    show "  línea ${i}"
+}
+```
+
+```bash
+orion hola.orx
+```
+
+```
+Hola desde Orion v1
+  línea 1
+  línea 2
+  línea 3
+  línea 4
+  línea 5
+```
+
+O corre el demo completo:
+
+```bash
+orion demo/demo_ventas_q1.orx
+```
 
 ---
 
@@ -575,6 +649,8 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 ---
 
 ## Extensión VSCode
+
+![VS Code Extension](assets/demo_vscode.jpeg)
 
 - Syntax highlighting completo
 - IntelliSense (LSP integrado)
