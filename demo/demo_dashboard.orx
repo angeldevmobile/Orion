@@ -1,0 +1,260 @@
+use "excel" as excel
+use "gui" as gui
+
+--   Datos base                                ─
+vendedores = [
+    {"id": 1,  "nombre": "Ana García",     "region": "Norte",  "producto": "CRM Pro",         "venta": 85000,  "meta": 80000,  "activo": yes, "meses": 24, "ingreso": "15/01/2024"},
+    {"id": 2,  "nombre": "Luis Martínez",  "region": "Sur",    "producto": "Analytics Suite", "venta": 62000,  "meta": 70000,  "activo": yes, "meses": 18, "ingreso": "03/07/2024"},
+    {"id": 3,  "nombre": "Marta López",    "region": "Norte",  "producto": "Cloud Storage",   "venta": 91000,  "meta": 85000,  "activo": yes, "meses": 36, "ingreso": "20/01/2023"},
+    {"id": 4,  "nombre": "Carlos Ruiz",    "region": "Centro", "producto": "Security Pack",   "venta": 74000,  "meta": 75000,  "activo": yes, "meses": 12, "ingreso": "10/01/2025"},
+    {"id": 5,  "nombre": "Elena Díaz",     "region": "Oeste",  "producto": "DevOps Tools",    "venta": 110000, "meta": 90000,  "activo": yes, "meses": 48, "ingreso": "05/01/2022"},
+    {"id": 6,  "nombre": "Pedro Sánchez",  "region": "Sur",    "producto": "CRM Pro",         "venta": 55000,  "meta": 65000,  "activo": yes, "meses": 8,  "ingreso": "12/05/2025"},
+    {"id": 7,  "nombre": "Isabel Torres",  "region": "Norte",  "producto": "Analytics Suite", "venta": 78000,  "meta": 75000,  "activo": yes, "meses": 30, "ingreso": "08/07/2023"},
+    {"id": 8,  "nombre": "Miguel Flores",  "region": "Centro", "producto": "Cloud Storage",   "venta": 43000,  "meta": 60000,  "activo": no,  "meses": 6,  "ingreso": "01/07/2025"},
+    {"id": 9,  "nombre": "Laura Vega",     "region": "Oeste",  "producto": "Security Pack",   "venta": 96000,  "meta": 88000,  "activo": yes, "meses": 42, "ingreso": "15/07/2022"},
+    {"id": 10, "nombre": "Roberto Silva",  "region": "Norte",  "producto": "DevOps Tools",    "venta": 67000,  "meta": 70000,  "activo": yes, "meses": 15, "ingreso": "22/10/2024"},
+    {"id": 11, "nombre": "Carmen Medina",  "region": "Sur",    "producto": "CRM Pro",         "venta": 81000,  "meta": 78000,  "activo": yes, "meses": 22, "ingreso": "14/03/2024"},
+    {"id": 12, "nombre": "Javier Castro",  "region": "Centro", "producto": "Analytics Suite", "venta": 58000,  "meta": 65000,  "activo": yes, "meses": 10, "ingreso": "05/03/2025"},
+    {"id": 13, "nombre": "Patricia Mora",  "region": "Oeste",  "producto": "Cloud Storage",   "venta": 72000,  "meta": 70000,  "activo": yes, "meses": 28, "ingreso": "19/09/2023"},
+    {"id": 14, "nombre": "Andrés Reyes",   "region": "Norte",  "producto": "Security Pack",   "venta": 49000,  "meta": 55000,  "activo": no,  "meses": 5,  "ingreso": "01/08/2025"},
+    {"id": 15, "nombre": "Sofía Vargas",   "region": "Sur",    "producto": "DevOps Tools",    "venta": 88000,  "meta": 80000,  "activo": yes, "meses": 33, "ingreso": "11/04/2023"},
+    {"id": 16, "nombre": "Diego Herrera",  "region": "Centro", "producto": "CRM Pro",         "venta": 95000,  "meta": 85000,  "activo": yes, "meses": 40, "ingreso": "07/09/2022"},
+    {"id": 17, "nombre": "Valentina Cruz", "region": "Oeste",  "producto": "Analytics Suite", "venta": 63000,  "meta": 68000,  "activo": yes, "meses": 14, "ingreso": "18/11/2024"},
+    {"id": 18, "nombre": "Héctor Romero",  "region": "Norte",  "producto": "Cloud Storage",   "venta": 77000,  "meta": 72000,  "activo": yes, "meses": 26, "ingreso": "25/11/2023"},
+    {"id": 19, "nombre": "Adriana Ponce",  "region": "Sur",    "producto": "Security Pack",   "venta": 41000,  "meta": 58000,  "activo": no,  "meses": 4,  "ingreso": "03/09/2025"},
+    {"id": 20, "nombre": "Francisco Ríos", "region": "Centro", "producto": "DevOps Tools",    "venta": 102000, "meta": 95000,  "activo": yes, "meses": 52, "ingreso": "01/12/2021"}
+]
+
+presupuestos = [
+    {"region": "Norte",  "presupuesto": 350000},
+    {"region": "Sur",    "presupuesto": 280000},
+    {"region": "Centro", "presupuesto": 320000},
+    {"region": "Oeste",  "presupuesto": 260000}
+]
+
+metas_producto = [
+    {"producto": "CRM Pro",         "comision_pct": 8},
+    {"producto": "Analytics Suite", "comision_pct": 7},
+    {"producto": "Cloud Storage",   "comision_pct": 6},
+    {"producto": "Security Pack",   "comision_pct": 9},
+    {"producto": "DevOps Tools",    "comision_pct": 10}
+]
+
+--   Enriquecimiento                              
+datos = []
+for v in vendedores {
+    pct    = round((v["venta"] * 100) / v["meta"], 1)
+    estado = "Cumple"
+    if v["venta"] < v["meta"] { estado = "Bajo meta" }
+    cat = "Junior"
+    if v["meses"] >= 12 { cat = "Mid" }
+    if v["meses"] >= 30 { cat = "Senior" }
+    v["cumplimiento"] = pct
+    v["estado"]       = estado
+    v["categoria"]    = cat
+    datos = datos + [v]
+}
+
+datos_full = excel.cruzar(datos, metas_producto, "producto", "left")
+datos_full = excel.dates(datos_full, "ingreso", "DD/MM/YYYY")
+datos_full = excel.date_parts(datos_full, "ingreso", ["year", "month"])
+
+activos    = excel.filtrar(datos_full, "activo", "==", yes)
+inactivos  = excel.filtrar(datos_full, "activo", "==", no)
+bajo_meta  = excel.filtrar(activos,   "estado", "==", "Bajo meta")
+sobre_meta = excel.filtrar(activos,   "estado", "==", "Cumple")
+
+--   Agregaciones                               ─
+por_region = excel.agrupar(activos, "region", {
+    "venta": ["sum", "avg"],
+    "meta":  ["sum"],
+    "count": yes
+})
+por_region = excel.renombrar_col(por_region, "venta_sum", "total_venta")
+por_region = excel.renombrar_col(por_region, "venta_avg", "prom_venta")
+por_region = excel.renombrar_col(por_region, "meta_sum",  "total_meta")
+por_region = excel.cruzar(por_region, presupuestos, "region", "left")
+por_region = excel.sort(por_region, "total_venta-")
+
+por_producto = excel.agrupar(datos_full, "producto", {
+    "venta":        ["sum", "avg"],
+    "cumplimiento": ["avg"],
+    "count":        yes
+})
+por_producto = excel.sort(por_producto, "venta_sum-")
+
+por_categoria = excel.agrupar(datos_full, "categoria", {
+    "venta":        ["sum", "avg"],
+    "cumplimiento": ["avg"],
+    "count":        yes
+})
+por_categoria = excel.sort(por_categoria, "venta_avg-")
+
+por_anio = excel.agrupar(datos_full, "ingreso_year", {
+    "venta": ["sum", "avg"],
+    "count": yes
+})
+por_anio = excel.sort(por_anio, "ingreso_year+")
+
+-- Estadísticas globales
+stats_venta  = excel.estadisticas(datos_full, "venta")
+total_meta_v = excel.estadisticas(datos_full, "meta").sum
+pct_global   = round((stats_venta.sum * 100) / total_meta_v, 1)
+
+-- Top 10 por venta
+ordenado = excel.sort(datos_full, "venta-")
+top_10 = []
+pos = 1
+for row in ordenado {
+    if pos <= 10 {
+        row["pos"] = pos
+        top_10 = top_10 + [row]
+    }
+    pos = pos + 1
+}
+top_10 = excel.seleccionar(top_10, ["pos", "nombre", "region", "producto", "venta", "meta", "cumplimiento", "estado", "categoria"])
+
+-- Scatter: venta vs meses
+scatter_data = excel.seleccionar(activos, ["nombre", "venta", "meses", "cumplimiento"])
+
+--   GUI Dashboard                               ─
+gui.panel("Dashboard Ventas Q1 2026", 1150, 780)
+
+-- Header
+gui.banner(
+    "Dashboard · Ventas Q1 2026",
+    "Equipo comercial — " + str(len(datos_full)) + " vendedores · 5 productos · 4 regiones"
+)
+
+gui.spacer(10)
+
+-- KPIs
+gui.row()
+  gui.card()
+    gui.caption("VENTA TOTAL")
+    gui.heading("$ " + str(stats_venta.sum))
+    gui.badge("USD", "accent")
+  gui.end()
+  gui.card()
+    gui.caption("CUMPLIMIENTO GLOBAL")
+    gui.heading(str(pct_global) + " %")
+    gui.badge("vs meta", "info")
+  gui.end()
+  gui.card()
+    gui.caption("ACTIVOS")
+    gui.heading(str(len(activos)) + " / " + str(len(datos_full)))
+    gui.badge(str(len(inactivos)) + " inactivos", "warning")
+  gui.end()
+  gui.card()
+    gui.caption("CUMPLEN META")
+    gui.heading(str(len(sobre_meta)))
+    gui.badge(str(len(bajo_meta)) + " bajo meta", "error")
+  gui.end()
+gui.end()
+
+gui.spacer(10)
+gui.divider()
+gui.spacer(6)
+
+-- Selector de vista
+vista = gui.value("vista")
+if vista == "" { vista = "Graficos" }
+
+gui.row()
+  gui.text("Vista:")
+  gui.pick("vista", ["Graficos", "Top 10", "Detalle completo", "Scatter"])
+gui.end()
+
+gui.spacer(8)
+
+--   Vista: Gráficos                              ─
+gui.fade("v_graficos", vista == "Graficos")
+
+  -- Selector tipo de gráfico para región
+  tipo_reg = gui.value("tipo_reg")
+  if tipo_reg == "" { tipo_reg = "bar" }
+
+  gui.row()
+    gui.caption("Tipo gráfico regional:")
+    gui.pick("tipo_reg", ["bar", "line", "area"])
+  gui.end()
+
+  gui.spacer(4)
+
+  gui.row()
+    gui.card()
+      gui.chart(por_region, tipo_reg, {
+          x:      "region",
+          y:      "total_venta",
+          y2:     "total_meta",
+          titulo: "Venta vs Meta por Región",
+          height: 240
+      })
+    gui.end()
+    gui.card()
+      gui.chart(por_producto, "pie", {
+          label:  "producto",
+          value:  "venta_sum",
+          titulo: "Distribución de Ventas por Producto",
+          height: 240
+      })
+    gui.end()
+  gui.end()
+
+  gui.spacer(8)
+
+  gui.row()
+    gui.card()
+      gui.chart(por_categoria, "bar", {
+          x:      "categoria",
+          y:      "venta_avg",
+          titulo: "Venta Promedio por Categoría",
+          height: 210,
+          color:  "success"
+      })
+    gui.end()
+    gui.card()
+      gui.chart(por_anio, "line", {
+          x:      "ingreso_year",
+          y:      "venta_avg",
+          titulo: "Venta Promedio por Año de Ingreso",
+          height: 210,
+          color:  "accent"
+      })
+    gui.end()
+  gui.end()
+
+gui.end()
+
+--   Vista: Top 10                               ─
+gui.fade("v_top10", vista == "Top 10")
+  gui.heading("Top 10 Vendedores por Venta")
+  gui.spacer(6)
+  gui.table(top_10, {height: 480})
+gui.end()
+
+--   Vista: Detalle completo                          ─
+gui.fade("v_detalle", vista == "Detalle completo")
+  detalle_cols = excel.seleccionar(datos_full, [
+      "nombre", "region", "producto", "venta", "meta",
+      "cumplimiento", "estado", "categoria", "meses"
+  ])
+  gui.heading("Todos los Vendedores")
+  gui.spacer(6)
+  gui.table(detalle_cols, {height: 500})
+gui.end()
+
+--   Vista: Scatter                               
+gui.fade("v_scatter", vista == "Scatter")
+  gui.heading("Relación: Ventas vs Antigüedad (meses)")
+  gui.spacer(6)
+  gui.chart(scatter_data, "scatter", {
+      x:      "meses",
+      y:      "venta",
+      titulo: "Venta vs Antigüedad — vendedores activos",
+      height: 420,
+      color:  "accent"
+  })
+gui.end()
+
+gui.run()

@@ -467,7 +467,7 @@ impl TypeChecker {
 
             Expr::Ident(name)  => {
                 let ty = self.scope_get(name);
-                if ty.is_none() && !is_builtin(name) && !self.fn_sigs.contains_key(name) && !self.shape_names.contains(name) {
+                if ty.is_none() && !is_builtin(name) && !self.fn_sigs.contains_key(name) && !self.shape_names.contains(name) && !crate::modules::is_known_module(name) {
                     let line = self.current_line;
                     let col  = self.current_col;
                     self.issues.push(TypeIssue::warning(
