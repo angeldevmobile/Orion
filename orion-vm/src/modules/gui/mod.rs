@@ -5,7 +5,7 @@ pub mod theme;
 
 use std::sync::atomic::Ordering;
 use crate::eval_value::EvalValue;
-use components::{Component, Style};
+use components::{Component, Style, ChartKind, ChartConfig};
 use state::{with_state, IS_WATCH_MODE, IS_REACTIVE_MODE, get_script_path};
 
 //     Dispatcher principal — gui.función(args)
@@ -230,6 +230,92 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
+        // ── Datos visuales ────────────────────────────────────────────────────
+
+        // gui.table(datos, config?)
+        // datos: lista de dicts  |  config: {cols:[..], height:300}
+        "table" => {
+            let rows_data = match args.get(0) {
+                Some(EvalValue::List(l)) => l.clone(),
+                _ => return Err("gui.table requiere una lista de dicts".into()),
+            };
+            let cfg = dict_opt(&args, 1);
+            let height = cfg_f32(&cfg, "height", 300.0);
+            let filter = cfg_list_str(&cfg, "cols");
+            let (headers, rows) = extract_table(&rows_data, filter);
+            push(Component::Table { headers, rows, height })
+        }
+
+        // gui.chart(datos, tipo, config?)
+        // tipo: "bar"|"line"|"area"|"scatter"|"pie"|"hist"
+        // config: {x:"col", y:"col", y2:"col", titulo:"", color:"", height:260, bins:10}
+        "chart" => {
+            let rows_data = match args.get(0) {
+                Some(EvalValue::List(l)) => l.clone(),
+                _ => return Err("gui.chart requiere (datos, tipo, config?)".into()),
+            };
+            let kind_str = str_arg(&args, 1).unwrap_or_else(|| "bar".into());
+            let kind = match kind_str.to_lowercase().as_str() {
+                "line"    => ChartKind::Line,
+                "area"    => ChartKind::Area,
+                "scatter" => ChartKind::Scatter,
+                "pie"     => ChartKind::Pie,
+                "hist"    => ChartKind::Hist,
+                _         => ChartKind::Bar,
+            };
+
+            let cfg    = dict_opt(&args, 2);
+            let x_col  = cfg_str(&cfg, "x");
+            let y_col  = cfg_str(&cfg, "y").or_else(|| cfg_str(&cfg, "value"));
+            let y2_col = cfg_str(&cfg, "y2");
+            let lbl    = cfg_str(&cfg, "label").or_else(|| x_col.clone());
+            let titulo = cfg_str(&cfg, "titulo").or_else(|| cfg_str(&cfg, "title"));
+            let height = cfg_f32(&cfg, "height", 260.0);
+            let bins   = cfg_usize(&cfg, "bins", 10);
+
+            // Etiquetas del eje X / segmentos de pie
+            let labels: Vec<String> = rows_data.iter().map(|row| {
+                match (row, &lbl) {
+                    (EvalValue::Dict(m), Some(col)) =>
+                        m.get(col.as_str()).map(eval_val_to_str).unwrap_or_default(),
+                    _ => String::new(),
+                }
+            }).collect();
+
+            let extract_vals = |col: &str| -> Vec<f64> {
+                rows_data.iter().map(|row| match row {
+                    EvalValue::Dict(m) => m.get(col).and_then(|v| match v {
+                        EvalValue::Float(f) => Some(*f),
+                        EvalValue::Int(n)   => Some(*n as f64),
+                        EvalValue::Str(s)   => s.parse().ok(),
+                        _                   => None,
+                    }).unwrap_or(0.0),
+                    _ => 0.0,
+                }).collect()
+            };
+
+            // Valores X para scatter (columna x numérica)
+            let xs: Vec<f64> = if kind == ChartKind::Scatter {
+                x_col.as_deref().map(extract_vals).unwrap_or_default()
+            } else {
+                vec![]
+            };
+
+            // Series nombradas
+            let mut series: Vec<(String, Vec<f64>)> = Vec::new();
+            if let Some(col) = &y_col  { series.push((col.clone(), extract_vals(col))); }
+            if let Some(col) = &y2_col { series.push((col.clone(), extract_vals(col))); }
+
+            // Colores personalizados
+            let palette: Vec<[u8; 3]> = [
+                cfg_str(&cfg, "color").and_then(|s| parse_color(&s)),
+                cfg_str(&cfg, "color2").and_then(|s| parse_color(&s)),
+            ].into_iter().flatten().collect();
+
+            let chart = ChartConfig { kind, title: titulo, height, labels, series, xs, bins, palette };
+            push(Component::Chart(Box::new(chart)))
+        }
+
         other => Err(format!("gui.{other} no existe")),
     }
 }
@@ -329,4 +415,82 @@ fn parse_rgb_tag(s: &str) -> Option<[u8; 3]> {
         .filter_map(|x| x.parse().ok())
         .collect();
     if parts.len() == 3 { Some([parts[0], parts[1], parts[2]]) } else { None }
+}
+
+// ── Helpers para gui.table / gui.chart ──────────────────────────────────────
+
+type CfgMap = Option<std::collections::HashMap<String, EvalValue>>;
+
+fn dict_opt(args: &[EvalValue], i: usize) -> CfgMap {
+    match args.get(i) {
+        Some(EvalValue::Dict(m)) => Some(m.clone()),
+        _ => None,
+    }
+}
+
+fn cfg_str(cfg: &CfgMap, key: &str) -> Option<String> {
+    cfg.as_ref()?.get(key).and_then(|v| match v {
+        EvalValue::Str(s) => Some(s.clone()),
+        _ => None,
+    })
+}
+
+fn cfg_f32(cfg: &CfgMap, key: &str, default: f32) -> f32 {
+    cfg.as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(|v| match v {
+            EvalValue::Float(f) => Some(*f as f32),
+            EvalValue::Int(n)   => Some(*n as f32),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
+fn cfg_usize(cfg: &CfgMap, key: &str, default: usize) -> usize {
+    cfg.as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(|v| match v {
+            EvalValue::Int(n)   => Some(*n as usize),
+            EvalValue::Float(f) => Some(*f as usize),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
+fn cfg_list_str(cfg: &CfgMap, key: &str) -> Option<Vec<String>> {
+    cfg.as_ref()?.get(key).and_then(|v| match v {
+        EvalValue::List(l) => Some(l.iter().map(eval_val_to_str).collect()),
+        _ => None,
+    })
+}
+
+fn eval_val_to_str(v: &EvalValue) -> String {
+    match v {
+        EvalValue::Str(s)   => s.clone(),
+        EvalValue::Int(n)   => n.to_string(),
+        EvalValue::Float(f) => format!("{:.2}", f),
+        EvalValue::Bool(b)  => b.to_string(),
+        EvalValue::Null     => String::new(),
+        other               => format!("{other:?}"),
+    }
+}
+
+fn extract_table(
+    rows: &[EvalValue],
+    filter: Option<Vec<String>>,
+) -> (Vec<String>, Vec<Vec<String>>) {
+    let headers: Vec<String> = match rows.first() {
+        Some(EvalValue::Dict(m)) => {
+            let all: Vec<String> = m.keys().cloned().collect();
+            filter.unwrap_or(all)
+        }
+        _ => return (vec![], vec![]),
+    };
+    let data: Vec<Vec<String>> = rows.iter().map(|row| match row {
+        EvalValue::Dict(m) => headers.iter().map(|h| {
+            m.get(h.as_str()).map(eval_val_to_str).unwrap_or_default()
+        }).collect(),
+        _ => headers.iter().map(|_| String::new()).collect(),
+    }).collect();
+    (headers, data)
 }

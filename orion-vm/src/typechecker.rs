@@ -423,6 +423,7 @@ impl TypeChecker {
                 self.check_call_types(index);
             }
             Expr::AttrAccess { object, attr: _ } => self.check_call_types(object),
+            Expr::Ident(name) => { self.scope_get(name); }
             _ => {}
         }
     }
@@ -498,12 +499,19 @@ impl TypeChecker {
                 if op == "not" { Some("bool".into()) } else { self.infer_type(expr) }
             }
 
-            Expr::Call { callee, args: _, kwargs: _ } => {
+            Expr::Call { callee, args, kwargs: _ } => {
+                for arg in args { self.infer_type(arg); }
+                self.infer_type(callee);
                 if let Expr::Ident(fn_name) = callee.as_ref() {
                     self.fn_sigs.get(fn_name).and_then(|s| s.return_type.clone())
                 } else {
                     None
                 }
+            }
+
+            Expr::AttrAccess { object, attr: _ } => {
+                self.infer_type(object);
+                Some("any".into())
             }
 
             _ => None,

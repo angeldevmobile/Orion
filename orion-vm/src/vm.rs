@@ -490,6 +490,10 @@ impl VM {
                             .ok_or_else(|| format!("Atributo '{}' no encontrado en dict/módulo", attr))?;
                         self.value_stack.push(val);
                     }
+                    Value::Module(mod_name) => {
+                        let result = crate::modules::call(&mod_name, &attr, vec![])?;
+                        self.value_stack.push(eval_to_value(result));
+                    }
                     _ => return Err(format!("GetAttr '{}': no es una instancia ni módulo", attr)),
                 }
             }

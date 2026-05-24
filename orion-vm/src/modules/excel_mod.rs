@@ -1071,7 +1071,7 @@ fn write_styled_impl(
         }
     } // ws borrow termina aquí
 
-    // ── Hojas de gráfico embebidas ────────────────────────────────────────────
+    //    Hojas de gráfico embebidas                                             
     for (i, chart_cfg) in charts_cfgs.iter().enumerate() {
         let chart_sheet = cfg_str(chart_cfg, "sheet")
             .unwrap_or_else(|| format!("Gráfico {}", i + 1));
@@ -1570,7 +1570,7 @@ fn to_f64_val(v: &EvalValue) -> Option<f64> {
     }
 }
 
-// ─── excel.chart ─────────────────────────────────────────────────────────────
+//     excel.chart                                                              
 fn excel_chart_impl(
     path:   &str,
     rows:   Vec<EvalValue>,
@@ -1636,7 +1636,7 @@ fn excel_chart_impl(
     Ok(EvalValue::Str(path.to_string()))
 }
 
-// ─── Constructor de gráfico compartido ───────────────────────────────────────
+//     Constructor de gráfico compartido                                        
 // Usado por excel.chart y por el key `charts` de excel.write_styled.
 //
 // Parámetros:
@@ -1758,7 +1758,7 @@ fn build_chart_from_cfg(
     Ok(chart)
 }
 
-// ─── Helpers de chart ─────────────────────────────────────────────────────────
+//     Helpers de chart                                                          
 
 // Parsea el campo `goal` del config en (valor_f64, etiqueta)
 fn parse_goal(cfg: &HashMap<String, EvalValue>) -> Option<(f64, String)> {
@@ -1805,7 +1805,7 @@ fn chart_palette(name: &str) -> Vec<u32> {
     }
 }
 
-// ─── Generador de fórmulas Excel ─────────────────────────────────────────────
+//     Generador de fórmulas Excel                                              
 // Convierte un descriptor { _f, col, ... } en una string de fórmula Excel.
 //
 // excel_row     — fila actual en notación Excel (1-based)
