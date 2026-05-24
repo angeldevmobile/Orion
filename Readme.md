@@ -1278,6 +1278,25 @@ data  = excel.sort(data, "region")          -- solo una columna
 data  = excel.join(data, targets, "region") -- solo una clave
 stats = excel.stats(data, "sales")
 excel.write_styled("report.xlsx", data, { ... })
+
+-- Datos + gráfico en un solo archivo, una sola llamada
+excel.write_styled("report.xlsx", data, {
+    titulo:  "Q1 Sales Report",
+    stripe:  yes,
+    freeze:  yes,
+    charts: [
+        {
+            type:        "bars",
+            x:           "region",
+            y:           "sales_sum",
+            title:       "Ventas por Región",
+            palette:     "orion",
+            style:       "minimal",
+            show_values: yes,
+            sheet:       "Gráfico"
+        }
+    ]
+})
 ```
 
 ### Lo que viene — 9 features con API diseñada
@@ -1290,8 +1309,8 @@ excel.write_styled("report.xlsx", data, { ... })
 | 4 | `long` | `df.melt(...)` | ✅ Completo |
 | 5 | `dates` + `date_parts` | `pd.to_datetime(...)` | ✅ Completo |
 | 6 | `join` multi-clave | `merge(on=["a","b"])` | ✅ Completo |
-| 7 | `chart` | openpyxl charts | Próximo |
-| 8 | `formula` | `ws["A1"] = "=SUM(...)"` | Próximo |
+| 7 | `chart` | openpyxl charts | ✅ Completo |
+| 8 | `formula` | `ws["A1"] = "=SUM(...)"` | ✅ Completo |
 | 9 | `sheet` builder | openpyxl cell-level | Próximo |
 
 ---

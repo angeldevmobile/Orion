@@ -45,6 +45,7 @@ pub mod insight_mod;
 // Módulos de datos
 pub mod csv_mod;
 pub mod excel_mod;
+pub mod excel_f_mod;
 pub mod regex_mod;
 pub mod table_mod;
 pub mod stat_mod;
@@ -103,6 +104,7 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         // Datos
         "csv"      => csv_mod::call(function, args),
         "excel"    => excel_mod::call(function, args),
+        "excel_f"  => excel_f_mod::call(function, args),
         "regex"    => regex_mod::call(function, args),
         "table" | "df" => table_mod::call(function, args),
         "stat"         => stat_mod::call(function, args),
@@ -163,7 +165,7 @@ pub fn is_known_module(name: &str) -> bool {
         "ai" | "crypto" | "matrix" | "quantum" |
         "cosmos" | "timewarp" | "vision" | "insight" |
         // Datos
-        "csv" | "excel" | "regex" | "table" | "df" | "stat" | "serie" | "frame" | "search" |
+        "csv" | "excel" | "excel_f" | "regex" | "table" | "df" | "stat" | "serie" | "frame" | "search" |
         // Interfaces
         "gui" | "tui" |
         // Backend core

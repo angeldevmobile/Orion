@@ -2,7 +2,9 @@ use crate::eval_value::EvalValue;
 use std::collections::HashMap;
 use chrono::{Datelike, NaiveDate};
 use calamine::{Reader, open_workbook_auto, Data};
-use rust_xlsxwriter::{Workbook, Format, Color, Formula};
+use rust_xlsxwriter::{Workbook, Format, Color, Formula,
+    Chart, ChartType, ChartFormat, ChartSolidFill,
+    ChartLine, ChartLineDashType, ChartLegendPosition};
 use rust_xlsxwriter::conditional_format::{
     ConditionalFormatCell, ConditionalFormatCellRule,
     ConditionalFormatFormula,
@@ -677,6 +679,88 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
+        // F-9: sheet(path) | sheet(path, name) → { name, rows, cols, headers, data }
+        // Lectura completa de una hoja: metadata + datos en un solo dict.
+        "sheet" => {
+            let path = str_arg("sheet", &args, 0)?;
+            let sheet_name: Option<String> = args.get(1)
+                .and_then(|v| if let EvalValue::Str(s) = v { Some(s.clone()) } else { None });
+
+            let mut wb: calamine::Sheets<std::io::BufReader<std::fs::File>> =
+                open_workbook_auto(&path)
+                    .map_err(|e| format!("excel.sheet: no se pudo abrir '{}': {}", path, e))?;
+
+            let target = match sheet_name {
+                Some(n) => n,
+                None => wb.sheet_names().first().cloned()
+                    .ok_or_else(|| "excel.sheet: el archivo no tiene hojas".to_string())?,
+            };
+
+            let range = wb.worksheet_range(&target)
+                .map_err(|e| format!("excel.sheet: hoja '{}' no encontrada: {}", target, e))?;
+
+            let mut rows_iter = range.rows();
+
+            let headers: Vec<String> = match rows_iter.next() {
+                Some(row) => row.iter().map(|c| cell_to_string(c)).collect(),
+                None => {
+                    let mut m = HashMap::new();
+                    m.insert("name".into(),    EvalValue::Str(target));
+                    m.insert("rows".into(),    EvalValue::Int(0));
+                    m.insert("cols".into(),    EvalValue::Int(0));
+                    m.insert("headers".into(), EvalValue::List(vec![]));
+                    m.insert("data".into(),    EvalValue::List(vec![]));
+                    return Ok(EvalValue::Dict(m));
+                }
+            };
+
+            let mut data: Vec<EvalValue> = Vec::new();
+            for row in rows_iter {
+                let mut map = HashMap::new();
+                for (i, cell) in row.iter().enumerate() {
+                    let key = headers.get(i).cloned()
+                        .unwrap_or_else(|| format!("col_{}", i));
+                    map.insert(key, cell_to_eval(cell));
+                }
+                data.push(EvalValue::Dict(map));
+            }
+
+            let nrows   = data.len() as i64;
+            let ncols   = headers.len() as i64;
+            let hdrs_v: Vec<EvalValue> = headers.iter()
+                .map(|h| EvalValue::Str(h.clone()))
+                .collect();
+
+            let mut m = HashMap::new();
+            m.insert("name".into(),    EvalValue::Str(target));
+            m.insert("rows".into(),    EvalValue::Int(nrows));
+            m.insert("cols".into(),    EvalValue::Int(ncols));
+            m.insert("headers".into(), EvalValue::List(hdrs_v));
+            m.insert("data".into(),    EvalValue::List(data));
+            Ok(EvalValue::Dict(m))
+        }
+
+        // f → retorna el sub-módulo formula builder (excel.f.pct, .ratio, .rank, ...)
+        "f" => Ok(EvalValue::Module("excel_f".to_string())),
+
+        // chart(path, datos, config) → genera xlsx con gráfico
+        // config: { type, x, y, title, x_title, y_title,
+        //           palette, colors, sheet, data_sheet,
+        //           stacked, smooth, show_values, goal,
+        //           width, height }
+        "chart" => {
+            if args.len() < 2 {
+                return Err("excel.chart requiere (path, datos, config?)".into());
+            }
+            let path   = str_arg("chart", &args, 0)?;
+            let rows   = list_arg("chart", &args, 1)?;
+            let config = match args.get(2) {
+                Some(EvalValue::Dict(m)) => m.clone(),
+                _ => HashMap::new(),
+            };
+            excel_chart_impl(&path, rows, config)
+        }
+
         f => Err(format!("excel.{}: función no encontrada", f)),
     }
 }
@@ -781,6 +865,37 @@ fn write_styled_impl(
         return Err("excel.write_styled: el primer dict está vacío".into());
     }
 
+    // Columnas de fórmulas vivas: { "col_name": descriptor_dict, ... }
+    let formulas: Vec<(String, HashMap<String, EvalValue>)> = {
+        let mut v: Vec<(String, HashMap<String, EvalValue>)> = match config.get("formulas") {
+            Some(EvalValue::Dict(m)) => m.iter().filter_map(|(name, val)| {
+                if let EvalValue::Dict(desc) = val {
+                    if desc.contains_key("_f") {
+                        return Some((name.clone(), desc.clone()));
+                    }
+                }
+                None
+            }).collect(),
+            _ => vec![],
+        };
+        v.sort_by(|a, b| a.0.cmp(&b.0)); // orden determinístico
+        v
+    };
+
+    // Gráficos embebidos: lista de configs de gráfico que referenciarán la hoja de datos
+    let charts_cfgs: Vec<HashMap<String, EvalValue>> = match config.get("charts") {
+        Some(EvalValue::List(l)) => l.iter().filter_map(|v| {
+            if let EvalValue::Dict(m) = v { Some(m.clone()) } else { None }
+        }).collect(),
+        Some(EvalValue::Dict(m)) => vec![m.clone()],
+        _ => vec![],
+    };
+
+    // Posiciones de filas — las calculamos antes del bloque para usarlas al crear charts
+    let header_row_pos: u32 = if titulo.is_some() { 1 } else { 0 };
+    let data_start_pos: u32 = header_row_pos + 1;
+    let data_end_pos:   u32 = data_start_pos + rows.len() as u32 - 1;
+
     let mut wb = Workbook::new();
 
     // Build per-column base formats ahead of time
@@ -834,8 +949,19 @@ fn write_styled_impl(
             ws.write_with_format(cur, col as u16, h.as_str(), &hdr_fmt)
                 .map_err(|e| format!("excel.write_styled header: {}", e))?;
         }
+        // Encabezados de columnas de fórmula
+        let formula_col_start = headers.len() as u16;
+        for (fi, (fname, _)) in formulas.iter().enumerate() {
+            ws.write_with_format(cur, formula_col_start + fi as u16, fname.as_str(), &hdr_fmt)
+                .map_err(|e| format!("excel.write_styled formula header: {}", e))?;
+        }
         cur += 1;
         let data_start = cur;
+
+        // Mapa col_name → índice de columna (para generar fórmulas)
+        let col_map: HashMap<String, u16> = headers.iter().enumerate()
+            .map(|(i, h)| (h.clone(), i as u16))
+            .collect();
 
         //   Filas de datos
         let mut totals: HashMap<String, f64> = HashMap::new();
@@ -847,6 +973,23 @@ fn write_styled_impl(
                     if totales_cols.contains(key) {
                         *totals.entry(key.clone()).or_insert(0.0) +=
                             to_f64_val(v).unwrap_or(0.0);
+                    }
+                }
+                // Fórmulas vivas por fila
+                if !formulas.is_empty() {
+                    let excel_row = cur + 1; // xlsxwriter es 0-based; Excel es 1-based
+                    let ds = data_start + 1; // primera fila de datos en Excel (1-based)
+                    // data_end_pos ya está calculado fuera del bloque
+                    let de = data_end_pos + 1;
+                    for (fi, (_, desc)) in formulas.iter().enumerate() {
+                        match generate_formula_str(desc, excel_row, &col_map, ds, de) {
+                            Ok(fstr) => {
+                                ws.write_formula(cur, formula_col_start + fi as u16,
+                                    Formula::new(&fstr))
+                                    .map_err(|e| format!("excel.write_styled fórmula: {}", e))?;
+                            }
+                            Err(e) => return Err(e),
+                        }
                     }
                 }
                 cur += 1;
@@ -927,6 +1070,25 @@ fn write_styled_impl(
                 .map_err(|e| format!("excel.write_styled width: {}", e))?;
         }
     } // ws borrow termina aquí
+
+    // ── Hojas de gráfico embebidas ────────────────────────────────────────────
+    for (i, chart_cfg) in charts_cfgs.iter().enumerate() {
+        let chart_sheet = cfg_str(chart_cfg, "sheet")
+            .unwrap_or_else(|| format!("Gráfico {}", i + 1));
+        let mut chart = build_chart_from_cfg(
+            chart_cfg,
+            &sheet_name,
+            &headers,
+            data_start_pos,
+            data_end_pos,
+            None,
+        )?;
+        let ws_c = wb.add_worksheet();
+        ws_c.set_name(&chart_sheet)
+            .map_err(|e| format!("excel.write_styled chart sheet: {}", e))?;
+        ws_c.insert_chart(0, 0, &mut chart)
+            .map_err(|e| format!("excel.write_styled chart insertar: {}", e))?;
+    }
 
     wb.save(path).map_err(|e| format!("excel.write_styled: error guardando '{}': {}", path, e))?;
     Ok(EvalValue::Null)
@@ -1405,6 +1567,358 @@ fn to_f64_val(v: &EvalValue) -> Option<f64> {
         EvalValue::Float(f) => Some(*f),
         EvalValue::Str(s)   => s.parse::<f64>().ok(),
         _                   => None,
+    }
+}
+
+// ─── excel.chart ─────────────────────────────────────────────────────────────
+fn excel_chart_impl(
+    path:   &str,
+    rows:   Vec<EvalValue>,
+    config: HashMap<String, EvalValue>,
+) -> Result<EvalValue, String> {
+    if rows.is_empty() {
+        return Err("excel.chart: datos vacíos".into());
+    }
+
+    let data_sht  = cfg_str(&config, "data_sheet").unwrap_or_else(|| "Datos".to_string());
+    let chart_sht = cfg_str(&config, "sheet").unwrap_or_else(|| "Gráfico".to_string());
+
+    let goal = parse_goal(&config);
+
+    let headers: Vec<String> = match rows.first() {
+        Some(EvalValue::Dict(m)) => m.keys().cloned().collect(),
+        _ => return Err("excel.chart: cada elemento debe ser un dict".into()),
+    };
+
+    let goal_col_idx = headers.len() as u16;
+    let nrows        = rows.len() as u32;
+    let first_row: u32 = 1;
+    let last_row:  u32 = nrows;
+
+    let mut wb = Workbook::new();
+
+    {
+        let ws = wb.add_worksheet();
+        ws.set_name(&data_sht).map_err(|e| format!("excel.chart: {}", e))?;
+
+        for (ci, h) in headers.iter().enumerate() {
+            ws.write(0, ci as u16, h.as_str())
+                .map_err(|e| format!("excel.chart encabezado: {}", e))?;
+        }
+        if let Some((_, ref lbl)) = goal {
+            ws.write(0, goal_col_idx, lbl.as_str())
+                .map_err(|e| format!("excel.chart encabezado meta: {}", e))?;
+        }
+        for (ri, row) in rows.iter().enumerate() {
+            let cur = (ri as u32) + 1;
+            if let EvalValue::Dict(m) = row {
+                for (ci, key) in headers.iter().enumerate() {
+                    write_cell(ws, cur, ci as u16, m.get(key).unwrap_or(&EvalValue::Null))?;
+                }
+                if let Some((gv, _)) = goal {
+                    ws.write(cur, goal_col_idx, gv)
+                        .map_err(|e| format!("excel.chart valor meta: {}", e))?;
+                }
+            }
+        }
+    }
+
+    let goal_ref = goal.as_ref().map(|_| goal_col_idx);
+    let mut chart = build_chart_from_cfg(&config, &data_sht, &headers, first_row, last_row, goal_ref)?;
+
+    {
+        let ws_c = wb.add_worksheet();
+        ws_c.set_name(&chart_sht).map_err(|e| format!("excel.chart hoja: {}", e))?;
+        ws_c.insert_chart(0, 0, &mut chart).map_err(|e| format!("excel.chart insertar: {}", e))?;
+    }
+
+    wb.save(path).map_err(|e| format!("excel.chart guardar '{}': {}", path, e))?;
+    Ok(EvalValue::Str(path.to_string()))
+}
+
+// ─── Constructor de gráfico compartido ───────────────────────────────────────
+// Usado por excel.chart y por el key `charts` de excel.write_styled.
+//
+// Parámetros:
+//   cfg          — config del gráfico (type, x, y, title, palette, style, ...)
+//   data_sheet   — nombre de la hoja donde están los datos
+//   headers      — nombres de columnas en orden
+//   first_row    — primera fila de datos (1-based, fila 0 = encabezados)
+//   last_row     — última fila de datos  (inclusive)
+//   goal_col_idx — Some(col) si hay línea de meta ya escrita en esa columna
+fn build_chart_from_cfg(
+    cfg:          &HashMap<String, EvalValue>,
+    data_sheet:   &str,
+    headers:      &[String],
+    first_row:    u32,
+    last_row:     u32,
+    goal_col_idx: Option<u16>,
+) -> Result<Chart, String> {
+    let type_str = cfg_str(cfg, "type").unwrap_or_else(|| "bars".to_string());
+    let x_col    = cfg_str(cfg, "x").ok_or("excel.chart: falta campo 'x'")?;
+    let y_cols: Vec<String> = match cfg.get("y") {
+        Some(EvalValue::List(l)) => l.iter().map(|v| to_str_val(v)).collect(),
+        Some(EvalValue::Str(s))  => vec![s.clone()],
+        _ => return Err("excel.chart: falta campo 'y'".into()),
+    };
+    if y_cols.is_empty() {
+        return Err("excel.chart: 'y' no puede estar vacío".into());
+    }
+
+    let title     = cfg_str(cfg, "title").unwrap_or_default();
+    let x_title   = cfg_str(cfg, "x_title").unwrap_or_default();
+    let y_title   = cfg_str(cfg, "y_title").unwrap_or_default();
+    let stacked   = cfg_bool(cfg, "stacked");
+    let smooth    = cfg_bool(cfg, "smooth");
+    let show_val  = cfg_bool(cfg, "show_values");
+    let style_str = cfg_str(cfg, "style").unwrap_or_else(|| "minimal".to_string());
+
+    let width_px: u32 = match cfg.get("width") {
+        Some(EvalValue::Int(n)) => *n as u32, _ => 640,
+    };
+    let height_px: u32 = match cfg.get("height") {
+        Some(EvalValue::Int(n)) => *n as u32, _ => 400,
+    };
+
+    let palette_name = cfg_str(cfg, "palette").unwrap_or_else(|| "orion".to_string());
+    let custom_colors: Vec<u32> = match cfg.get("colors") {
+        Some(EvalValue::List(l)) => l.iter().filter_map(|v| {
+            if let EvalValue::Str(s) = v { parse_hex_color(s) } else { None }
+        }).collect(),
+        _ => vec![],
+    };
+    let colors = if !custom_colors.is_empty() { custom_colors } else { chart_palette(&palette_name) };
+
+    // Índices de columnas
+    let x_idx = headers.iter().position(|h| h == &x_col)
+        .ok_or_else(|| format!("excel.chart: columna x '{}' no encontrada", x_col))? as u16;
+    let y_indices: Vec<u16> = y_cols.iter().map(|col| {
+        headers.iter().position(|h| h == col)
+            .ok_or_else(|| format!("excel.chart: columna y '{}' no encontrada", col))
+            .map(|i| i as u16)
+    }).collect::<Result<Vec<_>, _>>()?;
+
+    // Tipo de gráfico
+    let ctype = match type_str.as_str() {
+        "bars"    | "column"   | "columnas" => if stacked { ChartType::ColumnStacked } else { ChartType::Column },
+        "hbars"   | "bar"      | "barras"   => if stacked { ChartType::BarStacked    } else { ChartType::Bar    },
+        "lines"   | "line"     | "lineas"   => if stacked { ChartType::LineStacked   } else { ChartType::Line   },
+        "area"                              => if stacked { ChartType::AreaStacked   } else { ChartType::Area   },
+        "pie"     | "pastel"                => ChartType::Pie,
+        "donut"   | "doughnut" | "dona"     => ChartType::Doughnut,
+        "scatter" | "puntos"                => ChartType::Scatter,
+        "radar"                             => ChartType::Radar,
+        _                                   => ChartType::Column,
+    };
+
+    let mut chart = Chart::new(ctype);
+
+    if !title.is_empty()   { chart.title().set_name(&title); }
+    if !x_title.is_empty() { chart.x_axis().set_name(&x_title); }
+    if !y_title.is_empty() { chart.y_axis().set_name(&y_title); }
+
+    // Series de datos
+    for (si, &y_idx) in y_indices.iter().enumerate() {
+        let color = colors.get(si % colors.len()).copied().unwrap_or(0x2D5F8A);
+        let series = chart.add_series()
+            .set_categories((data_sheet, first_row, x_idx, last_row, x_idx))
+            .set_values((data_sheet, first_row, y_idx, last_row, y_idx))
+            .set_name(y_cols[si].as_str());
+        series.set_format(
+            ChartFormat::new().set_solid_fill(ChartSolidFill::new().set_color(Color::RGB(color)))
+        );
+        if smooth  { series.set_smooth(true); }
+        if show_val { series.set_data_label(rust_xlsxwriter::ChartDataLabel::new().show_value()); }
+    }
+
+    // Línea de meta — línea roja punteada referenciando la columna goal ya escrita
+    if let Some(gcol) = goal_col_idx {
+        let goal_lbl = match cfg.get("goal") {
+            Some(EvalValue::Dict(m)) => cfg_str(m, "label").unwrap_or_else(|| "Meta".to_string()),
+            _ => "Meta".to_string(),
+        };
+        chart.add_series()
+            .set_categories((data_sheet, first_row, x_idx,  last_row, x_idx))
+            .set_values(    (data_sheet, first_row, gcol, last_row, gcol))
+            .set_name(goal_lbl.as_str())
+            .set_format(
+                ChartFormat::new().set_line(
+                    ChartLine::new()
+                        .set_color(Color::RGB(0xE74C3C))
+                        .set_dash_type(ChartLineDashType::Dash)
+                )
+            );
+    }
+
+    // Estilo Excel integrado (1–48) y dimensiones
+    chart.set_style(chart_style_num(&style_str));
+    chart.set_width(width_px).set_height(height_px);
+    chart.legend().set_position(ChartLegendPosition::Bottom);
+
+    Ok(chart)
+}
+
+// ─── Helpers de chart ─────────────────────────────────────────────────────────
+
+// Parsea el campo `goal` del config en (valor_f64, etiqueta)
+fn parse_goal(cfg: &HashMap<String, EvalValue>) -> Option<(f64, String)> {
+    match cfg.get("goal") {
+        Some(EvalValue::Dict(m)) => {
+            let lbl = cfg_str(m, "label").unwrap_or_else(|| "Meta".to_string());
+            match m.get("value") {
+                Some(EvalValue::Float(f)) => Some((*f, lbl)),
+                Some(EvalValue::Int(i))   => Some((*i as f64, lbl)),
+                _ => None,
+            }
+        }
+        Some(EvalValue::Float(f)) => Some((*f, "Meta".to_string())),
+        Some(EvalValue::Int(i))   => Some((*i as f64, "Meta".to_string())),
+        _ => None,
+    }
+}
+
+// Mapea nombres de estilo a números de estilo Excel integrado (1–48)
+fn chart_style_num(name: &str) -> u8 {
+    match name {
+        "minimal"    | "clean"    => 2,
+        "light"                   => 3,
+        "neutral"                 => 4,
+        "corporate"               => 26,
+        "dark"                    => 8,
+        "vivid"      | "colorful" => 34,
+        "monochrome"              => 20,
+        _                         => 2,
+    }
+}
+
+// Paletas de colores predefinidas — 6 colores por paleta
+fn chart_palette(name: &str) -> Vec<u32> {
+    match name {
+        "orion"     => vec![0x2D5F8A, 0xE67E22, 0x27AE60, 0x8E44AD, 0xE74C3C, 0x1ABC9C],
+        "ocean"     => vec![0x023E8A, 0x0077B6, 0x00B4D8, 0x48CAE4, 0x90E0EF, 0x0096C7],
+        "vivid"     => vec![0xFF6B6B, 0xFFBF00, 0x4ECDC4, 0x45B7D1, 0xFF9F43, 0x96CEB4],
+        "corporate" => vec![0x003F5C, 0x2F4B7C, 0x665191, 0xA05195, 0xD45087, 0xF95D6A],
+        "sunset"    => vec![0xF72585, 0xB5179E, 0x7209B7, 0x3A0CA3, 0x4361EE, 0x4CC9F0],
+        "pastel"    => vec![0xFFB3BA, 0xFFDFBA, 0xBAFFBA, 0xBAE1FF, 0xD4BAFF, 0xFFBAD2],
+        "dark"      => vec![0x2C3E50, 0xE74C3C, 0x3498DB, 0x2ECC71, 0xF39C12, 0x9B59B6],
+        _           => vec![0x2D5F8A, 0xE67E22, 0x27AE60, 0x8E44AD, 0xE74C3C, 0x1ABC9C],
+    }
+}
+
+// ─── Generador de fórmulas Excel ─────────────────────────────────────────────
+// Convierte un descriptor { _f, col, ... } en una string de fórmula Excel.
+//
+// excel_row     — fila actual en notación Excel (1-based)
+// col_map       — nombre de columna → índice de columna (0-based xlsxwriter)
+// data_start    — primera fila de datos en Excel (1-based)
+// data_end      — última fila de datos en Excel  (1-based)
+fn generate_formula_str(
+    desc:       &HashMap<String, EvalValue>,
+    excel_row:  u32,
+    col_map:    &HashMap<String, u16>,
+    data_start: u32,
+    data_end:   u32,
+) -> Result<String, String> {
+    let f_type = match desc.get("_f") {
+        Some(EvalValue::Str(s)) => s.as_str(),
+        _ => return Err("Descriptor de fórmula inválido: falta '_f'".into()),
+    };
+
+    // Resuelve nombre de columna → letra Excel
+    let col_letter = |key: &str| -> Result<String, String> {
+        let name = match desc.get(key) {
+            Some(EvalValue::Str(s)) => s.clone(),
+            _ => return Err(format!("Fórmula '{}': campo '{}' requerido", f_type, key)),
+        };
+        let idx = col_map.get(&name)
+            .ok_or_else(|| format!("Fórmula '{}': columna '{}' no encontrada", f_type, name))?;
+        Ok(col_to_letter(*idx))
+    };
+
+    let get_num = |key: &str| -> Option<f64> {
+        match desc.get(key) {
+            Some(EvalValue::Float(f)) => Some(*f),
+            Some(EvalValue::Int(i))   => Some(*i as f64),
+            _ => None,
+        }
+    };
+
+    // Formatea un EvalValue como literal Excel (string con comillas, número, bool)
+    let lit = |v: &EvalValue| -> String {
+        match v {
+            EvalValue::Str(s)        => format!("\"{}\"", s.replace('"', "\"\"")),
+            EvalValue::Int(i)        => i.to_string(),
+            EvalValue::Float(f)      => format!("{}", f),
+            EvalValue::Bool(true)    => "TRUE".into(),
+            EvalValue::Bool(false)   => "FALSE".into(),
+            _                        => "\"\"".into(),
+        }
+    };
+
+    match f_type {
+        // =B6*0.05
+        "pct" => {
+            let cl  = col_letter("col")?;
+            let pct = get_num("val").unwrap_or(100.0);
+            Ok(format!("={}{}*{}", cl, excel_row, pct / 100.0))
+        }
+        // =B6/C6
+        "ratio" => {
+            let cl1 = col_letter("col")?;
+            let cl2 = col_letter("col2")?;
+            Ok(format!("={}{}/{}{}", cl1, excel_row, cl2, excel_row))
+        }
+        // =B6-C6
+        "diff" => {
+            let cl1 = col_letter("col")?;
+            let cl2 = col_letter("col2")?;
+            Ok(format!("={}{}-{}{}", cl1, excel_row, cl2, excel_row))
+        }
+        // =B6*1.19
+        "mul" => {
+            let cl     = col_letter("col")?;
+            let factor = get_num("val").unwrap_or(1.0);
+            Ok(format!("={}{}*{}", cl, excel_row, factor))
+        }
+        // =SUM($B$2:$B$10)  — igual en todas las filas
+        "sum" => {
+            let cl = col_letter("col")?;
+            Ok(format!("=SUM(${0}${1}:${0}${2})", cl, data_start, data_end))
+        }
+        // =AVERAGE($B$2:$B$10)
+        "avg" => {
+            let cl = col_letter("col")?;
+            Ok(format!("=AVERAGE(${0}${1}:${0}${2})", cl, data_start, data_end))
+        }
+        // =SUM($B$2:B6)  — se expande fila a fila
+        "cumulative" => {
+            let cl = col_letter("col")?;
+            Ok(format!("=SUM(${0}${1}:{0}{2})", cl, data_start, excel_row))
+        }
+        // =RANK(B6,$B$2:$B$10,0)
+        "rank" => {
+            let cl    = col_letter("col")?;
+            let order = match desc.get("dir") {
+                Some(EvalValue::Str(s)) if s == "asc" => 1,
+                _ => 0,
+            };
+            Ok(format!("=RANK({0}{1},${0}${2}:${0}${3},{4})",
+                cl, excel_row, data_start, data_end, order))
+        }
+        // =IF(B6>80000,"A","B")
+        "if" => {
+            let cl   = col_letter("col")?;
+            let op   = match desc.get("op") {
+                Some(EvalValue::Str(s)) => s.replace("==", "=").replace("!=", "<>"),
+                _ => ">".into(),
+            };
+            let val   = desc.get("val").unwrap_or(&EvalValue::Null);
+            let then  = desc.get("then").unwrap_or(&EvalValue::Null);
+            let else_ = desc.get("else_").unwrap_or(&EvalValue::Null);
+            Ok(format!("=IF({}{}{}{},{},{})",
+                cl, excel_row, op, lit(val), lit(then), lit(else_)))
+        }
+        t => Err(format!("Tipo de fórmula '{}' no reconocido internamente", t)),
     }
 }
 
