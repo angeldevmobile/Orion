@@ -436,7 +436,6 @@ fn keyword_or_ident(word: &str) -> TokenKind {
         "break"    => TokenKind::Break,
         "continue" => TokenKind::Continue,
         "fn"       => TokenKind::Fn,
-        "class"    => TokenKind::Class,
         "const"    => TokenKind::Const,
         "for"      => TokenKind::For,
         "in"       => TokenKind::In,
@@ -457,7 +456,6 @@ fn keyword_or_ident(word: &str) -> TokenKind {
         "using"     => TokenKind::Using,
         "is"        => TokenKind::Is,
         "on_create" => TokenKind::OnCreate,
-        "on_event"  => TokenKind::OnEvent,
         "on_error"  => TokenKind::OnError,
         "me"        => TokenKind::Me,
         "super"     => TokenKind::Super,
@@ -465,9 +463,6 @@ fn keyword_or_ident(word: &str) -> TokenKind {
         "spawn"    => TokenKind::Spawn,
         "async"    => TokenKind::Async,
         "await"    => TokenKind::Await,
-        "channel"  => TokenKind::Channel,
-        "parallel" => TokenKind::Parallel,
-        "lock"     => TokenKind::Lock,
 
         "ask"    => TokenKind::Ask,
         "read"   => TokenKind::Read,
@@ -476,20 +471,12 @@ fn keyword_or_ident(word: &str) -> TokenKind {
         "append" => TokenKind::Append,
 
         "serve"   => TokenKind::Serve,
-        "route"   => TokenKind::Route,
         "with"    => TokenKind::With,
         "choices" => TokenKind::Choices,
 
         "think"   => TokenKind::Think,
         "learn"   => TokenKind::Learn,
         "sense"   => TokenKind::Sense,
-
-        "sync"    => TokenKind::Sync,
-        "send"    => TokenKind::Send,
-        "receive" => TokenKind::Receive,
-        "pipe"    => TokenKind::Pipe,
-        "task"    => TokenKind::Task,
-        "stream"  => TokenKind::Stream,
 
         _ => TokenKind::Ident(word.to_string()),
     }
@@ -545,6 +532,26 @@ mod tests {
         assert_eq!(kinds("shape"),     vec![TokenKind::Shape,    TokenKind::Eof]);
         assert_eq!(kinds("think"),     vec![TokenKind::Think,    TokenKind::Eof]);
         assert_eq!(kinds("on_create"), vec![TokenKind::OnCreate, TokenKind::Eof]);
+    }
+
+    /// Los 12 keywords des-reservados (duplicaban módulos/features) ahora son
+    /// identificadores válidos: el usuario puede nombrar variables `stream`,
+    /// `task`, `pipe`, `route`, etc. `super` y `on_error` siguen reservados.
+    #[test]
+    fn test_dereserved_are_identifiers() {
+        for name in [
+            "class", "on_event", "channel", "parallel", "lock", "route",
+            "sync", "send", "receive", "pipe", "task", "stream",
+        ] {
+            assert_eq!(
+                kinds(name),
+                vec![TokenKind::Ident(name.to_string()), TokenKind::Eof],
+                "'{name}' debería ser identificador, no keyword"
+            );
+        }
+        // super y on_error siguen siendo keywords reservados (decisión de diseño pendiente)
+        assert_eq!(kinds("super"),    vec![TokenKind::Super,   TokenKind::Eof]);
+        assert_eq!(kinds("on_error"), vec![TokenKind::OnError, TokenKind::Eof]);
     }
 
     #[test]

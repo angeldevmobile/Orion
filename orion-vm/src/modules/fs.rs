@@ -191,14 +191,6 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str(base64_encode(&bytes)))
         }
 
-        // mkdir(path) → crea directorio (y padres)
-        "mkdir" => {
-            let path = one_str("mkdir", args)?;
-            std_fs::create_dir_all(&path)
-                .map_err(|e| format!("fs.mkdir: {}", e))?;
-            Ok(EvalValue::Bool(true))
-        }
-
         f => Err(format!("fs.{}() no existe", f)),
     }
 }

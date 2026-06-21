@@ -312,13 +312,6 @@ impl Formatter {
                 self.line("}");
             }
 
-            Stmt::Route { method, path, body, .. } => {
-                self.ind(); self.push("route \""); self.push(method);
-                self.push(" "); self.push(path); self.push("\" {"); self.nl();
-                self.indent += 1; self.write_body(body); self.indent -= 1;
-                self.line("}");
-            }
-
             Stmt::Think { prompt, .. } => {
                 self.ind(); self.push("think "); self.push(&fmt_expr(prompt)); self.nl();
             }

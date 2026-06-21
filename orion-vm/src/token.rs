@@ -16,7 +16,6 @@ pub enum TokenKind {
     Break,
     Continue,
     Fn,
-    Class,
     Const,
     For,
     In,
@@ -48,7 +47,6 @@ pub enum TokenKind {
     Using,
     Is,
     OnCreate,
-    OnEvent,
     OnError,
     Me,
     Super,
@@ -57,9 +55,6 @@ pub enum TokenKind {
     Spawn,
     Async,
     Await,
-    Channel,
-    Parallel,
-    Lock,
 
     // Keywords – I/O
     Ask,
@@ -70,7 +65,6 @@ pub enum TokenKind {
 
     // Keywords – server/net
     Serve,
-    Route,
     With,
     Choices,
 
@@ -78,14 +72,6 @@ pub enum TokenKind {
     Think,
     Learn,
     Sense,
-
-    // Keywords – communication
-    Sync,
-    Send,
-    Receive,
-    Pipe,
-    Task,
-    Stream,
 
     // Identifier
     Ident(String),
