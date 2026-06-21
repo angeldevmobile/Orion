@@ -1,0 +1,85 @@
+name: Release Binaries
+
+# Compila el binario `orion` en los 3 SO nativos y los publica como artefactos
+# listos para colocar en vscode-orion/orion-lang/bin/<platform>-<arch>/.
+#
+# Disparo manual (Actions → Release Binaries → Run workflow) o al crear un tag vX.Y.Z.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.target_dir }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target_dir: win32-x64
+            bin_name: orion.exe
+          - os: ubuntu-latest
+            target_dir: linux-x64
+            bin_name: orion
+          - os: macos-14            # Apple Silicon (arm64)
+            target_dir: darwin-arm64
+            bin_name: orion
+
+    defaults:
+      run:
+        working-directory: orion-vm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Dependencias de sistema (C nativo: libssh2, libffi, openssl, X11 para egui) ──
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libffi-dev libssl-dev libssh2-1-dev \
+            libx11-dev libxcb-composite0-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev pkg-config
+
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libssh2 libffi openssl@3 pkg-config
+
+      # Windows: rusqlite usa SQLite bundled (MSVC), egui no necesita X11.
+      # Si ssh2/openssl-sys fallan, descomenta vcpkg:
+      # - name: Setup vcpkg (Windows)
+      #   if: runner.os == 'Windows'
+      #   run: vcpkg install openssl:x64-windows-static-md
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            orion-vm/target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('orion-vm/Cargo.lock') }}
+
+      - name: Build release
+        run: cargo build --release --bin orion
+
+      - name: Smoke test (--version)
+        run: ./target/release/${{ matrix.bin_name }} --version
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: orion-${{ matrix.target_dir }}
+          path: orion-vm/target/release/${{ matrix.bin_name }}
+          if-no-files-found: error
