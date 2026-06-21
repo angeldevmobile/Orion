@@ -107,7 +107,7 @@ fn mark_value(val: &Value, marked: &mut HashSet<*const RefCell<InstanceData>>) {
             }
         }
         Value::Closure { env, .. } => {
-            for v in env.values() {
+            for v in env.borrow().values() {
                 mark_value(v, marked);
             }
         }

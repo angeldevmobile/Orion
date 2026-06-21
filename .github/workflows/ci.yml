@@ -36,3 +36,9 @@ jobs:
 
       - name: cargo test (regression)
         run: cargo test --test regression
+
+      - name: cargo test (differential VM-JIT)
+        run: cargo test --test differential
+
+      - name: cargo test (typechecker)
+        run: cargo test --test typecheck

@@ -48,8 +48,10 @@ pub enum Value {
     List(Vec<Value>),
     Dict(IndexMap<String, Value>),
     Instance(Rc<RefCell<InstanceData>>),
-    /// Closure: función + variables capturadas del scope donde fue creada
-    Closure { fn_name: String, env: IndexMap<String, Value> },
+    /// Closure: función + variables capturadas del scope donde fue creada.
+    /// El entorno es compartido (Rc<RefCell>) para que las mutaciones de las
+    /// variables capturadas persistan entre invocaciones del mismo closure.
+    Closure { fn_name: String, env: Rc<RefCell<IndexMap<String, Value>>> },
     /// Handle a una tarea asíncrona en curso
     Task(Arc<Mutex<Option<Result<SendValue, String>>>>),
     /// Puntero opaco de C FFI (dirección de memoria como u64)

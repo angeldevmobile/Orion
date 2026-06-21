@@ -1,7 +1,7 @@
 //! API pública del módulo JIT de Orion — Fase 5.
 //!
 //! Uso recomendado (programa completo):
-//! ```rust
+//! ```ignore
 //! match jit::run_program(&bc) {
 //!     Ok(true)  => { /* JIT ejecutó */ }
 //!     Ok(false) => { /* fallback al intérprete */ }

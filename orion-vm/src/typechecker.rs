@@ -182,6 +182,7 @@ impl TypeChecker {
             Stmt::TypedAssign { name, type_hint, value, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;
+                self.check_call_types(value);
                 let actual = self.infer_type(value);
                 if let Some(actual_ty) = &actual {
                     if !types_compatible(type_hint, actual_ty) {
@@ -198,6 +199,7 @@ impl TypeChecker {
             Stmt::Assign { name, value, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;
+                self.check_call_types(value);
                 let ty = self.infer_type(value);
                 if let Some(t) = ty {
                     self.scope_set(name.clone(), t);
@@ -209,6 +211,7 @@ impl TypeChecker {
             Stmt::Const { name, value, line, col, .. } => {
                 self.current_line = *line;
                 self.current_col  = *col;
+                self.check_call_types(value);
                 if let Some(ty) = self.infer_type(value) {
                     self.scope_set(name.clone(), ty);
                 }
@@ -336,6 +339,7 @@ impl TypeChecker {
             Stmt::Show { value, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;
+                self.check_call_types(value);
                 self.infer_type(value);
             }
 

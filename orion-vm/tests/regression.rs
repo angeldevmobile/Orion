@@ -111,3 +111,107 @@ fn test_unhandled_error_propagates() {
         "se esperaba un mensaje de error, got vacío"
     );
 }
+
+// ── OOP: shapes, acts, instancias (Sprint 1 — P0) ───────────────────────────
+// Patrón auto-verificante: si la semántica es correcta, `run_ok` pasa; si está
+// rota (valor inesperado), el programa lanza `error` y `run_ok` hace panic.
+
+#[test]
+fn test_oop_shape_construct_and_method() {
+    // on_create asigna campos; act los lee. p.sum() debe dar 7.
+    run_ok(
+        r#"shape Point {
+    x: 0
+    y: 0
+    on_create(a, b) {
+        x = a
+        y = b
+    }
+    act sum() {
+        return x + y
+    }
+}
+p = Point(3, 4)
+if p.sum() != 7 { error "OOP: p.sum() != 7" }
+if p.x != 3 { error "OOP: acceso a campo p.x falló" }"#,
+    );
+}
+
+#[test]
+fn test_oop_instances_are_independent() {
+    // Dos instancias del mismo shape no comparten estado.
+    run_ok(
+        r#"shape Counter {
+    count: 0
+    act increment() {
+        count = count + 1
+    }
+    act value() {
+        return count
+    }
+}
+c1 = Counter()
+c2 = Counter()
+c1.increment()
+c1.increment()
+c1.increment()
+c2.increment()
+if c1.value() != 3 { error "OOP: c1 esperaba 3" }
+if c2.value() != 1 { error "OOP: c2 esperaba 1 (estado compartido!)" }"#,
+    );
+}
+
+#[test]
+fn test_oop_is_operator() {
+    // `is` debe distinguir el tipo correcto del incorrecto.
+    run_ok(
+        r#"shape Dog { name: "" }
+shape Cat { name: "" }
+d = Dog()
+if d is Cat { error "is: dio true para tipo incorrecto" }
+ok = no
+if d is Dog { ok = yes }
+if ok != yes { error "is: dio false para el tipo correcto" }"#,
+    );
+}
+
+// ── Closures: captura y mutación de variables del frame externo (Sprint 1 — P0)
+
+#[test]
+fn test_closure_captures_and_persists_state() {
+    // La fn interna captura `inicio` y debe persistir su estado entre llamadas.
+    run_ok(
+        r#"fn hacer_contador(inicio) {
+    fn siguiente() {
+        inicio = inicio + 1
+        return inicio
+    }
+    return siguiente
+}
+c = hacer_contador(10)
+a = c()
+b = c()
+if a != 11 { error "closure: primera llamada esperaba 11" }
+if b != 12 { error "closure: el estado no persistió, esperaba 12" }"#,
+    );
+}
+
+#[test]
+fn test_closures_are_independent() {
+    // Dos closures del mismo factory tienen entornos capturados separados.
+    run_ok(
+        r#"fn hacer_contador(inicio) {
+    fn siguiente() {
+        inicio = inicio + 1
+        return inicio
+    }
+    return siguiente
+}
+c1 = hacer_contador(0)
+c2 = hacer_contador(100)
+r1 = c1()
+r2 = c2()
+if r1 != 1 { error "closure indep: c1 esperaba 1" }
+if r2 != 101 { error "closure indep: c2 esperaba 101 (entornos mezclados!)" }"#,
+    );
+}

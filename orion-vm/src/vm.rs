@@ -57,6 +57,10 @@ struct CallFrame {
     instance_fields: Vec<String>,
     /// Nombre del contexto de ejecución (función, act, etc.)
     name: String,
+    /// Si este frame ejecuta un closure, referencia compartida a su entorno
+    /// capturado. Al retornar se escriben de vuelta las variables capturadas
+    /// para que sus mutaciones persistan entre llamadas.
+    closure_env: Option<Rc<RefCell<IndexMap<String, Value>>>>,
 }
 
 impl CallFrame {
@@ -68,6 +72,7 @@ impl CallFrame {
             self_instance: None,
             instance_fields: Vec::new(),
             name: String::from("<main>"),
+            closure_env: None,
         }
     }
 
@@ -101,6 +106,21 @@ impl CallFrame {
             for field_name in &self.instance_fields {
                 if let Some(val) = self.vars.get(field_name) {
                     inst.fields.insert(field_name.clone(), val.clone());
+                }
+            }
+        }
+    }
+
+    /// Escribe de vuelta al entorno compartido del closure las variables
+    /// capturadas que pudieron mutar durante esta invocación. Solo persiste
+    /// las claves ya presentes en el entorno (las capturadas), no los locales nuevos.
+    fn sync_to_closure(&self) {
+        if let Some(env_rc) = &self.closure_env {
+            let mut env = env_rc.borrow_mut();
+            let keys: Vec<String> = env.keys().cloned().collect();
+            for k in keys {
+                if let Some(val) = self.vars.get(&k) {
+                    env.insert(k, val.clone());
                 }
             }
         }
@@ -439,11 +459,13 @@ impl VM {
                     let mut frame = CallFrame::with_args_named(
                         func.body, func.lines, &resolved_name, &func.params, args
                     );
-                    // Inyectar env capturado (los params tienen prioridad)
-                    if let Some(env) = closure_env {
-                        for (k, v) in env {
-                            frame.vars.entry(k).or_insert(v);
+                    // Inyectar env capturado (los params tienen prioridad) y
+                    // guardar la referencia compartida para el write-back al retornar.
+                    if let Some(env_rc) = closure_env {
+                        for (k, v) in env_rc.borrow().iter() {
+                            frame.vars.entry(k.clone()).or_insert_with(|| v.clone());
                         }
+                        frame.closure_env = Some(env_rc);
                     }
                     self.call_stack.push(frame);
                 } else if self.extern_fns.contains_key(&resolved_name) {
@@ -459,6 +481,7 @@ impl VM {
             Instruction::Return => {
                 let frame = self.call_stack.pop().ok_or("Return sin frame")?;
                 frame.sync_to_instance();
+                frame.sync_to_closure();
                 if self.call_stack.is_empty() {
                     return Ok(true);
                 }
@@ -527,11 +550,15 @@ impl VM {
             }
 
             Instruction::MakeClosure(fn_name) => {
-                // Captura una copia del scope actual como entorno de la closure
+                // Captura el scope actual como entorno compartido de la closure.
+                // Rc<RefCell> permite que las mutaciones persistan entre llamadas.
                 let env = self.call_stack.last()
                     .map(|f| f.vars.clone())
                     .unwrap_or_default();
-                self.value_stack.push(Value::Closure { fn_name, env });
+                self.value_stack.push(Value::Closure {
+                    fn_name,
+                    env: Rc::new(RefCell::new(env)),
+                });
             }
             Instruction::IsInstance(shape_name) => {
                 let obj = self.pop()?;
@@ -1273,10 +1300,11 @@ impl VM {
         let mut frame = CallFrame::with_args_named(
             func_def.body, func_def.lines, &fn_name, &func_def.params, args
         );
-        if let Some(env) = closure_env {
-            for (k, v) in env {
-                frame.vars.entry(k).or_insert(v);
+        if let Some(env_rc) = closure_env {
+            for (k, v) in env_rc.borrow().iter() {
+                frame.vars.entry(k.clone()).or_insert_with(|| v.clone());
             }
+            frame.closure_env = Some(env_rc);
         }
         self.call_stack.push(frame);
         loop {
@@ -2840,5 +2868,210 @@ mod tests {
         ]);
         assert!(r.is_err());
         assert!(r.unwrap_err().contains("error sin handler"));
+    }
+
+    //    Lógica booleana (Sprint 1 — P0)
+
+    #[test]
+    fn test_and_true_false() {
+        // true and false → false
+        let r = run_top(vec![
+            Instruction::LoadBool(true),
+            Instruction::LoadBool(false),
+            Instruction::And,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_and_true_true() {
+        let r = run_top(vec![
+            Instruction::LoadBool(true),
+            Instruction::LoadBool(true),
+            Instruction::And,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_or_false_true() {
+        let r = run_top(vec![
+            Instruction::LoadBool(false),
+            Instruction::LoadBool(true),
+            Instruction::Or,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_or_false_false() {
+        let r = run_top(vec![
+            Instruction::LoadBool(false),
+            Instruction::LoadBool(false),
+            Instruction::Or,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_and_truthiness_nonbool() {
+        // is_truthy: 1 and 0 → false (0 es falsy)
+        let r = run_top(vec![
+            Instruction::LoadInt(1),
+            Instruction::LoadInt(0),
+            Instruction::And,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(false));
+    }
+
+    //    Comparaciones restantes (Sprint 1 — P0)
+
+    #[test]
+    fn test_lt_eq_equal() {
+        // 5 <= 5 → true
+        let r = run_top(vec![
+            Instruction::LoadInt(5),
+            Instruction::LoadInt(5),
+            Instruction::LtEq,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_lt_eq_false() {
+        // 7 <= 3 → false
+        let r = run_top(vec![
+            Instruction::LoadInt(7),
+            Instruction::LoadInt(3),
+            Instruction::LtEq,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_gt_eq_equal() {
+        // 5 >= 5 → true
+        let r = run_top(vec![
+            Instruction::LoadInt(5),
+            Instruction::LoadInt(5),
+            Instruction::GtEq,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_gt_eq_false() {
+        // 3 >= 7 → false
+        let r = run_top(vec![
+            Instruction::LoadInt(3),
+            Instruction::LoadInt(7),
+            Instruction::GtEq,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Bool(false));
+    }
+
+    //    JumpIfTrue (Sprint 1 — P0)
+
+    #[test]
+    fn test_jump_if_true_taken() {
+        // condición true → salta sobre LoadInt(1), aterriza en LoadInt(99)
+        let r = run_top(vec![
+            Instruction::LoadBool(true),    // 0
+            Instruction::JumpIfTrue(4),     // 1
+            Instruction::LoadInt(1),        // 2 (saltado)
+            Instruction::Halt,              // 3
+            Instruction::LoadInt(99),       // 4
+            Instruction::Halt,              // 5
+        ]).unwrap();
+        assert_eq!(r, Value::Int(99));
+    }
+
+    #[test]
+    fn test_jump_if_true_not_taken() {
+        // condición false → no salta, ejecuta LoadInt(7)
+        let r = run_top(vec![
+            Instruction::LoadBool(false),   // 0
+            Instruction::JumpIfTrue(4),     // 1
+            Instruction::LoadInt(7),        // 2
+            Instruction::Halt,              // 3
+            Instruction::LoadInt(99),       // 4
+            Instruction::Halt,              // 5
+        ]).unwrap();
+        assert_eq!(r, Value::Int(7));
+    }
+
+    //    Diccionarios (Sprint 1 — P0)
+
+    #[test]
+    fn test_make_dict_and_get() {
+        // {"a": 10, "b": 20}["a"] → 10
+        let r = run_top(vec![
+            Instruction::LoadStr("a".into()),
+            Instruction::LoadInt(10),
+            Instruction::LoadStr("b".into()),
+            Instruction::LoadInt(20),
+            Instruction::MakeDict(2),
+            Instruction::LoadStr("a".into()),
+            Instruction::GetIndex,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(10));
+    }
+
+    #[test]
+    fn test_dict_missing_key_errors() {
+        // acceso a clave inexistente → error
+        let r = run_top(vec![
+            Instruction::LoadStr("a".into()),
+            Instruction::LoadInt(10),
+            Instruction::MakeDict(1),
+            Instruction::LoadStr("no_existe".into()),
+            Instruction::GetIndex,
+            Instruction::Halt,
+        ]);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_set_index_dict() {
+        // d = {"a": 10}; d["a"] = 99; d["a"] → 99
+        let r = run_top(vec![
+            Instruction::LoadStr("a".into()),
+            Instruction::LoadInt(10),
+            Instruction::MakeDict(1),
+            Instruction::LoadStr("a".into()),
+            Instruction::LoadInt(99),
+            Instruction::SetIndex,
+            Instruction::LoadStr("a".into()),
+            Instruction::GetIndex,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(99));
+    }
+
+    #[test]
+    fn test_set_index_dict_new_key() {
+        // d = {"a": 10}; d["b"] = 20; d["b"] → 20 (inserción de clave nueva)
+        let r = run_top(vec![
+            Instruction::LoadStr("a".into()),
+            Instruction::LoadInt(10),
+            Instruction::MakeDict(1),
+            Instruction::LoadStr("b".into()),
+            Instruction::LoadInt(20),
+            Instruction::SetIndex,
+            Instruction::LoadStr("b".into()),
+            Instruction::GetIndex,
+            Instruction::Halt,
+        ]).unwrap();
+        assert_eq!(r, Value::Int(20));
     }
 }
