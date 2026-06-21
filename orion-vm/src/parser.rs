@@ -110,12 +110,8 @@ impl Parser {
             In       => "in".to_string(),
             Is       => "is".to_string(),
             With     => "with".to_string(),
-            Send     => "send".to_string(),
-            Receive  => "receive".to_string(),
-            Sync     => "sync".to_string(),
-            Pipe     => "pipe".to_string(),
-            Task     => "task".to_string(),
-            Stream   => "stream".to_string(),
+            // send/receive/sync/pipe/task/stream se des-reservaron → ahora son Ident
+            // y los captura el brazo `Ident(n)` de arriba.
             Learn    => "learn".to_string(),
             Sense    => "sense".to_string(),
             _ => {
@@ -602,6 +598,13 @@ impl Parser {
                 Ok(Expr::Ident("me".to_string()))
             }
 
+            // super — usado como super.metodo(args); el postfix lo convierte en
+            // CallMethod con receiver Ident("super"), que codegen traduce a CallSuper.
+            TokenKind::Super => {
+                self.pos += 1;
+                Ok(Expr::Ident("super".to_string()))
+            }
+
             // await como expresión: result = await future
             TokenKind::Await => {
                 self.pos += 1;
@@ -929,6 +932,7 @@ impl Parser {
                 self.expect(&TokenKind::LBrace)?;
                 let mut fields = Vec::new();
                 let mut on_create = None;
+                let mut on_error = None;
                 let mut acts = Vec::new();
                 loop {
                     self.skip_newlines();
@@ -954,6 +958,13 @@ impl Parser {
                             let params = self.parse_params()?;
                             let body = self.parse_block()?;
                             on_create = Some((params, body));
+                        }
+                        TokenKind::OnError => {
+                            self.pos += 1;
+                            // on_error(err) { ... }  — err recibe el mensaje del error
+                            let params = self.parse_params()?;
+                            let body = self.parse_block()?;
+                            on_error = Some((params, body));
                         }
                         TokenKind::Act => {
                             self.pos += 1;
@@ -1002,7 +1013,7 @@ impl Parser {
                                         TokenKind::Assign | TokenKind::Semicolon |
                                         TokenKind::RBrace | TokenKind::Eof | TokenKind::Comma |
                                         TokenKind::Ident(_) | TokenKind::Act |
-                                        TokenKind::OnCreate | TokenKind::Using |
+                                        TokenKind::OnCreate | TokenKind::OnError | TokenKind::Using |
                                         TokenKind::LBracket
                                     );
                                     if after_is_decl {
@@ -1028,7 +1039,7 @@ impl Parser {
                     }
                 }
                 self.expect(&TokenKind::RBrace)?;
-                Ok(Stmt::Shape { name, type_params, fields, on_create, acts, using, doc, line, col })
+                Ok(Stmt::Shape { name, type_params, fields, on_create, on_error, acts, using, doc, line, col })
             }
 
             //   Asignación, asignación compuesta o expresión

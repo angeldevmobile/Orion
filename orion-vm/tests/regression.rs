@@ -175,6 +175,132 @@ if ok != yes { error "is: dio false para el tipo correcto" }"#,
     );
 }
 
+// ── super: llamada al método del shape padre ────────────────────────────────
+
+#[test]
+fn test_super_calls_parent_method() {
+    // Hija override saludar() y llama super.saludar() del padre Base.
+    run_ok(
+        r#"shape Base {
+    act saludar() {
+        return "hola desde base"
+    }
+}
+shape Hija using [Base] {
+    act saludar() {
+        return "hija + " + super.saludar()
+    }
+}
+h = Hija()
+r = h.saludar()
+if r != "hija + hola desde base" { error "super falló: " + r }"#,
+    );
+}
+
+#[test]
+fn test_super_with_args_and_shared_state() {
+    // super.metodo(args) opera sobre la misma instancia (estado compartido).
+    run_ok(
+        r#"shape Contador {
+    valor: 0
+    act incrementar(n) {
+        valor = valor + n
+        return valor
+    }
+}
+shape ContadorDoble using [Contador] {
+    act incrementar(n) {
+        a = super.incrementar(n)
+        b = super.incrementar(n)
+        return a + b
+    }
+}
+c = ContadorDoble()
+r = c.incrementar(5)
+if r != 15 { error "super con estado falló: " + str(r) }"#,
+    );
+}
+
+// ── on_error: hook de error a nivel de shape ────────────────────────────────
+
+#[test]
+fn test_on_error_catches_act_error() {
+    // Un error dentro de un act invoca on_error en vez de propagar.
+    run_ok(
+        r#"shape Cuenta {
+    saldo: 100
+    on_error(e) {
+        recuperado = yes
+    }
+    act retirar(monto) {
+        if monto > saldo { error "fondos insuficientes" }
+        saldo = saldo - monto
+    }
+}
+c = Cuenta()
+c.retirar(500)"#,
+    );
+}
+
+#[test]
+fn test_on_error_return_value_used() {
+    // El valor que retorna on_error se vuelve el resultado de la llamada fallida.
+    run_ok(
+        r#"shape Calc {
+    on_error(e) {
+        return -1
+    }
+    act dividir(a, b) {
+        if b == 0 { error "div cero" }
+        return a / b
+    }
+}
+c = Calc()
+r = c.dividir(10, 0)
+if r != -1 { error "on_error debió devolver -1" }"#,
+    );
+}
+
+#[test]
+fn test_on_error_not_triggered_on_success() {
+    // Si el act no falla, on_error no se ejecuta y el resultado es normal.
+    run_ok(
+        r#"shape Calc {
+    on_error(e) {
+        return -999
+    }
+    act suma(a, b) {
+        return a + b
+    }
+}
+c = Calc()
+if c.suma(2, 3) != 5 { error "on_error no debió dispararse" }"#,
+    );
+}
+
+#[test]
+fn test_on_error_inner_attempt_takes_priority() {
+    // Un attempt/handle DENTRO del act captura el error antes que on_error.
+    run_ok(
+        r#"shape Svc {
+    marca: "ninguna"
+    on_error(e) {
+        marca = "on_error"
+    }
+    act run() {
+        attempt {
+            error "boom"
+        } handle err {
+            marca = "interno"
+        }
+        return marca
+    }
+}
+s = Svc()
+if s.run() != "interno" { error "el attempt interno debió ganar" }"#,
+    );
+}
+
 // ── Closures: captura y mutación de variables del frame externo (Sprint 1 — P0)
 
 #[test]

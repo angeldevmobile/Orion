@@ -38,6 +38,8 @@ pub struct ActDef {
 pub struct ShapeDef {
     pub fields: Vec<FieldDef>,
     pub on_create: Option<ActDef>,
+    #[serde(default)]
+    pub on_error: Option<ActDef>,
     pub acts: IndexMap<String, ActDef>,
     #[serde(default)]
     pub using: Vec<String>,

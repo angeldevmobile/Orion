@@ -69,7 +69,7 @@ pub enum Stmt {
     // Funciones / clases
     Fn      { name: String, type_params: Vec<String>, params: Vec<Param>, body: Vec<Stmt>, ret_type: Option<String>, doc: Option<String>, line: u32, col: u32 },
     AsyncFn { name: String, type_params: Vec<String>, params: Vec<Param>, body: Vec<Stmt>, ret_type: Option<String>, doc: Option<String>, line: u32, col: u32 },
-    Shape   { name: String, type_params: Vec<String>, fields: Vec<FieldDef>, on_create: Option<(Vec<Param>, Vec<Stmt>)>, acts: Vec<ActDef>, using: Vec<String>, doc: Option<String>, line: u32, col: u32 },
+    Shape   { name: String, type_params: Vec<String>, fields: Vec<FieldDef>, on_create: Option<(Vec<Param>, Vec<Stmt>)>, on_error: Option<(Vec<Param>, Vec<Stmt>)>, acts: Vec<ActDef>, using: Vec<String>, doc: Option<String>, line: u32, col: u32 },
 
     // FFI — declaración de función C externa
     ExternFn {
@@ -99,7 +99,6 @@ pub enum Stmt {
 
     // Servidor / red
     Serve   { port: Expr, routes: Vec<Stmt>, line: u32, col: u32 },
-    Route   { method: String, path: String, body: Vec<Stmt>, line: u32, col: u32 },
 
     // IA / simbiótico
     Think   { prompt: Expr, line: u32, col: u32 },

@@ -103,8 +103,8 @@ impl Codegen {
                     self.functions.insert(name.clone(), fc);
                     self.async_fns.insert(name.clone());
                 }
-                Stmt::Shape { name, fields, on_create, acts, using, .. } => {
-                    let shape = self.compile_shape(fields, on_create, acts, using)?;
+                Stmt::Shape { name, fields, on_create, on_error, acts, using, .. } => {
+                    let shape = self.compile_shape(fields, on_create, on_error, acts, using)?;
                     self.shapes.insert(name.clone(), shape);
                 }
                 Stmt::ExternFn { name, params, ret_type, lib, .. } => {
@@ -154,6 +154,7 @@ impl Codegen {
         &self,
         fields:    &[FieldDef],
         on_create: &Option<(Vec<crate::ast::Param>, Vec<Stmt>)>,
+        on_error:  &Option<(Vec<crate::ast::Param>, Vec<Stmt>)>,
         acts:      &[ActDef],
         using:     &[String],
     ) -> Result<ShapeDef, CodegenError> {
@@ -187,6 +188,18 @@ impl Codegen {
             Some(BcActDef { params, body: fc.instrs, lines: fc.lines })
         } else { None };
 
+        // on_error — mismo esquema que on_create; recibe el mensaje del error
+        let bc_on_error = if let Some((oe_params, oe_body)) = on_error.as_ref() {
+            let mut fc = FnCompiler::new();
+            for stmt in oe_body {
+                fc.compile_stmt(stmt, &self.async_fns)?;
+            }
+            fc.emit(Instruction::LoadNull);
+            fc.emit(Instruction::Return);
+            let params = oe_params.iter().map(|p| p.name.clone()).collect();
+            Some(BcActDef { params, body: fc.instrs, lines: fc.lines })
+        } else { None };
+
         // acts
         let mut bc_acts = IndexMap::new();
         for act in acts {
@@ -206,6 +219,7 @@ impl Codegen {
         Ok(ShapeDef {
             fields:    bc_fields,
             on_create: bc_on_create,
+            on_error:  bc_on_error,
             acts:      bc_acts,
             using:     using.to_vec(),
         })
@@ -526,9 +540,6 @@ impl Codegen {
                 self.compile_expr_main(&expr)?;
                 self.emit(Instruction::Pop);
             }
-
-            // Route se maneja dentro de Serve (ignorar si aparece suelto)
-            Stmt::Route { .. } => {}
         }
         Ok(())
     }
@@ -873,7 +884,7 @@ impl FnCompiler {
             }
 
             Stmt::Shape { name, .. } => { self.emit(Instruction::DefineShape(name.clone())); }
-            Stmt::Use { .. } | Stmt::Route { .. } | Stmt::ExternFn { .. } => {}
+            Stmt::Use { .. } | Stmt::ExternFn { .. } => {}
 
             // fn interna dentro de un cuerpo de función → closure accesible como variable local
             Stmt::Fn { name, params, body, .. } | Stmt::AsyncFn { name, params, body, .. } => {
@@ -1014,9 +1025,15 @@ fn compile_expr_into(
         }
 
         Expr::CallMethod { method, receiver, args, .. } => {
-            recurse!(receiver);
-            for a in args { recurse!(a); }
-            emit!(Instruction::CallMethod(method.clone(), args.len() as u8));
+            // super.metodo(args) → CallSuper (resuelve en el shape padre sobre self)
+            if matches!(receiver.as_ref(), Expr::Ident(n) if n == "super") {
+                for a in args { recurse!(a); }
+                emit!(Instruction::CallSuper(method.clone(), args.len() as u8));
+            } else {
+                recurse!(receiver);
+                for a in args { recurse!(a); }
+                emit!(Instruction::CallMethod(method.clone(), args.len() as u8));
+            }
         }
 
         Expr::AttrAccess { object, attr } => {

@@ -571,6 +571,49 @@ impl VM {
                 };
                 self.value_stack.push(Value::Bool(result));
             }
+            Instruction::CallSuper(method_name, argc) => {
+                let mut args: Vec<Value> = (0..argc)
+                    .map(|_| self.pop())
+                    .collect::<Result<Vec<_>, _>>()?;
+                args.reverse();
+
+                // self_instance del act actual
+                let inst_rc = self.call_stack.last()
+                    .and_then(|f| f.self_instance.clone())
+                    .ok_or("super solo puede usarse dentro de un act de shape")?;
+                let shape_name = inst_rc.borrow().shape_name.clone();
+                let parents = self.shapes.get(&shape_name)
+                    .map(|s| s.using.clone())
+                    .ok_or_else(|| format!("Shape '{}' no encontrado", shape_name))?;
+                // Buscar el método SOLO en los shapes padre (vía using).
+                let act = parents.iter()
+                    .find_map(|p| self.find_act(p, &method_name))
+                    .cloned()
+                    .ok_or_else(|| format!(
+                        "super.{}(): no se encontró en los padres de '{}'",
+                        method_name, shape_name
+                    ))?;
+                if args.len() != act.params.len() {
+                    return Err(format!(
+                        "super.{}() espera {} argumento(s), recibió {}",
+                        method_name, act.params.len(), args.len()
+                    ));
+                }
+                let mut frame = CallFrame::new(act.body, act.lines);
+                let field_names: Vec<String> = {
+                    let inst = inst_rc.borrow();
+                    for (k, v) in &inst.fields {
+                        frame.vars.insert(k.clone(), v.clone());
+                    }
+                    inst.fields.keys().cloned().collect()
+                };
+                for (param, val) in act.params.iter().zip(args.into_iter()) {
+                    frame.vars.insert(param.clone(), val);
+                }
+                frame.self_instance = Some(Rc::clone(&inst_rc));
+                frame.instance_fields = field_names;
+                self.call_stack.push(frame);
+            }
             Instruction::CallMethod(method_name, argc) => {
                 let mut args: Vec<Value> = (0..argc)
                     .map(|_| self.pop())
@@ -803,20 +846,38 @@ impl VM {
                             ));
                         }
 
-                        let mut frame = CallFrame::new(act.body, act.lines);
-                        let field_names: Vec<String> = {
-                            let inst = inst_rc.borrow();
-                            for (k, v) in &inst.fields {
-                                frame.vars.insert(k.clone(), v.clone());
+                        // Si el shape define on_error, envolvemos el act: un error no
+                        // capturado dentro del act invoca on_error(err) en vez de propagar.
+                        if let Some(on_error) = self.find_on_error(&shape_name).cloned() {
+                            match self.run_act_isolated(&inst_rc, &act, args) {
+                                Ok(v) => self.value_stack.push(v),
+                                Err(e) => {
+                                    let oe_args = if on_error.params.is_empty() {
+                                        vec![]
+                                    } else {
+                                        vec![Value::Str(e)]
+                                    };
+                                    let r = self.run_act_isolated(&inst_rc, &on_error, oe_args)?;
+                                    self.value_stack.push(r);
+                                }
                             }
-                            inst.fields.keys().cloned().collect()
-                        };
-                        for (param, val) in act.params.iter().zip(args.into_iter()) {
-                            frame.vars.insert(param.clone(), val);
+                        } else {
+                            // Camino normal (sin on_error): el frame corre en el loop principal.
+                            let mut frame = CallFrame::new(act.body, act.lines);
+                            let field_names: Vec<String> = {
+                                let inst = inst_rc.borrow();
+                                for (k, v) in &inst.fields {
+                                    frame.vars.insert(k.clone(), v.clone());
+                                }
+                                inst.fields.keys().cloned().collect()
+                            };
+                            for (param, val) in act.params.iter().zip(args.into_iter()) {
+                                frame.vars.insert(param.clone(), val);
+                            }
+                            frame.self_instance = Some(Rc::clone(&inst_rc));
+                            frame.instance_fields = field_names;
+                            self.call_stack.push(frame);
                         }
-                        frame.self_instance = Some(Rc::clone(&inst_rc));
-                        frame.instance_fields = field_names;
-                        self.call_stack.push(frame);
                     }
                     //    Módulos stdlib nativos
                     Value::Module(mod_name) => {
@@ -1586,6 +1647,80 @@ impl VM {
             return shape.on_create.as_ref();
         }
         None
+    }
+
+    /// on_error del shape (hook de error). Hereda del padre vía `using` si el
+    /// shape propio no lo define.
+    fn find_on_error(&self, shape_name: &str) -> Option<&crate::bytecode::ActDef> {
+        let shape = self.shapes.get(shape_name)?;
+        if shape.on_error.is_some() {
+            return shape.on_error.as_ref();
+        }
+        for parent in &shape.using {
+            if let Some(oe) = self.find_on_error(parent) {
+                return Some(oe);
+            }
+        }
+        None
+    }
+
+    /// Ejecuta un act de una instancia de forma síncrona y AÍSLA los manejadores
+    /// de error externos: si el act lanza un error no capturado internamente,
+    /// se devuelve `Err` en vez de saltar a un `attempt/handle` externo. Lo usa
+    /// el hook `on_error` para envolver la ejecución de los acts.
+    fn run_act_isolated(
+        &mut self,
+        inst_rc: &Rc<RefCell<InstanceData>>,
+        act: &crate::bytecode::ActDef,
+        args: Vec<Value>,
+    ) -> Result<Value, String> {
+        let mut frame = CallFrame::new(act.body.clone(), act.lines.clone());
+        let field_names: Vec<String> = {
+            let inst = inst_rc.borrow();
+            for (k, v) in &inst.fields {
+                frame.vars.insert(k.clone(), v.clone());
+            }
+            inst.fields.keys().cloned().collect()
+        };
+        for (param, val) in act.params.iter().zip(args.into_iter()) {
+            frame.vars.insert(param.clone(), val);
+        }
+        frame.self_instance = Some(Rc::clone(inst_rc));
+        frame.instance_fields = field_names;
+
+        let call_base   = self.call_stack.len();
+        let vstack_base = self.value_stack.len();
+        // Oculta los handlers externos durante la ejecución del act.
+        let saved_handlers = std::mem::take(&mut self.error_handlers);
+        self.call_stack.push(frame);
+
+        let mut err: Option<String> = None;
+        while self.call_stack.len() > call_base {
+            match self.step() {
+                Ok(true)  => break,          // Halt (no debería ocurrir en un act)
+                Ok(false) => {}
+                Err(e)    => { err = Some(e); break; }
+            }
+        }
+
+        // Restaura los handlers externos y limpia frames residuales del act.
+        self.error_handlers = saved_handlers;
+        while self.call_stack.len() > call_base {
+            let f = self.call_stack.pop().unwrap();
+            f.sync_to_instance();
+        }
+
+        if let Some(e) = err {
+            self.value_stack.truncate(vstack_base);
+            return Err(e);
+        }
+        let result = if self.value_stack.len() > vstack_base {
+            self.value_stack.pop().unwrap()
+        } else {
+            Value::Null
+        };
+        self.value_stack.truncate(vstack_base);
+        Ok(result)
     }
 
     fn shape_uses(&self, shape_name: &str, target: &str) -> bool {

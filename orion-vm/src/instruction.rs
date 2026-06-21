@@ -64,6 +64,7 @@ pub enum Instruction {
     //   OOP
     DefineShape(String),     // registrar shape (no-op, ya cargado desde bytecode)
     CallMethod(String, u8),  // obj.method(args) — nombre del método, num args
+    CallSuper(String, u8),   // super.method(args) — método del shape padre sobre self
     IsInstance(String),      // obj is ShapeName → bool
     PushSelf,                // push la instancia actual (me) → Null si no hay
 
