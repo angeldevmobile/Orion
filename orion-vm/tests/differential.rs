@@ -127,6 +127,30 @@ show doble(inc(inc(5)))"#,
     );
 }
 
+// Programas FUERA del subconjunto JIT (usan len/for-in/dict): `--jit` debe hacer
+// fallback transparente al intérprete y producir la MISMA salida que el VM.
+// Verifica que la robustez del fallback no cambia resultados.
+
+#[test]
+fn diff_fallback_for_in_list() {
+    assert_vm_jit_match(
+        r#"suma = 0
+for i in [1, 2, 3, 4, 5] {
+    suma = suma + i
+}
+show suma"#,
+    );
+}
+
+#[test]
+fn diff_fallback_dict_and_len() {
+    assert_vm_jit_match(
+        r#"d = {"a": 1, "b": 2, "c": 3}
+show d["a"] + d["b"] + d["c"]
+show len([10, 20, 30])"#,
+    );
+}
+
 #[test]
 fn diff_factorial_loop() {
     assert_vm_jit_match(

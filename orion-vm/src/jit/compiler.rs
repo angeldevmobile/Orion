@@ -343,17 +343,32 @@ impl JitCompiler {
     /// - `Ok(false)` → instrucciones no elegibles → usar intérprete.
     /// - `Err(msg)`  → error real de compilación JIT.
     pub fn run_program(&mut self, bc: &OrionBytecode) -> Result<bool, String> {
+        // Nombres llamables por el JIT: solo funciones de usuario y shapes.
+        // El JIT NO implementa builtins (len, str, range, ...) ni métodos de módulo;
+        // un Call a algo fuera de este conjunto => programa no elegible => fallback al VM.
+        let callable: HashSet<&str> = bc.functions.keys()
+            .chain(bc.shapes.keys())
+            .map(|s| s.as_str())
+            .collect();
+        let eligible = |instr: &Instruction| -> bool {
+            match instr {
+                Instruction::Call(name, _) | Instruction::CallAsync(name, _) =>
+                    callable.contains(name.as_str()),
+                other => is_eligible(other),
+            }
+        };
+
         // Elegibilidad
         for instr in &bc.main {
-            if !is_eligible(instr) { return Ok(false); }
+            if !eligible(instr) { return Ok(false); }
         }
         for fdef in bc.functions.values() {
             for instr in &fdef.body {
-                if !is_eligible(instr) { return Ok(false); }
+                if !eligible(instr) { return Ok(false); }
             }
         }
         for shape in bc.shapes.values() {
-            let check_act = |body: &[Instruction]| body.iter().all(is_eligible);
+            let check_act = |body: &[Instruction]| body.iter().all(&eligible);
             if let Some(oc) = &shape.on_create {
                 if !check_act(&oc.body) { return Ok(false); }
             }

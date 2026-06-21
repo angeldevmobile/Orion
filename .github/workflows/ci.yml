@@ -42,3 +42,6 @@ jobs:
 
       - name: cargo test (typechecker)
         run: cargo test --test typecheck
+
+      - name: cargo test (stdlib smoke)
+        run: cargo test --test modules_smoke
