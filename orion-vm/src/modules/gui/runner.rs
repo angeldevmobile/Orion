@@ -201,7 +201,7 @@ impl eframe::App for OrionApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(24.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(640.0);
+                ui.set_max_width(ui.available_width());
                 let mut event: Option<String> = None;
                 for comp in &self.components {
                     render(ui, comp, &mut self.field_vals, &mut event);
@@ -231,7 +231,7 @@ impl eframe::App for OrionAppWatch {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(24.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(640.0);
+                ui.set_max_width(ui.available_width());
                 let mut event: Option<String> = None;
                 for comp in &self.components {
                     render(ui, comp, &mut self.field_vals, &mut event);
@@ -312,7 +312,7 @@ impl eframe::App for OrionAppReactive {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_space(24.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(640.0);
+                ui.set_max_width(ui.available_width());
                 for comp in &self.components {
                     render(ui, comp, &mut self.field_vals, &mut fired_event);
                     ui.add_space(6.0);

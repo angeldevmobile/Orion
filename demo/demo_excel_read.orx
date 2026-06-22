@@ -1,0 +1,38 @@
+-- demo_excel_read.orx — ETL puro desde un Excel real, CERO datos hardcodeados.
+-- Requisito: ejecutar antes  seed_ventas.orx  (genera demo/ventas.xlsx)
+use "excel" as excel
+
+-- 1. Leer del archivo
+datos = excel.read("demo/ventas.xlsx")
+show "Leídas ${len(datos)} filas de ventas.xlsx"
+
+-- 2. Enriquecer (campos calculados)
+for v in datos {
+    v.cumplimiento = round((v.venta * 100) / v.meta, 1)
+    v.estado = "Cumple"
+    if v.venta < v.meta { v.estado = "Bajo meta" }
+}
+
+-- 3. Agregar por región
+por_region = excel.agrupar(datos, "region", {"venta": ["sum", "avg"], "count": yes})
+por_region = excel.sort(por_region, "venta_sum-")
+
+-- 4. Estadísticas globales y top 3
+stats = excel.estadisticas(datos, "venta")
+top_3 = excel.sort(datos, "venta-")[0:3]
+
+-- 5. Escribir reporte multi-hoja
+excel.write_multi("demo/reporte.xlsx", {
+    "Detalle":    datos,
+    "Por Region": por_region,
+    "Top 3":      top_3
+})
+
+-- 6. Resumen en consola
+show "─────────────────────────────"
+show "Venta total : ${stats.sum}"
+show "Promedio    : ${stats.avg}"
+show "Máxima      : ${stats.max}"
+show "Regiones    : ${len(por_region)}"
+show "Top vendedor: ${top_3[0].nombre} (${top_3[0].venta})"
+show "→ demo/reporte.xlsx (3 hojas)"

@@ -1,0 +1,123 @@
+-- demo_dashboard_v2.orx — versión limpia usando v.campo, .push(), ${} y slicing
+use "excel" as excel
+use "gui" as gui
+
+--   Datos base  (en producción: vendedores = excel.read("ventas.xlsx"))
+vendedores = [
+    {"id": 1,  "nombre": "Ana García",     "region": "Norte",  "producto": "CRM Pro",         "venta": 85000,  "meta": 80000,  "activo": yes, "meses": 24, "ingreso": "15/01/2024"},
+    {"id": 2,  "nombre": "Luis Martínez",  "region": "Sur",    "producto": "Analytics Suite", "venta": 62000,  "meta": 70000,  "activo": yes, "meses": 18, "ingreso": "03/07/2024"},
+    {"id": 3,  "nombre": "Marta López",    "region": "Norte",  "producto": "Cloud Storage",   "venta": 91000,  "meta": 85000,  "activo": yes, "meses": 36, "ingreso": "20/01/2023"},
+    {"id": 4,  "nombre": "Carlos Ruiz",    "region": "Centro", "producto": "Security Pack",   "venta": 74000,  "meta": 75000,  "activo": yes, "meses": 12, "ingreso": "10/01/2025"},
+    {"id": 5,  "nombre": "Elena Díaz",     "region": "Oeste",  "producto": "DevOps Tools",    "venta": 110000, "meta": 90000,  "activo": yes, "meses": 48, "ingreso": "05/01/2022"},
+    {"id": 6,  "nombre": "Pedro Sánchez",  "region": "Sur",    "producto": "CRM Pro",         "venta": 55000,  "meta": 65000,  "activo": yes, "meses": 8,  "ingreso": "12/05/2025"},
+    {"id": 7,  "nombre": "Isabel Torres",  "region": "Norte",  "producto": "Analytics Suite", "venta": 78000,  "meta": 75000,  "activo": yes, "meses": 30, "ingreso": "08/07/2023"},
+    {"id": 8,  "nombre": "Miguel Flores",  "region": "Centro", "producto": "Cloud Storage",   "venta": 43000,  "meta": 60000,  "activo": no,  "meses": 6,  "ingreso": "01/07/2025"},
+    {"id": 9,  "nombre": "Laura Vega",     "region": "Oeste",  "producto": "Security Pack",   "venta": 96000,  "meta": 88000,  "activo": yes, "meses": 42, "ingreso": "15/07/2022"},
+    {"id": 10, "nombre": "Roberto Silva",  "region": "Norte",  "producto": "DevOps Tools",    "venta": 67000,  "meta": 70000,  "activo": yes, "meses": 15, "ingreso": "22/10/2024"}
+]
+
+presupuestos = [
+    {"region": "Norte", "presupuesto": 350000}, {"region": "Sur", "presupuesto": 280000},
+    {"region": "Centro", "presupuesto": 320000}, {"region": "Oeste", "presupuesto": 260000}
+]
+metas_producto = [
+    {"producto": "CRM Pro", "comision_pct": 8}, {"producto": "Analytics Suite", "comision_pct": 7},
+    {"producto": "Cloud Storage", "comision_pct": 6}, {"producto": "Security Pack", "comision_pct": 9},
+    {"producto": "DevOps Tools", "comision_pct": 10}
+]
+
+--   Enriquecimiento  (v.campo en vez de v["campo"], .push en vez de + [v])
+datos = []
+for v in vendedores {
+    v.cumplimiento = round((v.venta * 100) / v.meta, 1)
+    v.estado = "Cumple"
+    if v.venta < v.meta { v.estado = "Bajo meta" }
+    v.categoria = "Junior"
+    if v.meses >= 12 { v.categoria = "Mid" }
+    if v.meses >= 30 { v.categoria = "Senior" }
+    datos = datos.push(v)
+}
+
+datos_full = excel.cruzar(datos, metas_producto, "producto", "left")
+datos_full = excel.dates(datos_full, "ingreso", "DD/MM/YYYY")
+datos_full = excel.date_parts(datos_full, "ingreso", ["year", "month"])
+
+activos    = excel.filtrar(datos_full, "activo", "==", yes)
+inactivos  = excel.filtrar(datos_full, "activo", "==", no)
+bajo_meta  = excel.filtrar(activos, "estado", "==", "Bajo meta")
+sobre_meta = excel.filtrar(activos, "estado", "==", "Cumple")
+
+--   Agregaciones
+por_region = excel.agrupar(activos, "region", {"venta": ["sum", "avg"], "meta": ["sum"], "count": yes})
+por_region = excel.renombrar_col(por_region, "venta_sum", "total_venta")
+por_region = excel.renombrar_col(por_region, "meta_sum", "total_meta")
+por_region = excel.sort(por_region, "total_venta-")
+
+por_producto = excel.agrupar(datos_full, "producto", {"venta": ["sum", "avg"], "count": yes})
+por_producto = excel.sort(por_producto, "venta_sum-")
+
+-- Estadísticas globales
+stats_venta = excel.estadisticas(datos_full, "venta")
+total_meta  = excel.estadisticas(datos_full, "meta").sum
+pct_global  = round((stats_venta.sum * 100) / total_meta, 1)
+
+-- Top 10 por venta  (slicing en vez de loop con `if pos <= 10`)
+ordenado = excel.sort(datos_full, "venta-")
+top_10 = []
+pos = 1
+for row in ordenado[0:10] {
+    row.pos = pos
+    top_10 = top_10.push(row)
+    pos = pos + 1
+}
+top_10 = excel.seleccionar(top_10, ["pos", "nombre", "region", "producto", "venta", "cumplimiento", "estado"])
+
+--   GUI Dashboard
+gui.panel("Dashboard Ventas Q1 2026", 1150, 780)
+gui.banner("Dashboard · Ventas Q1 2026", "Equipo comercial — ${len(datos_full)} vendedores")
+gui.spacer(10)
+
+-- KPIs  (interpolación ${} en vez de "..." + str(...))
+gui.row()
+  gui.card()
+    gui.caption("VENTA TOTAL")
+    gui.heading("$ ${stats_venta.sum}")
+    gui.badge("USD", "accent")
+  gui.end()
+  gui.card()
+    gui.caption("CUMPLIMIENTO GLOBAL")
+    gui.heading("${pct_global} %")
+    gui.badge("vs meta", "info")
+  gui.end()
+  gui.card()
+    gui.caption("ACTIVOS")
+    gui.heading("${len(activos)} / ${len(datos_full)}")
+    gui.badge("${len(inactivos)} inactivos", "warning")
+  gui.end()
+  gui.card()
+    gui.caption("CUMPLEN META")
+    gui.heading("${len(sobre_meta)}")
+    gui.badge("${len(bajo_meta)} bajo meta", "error")
+  gui.end()
+gui.end()
+
+gui.spacer(10)
+gui.divider()
+gui.spacer(8)
+
+-- Gráficos
+gui.row()
+  gui.card()
+    gui.chart(por_region, "bar", {x: "region", y: "total_venta", y2: "total_meta", titulo: "Venta vs Meta por Región", height: 260})
+  gui.end()
+  gui.card()
+    gui.chart(por_producto, "pie", {label: "producto", value: "venta_sum", titulo: "Ventas por Producto", height: 260})
+  gui.end()
+gui.end()
+
+gui.spacer(10)
+gui.heading("Top 10 Vendedores")
+gui.spacer(6)
+gui.table(top_10, {height: 320})
+
+gui.run()

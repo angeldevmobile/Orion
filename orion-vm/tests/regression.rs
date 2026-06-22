@@ -175,6 +175,71 @@ if ok != yes { error "is: dio false para el tipo correcto" }"#,
     );
 }
 
+// ── Interpolación de strings ────────────────────────────────────────────────
+
+#[test]
+fn test_string_interpolation_always_string() {
+    // Una interpolación sola "${n}" debe dar un STRING (no el valor crudo Int),
+    // para que al pasarla a módulos (gui.heading, etc.) no salga "Int(5)".
+    run_ok(
+        r#"n = 5
+if type("${n}") != "string" { error "interpolacion sola debe ser string" }
+if "${n}" != "5" { error "interpolacion sola incorrecta" }
+if "${n} items" != "5 items" { error "interpolacion con texto incorrecta" }"#,
+    );
+}
+
+#[test]
+fn test_string_interpolation_adjacent() {
+    // Interpolaciones adyacentes deben concatenar como strings, no sumar.
+    run_ok(
+        r#"a = 1
+b = 2
+if "${a}${b}" != "12" { error "adyacentes deben concatenar (no sumar)" }"#,
+    );
+}
+
+// ── Acceso/escritura de atributos en dicts y slicing ────────────────────────
+
+#[test]
+fn test_dict_attr_write_and_read() {
+    // v.campo = x (escritura) y v.campo (lectura) en dicts.
+    run_ok(
+        r#"v = {"venta": 100}
+v.estado = "Cumple"
+v.cumplimiento = 95
+if v.estado != "Cumple" { error "escritura de atributo en dict falló" }
+if v.cumplimiento != 95 { error "segunda escritura falló" }
+if v.venta != 100 { error "el campo original se perdió" }"#,
+    );
+}
+
+#[test]
+fn test_dict_attr_write_in_loop() {
+    // Patrón de enriquecimiento: mutar dicts dentro de un for y acumular.
+    run_ok(
+        r#"filas = [{"n": 1}, {"n": 2}, {"n": 3}]
+salida = []
+for f in filas {
+    f.doble = f.n * 2
+    salida = salida.push(f)
+}
+if salida[1].doble != 4 { error "enriquecimiento en loop falló" }"#,
+    );
+}
+
+#[test]
+fn test_slicing_list_and_string() {
+    run_ok(
+        r#"nums = [10, 20, 30, 40, 50]
+if len(nums[0:3]) != 3 { error "slice [0:3] falló" }
+if nums[2:][0] != 30 { error "slice [2:] falló" }
+if len(nums[:2]) != 2 { error "slice [:2] falló" }
+if nums[-2:][0] != 40 { error "slice negativo falló" }
+if "orion"[0:3] != "ori" { error "slice de string falló" }"#,
+    );
+}
+
 // ── super: llamada al método del shape padre ────────────────────────────────
 
 #[test]

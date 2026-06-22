@@ -265,9 +265,19 @@ impl Codegen {
             }
             Stmt::AssignAttr { object, attr, value, line, .. } => {
                 self.current_line = line;
+                // Si el objeto es una variable (no `me`), reescribimos su valor tras
+                // SetAttr: necesario para dicts (por valor); inofensivo para instancias.
+                let var_name = match &object {
+                    Expr::Ident(n) if n != "me" => Some(n.clone()),
+                    _ => None,
+                };
                 self.compile_expr_main(&object)?;
                 self.compile_expr_main(&value)?;
                 self.emit(Instruction::SetAttr(attr));
+                match var_name {
+                    Some(name) => { self.emit(Instruction::StoreVar(name)); }
+                    None => { self.emit(Instruction::Pop); }
+                }
             }
             Stmt::Show { value, line, .. } => {
                 self.current_line = line;
@@ -631,9 +641,17 @@ impl FnCompiler {
             }
             Stmt::AssignAttr { object, attr, value, line, .. } => {
                 self.current_line = *line;
+                let var_name = match object {
+                    Expr::Ident(n) if n != "me" => Some(n.clone()),
+                    _ => None,
+                };
                 self.compile_expr(object, async_fns)?;
                 self.compile_expr(value, async_fns)?;
                 self.emit(Instruction::SetAttr(attr.clone()));
+                match var_name {
+                    Some(name) => { self.emit(Instruction::StoreVar(name)); }
+                    None => { self.emit(Instruction::Pop); }
+                }
             }
             Stmt::Show { value, line, .. } => {
                 self.current_line = *line;
@@ -1163,19 +1181,13 @@ fn compile_interpolated(
         return Ok(());
     }
 
-    // Emitir primera parte
-    let (is_expr, content) = &parts[0];
-    if *is_expr {
-        // compilar la sub-expresión con el lexer+parser de Rust
-        let sub = compile_sub_expr(instrs, lines, current_line, async_fns, content)?;
-        let _ = sub;
-    } else {
-        instrs.push(Instruction::LoadStr(content.clone()));
-        lines.push(current_line);
-    }
-
-    // Concatenar el resto
-    for (is_expr, content) in &parts[1..] {
+    // Arrancamos con un string vacío y concatenamos cada parte con Add.
+    // Add coacciona a string cuando un operando es string, así que el resultado
+    // SIEMPRE es String — incluso con una sola interpolación ("${n}" → "5", no Int)
+    // o con interpolaciones adyacentes ("${a}${b}" → concat, no suma numérica).
+    instrs.push(Instruction::LoadStr(String::new()));
+    lines.push(current_line);
+    for (is_expr, content) in &parts {
         if *is_expr {
             compile_sub_expr(instrs, lines, current_line, async_fns, content)?;
         } else {

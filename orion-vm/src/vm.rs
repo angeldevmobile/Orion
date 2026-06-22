@@ -536,8 +536,18 @@ impl VM {
                                 frame.vars.insert(attr, val);
                             }
                         }
+                        // Devolver el objeto para el write-back de AssignAttr (StoreVar).
+                        self.value_stack.push(Value::Instance(inst_rc));
                     }
-                    _ => return Err(format!("SetAttr '{}': no es una instancia", attr)),
+                    // Dicts son por valor: insertamos y devolvemos el dict modificado;
+                    // AssignAttr lo re-asigna a la variable (igual que v["k"] = val).
+                    Value::Dict(mut map) => {
+                        map.insert(attr, val);
+                        self.value_stack.push(Value::Dict(map));
+                    }
+                    _ => return Err(format!(
+                        "SetAttr '{}': solo se puede asignar atributo a instancias o dicts", attr
+                    )),
                 }
             }
             Instruction::PushSelf => {
@@ -1831,6 +1841,38 @@ impl VM {
 
     fn call_builtin(&self, name: &str, args: Vec<Value>) -> Result<Option<Value>, String> {
         match name {
+            // slice(obj, start, end) — soporta lista[a:b] y string[a:b].
+            // start/end pueden ser Null (extremo abierto); índices negativos cuentan desde el final.
+            "slice" => {
+                let mut it = args.into_iter();
+                let obj     = it.next().ok_or("slice() requiere un objeto")?;
+                let start_v = it.next().unwrap_or(Value::Null);
+                let end_v   = it.next().unwrap_or(Value::Null);
+                let resolve = |v: Value, len: i64, default: i64| -> i64 {
+                    match v {
+                        Value::Int(n) => (if n < 0 { len + n } else { n }).clamp(0, len),
+                        _ => default,
+                    }
+                };
+                match obj {
+                    Value::List(items) => {
+                        let len = items.len() as i64;
+                        let s = resolve(start_v, len, 0);
+                        let e = resolve(end_v, len, len);
+                        let out = if s < e { items[s as usize..e as usize].to_vec() } else { vec![] };
+                        Ok(Some(Value::List(out)))
+                    }
+                    Value::Str(st) => {
+                        let chars: Vec<char> = st.chars().collect();
+                        let len = chars.len() as i64;
+                        let s = resolve(start_v, len, 0);
+                        let e = resolve(end_v, len, len);
+                        let out: String = if s < e { chars[s as usize..e as usize].iter().collect() } else { String::new() };
+                        Ok(Some(Value::Str(out)))
+                    }
+                    _ => Err("slice(): solo aplica a listas o strings".to_string()),
+                }
+            }
             "str" => {
                 let val = args.into_iter().next().ok_or("str() requiere un argumento")?;
                 Ok(Some(Value::Str(val.to_string())))

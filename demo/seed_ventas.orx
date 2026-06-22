@@ -1,0 +1,19 @@
+-- seed_ventas.orx — genera demo/ventas.xlsx (ejecutar una vez)
+-- Los datos viven SOLO aquí; el demo de análisis lee del archivo.
+use "excel" as excel
+
+vendedores = [
+    {"nombre": "Ana García",    "region": "Norte",  "producto": "CRM Pro",         "venta": 85000,  "meta": 80000},
+    {"nombre": "Luis Martínez", "region": "Sur",    "producto": "Analytics Suite", "venta": 62000,  "meta": 70000},
+    {"nombre": "Marta López",   "region": "Norte",  "producto": "Cloud Storage",   "venta": 91000,  "meta": 85000},
+    {"nombre": "Carlos Ruiz",   "region": "Centro", "producto": "Security Pack",   "venta": 74000,  "meta": 75000},
+    {"nombre": "Elena Díaz",    "region": "Oeste",  "producto": "DevOps Tools",    "venta": 110000, "meta": 90000},
+    {"nombre": "Pedro Sánchez", "region": "Sur",    "producto": "CRM Pro",         "venta": 55000,  "meta": 65000},
+    {"nombre": "Isabel Torres", "region": "Norte",  "producto": "Analytics Suite", "venta": 78000,  "meta": 75000},
+    {"nombre": "Miguel Flores", "region": "Centro", "producto": "Cloud Storage",   "venta": 43000,  "meta": 60000},
+    {"nombre": "Laura Vega",    "region": "Oeste",  "producto": "Security Pack",   "venta": 96000,  "meta": 88000},
+    {"nombre": "Roberto Silva", "region": "Norte",  "producto": "DevOps Tools",    "venta": 67000,  "meta": 70000}
+]
+
+excel.write("demo/ventas.xlsx", vendedores)
+show "✓ Generado demo/ventas.xlsx con ${len(vendedores)} filas"

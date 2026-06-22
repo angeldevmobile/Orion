@@ -279,11 +279,19 @@ pub fn render(
                 });
         }
         Component::Row(children) => {
-            ui.horizontal(|ui| {
-                for child in children {
-                    render(ui, child, fields, event);
-                }
-            });
+            // Columnas de ancho IGUAL: evita que un hijo que se expande (p.ej. una
+            // gráfica con available_width) acapare el espacio y deje a los demás
+            // sin ancho (caso del pie que quedaba en una franja delgada).
+            if children.is_empty() {
+            } else if children.len() == 1 {
+                render(ui, &children[0], fields, event);
+            } else {
+                ui.columns(children.len(), |cols| {
+                    for (i, child) in children.iter().enumerate() {
+                        render(&mut cols[i], child, fields, event);
+                    }
+                });
+            }
         }
         Component::Col(children) => {
             ui.vertical(|ui| {
@@ -438,8 +446,12 @@ fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
         let avail_w = ui.available_width();
         let size = egui::Vec2::new(avail_w, cfg.height);
         let (resp, painter) = ui.allocate_painter(size, egui::Sense::hover());
-        let center = resp.rect.center();
-        let radius = (cfg.height / 2.2).min(avail_w / 2.5) - 10.0;
+        // Reservamos una franja a la derecha para la leyenda (así no se recorta
+        // a "D, S, C..."): el pie ocupa la parte izquierda, la leyenda la derecha.
+        let legend_w = (avail_w * 0.32).clamp(90.0, 170.0);
+        let pie_w    = (avail_w - legend_w).max(80.0);
+        let center   = egui::pos2(resp.rect.left() + pie_w / 2.0, resp.rect.center().y);
+        let radius   = (cfg.height / 2.2).min(pie_w / 2.5) - 10.0;
 
         let values = cfg.series.first().map(|(_, v)| v.as_slice()).unwrap_or(&[]);
         let total: f64 = values.iter().sum();
@@ -481,8 +493,8 @@ fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
                 angle += sweep;
             }
 
-            // Leyenda lateral
-            let legend_x = center.x + radius + 16.0;
+            // Leyenda lateral en la franja reservada (texto completo, sin recorte)
+            let legend_x = resp.rect.left() + pie_w + 8.0;
             let mut legend_y = center.y - (values.len() as f32 * 18.0) / 2.0;
             for (i, label) in cfg.labels.iter().enumerate() {
                 let color = palette_color(&cfg.palette, i);

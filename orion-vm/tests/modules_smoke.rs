@@ -85,3 +85,58 @@ fn smoke_db_roundtrip() {
 
     assert_eq!(list_len(rows), 1, "db debió devolver 1 fila");
 }
+
+#[test]
+fn smoke_fs_roundtrip() {
+    // Carpeta temporal única: mkdir → write → read → size → append → ls → delete.
+    let mut base = std::env::temp_dir();
+    base.push(format!("orion_smoke_fs_{}", std::process::id()));
+    let dir = base.to_str().unwrap().to_string();
+    let file = format!("{dir}/hola.txt");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // crear carpeta
+    call("fs", "mkdir", vec![s(&dir)]);
+    assert!(as_bool(call("fs", "is_dir", vec![s(&dir)])), "is_dir tras mkdir");
+    assert!(as_bool(call("fs", "exists", vec![s(&dir)])));
+
+    // escribir + leer
+    call("fs", "write", vec![s(&file), s("hola orion")]);
+    assert!(as_bool(call("fs", "is_file", vec![s(&file)])), "is_file tras write");
+    assert_eq!(as_str(call("fs", "read", vec![s(&file)])), "hola orion");
+    assert_eq!(as_int(call("fs", "size", vec![s(&file)])), 10);
+
+    // append
+    call("fs", "append", vec![s(&file), s("!")]);
+    assert_eq!(as_str(call("fs", "read", vec![s(&file)])), "hola orion!");
+
+    // listar carpeta
+    assert!(list_len(call("fs", "ls", vec![s(&dir)])) >= 1, "ls debe ver el archivo");
+
+    // borrar archivo
+    call("fs", "delete", vec![s(&file)]);
+    assert!(!as_bool(call("fs", "exists", vec![s(&file)])), "el archivo debió borrarse");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn smoke_process_execute() {
+    // execute(cmd) → dict {code, out, err}. `echo` existe en cmd y sh.
+    match call("process", "execute", vec![s("echo orion")]) {
+        EvalValue::Dict(m) => {
+            assert!(matches!(m.get("code"), Some(EvalValue::Int(_))), "execute debe devolver 'code'");
+            assert!(m.contains_key("out"), "execute debe devolver 'out'");
+        }
+        other => panic!("process.execute no devolvió dict: {other:?}"),
+    }
+}
+
+#[test]
+fn smoke_env_set_get() {
+    let key = format!("ORION_SMOKE_{}", std::process::id());
+    assert!(!as_bool(call("env", "has", vec![s(&key)])), "la var no debería existir aún");
+    call("env", "set", vec![s(&key), s("valor123")]);
+    assert!(as_bool(call("env", "has", vec![s(&key)])), "has tras set");
+    assert_eq!(as_str(call("env", "get", vec![s(&key)])), "valor123");
+}
