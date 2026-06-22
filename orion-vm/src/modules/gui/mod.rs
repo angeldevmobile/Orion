@@ -100,6 +100,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             with_state(|s| s.container_stack.push(("col".into(), s.components.len())));
             Ok(EvalValue::Null)
         }
+        // gui.grid(cols) … gui.end() — rejilla de N columnas, los hijos se acomodan por filas.
+        "grid" => {
+            let cols = args.get(0).and_then(|v| v.to_i64().ok()).unwrap_or(2).max(1);
+            with_state(|s| s.container_stack.push((format!("grid|{}", cols), s.components.len())));
+            Ok(EvalValue::Null)
+        }
+        // gui.sidebar(ancho?) … gui.end() — barra lateral fija (SidePanel izquierdo).
+        // El ancho lo decide el dev; 220 es solo el fallback si no se indica.
+        "sidebar" => {
+            let width = f32_arg(&args, 0).unwrap_or(220.0);
+            with_state(|s| s.container_stack.push((format!("sidebar|{}", width), s.components.len())));
+            Ok(EvalValue::Null)
+        }
         "zone" => {
             let style = style_args(&args, 0, 1);
             with_state(|s| {
@@ -122,6 +135,16 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                         Component::Row(children)
                     } else if kind == "col" {
                         Component::Col(children)
+                    } else if kind.starts_with("grid|") {
+                        let n = kind.strip_prefix("grid|")
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .unwrap_or(2).max(1);
+                        Component::Grid(n, children)
+                    } else if kind.starts_with("sidebar|") {
+                        let w = kind.strip_prefix("sidebar|")
+                            .and_then(|s| s.parse::<f32>().ok())
+                            .unwrap_or(220.0);
+                        Component::Sidebar(w, children)
                     } else if kind.starts_with("zone|") {
                         let parts: Vec<&str> = kind.splitn(3, '|').collect();
                         let bg = parse_rgb_tag(parts.get(1).copied().unwrap_or(""));

@@ -68,6 +68,11 @@ pub enum Component {
     Card(Vec<Component>),
     Row(Vec<Component>),
     Col(Vec<Component>),
+    /// Rejilla de N columnas de ancho igual; los hijos se acomodan por filas.
+    Grid(usize, Vec<Component>),
+    /// Barra lateral fija (ancho en px decidido por el dev). A nivel raíz el
+    /// runner la dibuja como SidePanel izquierdo.
+    Sidebar(f32, Vec<Component>),
     Zone(Vec<Component>, Style),
 
     //    UI-5 — Animaciones
@@ -300,6 +305,33 @@ pub fn render(
                     ui.add_space(6.0);
                 }
             });
+        }
+        Component::Grid(cols, children) => {
+            // N columnas de ancho igual; cada fila usa ui.columns(n) para que
+            // todas las filas queden alineadas aunque la última esté incompleta.
+            let n = (*cols).max(1);
+            for chunk in children.chunks(n) {
+                ui.columns(n, |c| {
+                    for (i, child) in chunk.iter().enumerate() {
+                        render(&mut c[i], child, fields, event);
+                    }
+                });
+                ui.add_space(8.0);
+            }
+        }
+        Component::Sidebar(width, children) => {
+            // A nivel raíz lo maneja el runner como SidePanel. Si aparece anidado,
+            // lo dibujamos como columna con fondo del ancho indicado.
+            egui::Frame::none()
+                .fill(theme::SURFACE)
+                .inner_margin(egui::Margin::same(12.0))
+                .show(ui, |ui| {
+                    ui.set_width(*width);
+                    for child in children {
+                        render(ui, child, fields, event);
+                        ui.add_space(6.0);
+                    }
+                });
         }
         Component::Zone(children, style) => {
             let fill = style.bg_color().unwrap_or(theme::SURFACE);

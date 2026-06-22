@@ -189,7 +189,58 @@ fn reload_script(path: &str) -> Option<Vec<Component>> {
     Some(comps)
 }
 
-//    Apps                                                                       
+//    Render raíz (común a las 3 apps)
+
+/// Dibuja los componentes: si hay un `Sidebar` a nivel raíz lo pinta como
+/// SidePanel izquierdo fijo, y el resto va en el panel central con scroll.
+fn render_root(
+    ctx: &egui::Context,
+    components: &[Component],
+    fields: &mut HashMap<String, String>,
+    event: &mut Option<String>,
+) {
+    // Ancho del sidebar: lo decide el dev en gui.sidebar(ancho); aquí solo lo usamos.
+    let sidebar_w = components.iter().find_map(|c| match c {
+        Component::Sidebar(w, _) => Some(*w),
+        _ => None,
+    });
+    if let Some(w) = sidebar_w {
+        egui::SidePanel::left("orion_sidebar")
+            .resizable(false)
+            .exact_width(w)
+            .frame(
+                egui::Frame::none()
+                    .fill(theme::SURFACE)
+                    .inner_margin(egui::Margin::same(16.0)),
+            )
+            .show(ctx, |ui| {
+                for comp in components {
+                    if let Component::Sidebar(_, children) = comp {
+                        for child in children {
+                            render(ui, child, fields, event);
+                            ui.add_space(8.0);
+                        }
+                    }
+                }
+            });
+    }
+
+    egui::CentralPanel::default().show(ctx, |ui| {
+        ui.add_space(24.0);
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.set_max_width(ui.available_width());
+            for comp in components {
+                if matches!(comp, Component::Sidebar(..)) {
+                    continue;
+                }
+                render(ui, comp, fields, event);
+                ui.add_space(6.0);
+            }
+        });
+    });
+}
+
+//    Apps
 
 struct OrionApp {
     components: Vec<Component>,
@@ -198,17 +249,8 @@ struct OrionApp {
 
 impl eframe::App for OrionApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(24.0);
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(ui.available_width());
-                let mut event: Option<String> = None;
-                for comp in &self.components {
-                    render(ui, comp, &mut self.field_vals, &mut event);
-                    ui.add_space(6.0);
-                }
-            });
-        });
+        let mut event: Option<String> = None;
+        render_root(ctx, &self.components, &mut self.field_vals, &mut event);
     }
 }
 
@@ -228,17 +270,8 @@ impl eframe::App for OrionAppWatch {
             }
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(24.0);
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(ui.available_width());
-                let mut event: Option<String> = None;
-                for comp in &self.components {
-                    render(ui, comp, &mut self.field_vals, &mut event);
-                    ui.add_space(6.0);
-                }
-            });
-        });
+        let mut event: Option<String> = None;
+        render_root(ctx, &self.components, &mut self.field_vals, &mut event);
 
         // Indicador sutil de watch mode en esquina superior derecha
         egui::Area::new(egui::Id::new("watch_badge"))
@@ -308,17 +341,7 @@ impl eframe::App for OrionAppReactive {
         }
 
         let mut fired_event: Option<String> = None;
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(24.0);
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_max_width(ui.available_width());
-                for comp in &self.components {
-                    render(ui, comp, &mut self.field_vals, &mut fired_event);
-                    ui.add_space(6.0);
-                }
-            });
-        });
+        render_root(ctx, &self.components, &mut self.field_vals, &mut fired_event);
 
         // Si se disparó un evento, re-evaluar el script en un hilo separado
         if let Some(ev) = fired_event {

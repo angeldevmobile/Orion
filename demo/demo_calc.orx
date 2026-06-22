@@ -1,0 +1,99 @@
+-- demo_calc.orx — calculadora interactiva en Orion.
+-- Prueba de UI reactiva: botones (grid) + estado (set/val) + eventos (pressed).
+-- El script se re-ejecuta en cada clic; el estado vive en gui.set/gui.val.
+use "gui" as gui
+
+fn aplicar(a, b, op) {
+    if op == "+" { return a + b }
+    if op == "-" { return a - b }
+    if op == "*" { return a * b }
+    if op == "/" {
+        if b == 0 { return 0 }
+        return a / b
+    }
+    return b
+}
+
+acc = gui.val("acc", 0)
+op  = gui.val("op", "")
+cur = gui.val("cur", "")
+
+-- Dígitos: acumulan en el input actual
+for d in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+    if gui.pressed(d) {
+        cur = cur + d
+        gui.set("cur", cur)
+        gui.set("disp", cur)
+    }
+}
+
+-- Operadores: cierran el operando actual y guardan el operador pendiente
+for o in ["+", "-", "*", "/"] {
+    if gui.pressed(o) {
+        if cur != "" {
+            if op != "" {
+                acc = aplicar(acc, float(cur), op)
+            } else {
+                acc = float(cur)
+            }
+        }
+        gui.set("acc", acc)
+        gui.set("op", o)
+        gui.set("cur", "")
+        gui.set("disp", str(acc))
+    }
+}
+
+-- Igual: calcula el resultado
+if gui.pressed("=") {
+    if op != "" {
+        b = cur
+        if b == "" { b = str(acc) }
+        acc = aplicar(acc, float(b), op)
+        gui.set("acc", acc)
+        gui.set("op", "")
+        gui.set("cur", "")
+        gui.set("disp", str(acc))
+    }
+}
+
+-- Limpiar
+if gui.pressed("C") {
+    gui.set("acc", 0)
+    gui.set("op", "")
+    gui.set("cur", "")
+    gui.set("disp", "0")
+}
+
+disp = gui.val("disp", "0")
+
+-- ── UI ──────────────────────────────────────────────
+gui.panel("Calculadora Orion", 360, 480)
+
+gui.card()
+  gui.caption("RESULTADO")
+  gui.heading(disp)
+gui.end()
+
+gui.spacer(8)
+
+gui.grid(4)
+  gui.ghost("7")
+  gui.ghost("8")
+  gui.ghost("9")
+  gui.press("/")
+  gui.ghost("4")
+  gui.ghost("5")
+  gui.ghost("6")
+  gui.press("*")
+  gui.ghost("1")
+  gui.ghost("2")
+  gui.ghost("3")
+  gui.press("-")
+  gui.ghost("0")
+  gui.press("C")
+  gui.press("=")
+  gui.press("+")
+gui.end()
+
+gui.run()
