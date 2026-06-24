@@ -77,7 +77,8 @@ impl Gc {
         before - self.heap.len()
     }
 
-    /// Número de instancias vivas según el heap del GC.
+    /// Número de instancias vivas según el heap del GC. Solo usado por tests.
+    #[cfg(test)]
     pub fn heap_size(&self) -> usize {
         self.heap.iter().filter(|w| w.strong_count() > 0).count()
     }

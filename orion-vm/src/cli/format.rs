@@ -47,14 +47,6 @@ pub fn run_format(path: &str, write_back: bool) {
     }
 }
 
-pub fn format_source(src: &str) -> Result<String, String> {
-    let tokens = lexer::lex(src)
-        .map_err(|e| format!("línea {}: {}", e.line, e.message))?;
-    let stmts = parser::parse(tokens)
-        .map_err(|e| format!("línea {}: {}", e.line, e.message))?;
-    Ok(format_program(&stmts))
-}
-
 //   Núcleo del formatter                  ──
 
 pub fn format_program(stmts: &[Stmt]) -> String {

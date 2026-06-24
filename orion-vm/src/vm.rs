@@ -76,12 +76,6 @@ impl CallFrame {
         }
     }
 
-    fn named(instructions: Vec<Instruction>, lines: Vec<u32>, name: &str) -> Self {
-        let mut frame = Self::new(instructions, lines);
-        frame.name = name.to_string();
-        frame
-    }
-
     fn with_args(instructions: Vec<Instruction>, lines: Vec<u32>, params: &[String], args: Vec<Value>) -> Self {
         let mut frame = Self::new(instructions, lines);
         for (param, val) in params.iter().zip(args.into_iter()) {
@@ -1279,7 +1273,7 @@ impl VM {
     }
 
     /// Carga un módulo .orx: compila, ejecuta en sub-VM, extrae vars y fns en un dict.
-    fn load_orx_module(&mut self, path: &str, module_name: &str, prefix: &str) -> Result<Value, String> {
+    fn load_orx_module(&mut self, path: &str, _module_name: &str, prefix: &str) -> Result<Value, String> {
         use crate::lexer::lex;
         use crate::parser::parse;
         use crate::codegen::compile;
@@ -1352,7 +1346,7 @@ impl VM {
             ("randint",  &["a", "b"]),
         ];
 
-        for (fname, params) in math_fns {
+        for (fname, _params) in math_fns {
             let key = format!("__math__{}", fname);
             ns.insert(fname.to_string(), Value::Str(key.clone()));
             // Registrar función con un body especial: usamos la instrucción Call con nombre especial
@@ -2500,11 +2494,6 @@ impl VM {
     /// Número de frames en el call stack (0 = programa terminado).
     pub fn call_depth(&self) -> usize {
         self.call_stack.len()
-    }
-
-    /// El programa terminó (call stack vacío tras el último Return/Halt).
-    pub fn is_done(&self) -> bool {
-        self.call_stack.is_empty()
     }
 
     /// Frames del call stack para el debugger: `(nombre_fn, línea)` del más reciente al más antiguo.

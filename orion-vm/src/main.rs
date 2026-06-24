@@ -5,7 +5,6 @@ mod vm;
 mod aot;
 mod bytecode;
 mod eval_value;
-mod stdlib_bridge;
 mod modules;
 mod ai;
 mod token;

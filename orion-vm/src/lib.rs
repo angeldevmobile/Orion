@@ -18,7 +18,6 @@ pub mod codegen;
 pub mod typechecker;
 pub mod vm;
 pub mod eval_value;
-pub mod stdlib_bridge;
 pub mod modules;
 pub mod ai;
 pub mod jit;

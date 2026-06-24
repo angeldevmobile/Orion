@@ -26,40 +26,6 @@ fn active_id() -> &'static Mutex<Option<u64>> {
     ACTIVE.get_or_init(|| Mutex::new(None))
 }
 
-//    API pública para eval.rs                                                   
-
-/// Resultado de un despacho exitoso del router activo.
-pub struct Dispatch {
-    pub handler:     EvalValue,
-    pub middlewares: Vec<EvalValue>,
-    pub params:      HashMap<String, String>,
-}
-
-/// Indica si hay un router activo (para diferenciar "no match" de "sin router").
-pub fn is_active() -> bool {
-    active_id().lock().unwrap().is_some()
-}
-
-/// Intenta despachar `method` + `path` contra el router activo.
-/// Devuelve `None` si no hay router activo o ninguna ruta coincide.
-pub fn try_dispatch(method: &str, path: &str) -> Option<Dispatch> {
-    let router_id = (*active_id().lock().unwrap())?;
-    let store = store().lock().unwrap();
-    let data  = store.get(&router_id)?;
-
-    for route in &data.routes {
-        if route.method == method || route.method == "*" {
-            if let Some(params) = match_path(&route.pattern, path) {
-                return Some(Dispatch {
-                    handler:     route.handler.clone(),
-                    middlewares: data.middlewares.clone(),
-                    params,
-                });
-            }
-        }
-    }
-    None
-}
 
 //    call() — API Orion                                                         
 

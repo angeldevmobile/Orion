@@ -12,7 +12,7 @@
 //! Eventos emitidos:
 //!   initialized, stopped, continued, exited, terminated, output
 
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 

@@ -57,7 +57,7 @@ fn analyze_with_ai(path: &str, question: &str) -> Result<EvalValue, String> {
     let b64 = img_to_base64(&img)?;
 
     // Contexto estructural
-    let meta    = extract_metadata_from_img(&img);
+    let _meta   = extract_metadata_from_img(&img);
     let context = format!(
         "Análisis estructural previo:\n\
          - Dimensiones: {}×{}\n\
@@ -182,7 +182,7 @@ fn detect_tables(path: &str) -> Result<EvalValue, String> {
 
 fn detect_signatures(path: &str) -> Result<EvalValue, String> {
     let img  = open_img(path)?;
-    let (w, h) = img.dimensions();
+    let (_w, _h) = img.dimensions();
     let d    = dark_density(&img);
     let detected   = d > 0.01 && d < 0.2;
     let confidence = if detected { ((d - 0.01) / 0.19).max(0.0).min(1.0) } else { 0.0 };

@@ -8,7 +8,7 @@ pub const BOLD:   &str = "\x1b[1m";
 pub const DIM:    &str = "\x1b[2m";
 pub const RED:    &str = "\x1b[31m";
 pub const GREEN:  &str = "\x1b[32m";
-pub const YELLOW: &str = "\x1b[33m";
+#[allow(dead_code)] pub const YELLOW: &str = "\x1b[33m";
 pub const CYAN:   &str = "\x1b[36m";
 pub const WHITE:  &str = "\x1b[37m";
 pub const BBLUE:  &str = "\x1b[94m";   // azul eléctrico — color principal
@@ -18,10 +18,6 @@ pub const ORANGE: &str = "\x1b[38;5;208m"; // naranja — acento secundario
 #[allow(dead_code)] pub const BMAGENTA: &str = "\x1b[95m";
 #[allow(dead_code)] pub const BGREEN:   &str = "\x1b[92m";
 #[allow(dead_code)] pub const BYELLOW:  &str = "\x1b[93m";
-
-// Alias usados por otros módulos
-pub use self::RED   as RED_MOD;
-pub use self::GREEN as GREEN_MOD;
 
 //    Animación de inicio                                                        
 

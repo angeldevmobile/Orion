@@ -7,10 +7,10 @@ pub const BG:        egui::Color32 = egui::Color32::from_rgb(15,  15,   23);
 pub const SURFACE:   egui::Color32 = egui::Color32::from_rgb(26,  26,   40);
 
 /// Colores semánticos del design system — disponibles como nombres en componentes
-pub const SUCCESS:   egui::Color32 = egui::Color32::from_rgb(34,  197,  94);
-pub const WARNING:   egui::Color32 = egui::Color32::from_rgb(234, 179,   8);
-pub const ERROR:     egui::Color32 = egui::Color32::from_rgb(239,  68,  68);
-pub const INFO:      egui::Color32 = egui::Color32::from_rgb(59,  130, 246);
+#[allow(dead_code)] pub const SUCCESS: egui::Color32 = egui::Color32::from_rgb(34,  197,  94);
+#[allow(dead_code)] pub const WARNING: egui::Color32 = egui::Color32::from_rgb(234, 179,   8);
+#[allow(dead_code)] pub const ERROR:   egui::Color32 = egui::Color32::from_rgb(239,  68,  68);
+#[allow(dead_code)] pub const INFO:    egui::Color32 = egui::Color32::from_rgb(59,  130, 246);
 
 pub fn apply(ctx: &egui::Context) {
     let mut vis = egui::Visuals::dark();

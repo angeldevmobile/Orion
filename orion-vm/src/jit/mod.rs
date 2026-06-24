@@ -16,7 +16,6 @@ pub mod runtime_oop;
 pub use compiler::JitCompiler;
 
 use crate::bytecode::OrionBytecode;
-use crate::instruction::Instruction;
 
 /// Compila y ejecuta un programa completo (main + funciones) con Cranelift JIT.
 ///
@@ -26,10 +25,4 @@ use crate::instruction::Instruction;
 pub fn run_program(bc: &OrionBytecode) -> Result<bool, String> {
     let mut jit = JitCompiler::new()?;
     jit.run_program(bc)
-}
-
-/// API de compatibilidad: solo instrucciones de main sin funciones.
-pub fn run_jit(instructions: &[Instruction]) -> Result<bool, String> {
-    let mut jit = JitCompiler::new()?;
-    jit.run(instructions)
 }

@@ -33,7 +33,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             conns().lock().unwrap()
                 .get_mut(&id)
                 .ok_or_else(|| format!("ws: conexión {} no existe", id))?
-                .write_message(Message::Text(msg))
+                .send(Message::Text(msg))
                 .map_err(|e| format!("ws.enviar: {}", e))?;
             Ok(EvalValue::Bool(true))
         }
@@ -43,7 +43,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             match conns().lock().unwrap()
                 .get_mut(&id)
                 .ok_or_else(|| format!("ws: conexión {} no existe", id))?
-                .read_message()
+                .read()
                 .map_err(|e| format!("ws.recibir: {}", e))?
             {
                 Message::Text(t)   => Ok(EvalValue::Str(t)),

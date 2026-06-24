@@ -45,6 +45,7 @@ pub enum PauseReason {
     /// Error de runtime no capturado.
     Error(String),
     /// Pausa solicitada explícitamente (futuro: Ctrl-C en DAP).
+    #[allow(dead_code)]
     UserPause,
 }
 

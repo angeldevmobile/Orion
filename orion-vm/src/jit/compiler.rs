@@ -260,6 +260,7 @@ impl JitCompiler {
         let i = types::I64;
         macro_rules! decl {
             ($name:literal, [$($p:expr),*], [$($r:expr),*]) => {{
+                #[allow(unused_mut)]
                 let mut sig = self.module.make_signature();
                 $(sig.params.push(AbiParam::new($p));)*
                 $(sig.returns.push(AbiParam::new($r));)*
@@ -519,19 +520,7 @@ impl JitCompiler {
         Ok(true)
     }
 
-    pub fn run(&mut self, instructions: &[Instruction]) -> Result<bool, String> {
-        use indexmap::IndexMap;
-        let dummy = OrionBytecode {
-            main: instructions.to_vec(),
-            lines: vec![],
-            functions: IndexMap::new(),
-            shapes: IndexMap::new(),
-            extern_fns: IndexMap::new(),
-        };
-        self.run_program(&dummy)
-    }
-
-    //     Generación de IR                                                     
+    //     Generación de IR
 
     fn fill_function_body(
         &mut self,
@@ -575,8 +564,8 @@ impl JitCompiler {
         let set_attr_ref           = self.module.declare_func_in_func(rt.set_attr,           &mut ctx.func);
         let is_instance_ref        = self.module.declare_func_in_func(rt.is_instance,        &mut ctx.func);
         let get_self_ref           = self.module.declare_func_in_func(rt.get_self,           &mut ctx.func);
-        let push_self_ref          = self.module.declare_func_in_func(rt.push_self,          &mut ctx.func);
-        let pop_self_ref           = self.module.declare_func_in_func(rt.pop_self,           &mut ctx.func);
+        let _push_self_ref         = self.module.declare_func_in_func(rt.push_self,          &mut ctx.func);
+        let _pop_self_ref          = self.module.declare_func_in_func(rt.pop_self,           &mut ctx.func);
         let get_self_field_ref     = self.module.declare_func_in_func(rt.get_self_field,     &mut ctx.func);
         let set_self_field_ref     = self.module.declare_func_in_func(rt.set_self_field,     &mut ctx.func);
         let call_method_ref        = self.module.declare_func_in_func(rt.call_method,        &mut ctx.func);

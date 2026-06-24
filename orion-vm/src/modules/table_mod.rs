@@ -862,7 +862,7 @@ fn pretty_print(rows: &[EvalValue], n: usize) {
     let show = rows.iter().take(n).collect::<Vec<_>>();
 
     // Calcular anchos de columna
-    let col_widths: Vec<usize> = headers.iter().enumerate().map(|(i, h)| {
+    let col_widths: Vec<usize> = headers.iter().enumerate().map(|(_i, h)| {
         let max_data = show.iter().map(|row| {
             if let EvalValue::Dict(m) = row {
                 m.get(h).map(|v| v.to_string().len()).unwrap_or(0)

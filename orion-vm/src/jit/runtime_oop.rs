@@ -477,14 +477,3 @@ unsafe fn call_method_instance(obj: i64, name_ptr: i64, args: &[i64]) -> i64 {
     }
 }
 
-//     Display de instancias (para rt_show, rt_add, etc.)
-
-pub fn instance_to_display(val_ptr: i64) -> String {
-    unsafe {
-        let inst = get_inst(val_ptr);
-        let parts: Vec<String> = inst.fields.iter()
-            .map(|(k, v)| format!("{}: {}", k, val_to_display(val_ref(*v))))
-            .collect();
-        format!("{}{{ {} }}", inst.shape_name, parts.join(", "))
-    }
-}

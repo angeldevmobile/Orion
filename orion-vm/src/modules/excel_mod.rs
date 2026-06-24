@@ -1380,7 +1380,7 @@ fn deduplicate(rows: Vec<EvalValue>, campos: Option<Vec<String>>) -> Result<Eval
             EvalValue::Dict(m) => {
                 match &campos {
                     Some(cols) => {
-                        let mut parts: Vec<String> = cols.iter()
+                        let parts: Vec<String> = cols.iter()
                             .map(|c| to_str_val(m.get(c).unwrap_or(&EvalValue::Null)))
                             .collect();
                         parts.join("||")

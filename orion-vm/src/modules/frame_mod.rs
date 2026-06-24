@@ -9,7 +9,7 @@
 use crate::eval_value::EvalValue;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
