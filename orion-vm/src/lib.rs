@@ -17,12 +17,9 @@ pub mod parser;
 pub mod codegen;
 pub mod typechecker;
 pub mod vm;
-pub mod builtins;
 pub mod eval_value;
-pub mod env;
 pub mod stdlib_bridge;
 pub mod modules;
-pub mod eval;
 pub mod ai;
 pub mod jit;
 

@@ -38,6 +38,27 @@ fn assert_has_error(src: &str) {
     );
 }
 
+/// Mensajes de warning (no error) emitidos por el type checker.
+fn warnings(src: &str) -> Vec<String> {
+    let tokens = lexer::lex(src).expect("lex");
+    let stmts = parser::parse(tokens).expect("parse");
+    typechecker::type_check(&stmts)
+        .into_iter()
+        .filter(|i| i.kind == "warning")
+        .map(|i| i.message)
+        .collect()
+}
+
+/// Falla si algún warning contiene `needle`.
+fn assert_no_warning_containing(src: &str, needle: &str) {
+    let warns = warnings(src);
+    let hits: Vec<_> = warns.iter().filter(|w| w.contains(needle)).collect();
+    assert!(
+        hits.is_empty(),
+        "no se esperaba ningún warning con '{needle}', se obtuvieron {hits:?}\n--- src ---\n{src}"
+    );
+}
+
 //    Deben PASAR (sin errores)
 
 #[test]
@@ -72,6 +93,35 @@ fn tc_ok_call_with_correct_arg_type() {
 }
 show saluda("orion")"#,
     );
+}
+
+// Regresión: parámetros de función SIN type hint usados en el cuerpo no deben
+// reportarse como "usada pero no definida en este scope" (el tipado es opcional
+// en Orion). Antes el type checker solo registraba en scope los parámetros con
+// anotación, marcando a los demás como indefinidos. Ver demo/demo_calc.orx.
+#[test]
+fn tc_ok_untyped_params_not_flagged_as_undefined() {
+    let src = r#"fn aplicar(a, b, op) {
+    if op == "+" { return a + b }
+    if op == "-" { return a - b }
+    if b == 0 { return 0 }
+    return b
+}
+show aplicar(2, 3, "+")"#;
+    assert_no_warning_containing(src, "usada pero no definida");
+    // y desde luego no debe ser un error duro
+    assert_ok(src);
+}
+
+// Regresión inversa: un parámetro no leído NO debe disparar el warning de
+// "asignada pero nunca usada" (los parámetros no son variables locales muertas).
+#[test]
+fn tc_ok_unused_param_not_flagged_as_unused() {
+    let src = r#"fn no_usa(x, y) {
+    return 0
+}
+show no_usa(1, 2)"#;
+    assert_no_warning_containing(src, "nunca usada");
 }
 
 //    Deben FALLAR (con error)

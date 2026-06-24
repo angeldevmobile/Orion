@@ -50,6 +50,31 @@ fn assert_vm_jit_match(src: &str) {
     );
 }
 
+/// Verifica que VM y JIT CONCUERDAN en el resultado, sea éxito o error:
+/// mismo estado de salida (ambos ok o ambos fallan) Y mismo stdout.
+///
+/// Más estricto que `assert_vm_jit_match` para programas que deben FALLAR:
+/// un backend que envuelve/coacciona en silencio mientras el otro aborta es
+/// precisamente la divergencia que esta red caza (overflow, módulo por cero,
+/// bool en aritmética, etc.).
+fn assert_vm_jit_agree(src: &str) {
+    let path = write_temp(src);
+    let p = path.to_str().unwrap();
+    let (vm_out, vm_ok) = run(&[p]);
+    let (jit_out, jit_ok) = run(&["--jit", p]);
+    let _ = fs::remove_file(&path);
+
+    assert_eq!(
+        vm_ok, jit_ok,
+        "VM y JIT DISCREPAN en éxito/fallo (vm_ok={vm_ok}, jit_ok={jit_ok}).\n\
+         --- programa ---\n{src}\n--- VM stdout ---\n{vm_out}--- JIT stdout ---\n{jit_out}"
+    );
+    assert_eq!(
+        vm_out, jit_out,
+        "VM y JIT DIVERGEN en stdout.\n--- programa ---\n{src}\n--- VM ---\n{vm_out}--- JIT ---\n{jit_out}"
+    );
+}
+
 #[test]
 fn diff_arithmetic_int() {
     assert_vm_jit_match("show 7 + 3\nshow 7 * 3 - 2\nshow 10 % 3\nshow -42");
@@ -165,4 +190,70 @@ fn diff_factorial_loop() {
 }
 show fact(6)"#,
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Paridad de ERRORES y casos límite (Sprint: core-hardening).
+//
+// Antes de este sprint, VM y JIT divergían en silencio en estos casos: la VM
+// hacía panic de Rust (backtrace al usuario) o erraba mientras el JIT envolvía
+// o coaccionaba sin avisar. La decisión de diseño acordada: ambos deben dar un
+// ERROR LIMPIO (mismo éxito/fallo, mismo stdout vacío). Estos tests congelan
+// esa semántica para que ningún backend vuelva a desviarse.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn diff_int_overflow_add() {
+    // MAX + 1: ni panic (VM) ni wrap silencioso (JIT) — error limpio en ambos.
+    assert_vm_jit_agree("show 9223372036854775807 + 1");
+}
+
+#[test]
+fn diff_int_overflow_mul() {
+    assert_vm_jit_agree("show 9223372036854775807 * 2");
+}
+
+#[test]
+fn diff_int_overflow_sub() {
+    assert_vm_jit_agree("show -9223372036854775808 - 1");
+}
+
+#[test]
+fn diff_mod_by_zero() {
+    // VM hacía panic de Rust aquí; ahora ambos dan error limpio.
+    assert_vm_jit_agree("show 10 % 0");
+}
+
+#[test]
+fn diff_div_by_zero() {
+    assert_vm_jit_agree("show 10 / 0");
+}
+
+#[test]
+fn diff_bool_in_arithmetic() {
+    // `yes + yes`: la VM erraba, el JIT concatenaba a "yesyes". Ahora ambos
+    // rechazan bool en aritmética con error de tipo.
+    assert_vm_jit_agree("show yes + yes");
+}
+
+#[test]
+fn diff_bool_plus_int() {
+    assert_vm_jit_agree("show no + 1");
+}
+
+#[test]
+fn diff_pow_negative_exponent() {
+    // Exponente negativo en ints: el JIT devolvía 0 en silencio; ahora error.
+    assert_vm_jit_agree("show 2 ** -3");
+}
+
+#[test]
+fn diff_pow_overflow() {
+    assert_vm_jit_agree("show 2 ** 100");
+}
+
+// Caso de control: aritmética válida en el límite NO debe fallar y debe coincidir.
+#[test]
+fn diff_int_max_no_overflow() {
+    assert_vm_jit_agree("show 9223372036854775806 + 1");
 }

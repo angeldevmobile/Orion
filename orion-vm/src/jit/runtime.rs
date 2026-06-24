@@ -170,21 +170,20 @@ pub extern "C" fn rt_add(a: i64, b: i64) -> i64 {
         let av = val_ref(a);
         let bv = val_ref(b);
         match (av.tag, bv.tag) {
-            (TAG_INT, TAG_INT)     => alloc_val(TAG_INT, av.data_i.wrapping_add(bv.data_i), 0.0),
+            (TAG_INT, TAG_INT) => match av.data_i.checked_add(bv.data_i) {
+                Some(r) => alloc_val(TAG_INT, r, 0.0),
+                None => { eprintln!("[JIT] Error: Desbordamiento aritmético en suma de enteros"); std::process::exit(1) }
+            },
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f + bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 + bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f + bv.data_i as f64),
-            (TAG_STR, TAG_STR) => {
-                let result = format!("{}{}", cstr_to_str(av.data_i), cstr_to_str(bv.data_i));
+            // Concatenación: solo si al menos un operando es Str (igual que la VM).
+            // bool/null/etc. en aritmética → error de tipo, NO coerción silenciosa.
+            (TAG_STR, _) | (_, TAG_STR) => {
+                let result = format!("{}{}", val_to_display(av), val_to_display(bv));
                 alloc_val(TAG_STR, string_to_cptr(result), 0.0)
             }
-            // Str + cualquier cosa: concatena como strings (igual que la VM)
-            _ => {
-                let sa = val_to_display(av);
-                let sb = val_to_display(bv);
-                let ptr = string_to_cptr(format!("{sa}{sb}"));
-                alloc_val(TAG_STR, ptr, 0.0)
-            }
+            _ => { eprintln!("[JIT] Error: tipos incompatibles en +"); std::process::exit(1) }
         }
     }
 }
@@ -195,11 +194,14 @@ pub extern "C" fn rt_sub(a: i64, b: i64) -> i64 {
         let av = val_ref(a);
         let bv = val_ref(b);
         match (av.tag, bv.tag) {
-            (TAG_INT, TAG_INT)     => alloc_val(TAG_INT, av.data_i.wrapping_sub(bv.data_i), 0.0),
+            (TAG_INT, TAG_INT) => match av.data_i.checked_sub(bv.data_i) {
+                Some(r) => alloc_val(TAG_INT, r, 0.0),
+                None => { eprintln!("[JIT] Error: Desbordamiento aritmético en resta de enteros"); std::process::exit(1) }
+            },
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f - bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 - bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f - bv.data_i as f64),
-            _ => { eprintln!("[JIT] tipos incompatibles en -"); std::process::exit(1) }
+            _ => { eprintln!("[JIT] Error: tipos incompatibles en -"); std::process::exit(1) }
         }
     }
 }
@@ -210,11 +212,14 @@ pub extern "C" fn rt_mul(a: i64, b: i64) -> i64 {
         let av = val_ref(a);
         let bv = val_ref(b);
         match (av.tag, bv.tag) {
-            (TAG_INT, TAG_INT)     => alloc_val(TAG_INT, av.data_i.wrapping_mul(bv.data_i), 0.0),
+            (TAG_INT, TAG_INT) => match av.data_i.checked_mul(bv.data_i) {
+                Some(r) => alloc_val(TAG_INT, r, 0.0),
+                None => { eprintln!("[JIT] Error: Desbordamiento aritmético en multiplicación de enteros"); std::process::exit(1) }
+            },
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f * bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 * bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f * bv.data_i as f64),
-            _ => { eprintln!("[JIT] tipos incompatibles en *"); std::process::exit(1) }
+            _ => { eprintln!("[JIT] Error: tipos incompatibles en *"); std::process::exit(1) }
         }
     }
 }
@@ -251,10 +256,13 @@ pub extern "C" fn rt_mod(a: i64, b: i64) -> i64 {
         let bv = val_ref(b);
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => {
-                if bv.data_i == 0 { eprintln!("[JIT] Error: módulo por cero"); std::process::exit(1); }
-                alloc_val(TAG_INT, av.data_i % bv.data_i, 0.0)
+                if bv.data_i == 0 { eprintln!("[JIT] Error: Módulo por cero"); std::process::exit(1); }
+                match av.data_i.checked_rem(bv.data_i) {
+                    Some(r) => alloc_val(TAG_INT, r, 0.0),
+                    None => { eprintln!("[JIT] Error: Desbordamiento aritmético en módulo"); std::process::exit(1) }
+                }
             }
-            _ => { eprintln!("[JIT] % solo soporta enteros"); std::process::exit(1) }
+            _ => { eprintln!("[JIT] Error: Módulo solo soporta enteros"); std::process::exit(1) }
         }
     }
 }
@@ -266,8 +274,11 @@ pub extern "C" fn rt_pow(a: i64, b: i64) -> i64 {
         let bv = val_ref(b);
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => {
-                let result = if bv.data_i < 0 { 0 } else { av.data_i.pow(bv.data_i as u32) };
-                alloc_val(TAG_INT, result, 0.0)
+                if bv.data_i < 0 { eprintln!("[JIT] Error: Exponente negativo en potencia de enteros (usa flotantes)"); std::process::exit(1); }
+                match u32::try_from(bv.data_i).ok().and_then(|e| av.data_i.checked_pow(e)) {
+                    Some(r) => alloc_val(TAG_INT, r, 0.0),
+                    None => { eprintln!("[JIT] Error: Desbordamiento aritmético en potencia"); std::process::exit(1) }
+                }
             }
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f.powf(bv.data_f)),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, (av.data_i as f64).powf(bv.data_f)),
@@ -282,9 +293,12 @@ pub extern "C" fn rt_neg(a: i64) -> i64 {
     unsafe {
         let av = val_ref(a);
         match av.tag {
-            TAG_INT   => alloc_val(TAG_INT, -av.data_i, 0.0),
+            TAG_INT   => match av.data_i.checked_neg() {
+                Some(r) => alloc_val(TAG_INT, r, 0.0),
+                None => { eprintln!("[JIT] Error: Desbordamiento aritmético en negación"); std::process::exit(1) }
+            },
             TAG_FLOAT => alloc_val(TAG_FLOAT, 0, -av.data_f),
-            _ => { eprintln!("[JIT] - requiere número"); std::process::exit(1) }
+            _ => { eprintln!("[JIT] Error: - requiere número"); std::process::exit(1) }
         }
     }
 }

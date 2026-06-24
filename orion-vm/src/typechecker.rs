@@ -235,9 +235,15 @@ impl TypeChecker {
                     self.scope_set(tp.clone(), "any".to_string());
                 }
                 for p in params {
-                    if let Some(th) = &p.type_hint {
-                        let resolved = if type_params.contains(th) { "any".to_string() } else { normalize(th) };
-                        self.scope_set(p.name.clone(), resolved);
+                    let resolved = match &p.type_hint {
+                        Some(th) if type_params.contains(th) => "any".to_string(),
+                        Some(th) => normalize(th),
+                        None => "any".to_string(),
+                    };
+                    self.scope_set(p.name.clone(), resolved);
+                    // Los parámetros no leídos no son "asignados pero nunca usados"
+                    if let Some(top) = self.written_not_read.last_mut() {
+                        top.remove(&p.name);
                     }
                 }
                 self.check_stmts(body, ret_type.as_deref());

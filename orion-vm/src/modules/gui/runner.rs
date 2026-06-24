@@ -312,50 +312,36 @@ pub fn launch_reactive(
                 path,
                 components,
                 field_vals,
-                pending: Arc::new(Mutex::new(None)),
             }))
         }),
     )
     .map_err(|e| format!("gui.run: {e}"))
 }
 
-/// Payload que devuelve el hilo de re-evaluación al hilo de UI.
-type ReactivePayload = (Vec<Component>, HashMap<String, String>);
-
 struct OrionAppReactive {
     path:       String,
     components: Vec<Component>,
     field_vals: HashMap<String, String>,
-    /// Canal entre hilo de re-evaluación y el hilo de UI
-    pending:    Arc<Mutex<Option<ReactivePayload>>>,
 }
 
 impl eframe::App for OrionAppReactive {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Aplicar resultado de re-evaluación si llegó
-        if let Ok(mut lock) = self.pending.try_lock() {
-            if let Some((new_comps, new_fields)) = lock.take() {
-                self.components = new_comps;
-                self.field_vals = new_fields;
-            }
-        }
-
         let mut fired_event: Option<String> = None;
         render_root(ctx, &self.components, &mut self.field_vals, &mut fired_event);
 
-        // Si se disparó un evento, re-evaluar el script en un hilo separado
+        // Si se disparó un evento, re-evaluar el script EN ESTE MISMO HILO de UI.
+        // El state_store vive en el thread_local STATE de este hilo; correrlo en
+        // un hilo aparte (thread::spawn) usaría un STATE nuevo y vacío, perdiendo
+        // todo el estado (acc/op/cur) en cada clic. La re-evaluación es trivial
+        // en coste, así que correrla síncronamente no afecta la fluidez.
         if let Some(ev) = fired_event {
-            let path_clone   = self.path.clone();
-            let fields_clone = self.field_vals.clone();
-            let bus          = self.pending.clone();
-            let ctx_clone    = ctx.clone();
-
-            thread::spawn(move || {
-                if let Some(payload) = rerun_script(&path_clone, ev, fields_clone) {
-                    *bus.lock().unwrap() = Some(payload);
-                    ctx_clone.request_repaint();
-                }
-            });
+            if let Some((new_comps, new_fields)) =
+                rerun_script(&self.path, ev, self.field_vals.clone())
+            {
+                self.components = new_comps;
+                self.field_vals = new_fields;
+            }
+            ctx.request_repaint();
         }
     }
 }

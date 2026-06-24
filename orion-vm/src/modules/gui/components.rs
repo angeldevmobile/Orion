@@ -14,7 +14,7 @@ impl Style {
     }
 }
 
-// ── Chart types ──────────────────────────────────────────────────────────────
+//   Chart types                                
 
 #[derive(Clone, PartialEq)]
 pub enum ChartKind { Bar, Line, Area, Scatter, Pie, Hist }
@@ -65,7 +65,10 @@ pub enum Component {
     Slide { id: String, min: f32, max: f32, step: f32 },
 
     //    Layout (containers anidados, se cierran con gui.end())
-    Card(Vec<Component>),
+    /// Tarjeta. Por defecto (`fill: true`) ocupa el ancho de su celda; con
+    /// `width` el dev fija un ancho concreto; con `fill: false` se encoge al
+    /// contenido. Decidido por el dev vía `gui.card({ width: N, fill: bool })`.
+    Card { children: Vec<Component>, width: Option<f32>, fill: bool },
     Row(Vec<Component>),
     Col(Vec<Component>),
     /// Rejilla de N columnas de ancho igual; los hijos se acomodan por filas.
@@ -271,12 +274,19 @@ pub fn render(
             }
             *val_str = val.to_string();
         }
-        Component::Card(children) => {
+        Component::Card { children, width, fill } => {
             egui::Frame::none()
                 .fill(egui::Color32::from_rgb(26, 26, 40))
                 .rounding(egui::Rounding::same(10.0))
                 .inner_margin(egui::Margin::same(16.0))
                 .show(ui, |ui| {
+                    // Ancho: el dev manda. width fijo > fill (ancho disponible) >
+                    // encogerse al contenido (fill:false).
+                    if let Some(w) = width {
+                        ui.set_width(*w);
+                    } else if *fill {
+                        ui.set_width(ui.available_width());
+                    }
                     for child in children {
                         render(ui, child, fields, event);
                         ui.add_space(6.0);
@@ -384,7 +394,7 @@ pub fn render(
             }
         }
 
-        // ── Datos visuales ────────────────────────────────────────────────────
+        //   Datos visuales                           
 
         Component::Table { headers, rows, height } => {
             render_table(ui, headers, rows, *height);
@@ -396,7 +406,7 @@ pub fn render(
     }
 }
 
-// ── Table ─────────────────────────────────────────────────────────────────────
+//   Table                                   ─
 
 fn render_table(ui: &mut egui::Ui, headers: &[String], rows: &[Vec<String>], height: f32) {
     let header_color  = egui::Color32::from_rgb(180, 170, 255);
@@ -458,7 +468,7 @@ fn render_table(ui: &mut egui::Ui, headers: &[String], rows: &[Vec<String>], hei
         });
 }
 
-// ── Chart ─────────────────────────────────────────────────────────────────────
+//   Chart                                   ─
 
 fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
     use egui_plot::{Bar, BarChart, Line, Plot, PlotPoints, Points};
@@ -473,7 +483,7 @@ fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
         ui.add_space(4.0);
     }
 
-    // ── Pie: custom painter ──────────────────────────────────────────────────
+    //   Pie: custom painter                          
     if cfg.kind == ChartKind::Pie {
         let avail_w = ui.available_width();
         let size = egui::Vec2::new(avail_w, cfg.height);
@@ -547,7 +557,7 @@ fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
         return;
     }
 
-    // ── egui_plot: Bar / Line / Area / Scatter / Hist ────────────────────────
+    //   egui_plot: Bar / Line / Area / Scatter / Hist             
     let labels     = cfg.labels.clone();
     let n_labels   = labels.len();
     let chart_kind = cfg.kind.clone();

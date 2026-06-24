@@ -176,7 +176,8 @@ impl Value {
 
     pub fn add(&self, other: &Value) -> Result<Value, String> {
         match (self, other) {
-            (Value::Int(a), Value::Int(b))     => Ok(Value::Int(a + b)),
+            (Value::Int(a), Value::Int(b))     => a.checked_add(*b).map(Value::Int)
+                .ok_or_else(|| "Desbordamiento aritmético en suma de enteros".to_string()),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 + b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a + *b as f64)),
@@ -194,7 +195,8 @@ impl Value {
 
     pub fn sub(&self, other: &Value) -> Result<Value, String> {
         match (self, other) {
-            (Value::Int(a), Value::Int(b))     => Ok(Value::Int(a - b)),
+            (Value::Int(a), Value::Int(b))     => a.checked_sub(*b).map(Value::Int)
+                .ok_or_else(|| "Desbordamiento aritmético en resta de enteros".to_string()),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 - b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a - *b as f64)),
@@ -204,7 +206,8 @@ impl Value {
 
     pub fn mul(&self, other: &Value) -> Result<Value, String> {
         match (self, other) {
-            (Value::Int(a), Value::Int(b))     => Ok(Value::Int(a * b)),
+            (Value::Int(a), Value::Int(b))     => a.checked_mul(*b).map(Value::Int)
+                .ok_or_else(|| "Desbordamiento aritmético en multiplicación de enteros".to_string()),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 * b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a * *b as f64)),

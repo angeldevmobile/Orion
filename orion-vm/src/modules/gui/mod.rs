@@ -88,8 +88,17 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //    Layout — containers anidados
         //    gui.card() / gui.row() / gui.col() / gui.zone() → abre el contenedor
         //    gui.end() → cierra el último contenedor abierto
+        // gui.card({ width: N?, fill: bool? }) — config opcional.
+        // Por defecto la tarjeta llena el ancho de su celda; el dev puede fijar
+        // un width concreto o pedir fill:false para que se encoja al contenido.
         "card" => {
-            with_state(|s| s.container_stack.push(("card".into(), s.components.len())));
+            let cfg   = dict_opt(&args, 0);
+            let width = cfg_f32_opt(&cfg, "width");
+            let fill  = cfg_bool(&cfg, "fill", true);
+            let w_tag = width.map(|w| w.to_string()).unwrap_or_default();
+            with_state(|s| s.container_stack.push(
+                (format!("card|{}|{}", w_tag, fill), s.components.len())
+            ));
             Ok(EvalValue::Null)
         }
         "row" => {
@@ -129,8 +138,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             with_state(|s| {
                 if let Some((kind, start)) = s.container_stack.pop() {
                     let children: Vec<Component> = s.components.drain(start..).collect();
-                    let comp = if kind == "card" {
-                        Component::Card(children)
+                    let comp = if kind == "card" || kind.starts_with("card|") {
+                        // "card|<width?>|<fill>" — width vacío = None
+                        let parts: Vec<&str> = kind.splitn(3, '|').collect();
+                        let width = parts.get(1).and_then(|s| s.parse::<f32>().ok());
+                        let fill  = parts.get(2).map(|s| *s == "true").unwrap_or(true);
+                        Component::Card { children, width, fill }
                     } else if kind == "row" {
                         Component::Row(children)
                     } else if kind == "col" {
@@ -464,6 +477,25 @@ fn cfg_f32(cfg: &CfgMap, key: &str, default: f32) -> f32 {
         .and_then(|v| match v {
             EvalValue::Float(f) => Some(*f as f32),
             EvalValue::Int(n)   => Some(*n as f32),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
+fn cfg_f32_opt(cfg: &CfgMap, key: &str) -> Option<f32> {
+    cfg.as_ref()?.get(key).and_then(|v| match v {
+        EvalValue::Float(f) => Some(*f as f32),
+        EvalValue::Int(n)   => Some(*n as f32),
+        _ => None,
+    })
+}
+
+fn cfg_bool(cfg: &CfgMap, key: &str, default: bool) -> bool {
+    cfg.as_ref()
+        .and_then(|m| m.get(key))
+        .and_then(|v| match v {
+            EvalValue::Bool(b) => Some(*b),
+            EvalValue::Int(n)  => Some(*n != 0),
             _ => None,
         })
         .unwrap_or(default)

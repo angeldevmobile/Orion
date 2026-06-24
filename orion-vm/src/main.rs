@@ -5,11 +5,8 @@ mod vm;
 mod aot;
 mod bytecode;
 mod eval_value;
-mod env;
-mod builtins;
 mod stdlib_bridge;
 mod modules;
-mod eval;
 mod ai;
 mod token;
 mod ast;
@@ -450,15 +447,6 @@ fn main() {
             }
         }
 
-        //    Tree-walker evaluator                                              
-        "--eval" => {
-            if args.len() < 3 {
-                cli::banner::fail("Uso: orion --eval <ast.json>");
-                std::process::exit(1);
-            }
-            run_eval(&args[2]);
-        }
-
         //    Compile .orx → .orbc
         "--compile" => {
             if args.len() < 3 {
@@ -631,7 +619,6 @@ fn print_help() {
         ("--new <proyecto>",              "Crear scaffold de proyecto"),
         ("--repl",                        "Modo interactivo"),
         ("--lex  <archivo.orx>",          "Imprimir tokens"),
-        ("--eval <ast.json>",             "Evaluador de árbol (tree-walker)"),
         ("--format <archivo.orx>",          "Formatear código fuente  [--write]"),
         ("--docs <archivo|carpeta>",       "Generar docs Markdown  [--output=dir]"),
         ("--add  <paquete>",              "Instalar paquete  [--force]"),
@@ -685,40 +672,7 @@ pub fn compile_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, 
         .map_err(|e| error::OrionError::from(e).with_file(path))
 }
 
-fn run_eval(ast_path: &str) {
-    let t0 = Instant::now();
-    let json_src = match fs::read_to_string(ast_path) {
-        Ok(s) => s,
-        Err(e) => {
-            cli::banner::fail(&format!("No se pudo leer '{ast_path}': {e}"));
-            std::process::exit(1);
-        }
-    };
-    let ast: serde_json::Value = match serde_json::from_str(&json_src) {
-        Ok(v) => v,
-        Err(e) => {
-            cli::banner::fail(&format!("JSON inválido en '{ast_path}': {e}"));
-            std::process::exit(1);
-        }
-    };
-    let stmts = match ast.as_array() {
-        Some(a) => a,
-        None => {
-            cli::banner::fail("El AST debe ser un array de sentencias");
-            std::process::exit(1);
-        }
-    };
-    match eval::run_program(stmts) {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("\n  [!] Error de Orion (tree-walker)\n  {}\n", e.replace('\n', "\n  "));
-            std::process::exit(1);
-        }
-    }
-    eprintln!("[Orion] Exec: {:.3} ms", t0.elapsed().as_secs_f64() * 1000.0);
-}
-
-//    REPL                                                                      
+//    REPL
 
 struct ReplSession {
     history: Vec<String>,  // successfully executed source snippets

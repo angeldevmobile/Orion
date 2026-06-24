@@ -351,14 +351,26 @@ impl VM {
             Instruction::Mod => {
                 let b = self.pop()?; let a = self.pop()?;
                 match (a, b) {
-                    (Value::Int(x), Value::Int(y)) => self.value_stack.push(Value::Int(x % y)),
+                    (Value::Int(_), Value::Int(0)) => return Err("Módulo por cero".to_string()),
+                    (Value::Int(x), Value::Int(y)) => {
+                        let r = x.checked_rem(y)
+                            .ok_or("Desbordamiento aritmético en módulo")?;
+                        self.value_stack.push(Value::Int(r));
+                    }
                     _ => return Err("Módulo solo soporta enteros".to_string()),
                 }
             }
             Instruction::Pow => {
                 let b = self.pop()?; let a = self.pop()?;
                 match (a, b) {
-                    (Value::Int(x), Value::Int(y))     => self.value_stack.push(Value::Int(x.pow(y as u32))),
+                    (Value::Int(_), Value::Int(y)) if y < 0 =>
+                        return Err("Exponente negativo en potencia de enteros (usa flotantes)".to_string()),
+                    (Value::Int(x), Value::Int(y)) => {
+                        let r = u32::try_from(y).ok()
+                            .and_then(|e| x.checked_pow(e))
+                            .ok_or("Desbordamiento aritmético en potencia")?;
+                        self.value_stack.push(Value::Int(r));
+                    }
                     (Value::Float(x), Value::Float(y)) => self.value_stack.push(Value::Float(x.powf(y))),
                     (Value::Int(x), Value::Float(y))   => self.value_stack.push(Value::Float((x as f64).powf(y))),
                     _ => return Err("Potencia requiere números".to_string()),
@@ -367,7 +379,11 @@ impl VM {
             Instruction::Neg => {
                 let a = self.pop()?;
                 match a {
-                    Value::Int(n)   => self.value_stack.push(Value::Int(-n)),
+                    Value::Int(n)   => {
+                        let r = n.checked_neg()
+                            .ok_or("Desbordamiento aritmético en negación")?;
+                        self.value_stack.push(Value::Int(r));
+                    }
                     Value::Float(f) => self.value_stack.push(Value::Float(-f)),
                     _ => return Err("Negación solo aplica a números".to_string()),
                 }
