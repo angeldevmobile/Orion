@@ -188,6 +188,13 @@ impl VM {
             if let Some(ref inst) = frame.self_instance {
                 roots.push(Value::Instance(Rc::clone(inst)));
             }
+            // El entorno capturado de un closure es estado vivo alcanzable aunque
+            // no se haya copiado a `vars` (p. ej. si un parámetro homónimo lo
+            // sombrea). Sin esto, una instancia capturada solo por el closure
+            // sería barrida por error → corrupción silenciosa.
+            if let Some(ref env_rc) = frame.closure_env {
+                roots.extend(env_rc.borrow().values().cloned());
+            }
         }
         self.gc.collect(&roots);
     }
