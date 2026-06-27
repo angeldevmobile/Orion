@@ -93,9 +93,41 @@ fn native_opts(title: &str, width: f32, height: f32) -> eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(title)
             .with_inner_size([width, height])
-            .with_resizable(true),
+            .with_resizable(true)
+            .with_icon(orion_icon()),
         ..Default::default()
     }
+}
+
+/// Ícono de la ventana generado en código (sin depender de un asset): disco en
+/// el color de acento de Orion con un anillo blanco — la "O" de Orion. Reemplaza
+/// el ícono genérico del sistema.
+fn orion_icon() -> egui::IconData {
+    const SIZE: i32 = 64;
+    let accent = [108u8, 99, 255];     // acento Orion
+    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    let c = (SIZE as f32 - 1.0) / 2.0; // centro
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let dx = x as f32 - c;
+            let dy = y as f32 - c;
+            let r = (dx * dx + dy * dy).sqrt();
+            let (px, a) = if r <= 30.0 {
+                // anillo blanco (la "O") sobre disco de acento
+                if (14.0..=21.0).contains(&r) {
+                    ([245u8, 245, 250], 255u8)
+                } else {
+                    (accent, 255u8)
+                }
+            } else if r <= 31.5 {
+                (accent, 120u8) // borde suavizado (anti-alias simple)
+            } else {
+                ([0, 0, 0], 0u8) // fuera del disco: transparente
+            };
+            rgba.extend_from_slice(&[px[0], px[1], px[2], a]);
+        }
+    }
+    egui::IconData { rgba, width: SIZE as u32, height: SIZE as u32 }
 }
 
 fn mtime(path: &str) -> Option<SystemTime> {

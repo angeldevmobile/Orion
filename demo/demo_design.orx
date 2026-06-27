@@ -1,0 +1,61 @@
+-- demo_design.orx — vitrina del design system de Orion GUI.
+-- Demuestra estilo por widget (color named/hex), badges semánticos, chart,
+-- inputs y layout — la flexibilidad tipo "patternfill" pero más simple.
+use "gui" as gui
+
+ventas = [
+    { "mes": "Ene", "total": 120 },
+    { "mes": "Feb", "total": 190 },
+    { "mes": "Mar", "total": 150 },
+    { "mes": "Abr", "total": 240 },
+    { "mes": "May", "total": 300 }
+]
+
+gui.panel("Orion · Design System", 720, 640)
+
+gui.banner("Panel de Ventas", "Estilo por widget · colores named y hex", "accent")
+gui.spacer(6)
+
+-- Fila de KPIs con color semántico POR tarjeta (el "patternfill")
+gui.grid(4)
+  gui.card()
+    gui.caption("INGRESOS")
+    gui.heading("$1,000", "success")
+  gui.end()
+  gui.card()
+    gui.caption("PENDIENTE")
+    gui.heading("$240", "warning")
+  gui.end()
+  gui.card()
+    gui.caption("DEVOLUCIONES")
+    gui.heading("$68", "error")
+  gui.end()
+  gui.card()
+    gui.caption("NUEVOS")
+    gui.heading("+42", "info")
+  gui.end()
+gui.end()
+
+gui.spacer(8)
+
+-- Gráfico nativo (egui_plot)
+gui.card()
+  gui.caption("VENTAS POR MES")
+  gui.chart(ventas, "bar", { "x": "mes", "y": "total", "color": "accent", "height": 220 })
+gui.end()
+
+gui.spacer(8)
+
+-- Inputs + botones con color custom (hex)
+gui.card()
+  gui.caption("NUEVA VENTA")
+  gui.field("Concepto…")
+  gui.pick("categoria", ["Producto", "Servicio", "Suscripción"])
+  gui.toggle("Marcar como pagada")
+  gui.row()
+    gui.press("Guardar", "#22c55e", "white")
+    gui.ghost("Cancelar")
+  gui.end()
+gui.end()
+
+gui.run()

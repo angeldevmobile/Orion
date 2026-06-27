@@ -566,7 +566,19 @@ fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
         format!("orion_chart_{}", cfg.title.as_deref().unwrap_or("0")),
     )
     .height(cfg.height)
-    .set_margin_fraction(egui::Vec2::new(0.05, 0.08));
+    .set_margin_fraction(egui::Vec2::new(0.05, 0.08))
+    // Dashboard estático: sin arrastre/zoom/scroll. La vista se auto-ajusta a
+    // los datos cada frame (no se "sube" ni queda en rango negativo al moverlo).
+    .allow_drag(false)
+    .allow_zoom(false)
+    .allow_scroll(false)
+    .allow_boxed_zoom(false);
+
+    // Barras/área/histograma: anclar el baseline en 0 para que las barras se
+    // dibujen desde abajo y el eje no caiga a valores negativos.
+    if matches!(chart_kind, ChartKind::Bar | ChartKind::Area | ChartKind::Hist) {
+        plot = plot.include_y(0.0);
+    }
 
     // Formateador del eje X con etiquetas de categoría
     if !labels.is_empty() && chart_kind != ChartKind::Scatter && chart_kind != ChartKind::Hist {
