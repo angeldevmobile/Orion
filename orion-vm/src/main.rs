@@ -281,6 +281,11 @@ fn main() {
             println!("{}", serde_json::to_string(&SymbolsResult { ok: true, symbols }).unwrap());
         }
 
+        //    Registro de builtins (typeshed de Orion) → JSON para el LSP
+        "--builtins-json" => {
+            cli::builtins::run_builtins_json();
+        }
+
         //    Hot reload
         "--watch" => {
             if args.len() < 3 {
@@ -620,6 +625,7 @@ fn print_help() {
         ("--lex  <archivo.orx>",          "Imprimir tokens"),
         ("--format <archivo.orx>",          "Formatear código fuente  [--write]"),
         ("--docs <archivo|carpeta>",       "Generar docs Markdown  [--output=dir]"),
+        ("--builtins-json",                "Registro de builtins en JSON (para el LSP)"),
         ("--add  <paquete>",              "Instalar paquete  [--force]"),
         ("--remove <paquete>",            "Desinstalar paquete"),
         ("--list",                        "Listar paquetes disponibles"),

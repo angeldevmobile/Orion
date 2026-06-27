@@ -6,6 +6,7 @@ pub mod test_runner;
 pub mod doctor;
 pub mod new_project;
 pub mod docs;
+pub mod builtins;
 pub mod build_native;
 pub mod format;
 pub mod debug;
