@@ -224,6 +224,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                             rounding: g(5).parse().ok(),
                             pad:      g(6).parse().ok(),
                             size:     None,
+                            width:    None,
                         })
                     } else if kind.starts_with("fade|") {
                         // "fade|id|show"
@@ -539,6 +540,7 @@ fn parse_style_dict(m: &std::collections::HashMap<String, EvalValue>) -> Style {
         rounding: cfg_f32_opt(&cfg, "rounding").or_else(|| cfg_f32_opt(&cfg, "radius")),
         size:     cfg_f32_opt(&cfg, "size").or_else(|| cfg_f32_opt(&cfg, "font_size")),
         pad:      cfg_f32_opt(&cfg, "pad").or_else(|| cfg_f32_opt(&cfg, "padding")),
+        width:    cfg_f32_opt(&cfg, "width").or_else(|| cfg_f32_opt(&cfg, "w")),
     }
 }
 

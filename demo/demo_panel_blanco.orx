@@ -1,0 +1,90 @@
+-- demo_panel_blanco.orx — panel de control en BLANCO con botones compactos.
+-- El developer decide el tamaño de cada botón (width / pad / size).
+use "gui" as gui
+
+meta = gui.val("meta", 35)
+if gui.pressed("+10") { gui.set("meta", meta + 10) }
+if gui.pressed("-10") { gui.set("meta", meta - 10) }
+if gui.pressed("Exportar reporte") { gui.set("meta", 100) }
+meta = gui.val("meta", 35)
+if meta > 100 { meta = 100 }
+if meta < 0   { meta = 0 }
+
+ventas = [
+    { "mes": "Ene", "total": 120 }, { "mes": "Feb", "total": 190 },
+    { "mes": "Mar", "total": 150 }, { "mes": "Abr", "total": 240 },
+    { "mes": "May", "total": 300 }, { "mes": "Jun", "total": 270 }
+]
+
+-- Tema CLARO (blanco), acento índigo.
+gui.theme({
+    "light":    yes,
+    "bg":       "#f5f6fa",
+    "surface":  "#ffffff",
+    "text":     "#1a1a2e",
+    "accent":   "#6c63ff",
+    "rounding": 12,
+    "heading":  28
+})
+
+gui.panel("Orion · Panel (claro)", 960, 720)
+
+gui.row()
+  gui.col()
+    gui.heading("Panel de Control")
+    gui.caption("Tema claro · botones a medida del developer")
+  gui.end()
+  gui.col()
+    gui.avatar("AZ", 42, "accent")
+  gui.end()
+gui.end()
+gui.spacer(12)
+
+gui.grid(4)
+  gui.card()
+    gui.caption("INGRESOS")
+    gui.heading("$12.4k", { "color": "success", "size": 28 })
+    gui.badge("+8.2%", "success")
+  gui.end()
+  gui.card()
+    gui.caption("PEDIDOS")
+    gui.heading("1,284", { "color": "info", "size": 28 })
+    gui.badge("+3.1%", "info")
+  gui.end()
+  gui.card()
+    gui.caption("PENDIENTES")
+    gui.heading("47", { "color": "warning", "size": 28 })
+    gui.badge("atención", "warning")
+  gui.end()
+  gui.card()
+    gui.caption("DEVOLUCIONES")
+    gui.heading("12", { "color": "error", "size": 28 })
+    gui.badge("-1.4%", "error")
+  gui.end()
+gui.end()
+gui.spacer(12)
+
+gui.row()
+  gui.card()
+    gui.caption("VENTAS POR MES")
+    gui.chart(ventas, "bar", { "x": "mes", "y": "total", "color": "accent", "height": 210 })
+  gui.end()
+  gui.card()
+    gui.caption("META MENSUAL")
+    gui.heading(str(meta) + "%", { "color": "accent", "size": 32 })
+    gui.spacer(4)
+    gui.progress(meta, "accent")
+    gui.spacer(12)
+    -- Botones PEQUEÑOS: el developer fija width 64 y padding chico.
+    gui.row()
+      gui.press("+10", { "bg": "accent", "fg": "white", "width": 64, "pad": 5 })
+      gui.ghost("-10", { "width": 64, "pad": 5 })
+    gui.end()
+  gui.end()
+gui.end()
+gui.spacer(12)
+
+-- Acción principal: botón ANCHO (el developer lo decide con width grande).
+gui.press("Exportar reporte", { "bg": "accent", "fg": "white", "width": 920, "pad": 10, "size": 16 })
+
+gui.run()

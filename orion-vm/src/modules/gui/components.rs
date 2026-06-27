@@ -10,6 +10,8 @@ pub struct Style {
     pub rounding: Option<f32>,
     pub size:     Option<f32>,
     pub pad:      Option<f32>,
+    /// Ancho fijo en px (botones/widgets). None = tamaño del contenido.
+    pub width:    Option<f32>,
 }
 
 impl Style {
@@ -188,26 +190,41 @@ pub fn render(
             }
         }
         Component::Press(label, style) => {
-            let fill = style.bg_color().unwrap_or_else(|| theme::current().accent);
-            let rt = match style.fg_color() {
-                Some(c) => egui::RichText::new(label).color(c),
-                None    => egui::RichText::new(label),
-            };
-            if ui.add_sized([120.0, 36.0], egui::Button::new(rt).fill(fill)).clicked()
-                && event.is_none()
-            {
-                *event = Some(label.clone());
-            }
+            let th = theme::current();
+            let fill = style.bg_color().unwrap_or(th.accent);
+            let mut rt = egui::RichText::new(label);
+            if let Some(sz) = style.size { rt = rt.size(sz); }
+            if let Some(c) = style.fg_color() { rt = rt.color(c); }
+            let clicked = ui.scope(|ui| {
+                // El developer decide padding y ancho; default = tamaño del contenido.
+                if let Some(p) = style.pad { ui.spacing_mut().button_padding = egui::vec2(p, p); }
+                let btn = egui::Button::new(rt)
+                    .fill(fill)
+                    .rounding(egui::Rounding::same(style.rounding.unwrap_or(th.rounding)));
+                match style.width {
+                    Some(w) => ui.add_sized([w, button_height(ui, style)], btn),
+                    None    => ui.add(btn),
+                }.clicked()
+            }).inner;
+            if clicked && event.is_none() { *event = Some(label.clone()); }
         }
         Component::Ghost(label, style) => {
-            let color = style.fg_color().unwrap_or_else(|| theme::current().accent);
-            if ui.add(
-                egui::Button::new(label)
+            let th = theme::current();
+            let color = style.fg_color().unwrap_or(th.accent);
+            let mut rt = egui::RichText::new(label).color(color);
+            if let Some(sz) = style.size { rt = rt.size(sz); }
+            let clicked = ui.scope(|ui| {
+                if let Some(p) = style.pad { ui.spacing_mut().button_padding = egui::vec2(p, p); }
+                let btn = egui::Button::new(rt)
                     .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::new(1.5, color)),
-            ).clicked() && event.is_none() {
-                *event = Some(label.clone());
-            }
+                    .stroke(egui::Stroke::new(style.border_w.unwrap_or(1.5), color))
+                    .rounding(egui::Rounding::same(style.rounding.unwrap_or(th.rounding)));
+                match style.width {
+                    Some(w) => ui.add_sized([w, button_height(ui, style)], btn),
+                    None    => ui.add(btn),
+                }.clicked()
+            }).inner;
+            if clicked && event.is_none() { *event = Some(label.clone()); }
         }
         Component::Tap(label) => {
             if ui.link(label).clicked() && event.is_none() {
@@ -316,16 +333,23 @@ pub fn render(
                 });
         }
         Component::Row(children) => {
-            // Columnas de ancho IGUAL: evita que un hijo que se expande (p.ej. una
-            // gráfica con available_width) acapare el espacio y deje a los demás
-            // sin ancho (caso del pie que quedaba en una franja delgada).
             if children.is_empty() {
             } else if children.len() == 1 {
                 render(ui, &children[0], fields, event);
-            } else {
+            } else if children.iter().any(is_container) {
+                // Si hay contenedores (tarjetas/columnas), columnas de ancho IGUAL
+                // para que se repartan el espacio (dashboards).
                 ui.columns(children.len(), |cols| {
                     for (i, child) in children.iter().enumerate() {
                         render(&mut cols[i], child, fields, event);
+                    }
+                });
+            } else {
+                // Solo widgets sueltos (botones, badges…): empaque horizontal,
+                // cada uno a su tamaño → el width del developer SE RESPETA.
+                ui.horizontal(|ui| {
+                    for child in children {
+                        render(ui, child, fields, event);
                     }
                 });
             }
@@ -488,6 +512,26 @@ pub fn render(
                 });
         }
     }
+}
+
+/// ¿El componente es un contenedor de layout (ocupa ancho)? Usado por `row`
+/// para decidir entre columnas iguales (contenedores) y empaque horizontal
+/// (widgets sueltos, donde el width del developer se respeta).
+fn is_container(c: &Component) -> bool {
+    matches!(c,
+        Component::Card { .. } | Component::Row(_) | Component::Col(_) |
+        Component::Grid(..) | Component::Sidebar(..) | Component::Zone(..) |
+        Component::Modal { .. } | Component::FadeGroup { .. } | Component::SlideIn { .. } |
+        Component::Chart(_) | Component::Table { .. }
+    )
+}
+
+/// Altura de un botón con ancho fijo, derivada de la fuente/padding que el dev
+/// fijó (o valores cómodos por defecto).
+fn button_height(ui: &egui::Ui, style: &Style) -> f32 {
+    let base = style.size.unwrap_or_else(|| ui.text_style_height(&egui::TextStyle::Button));
+    let pad  = style.pad.unwrap_or(8.0);
+    (base + pad * 2.0).max(28.0)
 }
 
 //   Cache de texturas para gui.image (carga el archivo una sola vez por path)
