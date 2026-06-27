@@ -505,17 +505,17 @@ pub extern "C" fn rt_set_index(obj: i64, idx: i64, val: i64) -> i64 {
         let iv = val_ref(idx);
         match ov.tag {
             TAG_LIST => {
-                let items = &*(ov.data_i as *const Vec<i64>);
-                let mut new_items = items.clone();
+                // Mutación in-place + mismo puntero → los alias ven el cambio
+                // (paridad con la VM).
+                let items = &mut *(ov.data_i as *mut Vec<i64>);
                 let i = iv.data_i;
-                let i_usize = if i < 0 { (new_items.len() as i64 + i) as usize } else { i as usize };
-                if i_usize >= new_items.len() {
+                let i_usize = if i < 0 { (items.len() as i64 + i) as usize } else { i as usize };
+                if i_usize >= items.len() {
                     eprintln!("[JIT] Índice {} fuera de rango en SetIndex", i);
                     std::process::exit(1);
                 }
-                new_items[i_usize] = val;
-                let raw = Box::into_raw(Box::new(new_items)) as i64;
-                alloc_val(TAG_LIST, raw, 0.0)
+                items[i_usize] = val;
+                obj
             }
             TAG_DICT => {
                 let entries = &*(ov.data_i as *const Vec<(String, i64)>);

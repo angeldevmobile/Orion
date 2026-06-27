@@ -295,3 +295,38 @@ fn diff_pow_overflow() {
 fn diff_int_max_no_overflow() {
     assert_vm_jit_agree("show 9223372036854775806 + 1");
 }
+
+// ── Listas por referencia: paridad VM ↔ JIT del aliasing/mutación ───────────
+// Antes el JIT clonaba en push/append/reverse/sort/set-index → divergía de la VM
+// (que muta in-place vía Rc<RefCell>). Ahora ambos backends mutan in-place.
+
+#[test]
+fn diff_list_push_mutates_self() {
+    assert_vm_jit_match("xs = [1, 2]\nxs.push(9)\nshow xs[2]");
+}
+
+#[test]
+fn diff_list_push_aliasing() {
+    // ys comparte backing con xs: el push de xs se ve en ys.
+    assert_vm_jit_match("xs = [1, 2]\nys = xs\nxs.push(3)\nshow ys[2]");
+}
+
+#[test]
+fn diff_list_set_index_aliasing() {
+    assert_vm_jit_match("m = [0, 0, 0]\nn = m\nm[1] = 7\nshow n[1]");
+}
+
+#[test]
+fn diff_list_mutation_through_function() {
+    assert_vm_jit_match("fn agg(l, v) {\n  l.push(v)\n}\nzs = [10]\nagg(zs, 20)\nshow zs[1]");
+}
+
+#[test]
+fn diff_list_reverse_in_place() {
+    assert_vm_jit_match("xs = [1, 2, 3]\nxs.reverse()\nshow xs[0]");
+}
+
+#[test]
+fn diff_list_sort_in_place() {
+    assert_vm_jit_match("xs = [3, 1, 2]\nxs.sort()\nshow xs[0]");
+}

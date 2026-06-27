@@ -334,7 +334,10 @@ unsafe fn call_method_str(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
 //     Métodos builtin de List
 
 unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
-    let items = &*(data_i as *const Vec<i64>);
+    // `&mut` para que los mutadores (push/append/reverse/sort) modifiquen el Vec
+    // detrás del puntero IN-PLACE y devuelvan el MISMO puntero → semántica por
+    // referencia, en paridad con la VM (`Rc<RefCell>`). Los alias ven el cambio.
+    let items = &mut *(data_i as *mut Vec<i64>);
     let name  = cstr_to_str(name_ptr);
     match name {
         "len"      => alloc_val(TAG_INT, items.len() as i64, 0.0),
@@ -343,16 +346,12 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         "last"     => items.last().copied().unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0)),
         "push" | "append" => {
             let item = args.first().copied().unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0));
-            let mut new_items = items.clone();
-            new_items.push(item);
-            let raw = Box::into_raw(Box::new(new_items)) as i64;
-            alloc_val(TAG_LIST, raw, 0.0)
+            items.push(item);
+            alloc_val(TAG_LIST, data_i, 0.0)
         }
         "reverse" => {
-            let mut new_items = items.clone();
-            new_items.reverse();
-            let raw = Box::into_raw(Box::new(new_items)) as i64;
-            alloc_val(TAG_LIST, raw, 0.0)
+            items.reverse();
+            alloc_val(TAG_LIST, data_i, 0.0)
         }
         "contains" => {
             if let Some(&item_ptr) = args.first() {
@@ -371,7 +370,7 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         "sum" => {
             let mut total = 0.0f64;
             let mut is_int = true;
-            for &p in items {
+            for &p in items.iter() {
                 let v = val_ref(p);
                 match v.tag {
                     TAG_INT   => total += v.data_i as f64,
@@ -383,8 +382,7 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             else      { alloc_val(TAG_FLOAT, 0, total) }
         }
         "sort" => {
-            let mut new_items = items.clone();
-            new_items.sort_by(|&a, &b| {
+            items.sort_by(|&a, &b| {
                 let av = val_ref(a); let bv = val_ref(b);
                 match (av.tag, bv.tag) {
                     (TAG_INT, TAG_INT)     => av.data_i.cmp(&bv.data_i),
@@ -393,8 +391,7 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
                     _                      => std::cmp::Ordering::Equal,
                 }
             });
-            let raw = Box::into_raw(Box::new(new_items)) as i64;
-            alloc_val(TAG_LIST, raw, 0.0)
+            alloc_val(TAG_LIST, data_i, 0.0)
         }
         "min" => {
             items.iter().copied().reduce(|a, b| {
