@@ -1,0 +1,51 @@
+-- demo_blanco.orx — panel blanco, colores binarios (negro y blanco).
+-- Demuestra que el developer decide el tema: claro, monocromo, alto contraste.
+use "gui" as gui
+
+n = gui.val("n", 0)
+if gui.pressed("Incrementar") { gui.set("n", n + 1) }
+if gui.pressed("Reset")       { gui.set("n", 0) }
+n = gui.val("n", 0)
+
+-- Tema BINARIO: fondo blanco, superficie blanca, texto y acento negros.
+gui.theme({
+    "light":    yes,
+    "bg":       "#ffffff",
+    "surface":  "#ffffff",
+    "text":     "#000000",
+    "accent":   "#000000",
+    "rounding": 4,
+    "heading":  30
+})
+
+gui.panel("Binario · Blanco y Negro", 560, 520)
+
+gui.heading("Monocromo")
+gui.text("Solo negro y blanco. El developer eligió el tema.")
+gui.divider()
+gui.spacer(8)
+
+-- Tarjetas con borde negro fino sobre blanco (zonas con estilo binario)
+gui.grid(2)
+  gui.zone({ "bg": "#ffffff", "border": "#000000", "border_w": 1, "rounding": 4, "pad": 18 })
+    gui.caption("CONTADOR")
+    gui.heading(str(n), { "color": "#000000", "size": 40 })
+  gui.end()
+  gui.zone({ "bg": "#000000", "border": "#000000", "rounding": 4, "pad": 18 })
+    gui.caption("INVERTIDO")
+    gui.heading("OK", { "color": "#ffffff", "size": 40 })
+  gui.end()
+gui.end()
+
+gui.spacer(10)
+
+-- Botón negro (relleno) + botón blanco (ghost con borde negro)
+gui.row()
+  gui.press("Incrementar", "#000000", "#ffffff")
+  gui.ghost("Reset", "#000000")
+gui.end()
+
+gui.spacer(10)
+gui.progress(80, "#000000")
+
+gui.run()

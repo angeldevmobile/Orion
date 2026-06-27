@@ -6,9 +6,11 @@ for t in ["Resumen", "Datos", "Ajustes"] {
     if gui.pressed(t) { gui.set("tab", t) }
     tab = gui.val("tab", "Resumen")
 }
-ver_modal = gui.val("modal", no)
+-- Procesar eventos PRIMERO, leer el estado DESPUÉS (si no, el modal no cierra
+-- en el mismo frame del clic).
 if gui.pressed("Abrir modal") { gui.set("modal", yes) }
 if gui.pressed("Cerrar")      { gui.set("modal", no) }
+ver_modal = gui.val("modal", no)
 
 gui.panel("Widgets nuevos", 560, 560)
 
