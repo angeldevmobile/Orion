@@ -432,16 +432,17 @@ pub fn render(
 
         Component::Progress { value, style } => {
             let th = theme::current();
+            let fill = style.fg_color().or(style.bg_color()).unwrap_or(th.accent);
+            // Texto que contraste con el relleno (blanco sobre oscuro, negro sobre claro).
+            let lum = 0.299 * fill.r() as f32 + 0.587 * fill.g() as f32 + 0.114 * fill.b() as f32;
+            let txt = if lum < 140.0 { egui::Color32::WHITE } else { egui::Color32::BLACK };
             ui.scope(|ui| {
-                // El relleno usa selection.bg_fill; el dev puede fijarlo con color.
-                if let Some(c) = style.fg_color().or(style.bg_color()) {
-                    ui.visuals_mut().selection.bg_fill = c;
-                }
+                ui.visuals_mut().selection.bg_fill = fill;
                 let v = value.clamp(0.0, 1.0);
                 ui.add(
                     egui::ProgressBar::new(v)
                         .rounding(egui::Rounding::same(th.rounding))
-                        .text(format!("{:.0}%", v * 100.0)),
+                        .text(egui::RichText::new(format!("{:.0}%", v * 100.0)).color(txt)),
                 );
             });
         }
