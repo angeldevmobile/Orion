@@ -1,0 +1,102 @@
+-- demo_panel.orx — panel de control pulido. Muestra la capacidad de diseño de
+-- Orion: jerarquía visual, KPIs, gráfico, progreso DINÁMICO y badges de estado.
+use "gui" as gui
+
+-- Estado: una meta que avanza con botones (el progreso SÍ se mueve).
+meta = gui.val("meta", 35)
+if gui.pressed("+10") { gui.set("meta", meta + 10) }
+if gui.pressed("-10") { gui.set("meta", meta - 10) }
+meta = gui.val("meta", 35)
+if meta > 100 { meta = 100 }
+if meta < 0   { meta = 0 }
+
+ventas = [
+    { "mes": "Ene", "total": 120 },
+    { "mes": "Feb", "total": 190 },
+    { "mes": "Mar", "total": 150 },
+    { "mes": "Abr", "total": 240 },
+    { "mes": "May", "total": 300 },
+    { "mes": "Jun", "total": 270 }
+]
+
+gui.theme({ "accent": "#6c63ff", "rounding": 14, "heading": 28 })
+gui.panel("Orion · Panel de Control", 960, 720)
+
+-- ── Encabezado ─────────────────────────────────────────────
+gui.row()
+  gui.col()
+    gui.heading("Panel de Control")
+    gui.caption("Resumen del mes · actualizado hoy")
+  gui.end()
+  gui.col()
+    gui.avatar("AZ", 44, "accent")
+  gui.end()
+gui.end()
+gui.spacer(12)
+
+-- ── KPIs ───────────────────────────────────────────────────
+gui.grid(4)
+  gui.card()
+    gui.caption("INGRESOS")
+    gui.heading("$12.4k", { "color": "success", "size": 30 })
+    gui.badge("+8.2%", "success")
+  gui.end()
+  gui.card()
+    gui.caption("PEDIDOS")
+    gui.heading("1,284", { "color": "info", "size": 30 })
+    gui.badge("+3.1%", "info")
+  gui.end()
+  gui.card()
+    gui.caption("PENDIENTES")
+    gui.heading("47", { "color": "warning", "size": 30 })
+    gui.badge("atención", "warning")
+  gui.end()
+  gui.card()
+    gui.caption("DEVOLUCIONES")
+    gui.heading("12", { "color": "error", "size": 30 })
+    gui.badge("-1.4%", "error")
+  gui.end()
+gui.end()
+gui.spacer(12)
+
+-- ── Gráfico + Meta ─────────────────────────────────────────
+gui.row()
+  gui.card()
+    gui.caption("VENTAS POR MES")
+    gui.chart(ventas, "bar", { "x": "mes", "y": "total", "color": "accent", "height": 220 })
+  gui.end()
+  gui.card()
+    gui.caption("META MENSUAL")
+    gui.heading(str(meta) + "%", { "color": "accent", "size": 34 })
+    gui.spacer(4)
+    gui.progress(meta, "accent")
+    gui.spacer(10)
+    gui.row()
+      gui.press("+10", "accent", "white")
+      gui.ghost("-10")
+    gui.end()
+  gui.end()
+gui.end()
+gui.spacer(12)
+
+-- ── Actividad reciente con badges de estado ────────────────
+gui.card()
+  gui.caption("ACTIVIDAD RECIENTE")
+  gui.spacer(4)
+  gui.row()
+    gui.text("Pago recibido · #4821")
+    gui.badge("completado", "success")
+  gui.end()
+  gui.divider()
+  gui.row()
+    gui.text("Envío en preparación · #4822")
+    gui.badge("en curso", "info")
+  gui.end()
+  gui.divider()
+  gui.row()
+    gui.text("Stock bajo · Producto X")
+    gui.badge("alerta", "warning")
+  gui.end()
+gui.end()
+
+gui.run()
