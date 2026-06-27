@@ -98,7 +98,7 @@ fn mark_value(val: &Value, marked: &mut HashSet<*const RefCell<InstanceData>>) {
             }
         }
         Value::List(items) => {
-            for item in items {
+            for item in items.borrow().iter() {
                 mark_value(item, marked);
             }
         }

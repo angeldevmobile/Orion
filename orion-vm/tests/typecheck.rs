@@ -153,6 +153,49 @@ show saluda(42)"#,
     );
 }
 
+//    Regresiones: falsos positivos de "variable no usada / no definida"
+//    (descubiertos construyendo orion-tasks-api). El análisis de uso no visitaba
+//    `return`, llamadas a método (CallMethod), el binding de `handle`, y trataba
+//    los nombres de builtins en posición de llamada como variables.
+
+#[test]
+fn tc_no_false_unused_in_return() {
+    // `return x` cuenta como uso de x aunque la fn no declare tipo de retorno.
+    assert_no_warning_containing(
+        "fn f() {\n    a = 5\n    return a\n}\nshow f()",
+        "nunca usada",
+    );
+}
+
+#[test]
+fn tc_no_false_unused_in_method_call() {
+    // Una variable usada solo como arg de un método (`xs.push(v)`) cuenta.
+    assert_no_warning_containing(
+        "fn f() {\n    v = 9\n    xs = [1].push(v)\n    return xs\n}\nshow f()",
+        "nunca usada",
+    );
+}
+
+#[test]
+fn tc_no_false_unused_handle_binding() {
+    // `handle err { }` sin inspeccionar el error es idiomático → sin warning.
+    assert_no_warning_containing(
+        "attempt {\n    x = 1\n    show x\n} handle err {\n    show \"falló\"\n}",
+        "nunca usada",
+    );
+}
+
+#[test]
+fn tc_no_false_undefined_on_builtin_call() {
+    // Builtins en posición de llamada no deben reportarse como "no definida".
+    for b in ["has_key(d, \"k\")", "get(d, \"k\")", "first(xs)", "is_empty(xs)"] {
+        assert_no_warning_containing(
+            &format!("d = {{ \"k\": 1 }}\nxs = [1, 2]\nshow {b}"),
+            "no definida",
+        );
+    }
+}
+
 #[test]
 fn tc_err_bool_assigned_to_int() {
     assert_has_error("x: int = yes");

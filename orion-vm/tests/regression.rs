@@ -406,3 +406,74 @@ if r1 != 1 { error "closure indep: c1 esperaba 1" }
 if r2 != 101 { error "closure indep: c2 esperaba 101 (entornos mezclados!)" }"#,
     );
 }
+
+// ── Listas por referencia (mutación real + aliasing) ────────────────────────
+
+#[test]
+fn test_list_push_mutates_variable() {
+    // xs.push(x) muta la variable in-place (semántica por referencia).
+    run_ok(
+        r#"xs = [1, 2]
+xs.push(3)
+if len(xs) != 3 { error "push no mutó xs" }
+if xs[2] != 3 { error "push no agregó el valor correcto" }"#,
+    );
+}
+
+#[test]
+fn test_list_aliasing() {
+    // ys = xs comparte el backing: mutar xs se ve en ys.
+    run_ok(
+        r#"xs = [1, 2]
+ys = xs
+xs.push(3)
+if len(ys) != 3 { error "el alias no vio la mutación" }"#,
+    );
+}
+
+#[test]
+fn test_list_mutation_through_function() {
+    // Pasar una lista a una función y mutarla afecta al llamador.
+    run_ok(
+        r#"fn agregar(lista, v) {
+    lista.push(v)
+}
+zs = [10]
+agregar(zs, 20)
+if len(zs) != 2 { error "la mutación dentro de la función no persistió" }
+if zs[1] != 20 { error "valor incorrecto tras mutación en función" }"#,
+    );
+}
+
+#[test]
+fn test_list_concat_does_not_alias() {
+    // p + q produce una lista NUEVA e independiente; mutar p no toca el resultado.
+    run_ok(
+        r#"p = [1, 2]
+q = p + [3]
+p.push(99)
+if len(q) != 3 { error "concat aliasó incorrectamente" }
+if len(p) != 3 { error "push tras concat no mutó p" }"#,
+    );
+}
+
+#[test]
+fn test_list_equality_is_structural() {
+    // == sigue comparando contenido, no identidad de referencia.
+    run_ok(
+        r#"a = [1, 2, 3]
+b = [1, 2, 3]
+if not (a == b) { error "igualdad estructural rota" }"#,
+    );
+}
+
+#[test]
+fn test_list_set_index_mutates() {
+    // m[i] = v muta el backing compartido in-place.
+    run_ok(
+        r#"m = [0, 0, 0]
+n = m
+m[1] = 7
+if n[1] != 7 { error "set-index no se reflejó en el alias" }"#,
+    );
+}

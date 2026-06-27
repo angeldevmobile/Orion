@@ -140,3 +140,24 @@ fn smoke_env_set_get() {
     assert!(as_bool(call("env", "has", vec![s(&key)])), "has tras set");
     assert_eq!(as_str(call("env", "get", vec![s(&key)])), "valor123");
 }
+
+#[test]
+fn smoke_state_shared_store() {
+    // El módulo `state` es el estado compartido thread-safe para servidores.
+    // (Store global: usamos claves propias para no chocar con otros tests.)
+    call("state", "set", vec![s("smoke_k"), EvalValue::Int(0)]);
+    assert_eq!(as_int(call("state", "get", vec![s("smoke_k")])), 0);
+
+    // incr atómico: get-modify-set bajo un solo lock.
+    assert_eq!(as_int(call("state", "incr", vec![s("smoke_k")])), 1);
+    assert_eq!(as_int(call("state", "incr", vec![s("smoke_k")])), 2);
+    assert_eq!(as_int(call("state", "incr", vec![s("smoke_k"), EvalValue::Int(10)])), 12);
+    assert_eq!(as_int(call("state", "decr", vec![s("smoke_k"), EvalValue::Int(2)])), 10);
+
+    assert!(as_bool(call("state", "has", vec![s("smoke_k")])));
+    // get con default cuando la clave no existe
+    assert_eq!(as_str(call("state", "get", vec![s("smoke_falta"), s("n/a")])), "n/a");
+
+    assert!(as_bool(call("state", "delete", vec![s("smoke_k")])));
+    assert!(!as_bool(call("state", "has", vec![s("smoke_k")])));
+}

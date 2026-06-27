@@ -130,7 +130,7 @@ impl<'a> Lexer<'a> {
             //   Numbers                           
             b'0' if self.peek_at(1) == Some(b'x') => tok!(self.lex_hex(line, col)?),
             b'0' if self.peek_at(1) == Some(b'b') => tok!(self.lex_binary(line, col)?),
-            b'0'..=b'9' => tok!(self.lex_number()),
+            b'0'..=b'9' => tok!(self.lex_number(line, col)?),
 
             //   Strings                           
             b'r' if self.peek_at(1) == Some(b'"') => tok!(self.lex_raw_string(line, col)?),
@@ -231,7 +231,7 @@ impl<'a> Lexer<'a> {
             .map_err(|_| LexError { message: format!("Número binario inválido: 0b{s}"), line, col })
     }
 
-    fn lex_number(&mut self) -> TokenKind {
+    fn lex_number(&mut self, line: u32, col: u32) -> Result<TokenKind, LexError> {
         let start = self.pos;
         self.skip_while(|c| c.is_ascii_digit());
 
@@ -253,9 +253,16 @@ impl<'a> Lexer<'a> {
 
         let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         if has_dot || has_sci {
-            TokenKind::Float(s.parse().unwrap())
+            s.parse().map(TokenKind::Float).map_err(|_| LexError {
+                message: format!("Número decimal inválido: {s}"), line, col,
+            })
         } else {
-            TokenKind::Int(s.parse().unwrap())
+            // Un literal fuera de rango i64 debe ser un error léxico limpio,
+            // NO un panic de Rust (lo cazó el fuzzer diferencial).
+            s.parse().map(TokenKind::Int).map_err(|_| LexError {
+                message: format!("Entero fuera de rango (máx {}): {s}", i64::MAX),
+                line, col,
+            })
         }
     }
 
@@ -504,6 +511,17 @@ mod tests {
     fn test_floats() {
         assert_eq!(kinds("3.14"), vec![TokenKind::Float(3.14), TokenKind::Eof]);
         assert_eq!(kinds("1.5e10"), vec![TokenKind::Float(1.5e10), TokenKind::Eof]);
+    }
+
+    #[test]
+    fn test_int_overflow_is_clean_error_not_panic() {
+        // i64::MAX + 1: el lexer debe devolver Err, no hacer panic de Rust.
+        // Regresión del bug que encontró el fuzzer diferencial.
+        assert_eq!(i64::MAX, 9223372036854775807);
+        let err = lex("9223372036854775808").expect_err("debe ser error léxico, no panic");
+        assert!(err.message.contains("fuera de rango"), "mensaje inesperado: {}", err.message);
+        // El máximo exacto sí debe lexar bien.
+        assert_eq!(kinds("9223372036854775807"), vec![TokenKind::Int(i64::MAX), TokenKind::Eof]);
     }
 
     #[test]

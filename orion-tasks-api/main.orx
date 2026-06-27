@@ -1,0 +1,200 @@
+-- ════════════════════════════════════════════════════════════════════════
+--  Orion Tasks API — REST CRUD backend con persistencia en archivo JSON
+--  Run:  orion orion-tasks-api/main.orx
+--  Prueba: bash orion-tasks-api/test_api.sh
+--
+--  Endpoints:
+--    GET    /              → info de la API
+--    GET    /health        → estado del servicio
+--    GET    /tasks         → lista todas las tareas
+--    POST   /tasks         → crea una tarea     body: {"title": "..."}
+--    GET    /tasks/:id     → obtiene una tarea
+--    PUT    /tasks/:id     → actualiza          body: {"title"?, "done"?}
+--    DELETE /tasks/:id     → elimina una tarea
+-- ════════════════════════════════════════════════════════════════════════
+use net
+use json
+
+PORT = 8088
+DB = "orion-tasks-api/tasks_db.json"
+
+-- ── Persistencia ───────────────────────────────────────────────────────
+-- El estado en memoria NO sobrevive entre requests (cada handler corre en su
+-- propio frame), así que la fuente de verdad es un archivo JSON: se carga al
+-- inicio de cada request y se guarda tras cada escritura. Persiste incluso
+-- entre reinicios del servidor.
+fn load_db() {
+    attempt {
+        return json.absorb(DB)
+    } handle err {
+        return { "tasks": [], "next_id": 1 }
+    }
+}
+
+fn save_db(db) {
+    json.emit(DB, db)
+}
+
+-- ── Helpers ────────────────────────────────────────────────────────────
+fn json_response(status, value) {
+    return { "status": status, "body": json.forge(value), "content_type": "application/json" }
+}
+
+-- Extrae el id numérico de un path tipo "/tasks/123" → 123  (o -1 si no hay).
+fn parse_id(path) {
+    parts = path.split("/")
+    if len(parts) < 3 {
+        return -1
+    }
+    attempt {
+        return int(parts[2])
+    } handle err {
+        return -1
+    }
+}
+
+fn find_task(tasks, id) {
+    for t in tasks {
+        if t["id"] == id {
+            return t
+        }
+    }
+    return null
+}
+
+-- Intenta parsear el body como JSON; null si está vacío o es inválido.
+fn parse_body(req) {
+    attempt {
+        return json.parse(req["body"])
+    } handle err {
+        return null
+    }
+}
+
+-- ── Router ─────────────────────────────────────────────────────────────
+fn router(req) {
+    path = req["path"]
+    method = req["method"]
+
+    if path == "/" {
+        return json_response(200, {
+            "name": "Orion Tasks API",
+            "version": "1.0",
+            "endpoints": ["GET /tasks", "POST /tasks", "GET /tasks/:id", "PUT /tasks/:id", "DELETE /tasks/:id"]
+        })
+    }
+
+    if path == "/health" {
+        return json_response(200, { "status": "ok" })
+    }
+
+    -- ── Colección /tasks ──
+    if path == "/tasks" {
+        db = load_db()
+
+        if method == "GET" {
+            return json_response(200, db["tasks"])
+        }
+
+        if method == "POST" {
+            body = parse_body(req)
+            if body == null or not has_key(body, "title") {
+                return json_response(400, { "error": "el campo 'title' es obligatorio" })
+            }
+            title = body["title"]
+            if title == "" {
+                return json_response(400, { "error": "'title' no puede estar vacío" })
+            }
+            id = db["next_id"]
+            task = { "id": id, "title": title, "done": no }
+            tasks = db["tasks"].push(task)
+            save_db({ "tasks": tasks, "next_id": id + 1 })
+            return json_response(201, task)
+        }
+
+        return json_response(405, { "error": "método no permitido en /tasks" })
+    }
+
+    -- ── Recurso /tasks/:id ──
+    if path.starts_with("/tasks/") {
+        id = parse_id(path)
+        db = load_db()
+        task = find_task(db["tasks"], id)
+
+        if task == null {
+            return json_response(404, { "error": "tarea no encontrada", "id": id })
+        }
+
+        if method == "GET" {
+            return json_response(200, task)
+        }
+
+        if method == "PUT" {
+            body = parse_body(req)
+            if body == null {
+                return json_response(400, { "error": "body JSON inválido" })
+            }
+            new_title = task["title"]
+            new_done = task["done"]
+            if has_key(body, "title") {
+                new_title = body["title"]
+            }
+            if has_key(body, "done") {
+                new_done = body["done"]
+            }
+            updated = { "id": id, "title": new_title, "done": new_done }
+            new_tasks = []
+            for t in db["tasks"] {
+                if t["id"] == id {
+                    new_tasks = new_tasks.push(updated)
+                } else {
+                    new_tasks = new_tasks.push(t)
+                }
+            }
+            save_db({ "tasks": new_tasks, "next_id": db["next_id"] })
+            return json_response(200, updated)
+        }
+
+        if method == "DELETE" {
+            new_tasks = []
+            for t in db["tasks"] {
+                if t["id"] != id {
+                    new_tasks = new_tasks.push(t)
+                }
+            }
+            save_db({ "tasks": new_tasks, "next_id": db["next_id"] })
+            return json_response(200, { "deleted": id })
+        }
+
+        return json_response(405, { "error": "método no permitido" })
+    }
+
+    return json_response(404, { "error": "ruta no encontrada", "path": path })
+}
+
+-- ── Arranque ───────────────────────────────────────────────────────────
+-- Siembra datos de ejemplo solo si el archivo no existe todavía.
+attempt {
+    json.absorb(DB)
+} handle err {
+    save_db({
+        "tasks": [
+            { "id": 1, "title": "Aprender Orion", "done": yes },
+            { "id": 2, "title": "Construir una API REST", "done": no },
+            { "id": 3, "title": "Mostrar valor real", "done": no }
+        ],
+        "next_id": 4
+    })
+}
+
+show "╔════════════════════════════════════════════════╗"
+show "║   Orion Tasks API · REST CRUD                   ║"
+show "╚════════════════════════════════════════════════╝"
+show "Escuchando en http://localhost:" + str(PORT)
+show "  GET    /tasks         — listar"
+show "  POST   /tasks         — crear   {\"title\": \"...\"}"
+show "  GET    /tasks/:id     — obtener"
+show "  PUT    /tasks/:id     — actualizar"
+show "  DELETE /tasks/:id     — eliminar"
+show ""
+serve PORT router

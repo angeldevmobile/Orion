@@ -85,6 +85,25 @@ fn diff_arithmetic_float() {
     assert_vm_jit_match("show 3.5 + 2.25\nshow 10.0 / 4.0\nshow 2.0 * 3.5");
 }
 
+// Regresión: `float ** int`. La VM no tenía el caso (Float, Int) en `Pow` y
+// erraba ("Potencia requiere números") mientras el JIT lo resolvía con `powi`.
+// Ahora ambos devuelven el mismo flotante.
+#[test]
+fn diff_pow_float_base_int_exponent() {
+    assert_vm_jit_match("x = 2.5\nshow x ** 3\nshow (-1.5) ** 2\nshow 4.0 ** 0");
+}
+
+// Regresión: igualdad numérica mixta int↔float. La VM caía a `_ => false`
+// (`5 == 5.0` daba `no`) mientras el JIT promovía (`yes`). Ahora `compare_eq`
+// promueve, consistente con `compare_lt`/`rt_eq`, e incluye los derivados
+// `<=`/`>=` que se apoyan en la igualdad.
+#[test]
+fn diff_mixed_int_float_equality() {
+    assert_vm_jit_match(
+        "show 5 == 5.0\nshow 5 != 5.0\nshow 5.0 == 5\nshow 5 <= 5.0\nshow 5 >= 5.0\nshow 6 > 5.5",
+    );
+}
+
 #[test]
 fn diff_comparisons() {
     assert_vm_jit_match(
@@ -100,6 +119,25 @@ fn diff_boolean_logic() {
 #[test]
 fn diff_string_concat() {
     assert_vm_jit_match(r#"show "hola" + " " + "orion""#);
+}
+
+// Concatenación mixta string↔número: ambos backends muestran el número con el
+// mismo formato `{}` (VM `add` con Display; JIT `rt_add`→`val_to_display`).
+#[test]
+fn diff_string_num_concat() {
+    assert_vm_jit_match(
+        "n = 5\nf = 2.5\nshow \"n=\" + n + \" f=\" + f\nshow 42 + \"!\"\nshow \"\" + 0",
+    );
+}
+
+// Igualdad de strings (`==`/`!=`): VM (`compare_eq`→`PartialEq` Str) y JIT
+// (`rt_eq` rama Str) coinciden. El ORDEN de strings NO se prueba: ambos lo
+// rechazan (no es una operación soportada), lo cual es acuerdo, no paridad útil.
+#[test]
+fn diff_string_equality() {
+    assert_vm_jit_match(
+        "a = \"hola\"\nshow a == \"hola\"\nshow a != \"chau\"\nshow (\"x\" + \"y\") == \"xy\"",
+    );
 }
 
 #[test]

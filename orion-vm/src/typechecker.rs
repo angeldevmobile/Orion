@@ -253,14 +253,21 @@ impl TypeChecker {
             Stmt::Return { value, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;
-                if let (Some(rt), Some(expr)) = (return_type, value) {
-                    if rt != "void" && rt != "any" {
-                        if let Some(actual) = self.infer_type(expr) {
-                            if !types_compatible(rt, &actual) {
-                                self.report(
-                                    format!("RETURN: se esperaba '{rt}', pero es de tipo '{actual}'"),
-                                    *line, *col,
-                                );
+                // Recorrer SIEMPRE el valor (aunque la función no declare tipo de
+                // retorno) para marcar como leídas las variables usadas en él; sin
+                // esto, `return x` no contaba como uso → falso "x nunca usada".
+                if let Some(expr) = value {
+                    self.check_call_types(expr);
+                    let actual = self.infer_type(expr);
+                    if let Some(rt) = return_type {
+                        if rt != "void" && rt != "any" {
+                            if let Some(actual) = actual {
+                                if !types_compatible(rt, &actual) {
+                                    self.report(
+                                        format!("RETURN: se esperaba '{rt}', pero es de tipo '{actual}'"),
+                                        *line, *col,
+                                    );
+                                }
                             }
                         }
                     }
@@ -312,6 +319,11 @@ impl TypeChecker {
                 if let Some(Handler { err_name, body: hbody }) = handler {
                     self.push_scope();
                     self.scope_set(err_name.clone(), "string".to_string());
+                    // El binding de error es implícito; `handle err { }` sin
+                    // inspeccionar el error es idiomático → no avisar "nunca usado".
+                    if let Some(top) = self.written_not_read.last_mut() {
+                        top.remove(err_name);
+                    }
                     self.check_stmts(hbody, return_type);
                     self.pop_scope();
                 }
@@ -433,6 +445,11 @@ impl TypeChecker {
                 self.check_call_types(index);
             }
             Expr::AttrAccess { object, attr: _ } => self.check_call_types(object),
+            Expr::CallMethod { receiver, args, kwargs, .. } => {
+                self.check_call_types(receiver);
+                for arg in args { self.check_call_types(arg); }
+                for (_, v) in kwargs { self.check_call_types(v); }
+            }
             Expr::Ident(name) => { self.scope_get(name); }
             _ => {}
         }
@@ -511,12 +528,28 @@ impl TypeChecker {
 
             Expr::Call { callee, args, kwargs: _ } => {
                 for arg in args { self.infer_type(arg); }
-                self.infer_type(callee);
-                if let Expr::Ident(fn_name) = callee.as_ref() {
-                    self.fn_sigs.get(fn_name).and_then(|s| s.return_type.clone())
-                } else {
-                    None
+                match callee.as_ref() {
+                    // El nombre en posición de llamada es una FUNCIÓN/builtin, no
+                    // una variable: lo marcamos leído (por si es un closure en una
+                    // variable) pero NO emitimos "usada pero no definida" —eso
+                    // evita falsos positivos sobre builtins (has_key, len, …) sin
+                    // tener que mantener una lista hardcodeada completa de ellos.
+                    Expr::Ident(fn_name) => {
+                        self.scope_get(fn_name);
+                        self.fn_sigs.get(fn_name).and_then(|s| s.return_type.clone())
+                    }
+                    other => { self.infer_type(other); None }
                 }
+            }
+
+            // Llamada a método `recv.metodo(args)`: hay que visitar receptor y
+            // argumentos para marcarlos como leídos (sin esto, una variable usada
+            // solo en `x.push(v)` se reportaba como "nunca usada").
+            Expr::CallMethod { receiver, args, kwargs, .. } => {
+                self.infer_type(receiver);
+                for arg in args { self.infer_type(arg); }
+                for (_, v) in kwargs { self.infer_type(v); }
+                Some("any".into())
             }
 
             Expr::AttrAccess { object, attr: _ } => {
@@ -559,7 +592,16 @@ impl TypeChecker {
 
 //    Helpers de tipos                                                          
 
-/// Builtins que siempre existen sin declaración explícita
+/// Builtins que siempre existen sin declaración explícita.
+///
+/// Solo se consulta en posición de VALOR (pasar un builtin como dato, p. ej.
+/// `map(double, xs)`). En posición de LLAMADA (`has_key(d, k)`) ya no se valida
+/// el nombre contra esta lista —ver `infer_type`/`Expr::Call`—, así que no hace
+/// falta que esté 100% completa para evitar falsos "no definido".
+///
+/// La fuente de verdad real es `VM::call_builtin` (vm.rs). El test
+/// `builtins_in_sync_with_runtime` verifica que estos nombres sigan siendo
+/// builtins reales del runtime.
 fn is_builtin(name: &str) -> bool {
     matches!(
         name,
@@ -573,6 +615,18 @@ fn is_builtin(name: &str) -> bool {
         | "spawn" | "await" | "task" | "sleep"
         | "yes" | "no" | "null" | "true" | "false"
         | "self" | "super"
+        // Colecciones / acceso seguro
+        | "has_key" | "get" | "first" | "last" | "is_empty" | "repeat"
+        // Conversión / parseo
+        | "parse_int" | "parse_float" | "to_int" | "to_float"
+        // Numéricos / math
+        | "sqrt" | "pow" | "sign" | "clamp" | "factorial" | "hypot"
+        | "sin" | "cos" | "tan" | "exp" | "log" | "log2" | "log10"
+        | "degrees" | "radians" | "rand" | "randint"
+        // Strings
+        | "lines" | "index_of" | "trim_start" | "trim_end"
+        // Aserciones
+        | "assert" | "assert_eq" | "assert_ne"
     )
 }
 

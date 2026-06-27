@@ -330,6 +330,7 @@ fn dbg_val(v: &Value) -> String {
         Value::Float(f)        => format!("{}", f),
         Value::Str(s)          => format!("{}\"{}\"{}",  GRN, s, RST),
         Value::List(items)     => {
+            let items = items.borrow();
             if items.is_empty() { return format!("{}[]{}", DIM, RST); }
             let inner: Vec<String> = items.iter().map(dbg_val).collect();
             format!("[{}]", inner.join(", "))

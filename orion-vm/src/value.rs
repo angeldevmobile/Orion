@@ -32,7 +32,7 @@ pub fn from_send(sv: SendValue) -> Value {
         SendValue::Int(n)      => Value::Int(n),
         SendValue::Float(f)    => Value::Float(f),
         SendValue::Str(s)      => Value::Str(s),
-        SendValue::List(items) => Value::List(items.into_iter().map(from_send).collect()),
+        SendValue::List(items) => Value::list(items.into_iter().map(from_send).collect()),
         SendValue::Dict(map)   => Value::Dict(map.into_iter().map(|(k, v)| (k, from_send(v))).collect()),
         SendValue::Ptr(p)      => Value::Ptr(p),
     }
@@ -45,7 +45,10 @@ pub enum Value {
     Float(f64),
     Str(String),
     Bool(bool),
-    List(Vec<Value>),
+    /// Lista por referencia: el contenido es compartido (Rc<RefCell>) para que
+    /// `xs.push(x)` y demás mutaciones se vean en todos los alias (`ys = xs`).
+    /// La igualdad (`==`) sigue siendo estructural; `Clone` comparte el backing.
+    List(Rc<RefCell<Vec<Value>>>),
     Dict(IndexMap<String, Value>),
     Instance(Rc<RefCell<InstanceData>>),
     /// Closure: función + variables capturadas del scope donde fue creada.
@@ -69,7 +72,7 @@ impl PartialEq for Value {
             (Value::Str(a), Value::Str(b))       => a == b,
             (Value::Bool(a), Value::Bool(b))     => a == b,
             (Value::Null, Value::Null)           => true,
-            (Value::List(a), Value::List(b))     => a == b,
+            (Value::List(a), Value::List(b))     => *a.borrow() == *b.borrow(),
             (Value::Dict(a), Value::Dict(b))     => a == b,
             (Value::Ptr(a), Value::Ptr(b))       => a == b,
             (Value::Instance(a), Value::Instance(b))  => Rc::ptr_eq(a, b),
@@ -90,7 +93,7 @@ impl fmt::Display for Value {
             Value::Null      => write!(f, "null"),
             Value::Ptr(p)    => write!(f, "<ptr 0x{:x}>", p),
             Value::List(items) => {
-                let parts: Vec<String> = items.iter().map(|v| v.to_string()).collect();
+                let parts: Vec<String> = items.borrow().iter().map(|v| v.to_string()).collect();
                 write!(f, "[{}]", parts.join(", "))
             }
             Value::Dict(map) => {
@@ -108,6 +111,12 @@ impl fmt::Display for Value {
 }
 
 impl Value {
+    /// Construye una lista nueva a partir de un Vec, envolviéndola en el backing
+    /// compartido. Usar SIEMPRE esto en vez de `Value::List(vec)` directo.
+    pub fn list(items: Vec<Value>) -> Value {
+        Value::List(Rc::new(RefCell::new(items)))
+    }
+
     pub fn type_name(&self) -> String {
         match self {
             Value::Int(_)      => "int".to_string(),
@@ -131,7 +140,7 @@ impl Value {
             Value::Int(n)    => *n != 0,
             Value::Float(n)  => *n != 0.0,
             Value::Str(s)    => !s.is_empty(),
-            Value::List(v)   => !v.is_empty(),
+            Value::List(v)   => !v.borrow().is_empty(),
             Value::Dict(m)   => !m.is_empty(),
             Value::Ptr(p)    => *p != 0,
             Value::Instance(_)    => true,
@@ -152,7 +161,7 @@ impl Value {
             Value::Float(f)    => Ok(SendValue::Float(*f)),
             Value::Str(s)      => Ok(SendValue::Str(s.clone())),
             Value::List(items) => {
-                let sv: Result<Vec<_>, _> = items.iter().map(|v| v.to_send()).collect();
+                let sv: Result<Vec<_>, _> = items.borrow().iter().map(|v| v.to_send()).collect();
                 Ok(SendValue::List(sv?))
             }
             Value::Dict(map) => {
@@ -185,9 +194,11 @@ impl Value {
             (Value::Str(a), b)                     => Ok(Value::Str(format!("{}{}", a, b))),
             (a, Value::Str(b))                     => Ok(Value::Str(format!("{}{}", a, b))),
             (Value::List(a), Value::List(b))        => {
-                let mut result = a.clone();
-                result.extend_from_slice(b);
-                Ok(Value::List(result))
+                // Concatenación: produce una lista NUEVA e independiente (no muta
+                // ninguno de los operandos). Snapshot de ambos backings.
+                let mut result = a.borrow().clone();
+                result.extend(b.borrow().iter().cloned());
+                Ok(Value::list(result))
             }
             _ => Err(format!("No se puede sumar {} + {}", self.type_name(), other.type_name())),
         }
@@ -228,7 +239,15 @@ impl Value {
     }
 
     pub fn compare_eq(&self, other: &Value) -> bool {
-        self == other
+        match (self, other) {
+            // Igualdad numérica con promoción int↔float, consistente con
+            // `compare_lt` y con el runtime JIT (`rt_eq`): el operador `==` es
+            // numérico, no estructural. (El `PartialEq` de abajo sigue siendo
+            // estructural para igualdad de listas/dicts/instancias.)
+            (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
+            (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
+            _ => self == other,
+        }
     }
 
     pub fn compare_lt(&self, other: &Value) -> Result<bool, String> {

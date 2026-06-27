@@ -450,7 +450,7 @@ fn dap_val(v: &crate::value::Value) -> String {
         Value::Int(n)             => n.to_string(),
         Value::Float(f)           => format!("{}", f),
         Value::Str(s)             => format!("\"{}\"", s),
-        Value::List(items)        => format!("[{} items]", items.len()),
+        Value::List(items)        => format!("[{} items]", items.borrow().len()),
         Value::Dict(map)          => format!("{{{} keys}}", map.len()),
         Value::Instance(rc)       => format!("<{}>", rc.borrow().shape_name),
         Value::Closure { fn_name, .. } => format!("<fn {}>", fn_name),

@@ -374,6 +374,8 @@ impl VM {
                     }
                     (Value::Float(x), Value::Float(y)) => self.value_stack.push(Value::Float(x.powf(y))),
                     (Value::Int(x), Value::Float(y))   => self.value_stack.push(Value::Float((x as f64).powf(y))),
+                    // Mismo cast `as i32` que el runtime JIT (rt_pow) para coincidir bit a bit.
+                    (Value::Float(x), Value::Int(y))   => self.value_stack.push(Value::Float(x.powi(y as i32))),
                     _ => return Err("Potencia requiere números".to_string()),
                 }
             }
@@ -681,7 +683,7 @@ impl VM {
                                 let parts: Vec<Value> = s.split(sep.to_string().as_str())
                                     .map(|p| Value::Str(p.to_string()))
                                     .collect();
-                                Value::List(parts)
+                                Value::list(parts)
                             }
                             "replace" => {
                                 let mut it = args.into_iter();
@@ -735,24 +737,29 @@ impl VM {
                         self.value_stack.push(result);
                     }
 
-                    //    Métodos de List                                   
-                    Value::List(mut list) => {
+                    //    Métodos de List
+                    // `list` es el backing compartido (Rc<RefCell<Vec>>). Los
+                    // métodos mutadores (push/append/reverse/sort) modifican el
+                    // Vec in-place y devuelven el MISMO Rc → el alias original ve
+                    // el cambio. Los transformadores (map/filter/reduce) producen
+                    // listas NUEVAS. Las lecturas usan borrow().
+                    Value::List(list) => {
                         let result = match method_name.as_str() {
-                            "len"      => Value::Int(list.len() as i64),
-                            "is_empty" => Value::Bool(list.is_empty()),
+                            "len"      => Value::Int(list.borrow().len() as i64),
+                            "is_empty" => Value::Bool(list.borrow().is_empty()),
                             "push" | "append" => {
                                 let item = args.into_iter().next()
                                     .ok_or("list.push() requiere 1 argumento")?;
-                                list.push(item);
+                                list.borrow_mut().push(item);
                                 Value::List(list)
                             }
-                            "first" => list.first().cloned().unwrap_or(Value::Null),
-                            "last"  => list.last().cloned().unwrap_or(Value::Null),
-                            "reverse" => { list.reverse(); Value::List(list) }
+                            "first" => list.borrow().first().cloned().unwrap_or(Value::Null),
+                            "last"  => list.borrow().last().cloned().unwrap_or(Value::Null),
+                            "reverse" => { list.borrow_mut().reverse(); Value::List(list) }
                             "contains" => {
                                 let item = args.into_iter().next()
                                     .ok_or("list.contains() requiere 1 argumento")?;
-                                Value::Bool(list.contains(&item))
+                                Value::Bool(list.borrow().contains(&item))
                             }
                             "join" => {
                                 let sep = match args.into_iter().next() {
@@ -760,40 +767,43 @@ impl VM {
                                     None => String::new(),
                                     Some(v) => v.to_string(),
                                 };
-                                Value::Str(list.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(&sep))
+                                Value::Str(list.borrow().iter().map(|v| v.to_string()).collect::<Vec<_>>().join(&sep))
                             }
                             "map" => {
                                 let cb = args.into_iter().next()
                                     .ok_or("list.map() requiere una función/lambda")?;
-                                let mut out = Vec::with_capacity(list.len());
-                                for item in list {
+                                let items = list.borrow().clone();
+                                let mut out = Vec::with_capacity(items.len());
+                                for item in items {
                                     let r = self.call_value(cb.clone(), vec![item])?;
                                     out.push(r);
                                 }
-                                Value::List(out)
+                                Value::list(out)
                             }
                             "filter" => {
                                 let cb = args.into_iter().next()
                                     .ok_or("list.filter() requiere una función/lambda")?;
+                                let items = list.borrow().clone();
                                 let mut out = Vec::new();
-                                for item in list {
+                                for item in items {
                                     let r = self.call_value(cb.clone(), vec![item.clone()])?;
                                     if r.is_truthy() { out.push(item); }
                                 }
-                                Value::List(out)
+                                Value::list(out)
                             }
                             "reduce" => {
                                 let mut it = args.into_iter();
                                 let cb  = it.next().ok_or("list.reduce() requiere función y acumulador")?;
                                 let acc = it.next().ok_or("list.reduce() requiere acumulador inicial")?;
                                 let mut acc = acc;
-                                for item in list {
+                                let items = list.borrow().clone();
+                                for item in items {
                                     acc = self.call_value(cb.clone(), vec![acc, item])?;
                                 }
                                 acc
                             }
                             "sort" => {
-                                list.sort_by(|a, b| match (a, b) {
+                                list.borrow_mut().sort_by(|a, b| match (a, b) {
                                     (Value::Int(x), Value::Int(y))     => x.cmp(y),
                                     (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
                                     (Value::Str(x), Value::Str(y))     => x.cmp(y),
@@ -804,7 +814,7 @@ impl VM {
                             "sum" => {
                                 let mut total = 0.0f64;
                                 let mut is_int = true;
-                                for v in &list {
+                                for v in list.borrow().iter() {
                                     match v {
                                         Value::Int(n)   => total += *n as f64,
                                         Value::Float(n) => { total += n; is_int = false; }
@@ -813,12 +823,12 @@ impl VM {
                                 }
                                 if is_int { Value::Int(total as i64) } else { Value::Float(total) }
                             }
-                            "min" => list.iter().cloned().reduce(|a, b| match (&a, &b) {
+                            "min" => list.borrow().iter().cloned().reduce(|a, b| match (&a, &b) {
                                 (Value::Int(x), Value::Int(y))     => if x <= y { a } else { b },
                                 (Value::Float(x), Value::Float(y)) => if x <= y { a } else { b },
                                 _ => a,
                             }).unwrap_or(Value::Null),
-                            "max" => list.iter().cloned().reduce(|a, b| match (&a, &b) {
+                            "max" => list.borrow().iter().cloned().reduce(|a, b| match (&a, &b) {
                                 (Value::Int(x), Value::Int(y))     => if x >= y { a } else { b },
                                 (Value::Float(x), Value::Float(y)) => if x >= y { a } else { b },
                                 _ => a,
@@ -834,8 +844,8 @@ impl VM {
                         match method_name.as_str() {
                             "len"      => { self.value_stack.push(Value::Int(map.len() as i64)); }
                             "is_empty" => { self.value_stack.push(Value::Bool(map.is_empty())); }
-                            "keys"     => { self.value_stack.push(Value::List(map.keys().map(|k| Value::Str(k.clone())).collect())); }
-                            "values"   => { self.value_stack.push(Value::List(map.values().cloned().collect())); }
+                            "keys"     => { self.value_stack.push(Value::list(map.keys().map(|k| Value::Str(k.clone())).collect())); }
+                            "values"   => { self.value_stack.push(Value::list(map.values().cloned().collect())); }
                             "contains" | "has_key" => {
                                 let key = args.into_iter().next()
                                     .ok_or("dict.contains() requiere 1 argumento")?
@@ -927,7 +937,7 @@ impl VM {
             Instruction::MakeList(n) => {
                 let mut items: Vec<Value> = (0..n).map(|_| self.pop()).collect::<Result<Vec<_>, _>>()?;
                 items.reverse();
-                self.value_stack.push(Value::List(items));
+                self.value_stack.push(Value::list(items));
             }
             Instruction::MakeDict(n) => {
                 let mut map = IndexMap::new();
@@ -946,6 +956,7 @@ impl VM {
                 let obj = self.pop()?;
                 match (obj, idx) {
                     (Value::List(items), Value::Int(i)) => {
+                        let items = items.borrow();
                         let i_usize = if i < 0 {
                             let len = items.len() as i64;
                             (len + i) as usize
@@ -980,16 +991,19 @@ impl VM {
                 let idx = self.pop()?;
                 let obj = self.pop()?;
                 match (obj, idx) {
-                    (Value::List(mut items), Value::Int(i)) => {
-                        let i_usize = if i < 0 {
-                            (items.len() as i64 + i) as usize
-                        } else {
-                            i as usize
-                        };
-                        if i_usize >= items.len() {
-                            return Err(format!("Índice {} fuera de rango en SetIndex", i));
+                    (Value::List(items), Value::Int(i)) => {
+                        {
+                            let mut items_mut = items.borrow_mut();
+                            let i_usize = if i < 0 {
+                                (items_mut.len() as i64 + i) as usize
+                            } else {
+                                i as usize
+                            };
+                            if i_usize >= items_mut.len() {
+                                return Err(format!("Índice {} fuera de rango en SetIndex", i));
+                            }
+                            items_mut[i_usize] = val;
                         }
-                        items[i_usize] = val;
                         self.value_stack.push(Value::List(items));
                     }
                     (Value::Dict(mut map), idx) => {
@@ -1112,7 +1126,7 @@ impl VM {
                 // Si hay choices, están en el stack debajo del prompt (ya extraímos prompt)
                 let choices_list: Option<Vec<Value>> = if choices {
                     let c = self.pop()?;
-                    if let Value::List(v) = c { Some(v) } else { None }
+                    if let Value::List(v) = c { Some(v.borrow().clone()) } else { None }
                 } else {
                     None
                 };
@@ -1161,7 +1175,7 @@ impl VM {
                     }
                     "lines" => {
                         let lines: Vec<Value> = content.lines().map(|l| Value::Str(l.to_string())).collect();
-                        Value::List(lines)
+                        Value::list(lines)
                     }
                     _ => Value::Str(content),
                 };
@@ -1406,7 +1420,7 @@ impl VM {
     // excel.compute(data, { "col": fn(row) { expr }, ... }) → list con nuevas columnas
     fn excel_compute(&mut self, args: Vec<Value>) -> Result<Value, String> {
         let data = match args.get(0) {
-            Some(Value::List(l)) => l.clone(),
+            Some(Value::List(l)) => l.borrow().clone(),
             Some(other) => return Err(format!(
                 "excel.compute: primer argumento debe ser lista, se recibió {:?}", other
             )),
@@ -1437,7 +1451,7 @@ impl VM {
             }
             result.push(Value::Dict(new_row));
         }
-        Ok(Value::List(result))
+        Ok(Value::list(result))
     }
 
     /// Dispatch de funciones math builtin
@@ -1770,90 +1784,169 @@ impl VM {
     // -------------------------------------------------------------------------
 
     fn serve_http(&mut self, port: u16, fn_name: String) -> Result<(), String> {
-        use tiny_http::{Server, Response, Header};
-        use std::str::FromStr;
+        use tiny_http::Server;
 
         let addr = format!("0.0.0.0:{}", port);
-        let server = Server::http(&addr)
-            .map_err(|e| format!("serve: no se pudo iniciar el servidor en {}: {}", addr, e))?;
+        let server = Arc::new(Server::http(&addr)
+            .map_err(|e| format!("serve: no se pudo iniciar el servidor en {}: {}", addr, e))?);
 
-        eprintln!("[Orion] Servidor escuchando en http://{}  (Ctrl+C para detener)", addr);
-
-        for mut request in server.incoming_requests() {
-            // Construir req dict
-            let url = request.url().to_string();
-            let method = request.method().to_string();
-
-            // Parsear path y query params
-            let (path, query) = if let Some(pos) = url.find('?') {
-                (url[..pos].to_string(), url[pos+1..].to_string())
-            } else {
-                (url.clone(), String::new())
-            };
-
-            let mut params = IndexMap::new();
-            for pair in query.split('&') {
-                if let Some((k, v)) = pair.split_once('=') {
-                    params.insert(k.to_string(), Value::Str(v.to_string()));
-                }
-            }
-
-            let mut body_str = String::new();
-            {
-                request.as_reader().read_to_string(&mut body_str).ok();
-            }
-
-            let mut req_map = IndexMap::new();
-            req_map.insert("path".to_string(),   Value::Str(path));
-            req_map.insert("method".to_string(), Value::Str(method));
-            req_map.insert("body".to_string(),   Value::Str(body_str));
-            req_map.insert("params".to_string(), Value::Dict(params));
-            let req_val = Value::Dict(req_map);
-
-            // Llamar la función handler
-            let func = self.functions.get(&fn_name).cloned()
-                .ok_or_else(|| format!("serve: handler '{}' no encontrado", fn_name))?;
-
-            if func.params.len() != 1 {
-                return Err(format!("serve: handler '{}' debe tener exactamente 1 parámetro (req)", fn_name));
-            }
-
-            let frame = CallFrame::with_args(func.body, func.lines, &func.params, vec![req_val]);
-            self.call_stack.push(frame);
-            self.run_until_frame_done()?;
-
-            // Obtener resultado del stack (el Return pone el valor en el stack si lo hay)
-            let result = self.value_stack.pop().unwrap_or(Value::Null);
-
-            // Extraer status y body de la respuesta
-            let (status_code, resp_body, content_type) = match result {
-                Value::Dict(ref m) => {
-                    let status = match m.get("status") {
-                        Some(Value::Int(n)) => *n as u16,
-                        _ => 200,
-                    };
-                    let body = m.get("body").map(|v| v.to_string()).unwrap_or_default();
-                    let ct = m.get("content_type")
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-                    (status, body, ct)
-                }
-                Value::Str(s) => (200, s, "text/plain; charset=utf-8".to_string()),
-                Value::Null   => (204, String::new(), "text/plain".to_string()),
-                other         => (200, other.to_string(), "text/plain; charset=utf-8".to_string()),
-            };
-
-            let header = Header::from_str(&format!("Content-Type: {}", content_type)).ok();
-            let mut response = Response::from_string(resp_body).with_status_code(status_code);
-            if let Some(h) = header {
-                response = response.with_header(h);
-            }
-
-            eprintln!("[Orion] {} {} → {}", request.method(), request.url(), status_code);
-            request.respond(response)
-                .map_err(|e| format!("serve: error al responder: {}", e))?;
+        // Validar el handler una sola vez antes de levantar los hilos.
+        let func = self.functions.get(&fn_name).cloned()
+            .ok_or_else(|| format!("serve: handler '{}' no encontrado", fn_name))?;
+        if func.params.len() != 1 {
+            return Err(format!("serve: handler '{}' debe tener exactamente 1 parámetro (req)", fn_name));
         }
+
+        // Snapshot de las variables globales (frame <main>) para sembrar cada
+        // worker (config/datos de solo lectura). Los Value normales viajan como
+        // SendValue (thread-safe); los módulos importados con `use` se llevan
+        // aparte porque SendValue no tiene variante Module y se re-registran como
+        // Value::Module en el worker. Las mutaciones de estado compartido van por
+        // el módulo `state`.
+        let (globals, module_globals): (Vec<(String, SendValue)>, Vec<(String, String)>) = {
+            let mut vals = Vec::new();
+            let mut mods = Vec::new();
+            if let Some(f) = self.call_stack.first() {
+                for (k, v) in &f.vars {
+                    match v {
+                        Value::Module(m) => mods.push((k.clone(), m.clone())),
+                        other => if let Ok(sv) = other.to_send() { vals.push((k.clone(), sv)); }
+                    }
+                }
+            }
+            (vals, mods)
+        };
+
+        // Pool de hilos: tantos workers como CPUs (acotado a [2, 16]). Cada uno
+        // tiene su PROPIA VM construida desde el blueprint del programa (bytecode,
+        // que es Send); los Value (Rc) nunca cruzan hilos.
+        let n_workers = std::thread::available_parallelism()
+            .map(|n| n.get()).unwrap_or(4).clamp(2, 16);
+
+        eprintln!("[Orion] Servidor escuchando en http://{}  ({} hilos · Ctrl+C para detener)", addr, n_workers);
+
+        let mut handles = Vec::with_capacity(n_workers);
+        for _ in 0..n_workers {
+            let server      = Arc::clone(&server);
+            let functions   = self.functions.clone();
+            let shapes      = self.shapes.clone();
+            let extern_fns  = self.extern_fns.clone();
+            let globals     = globals.clone();
+            let modules     = module_globals.clone();
+            let fn_name     = fn_name.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut vm = VM::new(Vec::new(), Vec::new(), functions, shapes, extern_fns);
+                if let Some(main_frame) = vm.call_stack.first_mut() {
+                    for (k, sv) in &globals {
+                        main_frame.vars.insert(k.clone(), from_send(sv.clone()));
+                    }
+                    for (k, m) in &modules {
+                        main_frame.vars.insert(k.clone(), Value::Module(m.clone()));
+                    }
+                }
+                // Bucle de aceptación: varios hilos llaman recv() sobre el mismo
+                // Server (tiny_http reparte los requests entre ellos).
+                loop {
+                    match server.recv() {
+                        Ok(request) => vm.handle_http_request(request, &fn_name),
+                        Err(_) => break,
+                    }
+                }
+            }));
+        }
+        for h in handles { let _ = h.join(); }
         Ok(())
+    }
+
+    /// Ejecuta el handler `fn_name` con el dict `req` y devuelve su valor de
+    /// retorno. Si falla, deja los stacks limpios para no contaminar el siguiente
+    /// request del mismo worker.
+    fn run_handler(&mut self, fn_name: &str, req: Value) -> Result<Value, String> {
+        let func = self.functions.get(fn_name).cloned()
+            .ok_or_else(|| format!("handler '{}' no encontrado", fn_name))?;
+        let frame = CallFrame::with_args(func.body, func.lines, &func.params, vec![req]);
+        self.call_stack.push(frame);
+        match self.run_until_frame_done() {
+            Ok(()) => Ok(self.value_stack.pop().unwrap_or(Value::Null)),
+            Err(e) => {
+                // Restaurar el worker a un estado limpio tras un error de handler.
+                self.call_stack.truncate(1);
+                self.value_stack.clear();
+                self.error_handlers.clear();
+                Err(e)
+            }
+        }
+    }
+
+    /// Construye el dict `req`, ejecuta el handler y responde. Un error del
+    /// handler se traduce a 500 y el worker sigue atendiendo (no tumba el server).
+    fn handle_http_request(&mut self, mut request: tiny_http::Request, fn_name: &str) {
+        use tiny_http::{Response, Header};
+        use std::str::FromStr;
+
+        let url = request.url().to_string();
+        let method = request.method().to_string();
+
+        let (path, query) = if let Some(pos) = url.find('?') {
+            (url[..pos].to_string(), url[pos+1..].to_string())
+        } else {
+            (url.clone(), String::new())
+        };
+
+        let mut params = IndexMap::new();
+        for pair in query.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                params.insert(k.to_string(), Value::Str(v.to_string()));
+            }
+        }
+
+        let mut body_str = String::new();
+        { request.as_reader().read_to_string(&mut body_str).ok(); }
+
+        let mut req_map = IndexMap::new();
+        req_map.insert("path".to_string(),   Value::Str(path));
+        req_map.insert("method".to_string(), Value::Str(method));
+        req_map.insert("body".to_string(),   Value::Str(body_str));
+        req_map.insert("params".to_string(), Value::Dict(params));
+        let req_val = Value::Dict(req_map);
+
+        // Ejecutar handler; un error se convierte en 500 sin tumbar al worker.
+        let result = match self.run_handler(fn_name, req_val) {
+            Ok(v)  => v,
+            Err(e) => {
+                eprintln!("[Orion] {} {} → 500 ({})", request.method(), request.url(), e);
+                let resp = Response::from_string(format!("error interno: {}", e))
+                    .with_status_code(500);
+                let _ = request.respond(resp);
+                return;
+            }
+        };
+
+        let (status_code, resp_body, content_type) = match result {
+            Value::Dict(ref m) => {
+                let status = match m.get("status") {
+                    Some(Value::Int(n)) => *n as u16,
+                    _ => 200,
+                };
+                let body = m.get("body").map(|v| v.to_string()).unwrap_or_default();
+                let ct = m.get("content_type")
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+                (status, body, ct)
+            }
+            Value::Str(s) => (200, s, "text/plain; charset=utf-8".to_string()),
+            Value::Null   => (204, String::new(), "text/plain".to_string()),
+            other         => (200, other.to_string(), "text/plain; charset=utf-8".to_string()),
+        };
+
+        let header = Header::from_str(&format!("Content-Type: {}", content_type)).ok();
+        let mut response = Response::from_string(resp_body).with_status_code(status_code);
+        if let Some(h) = header {
+            response = response.with_header(h);
+        }
+
+        eprintln!("[Orion] {} {} → {}", request.method(), request.url(), status_code);
+        let _ = request.respond(response);
     }
 
     fn call_builtin(&self, name: &str, args: Vec<Value>) -> Result<Option<Value>, String> {
@@ -1873,11 +1966,12 @@ impl VM {
                 };
                 match obj {
                     Value::List(items) => {
+                        let items = items.borrow();
                         let len = items.len() as i64;
                         let s = resolve(start_v, len, 0);
                         let e = resolve(end_v, len, len);
                         let out = if s < e { items[s as usize..e as usize].to_vec() } else { vec![] };
-                        Ok(Some(Value::List(out)))
+                        Ok(Some(Value::list(out)))
                     }
                     Value::Str(st) => {
                         let chars: Vec<char> = st.chars().collect();
@@ -1919,7 +2013,7 @@ impl VM {
             "len" => {
                 let val = args.into_iter().next().ok_or("len() requiere un argumento")?;
                 match val {
-                    Value::List(v) => Ok(Some(Value::Int(v.len() as i64))),
+                    Value::List(v) => Ok(Some(Value::Int(v.borrow().len() as i64))),
                     Value::Str(s)  => Ok(Some(Value::Int(s.len() as i64))),
                     Value::Dict(m) => Ok(Some(Value::Int(m.len() as i64))),
                     _ => Err("len(): tipo no soportado".to_string()),
@@ -1940,17 +2034,18 @@ impl VM {
                 let list = it.next().ok_or("push() requiere al menos 2 argumentos")?;
                 let val  = it.next().ok_or("push() requiere al menos 2 argumentos")?;
                 match list {
-                    Value::List(mut v) => { v.push(val); Ok(Some(Value::List(v))) }
+                    Value::List(v) => { v.borrow_mut().push(val); Ok(Some(Value::List(v))) }
                     _ => Err("push(): el primer argumento debe ser una lista".to_string()),
                 }
             }
             "pop" => {
                 let list = args.into_iter().next().ok_or("pop() requiere un argumento")?;
                 match list {
-                    Value::List(mut v) => {
-                        let item = v.pop().unwrap_or(Value::Null);
-                        // devuelve [item, nueva_lista] para permitir acceso a ambos
-                        Ok(Some(Value::List(vec![item, Value::List(v)])))
+                    Value::List(v) => {
+                        let item = v.borrow_mut().pop().unwrap_or(Value::Null);
+                        // devuelve [item, lista_mutada] para permitir acceso a ambos;
+                        // la lista interior es el MISMO backing (ya mutado in-place)
+                        Ok(Some(Value::list(vec![item, Value::List(v)])))
                     }
                     _ => Err("pop(): requiere una lista".to_string()),
                 }
@@ -1958,21 +2053,21 @@ impl VM {
             "first" => {
                 let list = args.into_iter().next().ok_or("first() requiere un argumento")?;
                 match list {
-                    Value::List(v) => Ok(Some(v.into_iter().next().unwrap_or(Value::Null))),
+                    Value::List(v) => Ok(Some(v.borrow().first().cloned().unwrap_or(Value::Null))),
                     _ => Err("first(): requiere una lista".to_string()),
                 }
             }
             "last" => {
                 let list = args.into_iter().next().ok_or("last() requiere un argumento")?;
                 match list {
-                    Value::List(v) => Ok(Some(v.into_iter().last().unwrap_or(Value::Null))),
+                    Value::List(v) => Ok(Some(v.borrow().last().cloned().unwrap_or(Value::Null))),
                     _ => Err("last(): requiere una lista".to_string()),
                 }
             }
             "reverse" => {
                 let list = args.into_iter().next().ok_or("reverse() requiere un argumento")?;
                 match list {
-                    Value::List(mut v) => { v.reverse(); Ok(Some(Value::List(v))) }
+                    Value::List(v) => { v.borrow_mut().reverse(); Ok(Some(Value::List(v))) }
                     Value::Str(s)      => Ok(Some(Value::Str(s.chars().rev().collect()))),
                     _ => Err("reverse(): requiere una lista o string".to_string()),
                 }
@@ -1987,14 +2082,14 @@ impl VM {
                     _ => return Err("range() requiere argumentos enteros".to_string()),
                 };
                 let v: Vec<Value> = (start..end).map(Value::Int).collect();
-                Ok(Some(Value::List(v)))
+                Ok(Some(Value::list(v)))
             }
             "contains" => {
                 let mut it = args.into_iter();
                 let container = it.next().ok_or("contains() requiere 2 argumentos")?;
                 let item      = it.next().ok_or("contains() requiere 2 argumentos")?;
                 match container {
-                    Value::List(v) => Ok(Some(Value::Bool(v.contains(&item)))),
+                    Value::List(v) => Ok(Some(Value::Bool(v.borrow().contains(&item)))),
                     Value::Str(s)  => {
                         let needle = item.to_string();
                         Ok(Some(Value::Bool(s.contains(needle.as_str()))))
@@ -2010,14 +2105,14 @@ impl VM {
             "keys" => {
                 let val = args.into_iter().next().ok_or("keys() requiere un argumento")?;
                 match val {
-                    Value::Dict(m) => Ok(Some(Value::List(m.keys().map(|k| Value::Str(k.clone())).collect()))),
+                    Value::Dict(m) => Ok(Some(Value::list(m.keys().map(|k| Value::Str(k.clone())).collect()))),
                     _ => Err("keys(): requiere un dict".to_string()),
                 }
             }
             "values" => {
                 let val = args.into_iter().next().ok_or("values() requiere un argumento")?;
                 match val {
-                    Value::Dict(m) => Ok(Some(Value::List(m.into_values().collect()))),
+                    Value::Dict(m) => Ok(Some(Value::list(m.into_values().collect()))),
                     _ => Err("values(): requiere un dict".to_string()),
                 }
             }
@@ -2061,7 +2156,7 @@ impl VM {
                         let parts: Vec<Value> = text.split(delimiter.as_str())
                             .map(|p| Value::Str(p.to_string()))
                             .collect();
-                        Ok(Some(Value::List(parts)))
+                        Ok(Some(Value::list(parts)))
                     }
                     _ => Err("split(): requiere dos strings".to_string()),
                 }
@@ -2072,7 +2167,7 @@ impl VM {
                 let sep  = it.next().unwrap_or(Value::Str(" ".to_string()));
                 match (list, sep) {
                     (Value::List(v), Value::Str(s)) => {
-                        let parts: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+                        let parts: Vec<String> = v.borrow().iter().map(|x| x.to_string()).collect();
                         Ok(Some(Value::Str(parts.join(&s))))
                     }
                     _ => Err("join(): join(lista, sep)".to_string()),
@@ -2122,7 +2217,7 @@ impl VM {
                 // max(a, b) o max(lista)
                 let items = if args.len() == 1 {
                     match args.into_iter().next().unwrap() {
-                        Value::List(v) => v,
+                        Value::List(v) => v.borrow().clone(),
                         other => vec![other],
                     }
                 } else { args };
@@ -2133,7 +2228,7 @@ impl VM {
                 if args.is_empty() { return Err("min() requiere argumentos".to_string()); }
                 let items = if args.len() == 1 {
                     match args.into_iter().next().unwrap() {
-                        Value::List(v) => v,
+                        Value::List(v) => v.borrow().clone(),
                         other => vec![other],
                     }
                 } else { args };
@@ -2190,8 +2285,8 @@ impl VM {
                 Ok(Some(Value::Float(b.powf(e))))
             }
             "sum" => {
-                let items = match args.into_iter().next().unwrap_or(Value::List(vec![])) {
-                    Value::List(v) => v,
+                let items = match args.into_iter().next().unwrap_or_else(|| Value::list(vec![])) {
+                    Value::List(v) => v.borrow().clone(),
                     other => vec![other],
                 };
                 let mut total = 0.0_f64;
@@ -2213,8 +2308,8 @@ impl VM {
             "sort" => {
                 let val = args.into_iter().next().ok_or("sort() requiere una lista")?;
                 match val {
-                    Value::List(mut v) => {
-                        v.sort_by(|a, b| {
+                    Value::List(v) => {
+                        v.borrow_mut().sort_by(|a, b| {
                             let fa = match a { Value::Int(n) => *n as f64, Value::Float(f) => *f, _ => 0.0 };
                             let fb = match b { Value::Int(n) => *n as f64, Value::Float(f) => *f, _ => 0.0 };
                             fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
@@ -2570,7 +2665,7 @@ fn json_to_value(v: serde_json::Value) -> Value {
         }
         serde_json::Value::String(s) => Value::Str(s),
         serde_json::Value::Array(arr) => {
-            Value::List(arr.into_iter().map(json_to_value).collect())
+            Value::list(arr.into_iter().map(json_to_value).collect())
         }
         serde_json::Value::Object(map) => {
             let mut hm = IndexMap::new();
@@ -2706,7 +2801,7 @@ pub fn value_to_eval(v: Value) -> crate::eval_value::EvalValue {
         Value::Bool(b)   => E::Bool(b),
         Value::Null      => E::Null,
         Value::Module(m) => E::Module(m),
-        Value::List(items) => E::List(items.into_iter().map(value_to_eval).collect()),
+        Value::List(items) => E::List(items.borrow().iter().cloned().map(value_to_eval).collect()),
         Value::Dict(map)   => {
             let mut m = std::collections::HashMap::new();
             for (k, v) in map { m.insert(k, value_to_eval(v)); }
@@ -2725,7 +2820,7 @@ pub fn eval_to_value(e: crate::eval_value::EvalValue) -> Value {
         E::Bool(b)   => Value::Bool(b),
         E::Null      => Value::Null,
         E::Module(m) => Value::Module(m),
-        E::List(items) => Value::List(items.into_iter().map(eval_to_value).collect()),
+        E::List(items) => Value::list(items.into_iter().map(eval_to_value).collect()),
         E::Dict(map)   => {
             let mut m = indexmap::IndexMap::new();
             for (k, v) in map { m.insert(k, eval_to_value(v)); }
@@ -2979,7 +3074,7 @@ mod tests {
             Instruction::MakeList(3),
             Instruction::Halt,
         ]).unwrap();
-        assert_eq!(r, Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
+        assert_eq!(r, Value::list(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
     }
 
     #[test]
