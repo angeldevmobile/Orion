@@ -77,12 +77,12 @@ Anunciar como "soporta X" con esa salvedad:
 | `search` | archivos de datos a indexar |
 | `excel_f` | (puro, cableado; falta test de salida) |
 
-## 🚧 No probado — interfaz interactiva
+## 🟡 Interfaz — verificado por construcción
 
-| Módulo | Motivo |
+| Módulo | Estado |
 |---|---|
-| `gui` | UI de escritorio (requiere ventana/interacción) |
-| `tui` | UI de terminal (requiere TTY/interacción) |
+| `gui` | ✅ Árbol de widgets verificado headless (`smoke_gui_headless_widgets`) + render confirmado con capturas. Tema configurable, estilo por widget, 20+ widgets, charts. Ver [GUI.md](GUI.md). El render abre ventana, así que no se automatiza el pixel-perfect. |
+| `tui` | 🚧 UI de terminal (requiere TTY/interacción) — sin tests aún |
 
 ---
 

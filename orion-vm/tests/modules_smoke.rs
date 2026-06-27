@@ -457,3 +457,53 @@ fn smoke_frame() {
     ]);
     assert!(ok("frame", "from_list", vec![rows]), "frame.from_list");
 }
+
+// ── GUI headless: el árbol de widgets se construye sin abrir ventana ─────────
+// (No se llama gui.run — eso abriría eframe. Verificamos que cada widget y el
+// tema despachan vía modules::call.)
+
+#[test]
+fn smoke_gui_headless_widgets() {
+    // Tema configurable por el developer
+    assert!(ok("gui", "theme", vec![dict(&[("accent", s("#ff7a00")), ("rounding", i(14)), ("light", EvalValue::Bool(false))])]));
+    assert!(ok("gui", "panel", vec![s("Test"), i(420), i(320)]));
+
+    // Tipografía con color/size por widget
+    assert!(ok("gui", "heading", vec![s("Título"), s("accent")]));
+    assert!(ok("gui", "text", vec![s("cuerpo"), dict(&[("color", s("success")), ("size", i(18))])]));
+    assert!(ok("gui", "caption", vec![s("CAP")]));
+
+    // Contenedor + widgets internos
+    assert!(ok("gui", "card", vec![]));
+    assert!(ok("gui", "field", vec![s("escribe…")]));
+    assert!(ok("gui", "toggle", vec![s("activo")]));
+    assert!(ok("gui", "pick", vec![s("cat"), EvalValue::List(vec![s("A"), s("B")])]));
+    assert!(ok("gui", "press", vec![s("OK"), s("accent"), s("white")]));
+    assert!(ok("gui", "ghost", vec![s("Cancelar")]));
+    assert!(ok("gui", "end", vec![]));
+
+    // Widgets nuevos
+    assert!(ok("gui", "progress", vec![i(50)]));
+    assert!(ok("gui", "progress", vec![EvalValue::Float(0.3), s("success")]));
+    assert!(ok("gui", "tabs", vec![EvalValue::List(vec![s("Uno"), s("Dos")]), s("Uno")]));
+    assert!(ok("gui", "image", vec![s("demo/logo.png"), i(120)]));
+    assert!(ok("gui", "badge", vec![s("nuevo"), s("success")]));
+    assert!(ok("gui", "divider", vec![]));
+
+    // Zona con estilo completo por dict (borde/rounding/pad)
+    assert!(ok("gui", "zone", vec![dict(&[("border", s("accent")), ("border_w", i(2)), ("rounding", i(16)), ("pad", i(20))])]));
+    assert!(ok("gui", "heading", vec![s("dentro de zona")]));
+    assert!(ok("gui", "end", vec![]));
+
+    // Modal (contenedor)
+    assert!(ok("gui", "modal", vec![s("Confirmar")]));
+    assert!(ok("gui", "text", vec![s("¿seguro?")]));
+    assert!(ok("gui", "end", vec![]));
+
+    // Chart sin abrir ventana
+    let datos = EvalValue::List(vec![
+        dict(&[("mes", s("Ene")), ("v", i(10))]),
+        dict(&[("mes", s("Feb")), ("v", i(20))]),
+    ]);
+    assert!(ok("gui", "chart", vec![datos, s("bar"), dict(&[("x", s("mes")), ("y", s("v"))])]));
+}

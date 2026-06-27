@@ -1,0 +1,109 @@
+# Orion GUI — referencia
+
+GUI de escritorio nativo sobre `egui`. Modo inmediato: el script se **re-ejecuta
+en cada evento** y el estado vive en `gui.set/gui.val`. Cero hardcodeo: el
+developer decide tema, colores, bordes, fuentes y layout.
+
+```orion
+use "gui" as gui
+gui.panel("Mi App", 720, 560)
+gui.heading("Hola Orion")
+gui.run()                       -- abre la ventana (bloqueante)
+```
+
+## Tema — `gui.theme({...})`
+
+Sobrescribe lo que quieras; lo que no fijes cae al default.
+
+```orion
+gui.theme({
+    "accent":   "#f97316",      -- o nombre: "blue", "success"…
+    "bg":       "#1b1410",
+    "surface":  "#2a2018",
+    "text":     "#f5f5fa",
+    "rounding": 16,             -- radio de esquinas
+    "heading":  30,             -- tamaño de títulos
+    "body":     15,             -- tamaño de cuerpo
+    "spacing":  8,
+    "light":    no              -- yes = tema claro
+})
+```
+
+Los nombres semánticos `accent`/`surface`/`bg`/`text` **siguen tu tema**.
+
+## Colores
+
+- **Nombres semánticos:** `accent`, `success`, `warning`, `error`, `info`
+- **Básicos:** `white`, `black`, `red`, `green`, `blue`, `yellow`, `orange`, `purple`, `pink`, `gray`
+- **Hex:** `"#22c55e"`
+
+## Estilo por widget
+
+Cualquier widget acepta un color posicional **o** un dict de estilo completo:
+
+```orion
+gui.heading("Título", "accent")                 -- color de texto
+gui.heading("Título", { "color": "accent", "size": 28 })
+gui.press("Guardar", "#22c55e", "white")        -- bg, texto
+gui.zone({ "border": "accent", "border_w": 2, "rounding": 18, "pad": 22 })
+  -- … hijos …
+gui.end()
+```
+
+Claves de estilo: `bg`/`fill`, `fg`/`color`/`text`, `border`, `border_w`,
+`rounding`/`radius`, `size`/`font_size`, `pad`/`padding`.
+
+## Layout (contenedores — se cierran con `gui.end()`)
+
+| Función | Qué hace |
+|---|---|
+| `gui.panel(titulo, w, h)` | configura la ventana |
+| `gui.card({width?, fill?})` | tarjeta |
+| `gui.row()` | fila (columnas de igual ancho) |
+| `gui.col()` | columna |
+| `gui.grid(n)` | rejilla de n columnas |
+| `gui.sidebar(ancho?)` | barra lateral |
+| `gui.zone({estilo})` | contenedor con estilo libre |
+| `gui.end()` | cierra el último contenedor |
+
+## Widgets
+
+**Texto:** `gui.heading(t, estilo?)` · `gui.text(t, estilo?)` · `gui.caption(t, estilo?)`
+
+**Acciones:** `gui.press(label, bg?, fg?)` · `gui.ghost(label, color?)` · `gui.tap(label)`
+— al pulsar disparan `label` como evento → `if gui.pressed("label") { … }`
+
+**Inputs:** `gui.field(placeholder, estilo?)` · `gui.toggle(label)` ·
+`gui.pick(id, [opciones], estilo?)` · `gui.slide(id, min, max, step)`
+
+**Display:** `gui.badge(t, estilo?)` · `gui.banner(titulo, subtitulo?, estilo?)` ·
+`gui.avatar(t, tam?, estilo?)` · `gui.divider()` · `gui.spacer(px?)`
+
+**Datos:** `gui.table([dicts], {height?, cols?})` ·
+`gui.chart([dicts], tipo, {x, y, color, height…})` — tipo: `bar|line|area|scatter|pie|hist`
+
+**Nuevos:**
+| Widget | Uso |
+|---|---|
+| `gui.progress(v, color?)` | barra de progreso (`v` 0..1 o 0..100) |
+| `gui.tabs([labels], activa?)` | pestañas; al click dispara el label |
+| `gui.image(ruta, ancho?, alto?)` | png/jpg/bmp/gif (mantiene aspecto) |
+| `gui.modal(titulo) … gui.end()` | diálogo centrado |
+
+## Estado reactivo
+
+```orion
+n = gui.val("contador", 0)          -- lee (con default)
+if gui.pressed("+1") { gui.set("contador", n + 1) }   -- escribe
+```
+
+## Animaciones
+
+`gui.fade(id, mostrar) … gui.end()` · `gui.slide_in(id) … gui.end()`
+
+---
+
+Ejemplos completos: [`demo/demo_design.orx`](demo/demo_design.orx) (dashboard),
+[`demo/demo_theme.orx`](demo/demo_theme.orx) (tema custom),
+[`demo/demo_widgets.orx`](demo/demo_widgets.orx) (widgets nuevos),
+[`demo/demo_calc.orx`](demo/demo_calc.orx) (calculadora reactiva).
