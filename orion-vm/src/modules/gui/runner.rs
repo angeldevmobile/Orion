@@ -23,7 +23,7 @@ pub fn launch(
         &title,
         opts,
         Box::new(move |cc| {
-            theme::apply(&cc.egui_ctx);
+            theme::apply(&cc.egui_ctx, &theme::Theme::from_state());
             Ok(Box::new(OrionApp { components, field_vals }))
         }),
     )
@@ -51,7 +51,7 @@ pub fn launch_watch(
         &title,
         opts,
         Box::new(move |cc| {
-            theme::apply(&cc.egui_ctx);
+            theme::apply(&cc.egui_ctx, &theme::Theme::from_state());
 
             // El watcher thread necesita el Context para despertar a eframe al recargar
             let ctx     = cc.egui_ctx.clone();
@@ -242,7 +242,7 @@ fn render_root(
             .exact_width(w)
             .frame(
                 egui::Frame::none()
-                    .fill(theme::SURFACE)
+                    .fill(theme::current().surface)
                     .inner_margin(egui::Margin::same(16.0)),
             )
             .show(ctx, |ui| {
@@ -339,7 +339,7 @@ pub fn launch_reactive(
         &title,
         opts,
         Box::new(move |cc| {
-            theme::apply(&cc.egui_ctx);
+            theme::apply(&cc.egui_ctx, &theme::Theme::from_state());
             Ok(Box::new(OrionAppReactive {
                 path,
                 components,

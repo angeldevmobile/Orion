@@ -1,0 +1,46 @@
+-- demo_theme.orx — el developer DECIDE el tema. Cero hardcodeo.
+use "gui" as gui
+
+-- Tema custom: acento naranja, fondo y superficie propios, esquinas y fuente.
+gui.theme({
+    "accent":   "#f97316",
+    "bg":       "#1b1410",
+    "surface":  "#2a2018",
+    "rounding": 16,
+    "heading":  30
+})
+
+gui.panel("Mi App · Tema Custom", 640, 520)
+
+gui.banner("Tema definido por el developer", "acento naranja · esquinas 16 · fuente 30")
+gui.spacer(8)
+
+-- KPIs con color de TEXTO por widget (antes salía blanco; ahora aplica)
+gui.grid(3)
+  gui.card()
+    gui.caption("OK")
+    gui.heading("128", "success")
+  gui.end()
+  gui.card()
+    gui.caption("ALERTA")
+    gui.heading("12", "warning")
+  gui.end()
+  gui.card()
+    gui.caption("ERROR")
+    gui.heading("3", "error")
+  gui.end()
+gui.end()
+
+gui.spacer(8)
+
+-- Zona con estilo completo por dict: borde de acento, padding y rounding propios
+gui.zone({ "border": "accent", "border_w": 2, "rounding": 18, "pad": 22 })
+  gui.heading("Estilo por widget", { "color": "accent", "size": 22 })
+  gui.text("Bordes, color, fuente y padding decididos por el developer.")
+  gui.row()
+    gui.press("Acción", "accent", "white")
+    gui.ghost("Secundario")
+  gui.end()
+gui.end()
+
+gui.run()

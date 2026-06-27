@@ -1,8 +1,15 @@
-/// Estilo opcional por componente: color de fondo y/o texto
+/// Estilo opcional por componente. El developer decide cada propiedad; lo que no
+/// fija cae al tema. Permite "diseñar a su gusto": color, borde, redondeo, fuente
+/// y padding por widget.
 #[derive(Clone, Default)]
 pub struct Style {
-    pub bg: Option<[u8; 3]>,
-    pub fg: Option<[u8; 3]>,
+    pub bg:       Option<[u8; 3]>,
+    pub fg:       Option<[u8; 3]>,
+    pub border:   Option<[u8; 3]>,
+    pub border_w: Option<f32>,
+    pub rounding: Option<f32>,
+    pub size:     Option<f32>,
+    pub pad:      Option<f32>,
 }
 
 impl Style {
@@ -11,6 +18,14 @@ impl Style {
     }
     pub fn fg_color(&self) -> Option<egui::Color32> {
         self.fg.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+    }
+    pub fn border_color(&self) -> Option<egui::Color32> {
+        self.border.map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+    }
+    /// Stroke de borde si el developer fijó color (grosor por defecto 1.5).
+    pub fn stroke(&self) -> Option<egui::Stroke> {
+        let c = self.border_color()?;
+        Some(egui::Stroke::new(self.border_w.unwrap_or(1.5), c))
     }
 }
 
@@ -93,7 +108,6 @@ use std::collections::HashMap;
 use eframe::egui;
 use super::theme;
 
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(108, 99, 255);
 
 const DEFAULT_PALETTE: &[[u8; 3]] = &[
     [108, 99,  255], [34,  197,  94], [59,  130, 246], [234, 179,   8],
@@ -117,25 +131,21 @@ pub fn render(
 ) {
     match comp {
         Component::Heading(t, style) => {
-            let rt = egui::RichText::new(t).size(26.0).strong();
-            let rt = match style.fg_color() {
-                Some(c) => rt.color(c),
-                None    => rt,
-            };
+            let size = style.size.unwrap_or_else(|| theme::current().heading);
+            let mut rt = egui::RichText::new(t).size(size).strong();
+            if let Some(c) = style.fg_color() { rt = rt.color(c); }
             ui.label(rt);
         }
         Component::Text(t, style) => {
-            match style.fg_color() {
-                Some(c) => { ui.colored_label(c, t); }
-                None    => { ui.label(t); }
-            }
+            let mut rt = egui::RichText::new(t);
+            if let Some(sz) = style.size { rt = rt.size(sz); }
+            if let Some(c) = style.fg_color() { rt = rt.color(c); }
+            ui.label(rt);
         }
         Component::Caption(t, style) => {
-            let rt = egui::RichText::new(t).small();
-            let rt = match style.fg_color() {
-                Some(c) => rt.color(c),
-                None    => rt,
-            };
+            let mut rt = egui::RichText::new(t);
+            rt = match style.size { Some(sz) => rt.size(sz), None => rt.small() };
+            if let Some(c) = style.fg_color() { rt = rt.color(c); }
             ui.label(rt);
         }
         Component::Field { id, placeholder, style } => {
@@ -167,7 +177,7 @@ pub fn render(
             }
         }
         Component::Press(label, style) => {
-            let fill = style.bg_color().unwrap_or(ACCENT);
+            let fill = style.bg_color().unwrap_or_else(|| theme::current().accent);
             let rt = match style.fg_color() {
                 Some(c) => egui::RichText::new(label).color(c),
                 None    => egui::RichText::new(label),
@@ -179,7 +189,7 @@ pub fn render(
             }
         }
         Component::Ghost(label, style) => {
-            let color = style.fg_color().unwrap_or(ACCENT);
+            let color = style.fg_color().unwrap_or_else(|| theme::current().accent);
             if ui.add(
                 egui::Button::new(label)
                     .fill(egui::Color32::TRANSPARENT)
@@ -194,7 +204,7 @@ pub fn render(
             }
         }
         Component::Badge(text, style) => {
-            let fill = style.bg_color().unwrap_or(ACCENT);
+            let fill = style.bg_color().unwrap_or_else(|| theme::current().accent);
             egui::Frame::none()
                 .fill(fill)
                 .rounding(egui::Rounding::same(12.0))
@@ -205,7 +215,7 @@ pub fn render(
                 });
         }
         Component::Banner { title, subtitle, style } => {
-            let fill = style.bg_color().unwrap_or(theme::SURFACE);
+            let fill = style.bg_color().unwrap_or(theme::current().surface);
             egui::Frame::none()
                 .fill(fill)
                 .rounding(egui::Rounding::same(10.0))
@@ -221,7 +231,7 @@ pub fn render(
                 });
         }
         Component::Avatar { text, size, style } => {
-            let fill       = style.bg_color().unwrap_or(ACCENT);
+            let fill       = style.bg_color().unwrap_or_else(|| theme::current().accent);
             let text_color = style.fg_color().unwrap_or(egui::Color32::WHITE);
             let (resp, painter) = ui.allocate_painter(
                 egui::Vec2::splat(*size),
@@ -275,9 +285,10 @@ pub fn render(
             *val_str = val.to_string();
         }
         Component::Card { children, width, fill } => {
+            let th = theme::current();
             egui::Frame::none()
-                .fill(egui::Color32::from_rgb(26, 26, 40))
-                .rounding(egui::Rounding::same(10.0))
+                .fill(th.surface)
+                .rounding(egui::Rounding::same(th.rounding + 2.0))
                 .inner_margin(egui::Margin::same(16.0))
                 .show(ui, |ui| {
                     // Ancho: el dev manda. width fijo > fill (ancho disponible) >
@@ -333,7 +344,7 @@ pub fn render(
             // A nivel raíz lo maneja el runner como SidePanel. Si aparece anidado,
             // lo dibujamos como columna con fondo del ancho indicado.
             egui::Frame::none()
-                .fill(theme::SURFACE)
+                .fill(theme::current().surface)
                 .inner_margin(egui::Margin::same(12.0))
                 .show(ui, |ui| {
                     ui.set_width(*width);
@@ -344,13 +355,17 @@ pub fn render(
                 });
         }
         Component::Zone(children, style) => {
-            let fill = style.bg_color().unwrap_or(theme::SURFACE);
-            egui::Frame::none()
+            let th = theme::current();
+            let fill = style.bg_color().unwrap_or(th.surface);
+            let pad  = style.pad.unwrap_or(14.0);
+            let mut frame = egui::Frame::none()
                 .fill(fill)
-                .rounding(egui::Rounding::same(6.0))
-                .inner_margin(egui::Margin::symmetric(16.0, 12.0))
+                .rounding(egui::Rounding::same(style.rounding.unwrap_or(th.rounding)))
+                .inner_margin(egui::Margin::same(pad));
+            if let Some(stroke) = style.stroke() { frame = frame.stroke(stroke); }
+            frame
                 .show(ui, |ui| {
-                    ui.set_max_width(f32::INFINITY);
+                    ui.set_width(ui.available_width());
                     for child in children {
                         render(ui, child, fields, event);
                         ui.add_space(4.0);

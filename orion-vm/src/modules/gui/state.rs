@@ -26,6 +26,22 @@ thread_local! {
     pub static STATE: RefCell<GuiState> = RefCell::new(GuiState::default());
 }
 
+/// Overrides de tema fijados por el developer con `gui.theme({...})`. Todo es
+/// opcional: lo que no se setea cae al default. Datos planos (sin egui) para que
+/// el estado siga siendo clonable y libre de dependencias gráficas.
+#[derive(Default, Clone)]
+pub struct ThemeConfig {
+    pub accent:   Option<[u8; 3]>,
+    pub bg:       Option<[u8; 3]>,
+    pub surface:  Option<[u8; 3]>,
+    pub text:     Option<[u8; 3]>,
+    pub rounding: Option<f32>,
+    pub heading:  Option<f32>,
+    pub body:     Option<f32>,
+    pub spacing:  Option<f32>,
+    pub light:    Option<bool>,
+}
+
 #[derive(Default, Clone)]
 pub struct GuiState {
     pub title:           String,
@@ -34,6 +50,8 @@ pub struct GuiState {
     pub components:      Vec<Component>,
     pub field_vals:      HashMap<String, String>,
     pub container_stack: Vec<(String, usize)>,
+    /// Tema fijado por el developer (overrides; vacío = defaults).
+    pub theme:           ThemeConfig,
 
     // UI-3 — Estado reactivo
     /// Valores que persisten entre re-ejecuciones del script

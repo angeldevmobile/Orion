@@ -21,10 +21,30 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
+        //    Tema configurable — gui.theme({ accent, bg, surface, text,
+        //    rounding, heading, body, spacing, light })  — el developer decide.
+        "theme" => {
+            let cfg = dict_opt(&args, 0);
+            let tc = crate::modules::gui::state::ThemeConfig {
+                accent:   cfg_color(&cfg, "accent"),
+                bg:       cfg_color(&cfg, "bg").or_else(|| cfg_color(&cfg, "background")),
+                surface:  cfg_color(&cfg, "surface").or_else(|| cfg_color(&cfg, "card")),
+                text:     cfg_color(&cfg, "text").or_else(|| cfg_color(&cfg, "fg")),
+                rounding: cfg_f32_opt(&cfg, "rounding").or_else(|| cfg_f32_opt(&cfg, "radius")),
+                heading:  cfg_f32_opt(&cfg, "heading").or_else(|| cfg_f32_opt(&cfg, "heading_size")),
+                body:     cfg_f32_opt(&cfg, "body").or_else(|| cfg_f32_opt(&cfg, "font_size")),
+                spacing:  cfg_f32_opt(&cfg, "spacing"),
+                light:    cfg_bool_opt(&cfg, "light").or_else(||
+                              cfg_str(&cfg, "mode").map(|m| m.eq_ignore_ascii_case("light") || m.eq_ignore_ascii_case("claro"))),
+            };
+            with_state(|s| s.theme = tc);
+            Ok(EvalValue::Null)
+        }
+
         //    Tipografía — gui.heading("texto", "colorTexto?")
-        "heading" => push(Component::Heading(req_str(&args, 0, "heading")?, style_args(&args, 1, 2))),
-        "text"    => push(Component::Text(req_str(&args, 0, "text")?, style_args(&args, 1, 2))),
-        "caption" => push(Component::Caption(req_str(&args, 0, "caption")?, style_args(&args, 1, 2))),
+        "heading" => push(Component::Heading(req_str(&args, 0, "heading")?, text_style_args(&args, 1))),
+        "text"    => push(Component::Text(req_str(&args, 0, "text")?, text_style_args(&args, 1))),
+        "caption" => push(Component::Caption(req_str(&args, 0, "caption")?, text_style_args(&args, 1))),
 
         //    Inputs — gui.field("placeholder", "bgColor?", "textColor?")
         "field" => {
@@ -126,10 +146,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let style = style_args(&args, 0, 1);
             with_state(|s| {
                 let idx = s.components.len();
-                // guardamos el estilo codificado en el tipo de contenedor
-                s.container_stack.push((format!("zone|{}|{}",
-                    style.bg.map(|c| format!("{},{},{}", c[0], c[1], c[2])).unwrap_or_default(),
-                    style.fg.map(|c| format!("{},{},{}", c[0], c[1], c[2])).unwrap_or_default(),
+                // Estilo completo codificado en el tag del contenedor:
+                // zone|bg|fg|border|border_w|rounding|pad  (vacío = None).
+                s.container_stack.push((format!("zone|{}|{}|{}|{}|{}|{}",
+                    enc_rgb(style.bg), enc_rgb(style.fg), enc_rgb(style.border),
+                    enc_f(style.border_w), enc_f(style.rounding), enc_f(style.pad),
                 ), idx));
             });
             Ok(EvalValue::Null)
@@ -159,10 +180,17 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                             .unwrap_or(220.0);
                         Component::Sidebar(w, children)
                     } else if kind.starts_with("zone|") {
-                        let parts: Vec<&str> = kind.splitn(3, '|').collect();
-                        let bg = parse_rgb_tag(parts.get(1).copied().unwrap_or(""));
-                        let fg = parse_rgb_tag(parts.get(2).copied().unwrap_or(""));
-                        Component::Zone(children, Style { bg, fg })
+                        let p: Vec<&str> = kind.split('|').collect();
+                        let g = |i: usize| p.get(i).copied().unwrap_or("");
+                        Component::Zone(children, Style {
+                            bg:       parse_rgb_tag(g(1)),
+                            fg:       parse_rgb_tag(g(2)),
+                            border:   parse_rgb_tag(g(3)),
+                            border_w: g(4).parse().ok(),
+                            rounding: g(5).parse().ok(),
+                            pad:      g(6).parse().ok(),
+                            size:     None,
+                        })
                     } else if kind.starts_with("fade|") {
                         // "fade|id|show"
                         let parts: Vec<&str> = kind.splitn(3, '|').collect();
@@ -401,10 +429,12 @@ fn f32_arg(args: &[EvalValue], i: usize) -> Option<f32> {
 /// Parsea "#RRGGBB" o nombre de color del design system de Orion GUI.
 fn parse_color(s: &str) -> Option<[u8; 3]> {
     match s.to_lowercase().as_str() {
-        // Paleta base Orion
-        "accent"        => return Some([108, 99,  255]),
-        "surface"       => return Some([26,  26,  40]),
-        "bg"            => return Some([15,  15,  23]),
+        // Paleta del TEMA: estos nombres siguen lo que el developer fijó con
+        // gui.theme({...}); si no fijó nada, caen al default. (No hardcodeados.)
+        "accent"        => return Some(with_state(|s| s.theme.accent).unwrap_or([108, 99, 255])),
+        "surface"       => return Some(with_state(|s| s.theme.surface).unwrap_or([26, 26, 40])),
+        "bg"            => return Some(with_state(|s| s.theme.bg).unwrap_or([15, 15, 23])),
+        "text"          => return Some(with_state(|s| s.theme.text).unwrap_or([235, 235, 245])),
         // Semánticos
         "success"       => return Some([34,  197, 94]),
         "warning"       => return Some([234, 179, 8]),
@@ -438,14 +468,51 @@ fn color_arg(args: &[EvalValue], i: usize) -> Option<[u8; 3]> {
     str_arg(args, i).and_then(|s| parse_color(&s))
 }
 
+/// Estilo para widgets con fondo (botones, cards, badges): color posicional = bg.
+/// Si en la posición de estilo viene un DICT, se parsea estilo completo
+/// (bg, fg, border, border_w, rounding, size, pad) — el developer decide.
 fn style_args(args: &[EvalValue], bg_idx: usize, fg_idx: usize) -> Style {
+    if let Some(EvalValue::Dict(m)) = args.get(bg_idx) {
+        return parse_style_dict(m);
+    }
     Style {
         bg: color_arg(args, bg_idx),
         fg: color_arg(args, fg_idx),
+        ..Default::default()
+    }
+}
+
+/// Estilo para widgets de TEXTO (heading/text/caption): color posicional = texto.
+/// También acepta un dict de estilo completo.
+fn text_style_args(args: &[EvalValue], idx: usize) -> Style {
+    if let Some(EvalValue::Dict(m)) = args.get(idx) {
+        return parse_style_dict(m);
+    }
+    Style { fg: color_arg(args, idx), ..Default::default() }
+}
+
+/// Parsea un dict de estilo completo. Acepta sinónimos para ser amable con el dev.
+fn parse_style_dict(m: &std::collections::HashMap<String, EvalValue>) -> Style {
+    let cfg = Some(m.clone());
+    Style {
+        bg:       cfg_color(&cfg, "bg").or_else(|| cfg_color(&cfg, "fill")),
+        fg:       cfg_color(&cfg, "fg").or_else(|| cfg_color(&cfg, "color")).or_else(|| cfg_color(&cfg, "text")),
+        border:   cfg_color(&cfg, "border").or_else(|| cfg_color(&cfg, "stroke")),
+        border_w: cfg_f32_opt(&cfg, "border_w").or_else(|| cfg_f32_opt(&cfg, "stroke_w")),
+        rounding: cfg_f32_opt(&cfg, "rounding").or_else(|| cfg_f32_opt(&cfg, "radius")),
+        size:     cfg_f32_opt(&cfg, "size").or_else(|| cfg_f32_opt(&cfg, "font_size")),
+        pad:      cfg_f32_opt(&cfg, "pad").or_else(|| cfg_f32_opt(&cfg, "padding")),
     }
 }
 
 // Decodifica "R,G,B" guardado en zone|... → Option<[u8;3]>
+fn enc_rgb(c: Option<[u8; 3]>) -> String {
+    c.map(|c| format!("{},{},{}", c[0], c[1], c[2])).unwrap_or_default()
+}
+fn enc_f(v: Option<f32>) -> String {
+    v.map(|v| v.to_string()).unwrap_or_default()
+}
+
 fn parse_rgb_tag(s: &str) -> Option<[u8; 3]> {
     let parts: Vec<u8> = s.split(',')
         .filter_map(|x| x.parse().ok())
@@ -486,6 +553,18 @@ fn cfg_f32_opt(cfg: &CfgMap, key: &str) -> Option<f32> {
     cfg.as_ref()?.get(key).and_then(|v| match v {
         EvalValue::Float(f) => Some(*f as f32),
         EvalValue::Int(n)   => Some(*n as f32),
+        _ => None,
+    })
+}
+
+fn cfg_color(cfg: &CfgMap, key: &str) -> Option<[u8; 3]> {
+    cfg_str(cfg, key).and_then(|s| parse_color(&s))
+}
+
+fn cfg_bool_opt(cfg: &CfgMap, key: &str) -> Option<bool> {
+    cfg.as_ref()?.get(key).and_then(|v| match v {
+        EvalValue::Bool(b) => Some(*b),
+        EvalValue::Int(n)  => Some(*n != 0),
         _ => None,
     })
 }
