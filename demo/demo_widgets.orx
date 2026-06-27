@@ -1,0 +1,48 @@
+-- demo_widgets.orx — widgets nuevos: progress, tabs, image, modal.
+use "gui" as gui
+
+tab = gui.val("tab", "Resumen")
+for t in ["Resumen", "Datos", "Ajustes"] {
+    if gui.pressed(t) { gui.set("tab", t) }
+    tab = gui.val("tab", "Resumen")
+}
+ver_modal = gui.val("modal", no)
+if gui.pressed("Abrir modal") { gui.set("modal", yes) }
+if gui.pressed("Cerrar")      { gui.set("modal", no) }
+
+gui.panel("Widgets nuevos", 560, 560)
+
+gui.image("demo/logo.png", 200)
+gui.spacer(8)
+
+gui.tabs(["Resumen", "Datos", "Ajustes"], tab)
+gui.spacer(6)
+
+gui.card()
+  gui.caption("PESTAÑA ACTIVA")
+  gui.heading(tab, "accent")
+gui.end()
+
+gui.spacer(8)
+
+gui.card()
+  gui.caption("PROGRESO")
+  gui.progress(0.35)
+  gui.spacer(6)
+  gui.progress(80, "success")
+gui.end()
+
+gui.spacer(8)
+gui.press("Abrir modal", "accent", "white")
+
+if ver_modal {
+    gui.modal("Confirmar")
+      gui.text("¿Seguro que quieres continuar?")
+      gui.row()
+        gui.press("Cerrar", "error", "white")
+        gui.ghost("Cancelar")
+      gui.end()
+    gui.end()
+}
+
+gui.run()

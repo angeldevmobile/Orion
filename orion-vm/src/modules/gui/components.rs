@@ -100,11 +100,22 @@ pub enum Component {
     //    Datos visuales
     Table { headers: Vec<String>, rows: Vec<Vec<String>>, height: f32 },
     Chart(Box<ChartConfig>),
+
+    //    Widgets nuevos
+    /// Barra de progreso (value 0..1). Color opcional vía style.
+    Progress { value: f32, style: Style },
+    /// Barra de pestañas. La activa se resalta; al click dispara su label.
+    Tabs { labels: Vec<String>, active: String },
+    /// Imagen desde archivo (png/jpg/bmp/gif). Tamaño opcional.
+    Image { path: String, width: Option<f32>, height: Option<f32> },
+    /// Diálogo modal centrado (contenedor).
+    Modal { title: String, children: Vec<Component> },
 }
 
 //     Render
 
 use std::collections::HashMap;
+use std::cell::RefCell;
 use eframe::egui;
 use super::theme;
 
@@ -418,7 +429,83 @@ pub fn render(
         Component::Chart(cfg) => {
             render_chart(ui, cfg);
         }
+
+        Component::Progress { value, style } => {
+            let th = theme::current();
+            ui.scope(|ui| {
+                // El relleno usa selection.bg_fill; el dev puede fijarlo con color.
+                if let Some(c) = style.fg_color().or(style.bg_color()) {
+                    ui.visuals_mut().selection.bg_fill = c;
+                }
+                let v = value.clamp(0.0, 1.0);
+                ui.add(
+                    egui::ProgressBar::new(v)
+                        .rounding(egui::Rounding::same(th.rounding))
+                        .text(format!("{:.0}%", v * 100.0)),
+                );
+            });
+        }
+
+        Component::Tabs { labels, active } => {
+            ui.horizontal(|ui| {
+                for label in labels {
+                    let selected = label == active;
+                    if ui.selectable_label(selected, label).clicked() && event.is_none() {
+                        *event = Some(label.clone());
+                    }
+                }
+            });
+        }
+
+        Component::Image { path, width, height } => {
+            match load_texture(ui.ctx(), path) {
+                Some(tex) => {
+                    let nat = tex.size_vec2();
+                    let (w, h) = match (width, height) {
+                        (Some(w), Some(h)) => (*w, *h),
+                        (Some(w), None)    => (*w, nat.y * (*w / nat.x)),   // mantener aspecto
+                        (None, Some(h))    => (nat.x * (*h / nat.y), *h),
+                        (None, None)       => (nat.x, nat.y),
+                    };
+                    ui.add(egui::Image::new((tex.id(), egui::vec2(w, h)))
+                        .rounding(egui::Rounding::same(theme::current().rounding)));
+                }
+                None => { ui.colored_label(theme::ERROR, format!("[imagen no encontrada: {path}]")); }
+            }
+        }
+
+        Component::Modal { title, children } => {
+            egui::Window::new(title)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ui.ctx(), |ui| {
+                    for child in children {
+                        render(ui, child, fields, event);
+                        ui.add_space(6.0);
+                    }
+                });
+        }
     }
+}
+
+//   Cache de texturas para gui.image (carga el archivo una sola vez por path)
+
+thread_local! {
+    static TEXTURES: RefCell<HashMap<String, egui::TextureHandle>> = RefCell::new(HashMap::new());
+}
+
+fn load_texture(ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
+    if let Some(t) = TEXTURES.with(|m| m.borrow().get(path).cloned()) {
+        return Some(t);
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    let (w, h) = img.dimensions();
+    let color = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &img);
+    let handle = ctx.load_texture(path, color, egui::TextureOptions::LINEAR);
+    TEXTURES.with(|m| m.borrow_mut().insert(path.to_string(), handle.clone()));
+    Some(handle)
 }
 
 //   Table                                   ─

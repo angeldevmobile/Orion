@@ -105,6 +105,40 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             push(Component::Slide { id, min, max, step })
         }
 
+        //    Widgets nuevos
+        // gui.progress(valor, "color?") — acepta 0..1 o 0..100 (se normaliza).
+        "progress" => {
+            let raw = f32_arg(&args, 0).unwrap_or(0.0);
+            let value = if raw > 1.0 { raw / 100.0 } else { raw };
+            push(Component::Progress { value, style: style_args(&args, 1, 2) })
+        }
+        // gui.tabs([labels], "activa?") — barra de pestañas; click dispara el label.
+        "tabs" => {
+            let labels: Vec<String> = match args.get(0) {
+                Some(EvalValue::List(l)) => l.iter().map(|v| match v {
+                    EvalValue::Str(s) => s.clone(),
+                    other             => format!("{other}"),
+                }).collect(),
+                _ => vec![],
+            };
+            let active = str_arg(&args, 1)
+                .or_else(|| labels.first().cloned())
+                .unwrap_or_default();
+            push(Component::Tabs { labels, active })
+        }
+        // gui.image("ruta", ancho?, alto?) — png/jpg/bmp/gif. Mantiene aspecto si
+        // se da solo una dimensión.
+        "image" | "img" => {
+            let path = req_str(&args, 0, "image")?;
+            push(Component::Image { path, width: f32_arg(&args, 1), height: f32_arg(&args, 2) })
+        }
+        // gui.modal("título") … gui.end() — diálogo centrado (contenedor).
+        "modal" => {
+            let title = str_arg(&args, 0).unwrap_or_else(|| "".into());
+            with_state(|s| s.container_stack.push((format!("modal|{title}"), s.components.len())));
+            Ok(EvalValue::Null)
+        }
+
         //    Layout — containers anidados
         //    gui.card() / gui.row() / gui.col() / gui.zone() → abre el contenedor
         //    gui.end() → cierra el último contenedor abierto
@@ -200,6 +234,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     } else if kind.starts_with("slide_in|") {
                         let id = kind.strip_prefix("slide_in|").unwrap_or("").to_string();
                         Component::SlideIn { id, children }
+                    } else if kind.starts_with("modal|") {
+                        let title = kind.strip_prefix("modal|").unwrap_or("").to_string();
+                        Component::Modal { title, children }
                     } else {
                         Component::Col(children)
                     };
