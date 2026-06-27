@@ -1,0 +1,192 @@
+-- demo_tasks.orx — Gestor de Tareas: la vitrina que junta TODO.
+--   • GUI reactiva (egui)         → el script se re-ejecuta en cada evento
+--   • estado de UI efímero (gui.set/gui.val) → la pestaña activa
+--   • estado de datos PERSISTENTE (módulo state) → las tareas sobreviven al
+--     cerrar y reabrir la app (respaldo a disco en demo/tasks.db)
+--
+-- Diseño 100% del developer: tema, colores y layout elegidos aquí, cero hardcodeo.
+use "gui" as gui
+use "state" as state
+
+-- Etiqueta visible de la pestaña a partir del filtro guardado (en minúsculas).
+fn filtro_label(f) {
+    if f == "activas" { return "Activas" }
+    if f == "hechas"  { return "Hechas" }
+    return "Todas"
+}
+
+-- ── Persistencia: carga lo que haya en disco y respalda cada cambio ──────────
+state.persist("demo/tasks.db")
+
+-- Sembrar ejemplos la PRIMERA vez (luego el usuario manda).
+if !state.has("seeded") {
+    state.set("tasks", [
+        { "text": "Probar el gestor de tareas de Orion", "done": no },
+        { "text": "Agregar una tarea nueva abajo",        "done": no },
+        { "text": "Leer GUI.md",                          "done": yes }
+    ])
+    state.set("seeded", yes)
+}
+
+tasks  = state.get("tasks", [])
+filtro = gui.val("filtro", "todas")
+
+-- ── Eventos que MUTAN los datos ──────────────────────────────────────────────
+ev = gui.ev()
+
+-- Agregar la tarea escrita en el campo
+if gui.pressed("agregar") {
+    txt = gui.value("nueva")
+    if txt != "" {
+        tasks = tasks + [{ "text": txt, "done": no }]
+        state.set("tasks", tasks)
+        gui.setval("nueva", "")          -- limpia el input tras agregar
+    }
+}
+
+-- Eventos por tarea: "toggle:<i>" y "del:<i>" (i = índice en la lista completa)
+partes = ev.split(":")
+if partes.len() == 2 {
+    accion = partes[0]
+    idx    = partes[1].to_int()
+
+    if accion == "toggle" {
+        nuevas = []
+        i = 0
+        for t in tasks {
+            if i == idx { t["done"] = !t["done"] }
+            nuevas = nuevas + [t]
+            i = i + 1
+        }
+        tasks = nuevas
+        state.set("tasks", tasks)
+    }
+
+    if accion == "del" {
+        nuevas = []
+        i = 0
+        for t in tasks {
+            if i != idx { nuevas = nuevas + [t] }
+            i = i + 1
+        }
+        tasks = nuevas
+        state.set("tasks", tasks)
+    }
+}
+
+-- Limpiar todas las completadas
+if gui.pressed("limpiar") {
+    nuevas = []
+    for t in tasks {
+        if !t["done"] { nuevas = nuevas + [t] }
+    }
+    tasks = nuevas
+    state.set("tasks", tasks)
+}
+
+-- Cambio de filtro (pestañas)
+if gui.pressed("Todas")   { gui.set("filtro", "todas")   }
+if gui.pressed("Activas") { gui.set("filtro", "activas") }
+if gui.pressed("Hechas")  { gui.set("filtro", "hechas")  }
+filtro = gui.val("filtro", "todas")
+
+-- ── Métricas derivadas ───────────────────────────────────────────────────────
+total = tasks.len()
+hechas = 0
+for t in tasks {
+    if t["done"] { hechas = hechas + 1 }
+}
+pendientes = total - hechas
+pct = 0
+if total > 0 { pct = floor((hechas * 100) / total) }
+
+-- ── Tema y ventana ───────────────────────────────────────────────────────────
+gui.theme({
+    "accent":   "#6c63ff",
+    "bg":       "#14121d",
+    "surface":  "#1e1b2b",
+    "rounding": 12,
+    "heading":  26
+})
+gui.panel("Orion · Tareas", 560, 720)
+
+-- Encabezado
+gui.row()
+  gui.col()
+    gui.heading("Mis Tareas")
+    gui.caption(str(pendientes) + " pendientes · " + str(hechas) + " hechas")
+  gui.end()
+  gui.col()
+    gui.avatar("AZ", 42, "accent")
+  gui.end()
+gui.end()
+gui.spacer(10)
+
+-- Progreso global
+gui.card()
+  gui.caption("PROGRESO")
+  gui.spacer(4)
+  gui.progress(pct, "success")
+  gui.spacer(2)
+  gui.caption(str(pct) + "% completado")
+gui.end()
+gui.spacer(10)
+
+-- Alta de tarea: campo con id ESTABLE + botón
+gui.card()
+  gui.caption("NUEVA TAREA")
+  gui.spacer(4)
+  gui.field("¿Qué hay que hacer?", { "id": "nueva" })
+  gui.spacer(8)
+  gui.press("Agregar", { "bg": "accent", "fg": "white", "event": "agregar" })
+gui.end()
+gui.spacer(10)
+
+-- Filtro
+gui.tabs(["Todas", "Activas", "Hechas"], filtro_label(filtro))
+gui.spacer(8)
+
+-- Lista de tareas (conserva el índice REAL para los eventos)
+if total == 0 {
+    gui.card()
+      gui.caption("Sin tareas todavía. Agrega la primera arriba.")
+    gui.end()
+}
+
+i = 0
+for t in tasks {
+    visible = no
+    if filtro == "todas"   { visible = yes }
+    if filtro == "activas" { if !t["done"] { visible = yes } }
+    if filtro == "hechas"  { if t["done"]  { visible = yes } }
+
+    if visible {
+        gui.card()
+          gui.row()
+            -- check: ✓ relleno si está hecha, ○ contorno si no
+            if t["done"] {
+                gui.press("●", { "bg": "success", "fg": "white", "event": "toggle:" + str(i) })
+            } else {
+                gui.ghost("○", { "event": "toggle:" + str(i) })
+            }
+            -- texto (atenuado si está hecha)
+            if t["done"] {
+                gui.caption(t["text"])
+            } else {
+                gui.text(t["text"])
+            }
+            -- borrar
+            gui.ghost("×", { "color": "error", "event": "del:" + str(i) })
+          gui.end()
+        gui.end()
+    }
+    i = i + 1
+}
+
+-- Pie: acción de limpieza
+if hechas > 0 {
+    gui.spacer(8)
+    gui.ghost("Limpiar completadas (" + str(hechas) + ")", { "color": "error", "event": "limpiar" })
+}
+
+gui.run()

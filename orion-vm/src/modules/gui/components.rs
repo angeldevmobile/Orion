@@ -12,6 +12,9 @@ pub struct Style {
     pub pad:      Option<f32>,
     /// Ancho fijo en px (botones/widgets). None = tamaño del contenido.
     pub width:    Option<f32>,
+    /// Evento a disparar al pulsar (botones), distinto del texto visible. Permite
+    /// mostrar "✓" pero disparar "toggle:3". None = se usa el label como evento.
+    pub event:    Option<String>,
 }
 
 impl Style {
@@ -206,7 +209,9 @@ pub fn render(
                     None    => ui.add(btn),
                 }.clicked()
             }).inner;
-            if clicked && event.is_none() { *event = Some(label.clone()); }
+            if clicked && event.is_none() {
+                *event = Some(style.event.clone().unwrap_or_else(|| label.clone()));
+            }
         }
         Component::Ghost(label, style) => {
             let th = theme::current();
@@ -224,7 +229,9 @@ pub fn render(
                     None    => ui.add(btn),
                 }.clicked()
             }).inner;
-            if clicked && event.is_none() { *event = Some(label.clone()); }
+            if clicked && event.is_none() {
+                *event = Some(style.event.clone().unwrap_or_else(|| label.clone()));
+            }
         }
         Component::Tap(label) => {
             if ui.link(label).clicked() && event.is_none() {

@@ -73,8 +73,26 @@ Claves de estilo: `bg`/`fill`, `fg`/`color`/`text`, `border`, `border_w`,
 **Acciones:** `gui.press(label, bg?, fg?)` · `gui.ghost(label, color?)` · `gui.tap(label)`
 — al pulsar disparan `label` como evento → `if gui.pressed("label") { … }`
 
+Para disparar un evento **distinto del texto visible** (clave en listas dinámicas:
+ícono fijo, evento por índice), pásalo en el dict de estilo:
+
+```orion
+gui.press("✓", { "bg": "success", "event": "toggle:" + str(i) })
+gui.ghost("×", { "color": "error",  "event": "del:" + str(i) })
+-- luego: if gui.pressed("toggle:3") { … }   ó parsea gui.ev()
+```
+
 **Inputs:** `gui.field(placeholder, estilo?)` · `gui.toggle(label)` ·
 `gui.pick(id, [opciones], estilo?)` · `gui.slide(id, min, max, step)`
+
+Dale al campo un **id estable** para leerlo fiable (sin él el id es posicional y
+se rompe si cambia el layout):
+
+```orion
+gui.field("¿Qué hacer?", { "id": "nueva" })
+txt = gui.value("nueva")        -- lee lo escrito
+gui.setval("nueva", "")         -- fija/limpia el campo (p.ej. tras agregar)
+```
 
 **Display:** `gui.badge(t, estilo?)` · `gui.banner(titulo, subtitulo?, estilo?)` ·
 `gui.avatar(t, tam?, estilo?)` · `gui.divider()` · `gui.spacer(px?)`
@@ -106,4 +124,6 @@ if gui.pressed("+1") { gui.set("contador", n + 1) }   -- escribe
 Ejemplos completos: [`demo/demo_design.orx`](demo/demo_design.orx) (dashboard),
 [`demo/demo_theme.orx`](demo/demo_theme.orx) (tema custom),
 [`demo/demo_widgets.orx`](demo/demo_widgets.orx) (widgets nuevos),
-[`demo/demo_calc.orx`](demo/demo_calc.orx) (calculadora reactiva).
+[`demo/demo_calc.orx`](demo/demo_calc.orx) (calculadora reactiva),
+[`demo/demo_tasks.orx`](demo/demo_tasks.orx) (gestor de tareas: GUI + módulo
+`state` + persistencia a disco — las tareas sobreviven al reinicio).

@@ -113,6 +113,106 @@ fn dict(pairs: &[(&str, EvalValue)]) -> EvalValue {
     EvalValue::Dict(pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect())
 }
 
+/// Construye un widget vía gui.call y devuelve el último Component creado.
+fn build(name: &str, args: Vec<EvalValue>) -> Component {
+    with_state(|s| {
+        s.components.clear();
+        s.container_stack.clear();
+    });
+    gui_call(name, args).expect(name);
+    with_state(|s| s.components.last().cloned().expect("componente"))
+}
+
+#[test]
+fn field_acepta_id_explicito_y_setval_lo_escribe() {
+    // gui.field("placeholder", {"id":"nueva"}) → id ESTABLE elegido por el dev.
+    let comp = build(
+        "field",
+        vec![
+            EvalValue::Str("¿Qué hacer?".into()),
+            dict(&[("id", EvalValue::Str("nueva".into()))]),
+        ],
+    );
+    match comp {
+        Component::Field { id, .. } => assert_eq!(id, "nueva", "id explícito del dev"),
+        _ => panic!("se esperaba Field"),
+    }
+
+    // Sin id explícito cae a uno posicional (field_N).
+    let comp = build("field", vec![EvalValue::Str("x".into())]);
+    match comp {
+        Component::Field { id, .. } => assert!(id.starts_with("field_"), "id posicional, fue {id}"),
+        _ => panic!("se esperaba Field"),
+    }
+
+    // gui.setval escribe en field_vals; gui.value lo lee de vuelta (EvalValue no
+    // es PartialEq, así que extraemos el String para comparar).
+    let value_str = |id: &str| -> String {
+        match gui_call("value", vec![EvalValue::Str(id.into())]).expect("value") {
+            EvalValue::Str(s) => s,
+            other => format!("{other:?}"),
+        }
+    };
+    gui_call(
+        "setval",
+        vec![EvalValue::Str("nueva".into()), EvalValue::Str("comprar pan".into())],
+    )
+    .expect("setval");
+    assert_eq!(value_str("nueva"), "comprar pan", "setval→value roundtrip");
+
+    // setval con texto vacío limpia el campo (caso "limpiar tras agregar").
+    gui_call("setval", vec![EvalValue::Str("nueva".into()), EvalValue::Str("".into())])
+        .expect("setval vacío");
+    assert_eq!(value_str("nueva"), "", "setval('') limpia el field");
+}
+
+#[test]
+fn boton_dispara_evento_distinto_del_label() {
+    // gui.press("✓", {"event":"toggle:3"}) → muestra "✓" pero el Style lleva el
+    // evento "toggle:3" (la base de listas dinámicas: ícono fijo, evento por índice).
+    let comp = build(
+        "press",
+        vec![
+            EvalValue::Str("✓".into()),
+            dict(&[
+                ("bg", EvalValue::Str("success".into())),
+                ("event", EvalValue::Str("toggle:3".into())),
+            ]),
+        ],
+    );
+    match comp {
+        Component::Press(label, style) => {
+            assert_eq!(label, "✓", "el texto visible es el ícono");
+            assert_eq!(style.event.as_deref(), Some("toggle:3"), "evento override");
+            assert!(style.bg.is_some(), "el bg del dict también se respeta");
+        }
+        _ => panic!("se esperaba Press"),
+    }
+
+    // ghost igual: "×" visible, evento "del:0".
+    let comp = build(
+        "ghost",
+        vec![
+            EvalValue::Str("×".into()),
+            dict(&[("event", EvalValue::Str("del:0".into()))]),
+        ],
+    );
+    match comp {
+        Component::Ghost(label, style) => {
+            assert_eq!(label, "×");
+            assert_eq!(style.event.as_deref(), Some("del:0"));
+        }
+        _ => panic!("se esperaba Ghost"),
+    }
+
+    // Sin event en el dict → None (se usará el label como evento, como siempre).
+    let comp = build("press", vec![EvalValue::Str("Agregar".into())]);
+    match comp {
+        Component::Press(_, style) => assert!(style.event.is_none(), "sin override = None"),
+        _ => panic!("se esperaba Press"),
+    }
+}
+
 #[test]
 fn card_width_config_is_developer_controlled() {
     // Default: sin config → llena el ancho (fill=true, sin width fijo).

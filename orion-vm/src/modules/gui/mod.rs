@@ -50,7 +50,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "field" => {
             let placeholder = str_arg(&args, 0).unwrap_or_default();
             let style = style_args(&args, 1, 2);
-            let id = with_state(|s| format!("field_{}", s.components.len()));
+            // El dev puede fijar un id ESTABLE: gui.field("...", {"id":"nueva"}).
+            // Con id explícito se lee fiable vía gui.value("nueva"); sin él cae a
+            // uno posicional (frágil si cambia el layout).
+            let id = cfg_str(&dict_opt(&args, 1), "id")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| with_state(|s| format!("field_{}", s.components.len())));
             push(Component::Field { id, placeholder, style })
         }
         "toggle" => {
@@ -225,6 +230,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                             pad:      g(6).parse().ok(),
                             size:     None,
                             width:    None,
+                            event:    None,
                         })
                     } else if kind.starts_with("fade|") {
                         // "fade|id|show"
@@ -283,6 +289,16 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let id  = req_str(&args, 0, "value")?;
             let val = with_state(|s| s.field_vals.get(&id).cloned().unwrap_or_default());
             Ok(EvalValue::Str(val))
+        }
+
+        // gui.setval("id", texto) → fija el valor de un field (p.ej. limpiarlo
+        // tras agregar una tarea). Escribe en field_vals, que el runner preserva
+        // entre re-ejecuciones reactivas.
+        "setval" | "set_field" => {
+            let id  = req_str(&args, 0, "setval")?;
+            let val = str_arg(&args, 1).unwrap_or_default();
+            with_state(|s| { s.field_vals.insert(id, val); });
+            Ok(EvalValue::Null)
         }
 
         // UI-5 — Animaciones
@@ -541,6 +557,7 @@ fn parse_style_dict(m: &std::collections::HashMap<String, EvalValue>) -> Style {
         size:     cfg_f32_opt(&cfg, "size").or_else(|| cfg_f32_opt(&cfg, "font_size")),
         pad:      cfg_f32_opt(&cfg, "pad").or_else(|| cfg_f32_opt(&cfg, "padding")),
         width:    cfg_f32_opt(&cfg, "width").or_else(|| cfg_f32_opt(&cfg, "w")),
+        event:    cfg_str(&cfg, "event").or_else(|| cfg_str(&cfg, "ev")),
     }
 }
 
