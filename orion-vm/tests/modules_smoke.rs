@@ -1,8 +1,10 @@
-//! Smoke tests de la stdlib (Sprint 3).
+//! Smoke tests de la stdlib (sweep de cobertura, 2026-06-26).
 //!
-//! La biblioteca estándar (56 módulos) es el diferenciador de Orion, pero tenía
-//! 0 tests. Estos smoke tests verifican que los módulos clave se despachan y
-//! ejecutan operaciones básicas correctamente vía `modules::call`.
+//! La biblioteca estándar (~56 módulos) es el diferenciador de Orion. Estos
+//! smoke tests verifican vía `modules::call` qué módulos funcionan de verdad,
+//! para anunciar solo lo verificado. ~43 módulos probados offline con salida
+//! real; los externos (net/s3/ssh/docker/mail/ws/llm/ai/vision) se verifican
+//! "cableados" (despachan y validan args) sin disparar I/O. Ver ESTADO_MODULOS.md.
 
 use orion_vm::eval_value::EvalValue;
 use orion_vm::modules;
@@ -160,4 +162,298 @@ fn smoke_state_shared_store() {
 
     assert!(as_bool(call("state", "delete", vec![s("smoke_k")])));
     assert!(!as_bool(call("state", "has", vec![s("smoke_k")])));
+}
+
+// ════════════════════════════════════════════════════════════════════════
+//  Sweep de cobertura (2026-06-26): mapear qué módulos funcionan de verdad
+//  para anunciar solo lo verificado. Helpers:
+// ════════════════════════════════════════════════════════════════════════
+
+fn ok(m: &str, f: &str, args: Vec<EvalValue>) -> bool { modules::call(m, f, args).is_ok() }
+fn i(n: i64) -> EvalValue { EvalValue::Int(n) }
+fn ilist(xs: &[i64]) -> EvalValue { EvalValue::List(xs.iter().map(|&x| EvalValue::Int(x)).collect()) }
+fn flist(xs: &[f64]) -> EvalValue { EvalValue::List(xs.iter().map(|&x| EvalValue::Float(x)).collect()) }
+fn mat(rows: &[&[i64]]) -> EvalValue {
+    EvalValue::List(rows.iter().map(|r| ilist(r)).collect())
+}
+fn dict(pairs: &[(&str, EvalValue)]) -> EvalValue {
+    let mut m = HashMap::new();
+    for (k, v) in pairs { m.insert(k.to_string(), v.clone()); }
+    EvalValue::Dict(m)
+}
+
+#[test]
+fn smoke_crypto() {
+    assert!(matches!(call("crypto", "hash", vec![s("orion")]), EvalValue::Str(_)));
+    let h = as_str(call("crypto", "sha256", vec![s("orion")]));
+    assert_eq!(h.len(), 64, "sha256 debe ser 64 hex chars");
+}
+
+#[test]
+fn smoke_crypto2_aes_roundtrip() {
+    let key = s("0123456789abcdef0123456789abcdef");
+    let enc = call("crypto2", "aes_encrypt", vec![s("secreto"), key.clone()]);
+    let cipher = match enc { EvalValue::Str(c) => c, o => panic!("aes_encrypt: {o:?}") };
+    let dec = call("crypto2", "aes_decrypt", vec![s(&cipher), key]);
+    assert_eq!(as_str(dec), "secreto");
+}
+
+#[test]
+fn smoke_matrix() {
+    assert!(ok("matrix", "add", vec![mat(&[&[1,2],&[3,4]]), mat(&[&[1,1],&[1,1]])]));
+    assert!(ok("matrix", "mul", vec![mat(&[&[1,2],&[3,4]]), mat(&[&[1,0],&[0,1]])]));
+    assert!(ok("matrix", "transpose", vec![mat(&[&[1,2,3]])]));
+}
+
+#[test]
+fn smoke_validate() {
+    assert!(as_bool(call("validate", "email", vec![s("a@b.com")])));
+    assert!(!as_bool(call("validate", "email", vec![s("noesmail")])));
+    assert!(as_bool(call("validate", "length", vec![s("abc"), i(1), i(5)])));
+}
+
+#[test]
+fn smoke_random() {
+    let n = as_int(call("random", "int", vec![i(1), i(10)]));
+    assert!((1..=10).contains(&n), "random.int fuera de rango: {n}");
+    assert!(ok("random", "choice", vec![ilist(&[1,2,3])]));
+    assert!(ok("random", "shuffle", vec![ilist(&[1,2,3,4])]));
+}
+
+#[test]
+fn smoke_zip_gzip_roundtrip() {
+    let mut base = std::env::temp_dir();
+    base.push(format!("orion_smoke_zip_{}", std::process::id()));
+    let src = format!("{}.txt", base.to_str().unwrap());
+    let gz  = format!("{}.gz", base.to_str().unwrap());
+    let out = format!("{}.out", base.to_str().unwrap());
+    std::fs::write(&src, "contenido orion para comprimir").unwrap();
+    assert!(ok("zip", "gzip",   vec![s(&src), s(&gz)]),  "zip.gzip falló");
+    assert!(ok("zip", "gunzip", vec![s(&gz),  s(&out)]), "zip.gunzip falló");
+    assert_eq!(std::fs::read_to_string(&out).unwrap(), "contenido orion para comprimir");
+    for f in [&src, &gz, &out] { let _ = std::fs::remove_file(f); }
+}
+
+#[test]
+fn smoke_vector_store() {
+    let h = call("vector", "new", vec![]);
+    let handle = match h { EvalValue::Str(s) => s, o => panic!("vector.new: {o:?}") };
+    assert!(ok("vector", "add", vec![s(&handle), s("a"), flist(&[1.0, 0.0, 0.0])]));
+    assert!(ok("vector", "add", vec![s(&handle), s("b"), flist(&[0.0, 1.0, 0.0])]));
+    let res = call("vector", "search", vec![s(&handle), flist(&[1.0, 0.0, 0.0]), i(1)]);
+    assert!(list_len(res) >= 1, "vector.search debe devolver resultados");
+}
+
+#[test]
+fn smoke_auth_jwt() {
+    let h = as_str(call("auth", "hash", vec![s("clave123")]));
+    assert!(as_bool(call("auth", "verify", vec![s("clave123"), s(&h)])), "auth verify roundtrip");
+    let tok = call("auth", "token", vec![dict(&[("uid", i(7))]), s("secreto")]);
+    assert!(matches!(tok, EvalValue::Str(_)), "auth.token debe ser string");
+}
+
+#[test]
+fn smoke_cola_queue() {
+    call("cola", "create", vec![s("q1")]);
+    call("cola", "push", vec![s("q1"), s("primero")]);
+    call("cola", "push", vec![s("q1"), s("segundo")]);
+    assert_eq!(as_str(call("cola", "pop", vec![s("q1")])), "primero", "FIFO");
+    assert_eq!(as_int(call("cola", "size", vec![s("q1")])), 1);
+}
+
+#[test]
+fn smoke_stat_correlation() {
+    let r = call("stat", "correlation", vec![flist(&[1.0,2.0,3.0]), flist(&[2.0,4.0,6.0])]);
+    assert!(matches!(r, EvalValue::Float(_) | EvalValue::Int(_)), "correlation numérica");
+}
+
+#[test]
+fn smoke_proto_roundtrip() {
+    let d = dict(&[("n", i(42)), ("nombre", s("orion"))]);
+    let enc = call("proto", "encode", vec![d]);
+    assert!(ok("proto", "decode", vec![enc]), "proto decode del encode");
+}
+
+#[test]
+fn smoke_formato() {
+    assert!(matches!(call("formato", "centrar", vec![s("hi"), i(10)]), EvalValue::Str(_)));
+    assert!(matches!(call("formato", "separador", vec![i(10)]), EvalValue::Str(_)));
+}
+
+#[test]
+fn smoke_template() {
+    let vars = dict(&[("nombre", s("Orion"))]);
+    let r = call("template", "render", vec![s("Hola {{nombre}}"), vars]);
+    assert_eq!(as_str(r), "Hola Orion");
+}
+
+#[test]
+fn smoke_csv_roundtrip() {
+    let mut p = std::env::temp_dir();
+    p.push(format!("orion_smoke_csv_{}.csv", std::process::id()));
+    let path = p.to_str().unwrap().to_string();
+    let rows = EvalValue::List(vec![
+        dict(&[("id", i(1)), ("nombre", s("a"))]),
+        dict(&[("id", i(2)), ("nombre", s("b"))]),
+    ]);
+    assert!(ok("csv", "write", vec![s(&path), rows]), "csv.write");
+    let read = call("csv", "read", vec![s(&path)]);
+    assert_eq!(list_len(read), 2, "csv.read debe ver 2 filas");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn smoke_timewarp_tarea() {
+    assert!(matches!(call("timewarp", "timestamp", vec![]), EvalValue::Int(_)));
+    assert!(matches!(call("tarea", "now", vec![]), EvalValue::Int(_) | EvalValue::Str(_)));
+}
+
+#[test]
+fn smoke_log() {
+    assert!(ok("log", "info", vec![s("mensaje de prueba")]));
+}
+
+#[test]
+fn smoke_secret_mask() {
+    assert!(matches!(call("secret", "mask", vec![s("supersecreto")]), EvalValue::Str(_)));
+}
+
+#[test]
+fn smoke_embed_math() {
+    let r = call("embed", "similarity", vec![flist(&[1.0,0.0]), flist(&[1.0,0.0])]);
+    assert!(matches!(r, EvalValue::Float(_) | EvalValue::Int(_)), "embed.similarity numérica");
+}
+
+// Verifica que un módulo/función está CABLEADO (despacha) sin disparar I/O:
+// llamar con args vacíos debe dar error de validación, no "no encontrado".
+fn wired(m: &str, f: &str) -> bool {
+    match modules::call(m, f, vec![]) {
+        Ok(_)  => true,
+        Err(e) => !e.contains("no encontrado") && !e.contains("no existe"),
+    }
+}
+
+#[test]
+fn smoke_cache() {
+    call("cache", "set", vec![s("ck"), s("cv")]);
+    assert_eq!(as_str(call("cache", "get", vec![s("ck")])), "cv");
+}
+
+#[test]
+fn smoke_config_get() {
+    let cfg = dict(&[("puerto", i(8080))]);
+    assert_eq!(as_int(call("config", "get", vec![cfg, s("puerto")])), 8080);
+}
+
+#[test]
+fn smoke_grafo() {
+    let g = as_int(call("grafo", "create", vec![])); // handle numérico
+    assert!(ok("grafo", "node", vec![i(g), s("A")]));
+    assert!(ok("grafo", "node", vec![i(g), s("B")]));
+    assert!(ok("grafo", "edge", vec![i(g), s("A"), s("B")]));
+}
+
+#[test]
+fn smoke_quantum() {
+    assert!(ok("quantum", "zero", vec![]));
+    assert!(ok("quantum", "bell", vec![]));
+}
+
+#[test]
+fn smoke_router() {
+    let r = as_int(call("router", "new", vec![])); // handle numérico
+    assert!(ok("router", "get", vec![i(r), s("/health"), s("handler")]));
+}
+
+#[test]
+fn smoke_sse() {
+    assert!(matches!(call("sse", "event", vec![s("hola")]), EvalValue::Str(_)));
+    assert!(matches!(call("sse", "named", vec![s("ping"), s("1")]), EvalValue::Str(_)));
+}
+
+#[test]
+fn smoke_stream() {
+    assert!(ok("stream", "range", vec![i(1), i(5)]));
+    assert!(ok("stream", "from", vec![ilist(&[1,2,3])]));
+}
+
+#[test]
+fn smoke_middleware() {
+    assert!(ok("middleware", "rate_limit", vec![i(5), i(60)]));
+}
+
+#[test]
+fn smoke_pdf() {
+    let mut p = std::env::temp_dir();
+    p.push(format!("orion_smoke_{}.pdf", std::process::id()));
+    let path = p.to_str().unwrap().to_string();
+    assert!(ok("pdf", "create", vec![s(&path), s("Reporte Orion")]), "pdf.create");
+    assert!(std::path::Path::new(&path).exists(), "el PDF debió generarse");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn smoke_watch_stat() {
+    let mut p = std::env::temp_dir();
+    p.push(format!("orion_smoke_watch_{}.txt", std::process::id()));
+    let path = p.to_str().unwrap().to_string();
+    std::fs::write(&path, "x").unwrap();
+    assert!(ok("watch", "stat", vec![s(&path)]), "watch.stat");
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn smoke_excel_f() {
+    // funciones financieras/aritméticas sobre números
+    assert!(wired("excel_f", "ratio"), "excel_f.ratio cableado");
+    assert!(wired("excel_f", "sum"), "excel_f.sum cableado");
+}
+
+// ── Módulos externos (necesitan servicio): solo verificamos CABLEADO ──────────
+// No disparan I/O real; confirman que el módulo/función existe y valida args.
+
+#[test]
+fn smoke_external_modules_wired() {
+    for (m, f) in [
+        ("net", "get"), ("net", "post"),
+        ("mail", "send"), ("s3", "upload"), ("s3", "download"),
+        ("ssh", "connect"), ("ssh", "exec"),
+        ("docker", "containers"), ("docker", "start"),
+        ("ws", "connect"), ("ws", "send"),
+        ("llm", "query"), ("llm", "chat"),
+        ("ai", "ask"), ("ai", "think"),
+        ("vision", "info"), ("vision", "resize"),
+        ("insight", "analyze"),
+        ("search", "csv"),
+    ] {
+        assert!(wired(m, f), "módulo externo '{m}.{f}' NO está cableado");
+    }
+}
+
+#[test]
+fn smoke_cosmos() {
+    assert!(ok("cosmos", "star", vec![i(3)]), "cosmos.star genera estrellas");
+    assert!(ok("cosmos", "universe", vec![]), "cosmos.universe crea simulación");
+}
+
+#[test]
+fn smoke_table_from() {
+    let rows = EvalValue::List(vec![
+        dict(&[("a", i(1))]), dict(&[("a", i(2))]),
+    ]);
+    assert!(ok("table", "from", vec![rows]), "table.from con lista de dicts");
+}
+
+#[test]
+fn smoke_serie() {
+    let h = call("serie", "new", vec![flist(&[1.0, 2.0, 3.0, 4.0])]);
+    assert!(matches!(h, EvalValue::Str(_) | EvalValue::Int(_) | EvalValue::Dict(_)), "serie.new crea serie");
+}
+
+#[test]
+fn smoke_frame() {
+    let rows = EvalValue::List(vec![
+        dict(&[("x", i(10))]), dict(&[("x", i(20))]),
+    ]);
+    assert!(ok("frame", "from_list", vec![rows]), "frame.from_list");
 }
