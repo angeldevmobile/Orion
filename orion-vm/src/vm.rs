@@ -755,6 +755,10 @@ impl VM {
                             }
                             "first" => list.borrow().first().cloned().unwrap_or(Value::Null),
                             "last"  => list.borrow().last().cloned().unwrap_or(Value::Null),
+                            // Quita y devuelve el último elemento, mutando in-place
+                            // (contrato estándar). Antes `a.pop()` como método daba
+                            // error en la VM (solo existía el builtin pop(a)).
+                            "pop" => list.borrow_mut().pop().unwrap_or(Value::Null),
                             "reverse" => { list.borrow_mut().reverse(); Value::List(list) }
                             "contains" => {
                                 let item = args.into_iter().next()

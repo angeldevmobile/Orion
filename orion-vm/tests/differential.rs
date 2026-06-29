@@ -330,3 +330,69 @@ fn diff_list_reverse_in_place() {
 fn diff_list_sort_in_place() {
     assert_vm_jit_match("xs = [3, 1, 2]\nxs.sort()\nshow xs[0]");
 }
+
+// Igualdad estructural de listas/dicts con `==`/`!=`. Antes el JIT solo comparaba
+// escalares y devolvía `false` para listas/dicts (comparación por identidad de
+// puntero) → `[1,2] == [1,2]` daba `no` mientras la VM daba `yes`.
+
+#[test]
+fn diff_list_eq_structural() {
+    assert_vm_jit_match("show [1, 2, 3] == [1, 2, 3]");
+    assert_vm_jit_match("show [1, 2] == [1, 3]");
+    assert_vm_jit_match("show [1, 2, 3] == [1, 2]");
+}
+
+#[test]
+fn diff_list_eq_alias_and_neq() {
+    assert_vm_jit_match("a = [1, 2]\nb = a\nshow a == b");
+    assert_vm_jit_match("show [1, 2] != [1, 2]");
+    assert_vm_jit_match("show [1, 2] != [3, 4]");
+}
+
+#[test]
+fn diff_list_eq_nested() {
+    assert_vm_jit_match("show [1, [2, 3]] == [1, [2, 3]]");
+    assert_vm_jit_match("show [[1], [2]] == [[1], [2, 9]]");
+}
+
+#[test]
+fn diff_dict_eq_structural() {
+    assert_vm_jit_match("show { \"a\": 1 } == { \"a\": 1 }");
+    assert_vm_jit_match("show { \"a\": 1 } == { \"a\": 2 }");
+}
+
+#[test]
+fn diff_dict_eq_order_independent() {
+    // IndexMap compara sin importar el orden de inserción; el JIT debe igualar.
+    assert_vm_jit_match("show { \"a\": 1, \"b\": 2 } == { \"b\": 2, \"a\": 1 }");
+}
+
+#[test]
+fn diff_eq_mixed_structures() {
+    assert_vm_jit_match("show { \"items\": [1, 2] } == { \"items\": [1, 2] }");
+    assert_vm_jit_match("show [{ \"x\": 1 }] == [{ \"x\": 1 }]");
+}
+
+#[test]
+fn diff_eq_after_mutation() {
+    assert_vm_jit_match("a = [1, 2, 3]\na.push(4)\nshow a == [1, 2, 3, 4]");
+    assert_vm_jit_match("m = [[1], [2]]\nm[0].push(9)\nshow m == [[1, 9], [2]]");
+}
+
+#[test]
+fn diff_eq_in_conditional() {
+    assert_vm_jit_match("if [1] == [1] { show \"igual\" } else { show \"distinto\" }");
+}
+
+// `a.pop()` (sintaxis de método): contrato estándar = quita y devuelve el último,
+// mutando in-place. Antes la VM erraba ("List no tiene método 'pop'") y el JIT
+// devolvía el último sin quitarlo → divergían.
+#[test]
+fn diff_list_pop_method() {
+    assert_vm_jit_match("a = [1, 2, 3]\nx = a.pop()\nshow x\nshow a");
+}
+
+#[test]
+fn diff_list_pop_until_empty() {
+    assert_vm_jit_match("a = [1]\nx = a.pop()\ny = a.pop()\nshow x\nshow y\nshow a");
+}

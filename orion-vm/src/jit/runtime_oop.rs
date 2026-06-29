@@ -412,8 +412,9 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             }).unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }
         "pop" => {
-            if items.is_empty() { return alloc_val(TAG_NULL, 0, 0.0); }
-            *items.last().unwrap()
+            // Quita y devuelve el último elemento, mutando in-place (contrato
+            // estándar, paridad con la VM). Antes solo leía `last()` sin quitar.
+            items.pop().unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }
         _ => { eprintln!("[JIT] List no tiene método '{}'", name); std::process::exit(1) }
     }

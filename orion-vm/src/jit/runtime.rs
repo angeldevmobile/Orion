@@ -305,21 +305,44 @@ pub extern "C" fn rt_neg(a: i64) -> i64 {
 
 //     Comparación                                                              
 
+/// Igualdad del operador `==`, idéntica a `Value::compare_eq` de la VM:
+/// numérica con promoción int↔float, y ESTRUCTURAL (recursiva) para listas y
+/// dicts. Antes el JIT solo comparaba escalares y devolvía `false` para
+/// listas/dicts → `[1,2] == [1,2]` daba `no` (divergencia con la VM).
+unsafe fn jit_vals_equal(a: i64, b: i64) -> bool {
+    let av = val_ref(a);
+    let bv = val_ref(b);
+    match (av.tag, bv.tag) {
+        (TAG_NULL,  TAG_NULL)  => true,
+        (TAG_INT,   TAG_INT)   => av.data_i == bv.data_i,
+        (TAG_FLOAT, TAG_FLOAT) => av.data_f == bv.data_f,
+        (TAG_INT,   TAG_FLOAT) => (av.data_i as f64) == bv.data_f,
+        (TAG_FLOAT, TAG_INT)   => av.data_f == (bv.data_i as f64),
+        (TAG_BOOL,  TAG_BOOL)  => av.data_i == bv.data_i,
+        (TAG_STR,   TAG_STR)   => cstr_to_str(av.data_i) == cstr_to_str(bv.data_i),
+        (TAG_LIST,  TAG_LIST)  => {
+            let la = &*(av.data_i as *const Vec<i64>);
+            let lb = &*(bv.data_i as *const Vec<i64>);
+            la.len() == lb.len()
+                && la.iter().zip(lb.iter()).all(|(&x, &y)| jit_vals_equal(x, y))
+        }
+        (TAG_DICT,  TAG_DICT)  => {
+            // Como IndexMap en la VM: igualdad independiente del orden.
+            let da = &*(av.data_i as *const Vec<(String, i64)>);
+            let db = &*(bv.data_i as *const Vec<(String, i64)>);
+            da.len() == db.len()
+                && da.iter().all(|(k, v)| {
+                    db.iter().any(|(k2, v2)| k == k2 && jit_vals_equal(*v, *v2))
+                })
+        }
+        _ => false,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn rt_eq(a: i64, b: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
-        let bv = val_ref(b);
-        let eq = match (av.tag, bv.tag) {
-            (TAG_NULL,  TAG_NULL)  => true,
-            (TAG_INT,   TAG_INT)   => av.data_i == bv.data_i,
-            (TAG_FLOAT, TAG_FLOAT) => av.data_f == bv.data_f,
-            (TAG_INT,   TAG_FLOAT) => (av.data_i as f64) == bv.data_f,
-            (TAG_FLOAT, TAG_INT)   => av.data_f == (bv.data_i as f64),
-            (TAG_BOOL,  TAG_BOOL)  => av.data_i == bv.data_i,
-            (TAG_STR,   TAG_STR)   => cstr_to_str(av.data_i) == cstr_to_str(bv.data_i),
-            _ => false,
-        };
+        let eq = jit_vals_equal(a, b);
         alloc_val(TAG_BOOL, if eq { 1 } else { 0 }, 0.0)
     }
 }
@@ -327,18 +350,7 @@ pub extern "C" fn rt_eq(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_neq(a: i64, b: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
-        let bv = val_ref(b);
-        let neq = match (av.tag, bv.tag) {
-            (TAG_NULL,  TAG_NULL)  => false,
-            (TAG_INT,   TAG_INT)   => av.data_i != bv.data_i,
-            (TAG_FLOAT, TAG_FLOAT) => av.data_f != bv.data_f,
-            (TAG_INT,   TAG_FLOAT) => (av.data_i as f64) != bv.data_f,
-            (TAG_FLOAT, TAG_INT)   => av.data_f != (bv.data_i as f64),
-            (TAG_BOOL,  TAG_BOOL)  => av.data_i != bv.data_i,
-            (TAG_STR,   TAG_STR)   => cstr_to_str(av.data_i) != cstr_to_str(bv.data_i),
-            _ => true,
-        };
+        let neq = !jit_vals_equal(a, b);
         alloc_val(TAG_BOOL, if neq { 1 } else { 0 }, 0.0)
     }
 }
