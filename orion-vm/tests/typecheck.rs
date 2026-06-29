@@ -200,3 +200,124 @@ fn tc_no_false_undefined_on_builtin_call() {
 fn tc_err_bool_assigned_to_int() {
     assert_has_error("x: int = yes");
 }
+
+//    Regresiones: falsos positivos de "usada pero no definida" descubiertos
+//    auditando los 91 ejemplos .orx (use, campos de shape, herencia `using`,
+//    params de act sin tipo, y bindings de read/ask/await).
+
+#[test]
+fn tc_no_false_undefined_on_use_module() {
+    // `use "math"` liga `math` como namespace; `math.sqrt(...)` no es indefinido.
+    assert_no_warning_containing(
+        "use \"math\"\nshow math.sqrt(25)",
+        "no definida",
+    );
+}
+
+#[test]
+fn tc_no_false_undefined_on_use_alias_and_selective() {
+    assert_no_warning_containing(
+        "use \"strings\" as s\nshow s.upper(\"hola\")",
+        "no definida",
+    );
+    assert_no_warning_containing(
+        "use \"math\" take [sqrt]\nshow sqrt(9)",
+        "no definida",
+    );
+}
+
+#[test]
+fn tc_no_false_undefined_on_shape_fields() {
+    // Dentro de un act, los campos del shape se acceden sin `self.`.
+    let src = r#"shape Circulo {
+    radio: int = 0
+    on_create(r) {
+        radio = r
+    }
+    act area() -> int {
+        return radio * radio
+    }
+}
+c = Circulo(5)
+show c.area()"#;
+    assert_no_warning_containing(src, "no definida");
+    assert_ok(src);
+}
+
+#[test]
+fn tc_no_false_undefined_on_shape_untyped_params() {
+    // Params de on_create/act sin anotación no deben marcarse indefinidos.
+    let src = r#"shape Cuenta {
+    balance: int = 0
+    on_create(o, initial) {
+        balance = initial
+    }
+    act buscar(objeto) {
+        return objeto
+    }
+}
+c = Cuenta("ana", 100)
+show c.buscar("x")"#;
+    assert_no_warning_containing(src, "no definida");
+}
+
+#[test]
+fn tc_no_false_undefined_on_inherited_fields() {
+    // Campos heredados vía `using` son visibles en el shape hijo.
+    let src = r#"shape Animal {
+    nombre: string = ""
+}
+shape Perro {
+    using Animal
+    act ladra() -> string {
+        return nombre + " ladra"
+    }
+}"#;
+    assert_no_warning_containing(src, "no definida");
+}
+
+//    Inferencia de retorno para funciones SIN anotación (propaga entre fns)
+
+#[test]
+fn tc_infers_untyped_fn_return_type() {
+    // `nombre()` no declara retorno pero claramente devuelve string → asignarlo
+    // a un int debe ser error (la inferencia cruza la función).
+    assert_has_error("fn nombre() { return \"orion\" }\nx: int = nombre()");
+    // caso correcto: el mismo retorno asignado a string → sin error.
+    assert_ok("fn nombre() { return \"orion\" }\nx: string = nombre()");
+}
+
+#[test]
+fn tc_infers_untyped_fn_return_through_chain() {
+    // Cadena A→B: A llama a B (ambas sin anotar). El punto fijo propaga el tipo.
+    assert_has_error(
+        "fn base() { return 3.14 }\nfn wrap() { return base() }\nx: int = wrap()",
+    );
+}
+
+#[test]
+fn tc_conservative_no_infer_on_param_return() {
+    // Retorno que depende de un parámetro sin tipo → NO se infiere (queda any),
+    // así no se inventa un tipo que dispare falsos errores. La recursión típica
+    // (fib) entra aquí y debe quedar sin error.
+    assert_ok(
+        "fn fib(n) {\n    if n < 2 { return n }\n    return fib(n - 1) + fib(n - 2)\n}\nx: int = fib(10)",
+    );
+}
+
+#[test]
+fn tc_conservative_no_infer_on_mixed_returns() {
+    // Returns de tipos distintos → no se infiere (queda any) → sin falso error.
+    assert_ok(
+        "fn f(c) {\n    if c { return 1 }\n    return \"dos\"\n}\ny = f(yes)",
+    );
+}
+
+#[test]
+fn tc_no_false_undefined_on_read_binding() {
+    // `read ruta -> contenido` liga `contenido`.
+    assert_no_warning_containing(
+        "fn leer(ruta) {\n    read ruta -> contenido\n    return contenido\n}",
+        "no definida",
+    );
+}

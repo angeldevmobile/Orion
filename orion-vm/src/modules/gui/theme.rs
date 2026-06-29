@@ -9,7 +9,7 @@ use super::state::{with_state, ThemeConfig};
 #[allow(dead_code)] pub const ERROR:   egui::Color32 = egui::Color32::from_rgb(239,  68,  68);
 #[allow(dead_code)] pub const INFO:    egui::Color32 = egui::Color32::from_rgb(59,  130, 246);
 
-/// Tema RESUELTO (valores concretos). Se arma desde defaults + overrides que el
+/// Se arma desde defaults + overrides que el
 /// developer pasa con `gui.theme({...})`. NADA está fijado a fuego: accent, fondo,
 /// superficie, texto, redondeo, tipografía y modo claro/oscuro son todos overridables.
 #[derive(Clone)]

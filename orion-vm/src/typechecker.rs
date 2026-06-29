@@ -36,6 +36,8 @@ pub struct TypeChecker {
     fn_sigs: HashMap<String, FnSig>,
     shape_names: HashSet<String>,
     shape_type_params: HashMap<String, Vec<String>>, // shape → sus type params
+    shape_fields: HashMap<String, Vec<(String, Option<String>)>>, // shape → (campo, tipo)
+    shape_using:  HashMap<String, Vec<String>>,       // shape → shapes heredados
     scope_stack: Vec<HashMap<String, String>>,
     current_line: u32,
     current_col:  u32,
@@ -50,6 +52,8 @@ impl TypeChecker {
             fn_sigs: HashMap::new(),
             shape_names: HashSet::new(),
             shape_type_params: HashMap::new(),
+            shape_fields: HashMap::new(),
+            shape_using:  HashMap::new(),
             scope_stack: vec![HashMap::new()],
             current_line: 0,
             current_col:  0,
@@ -59,8 +63,117 @@ impl TypeChecker {
 
     pub fn check(mut self, stmts: &[Stmt]) -> Vec<TypeIssue> {
         self.collect_fn_sigs(stmts);
+        self.infer_untyped_fn_returns(stmts);
         self.check_stmts(stmts, None);
         self.issues
+    }
+
+    //    Inferencia de retorno para funciones SIN anotación
+
+    /// Para cada `fn`/`async fn` sin `-> tipo`, infiere su retorno a partir del
+    /// cuerpo, para que la inferencia se propague a través de las funciones del
+    /// usuario (hoy una llamada a una fn sin anotar valía `any`).
+    ///
+    /// CONSERVADOR a propósito: solo fija un tipo cuando TODOS los `return`
+    /// coinciden en un mismo tipo concreto. Si hay returns mixtos, vacíos, o
+    /// alguno depende de un valor desconocido (p. ej. un parámetro sin tipo),
+    /// se deja en `any`. Así nunca infiere un tipo equivocado que dispare un
+    /// falso error en el call site (que ahora aborta la ejecución).
+    ///
+    /// Itera hasta punto fijo (acotado) para resolver cadenas A→B→C.
+    fn infer_untyped_fn_returns(&mut self, stmts: &[Stmt]) {
+        for _ in 0..6 {
+            let mut changed = false;
+            for stmt in stmts {
+                let (name, body) = match stmt {
+                    Stmt::Fn { name, body, ret_type: None, .. } |
+                    Stmt::AsyncFn { name, body, ret_type: None, .. } => (name, body),
+                    _ => continue,
+                };
+                // ¿ya inferido en una pasada previa?
+                if self.fn_sigs.get(name).and_then(|s| s.return_type.clone()).is_some() {
+                    continue;
+                }
+                let rts = self.collect_return_types(body);
+                if rts.is_empty() || rts.iter().any(|t| t.is_none()) {
+                    continue;
+                }
+                let first = rts[0].clone().unwrap();
+                if rts.iter().all(|t| t.as_deref() == Some(first.as_str())) {
+                    if let Some(sig) = self.fn_sigs.get_mut(name) {
+                        sig.return_type = Some(first);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed { break; }
+        }
+    }
+
+    /// Tipos de todas las expresiones `return` del cuerpo (sin entrar en `fn`
+    /// anidadas). `None` = retorno sin valor o de tipo no determinable.
+    fn collect_return_types(&self, body: &[Stmt]) -> Vec<Option<String>> {
+        let mut out = Vec::new();
+        for s in body {
+            match s {
+                Stmt::Return { value, .. } => {
+                    out.push(value.as_ref().and_then(|e| self.infer_pure(e)));
+                }
+                Stmt::If { then_body, else_body, .. } => {
+                    out.extend(self.collect_return_types(then_body));
+                    out.extend(self.collect_return_types(else_body));
+                }
+                Stmt::While { body, .. } | Stmt::For { body, .. } => {
+                    out.extend(self.collect_return_types(body));
+                }
+                Stmt::Attempt { body, handler, .. } => {
+                    out.extend(self.collect_return_types(body));
+                    if let Some(h) = handler { out.extend(self.collect_return_types(&h.body)); }
+                }
+                Stmt::Match { arms, .. } => {
+                    for a in arms { out.extend(self.collect_return_types(&a.body)); }
+                }
+                _ => {} // no recursar en Stmt::Fn anidadas: sus returns son suyos
+            }
+        }
+        out
+    }
+
+    /// Inferencia pura (sin scope, sin emitir issues) para el pase de retornos.
+    /// Devuelve `None` para todo lo que dependa de variables/params (Ident, etc.),
+    /// manteniendo el pase conservador.
+    fn infer_pure(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Int(_)        => Some("int".into()),
+            Expr::Float(_)      => Some("float".into()),
+            Expr::Str(_)        => Some("string".into()),
+            Expr::Bool(_)       => Some("bool".into()),
+            Expr::List(_)       => Some("list".into()),
+            Expr::Dict(_)       => Some("dict".into()),
+            Expr::Lambda { .. } => Some("fn".into()),
+            Expr::BinaryOp { op, left, right } => {
+                let lt = self.infer_pure(left);
+                let rt = self.infer_pure(right);
+                match op.as_str() {
+                    "+" | "-" | "*" | "/" | "%" | "**" => match (lt.as_deref(), rt.as_deref()) {
+                        (Some("float"), _) | (_, Some("float")) => Some("float".into()),
+                        (Some("int"), Some("int"))              => Some("int".into()),
+                        (Some("string"), Some("string")) if op == "+" => Some("string".into()),
+                        _ => None,
+                    },
+                    "<" | ">" | "<=" | ">=" | "==" | "!=" | "and" | "or" => Some("bool".into()),
+                    _ => None,
+                }
+            }
+            Expr::UnaryOp { op, expr } => {
+                if op == "not" { Some("bool".into()) } else { self.infer_pure(expr) }
+            }
+            Expr::Call { callee, .. } => match callee.as_ref() {
+                Expr::Ident(f) => self.fn_sigs.get(f).and_then(|s| s.return_type.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     //    Scope                                                                   
@@ -152,9 +265,14 @@ impl TypeChecker {
                     };
                     self.fn_sigs.insert(name.clone(), sig);
                 }
-                Stmt::Shape { name, type_params, .. } => {
+                Stmt::Shape { name, type_params, fields, using, .. } => {
                     self.shape_names.insert(name.clone());
                     self.shape_type_params.insert(name.clone(), type_params.clone());
+                    self.shape_fields.insert(
+                        name.clone(),
+                        fields.iter().map(|f| (f.name.clone(), f.type_hint.clone())).collect(),
+                    );
+                    self.shape_using.insert(name.clone(), using.clone());
                     // Registrar el shape como constructor callable
                     self.fn_sigs.entry(name.clone()).or_insert(FnSig {
                         type_params: type_params.clone(),
@@ -167,7 +285,25 @@ impl TypeChecker {
         }
     }
 
-    //    Statements                                                             
+    /// Campos visibles dentro de un shape: los propios más los heredados vía
+    /// `using` (transitivamente). Evita ciclos con un set de visitados.
+    fn collect_all_fields(&self, shape: &str) -> Vec<(String, Option<String>)> {
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        let mut stack = vec![shape.to_string()];
+        while let Some(s) = stack.pop() {
+            if !seen.insert(s.clone()) { continue; }
+            if let Some(fs) = self.shape_fields.get(&s) {
+                out.extend(fs.iter().cloned());
+            }
+            if let Some(parents) = self.shape_using.get(&s) {
+                for p in parents { stack.push(p.clone()); }
+            }
+        }
+        out
+    }
+
+    //    Statements
 
     fn check_stmts(&mut self, stmts: &[Stmt], return_type: Option<&str>) {
         for stmt in stmts {
@@ -222,12 +358,16 @@ impl TypeChecker {
             Stmt::AsyncFn { name, type_params, params, body, ret_type, line, col, .. } => {
                 self.current_line = *line;
                 self.current_col  = *col;
+                // Preserva el retorno inferido por `infer_untyped_fn_returns`
+                // cuando la fn no lo declara (si no, lo borraríamos a None).
+                let return_type = ret_type.clone()
+                    .or_else(|| self.fn_sigs.get(name).and_then(|s| s.return_type.clone()));
                 let sig = FnSig {
                     type_params: type_params.clone(),
                     params: params.iter()
                         .map(|p| (p.name.clone(), p.type_hint.clone()))
                         .collect(),
-                    return_type: ret_type.clone(),
+                    return_type,
                 };
                 self.fn_sigs.insert(name.clone(), sig);
                 self.push_scope();
@@ -354,6 +494,34 @@ impl TypeChecker {
                 self.scope_set(name.clone(), ty);
             }
 
+            // Estas sentencias LIGAN una variable nueva; hay que registrarla para
+            // que su uso posterior no se reporte como "no definida".
+            Stmt::Read { path, var, line, col } => {
+                self.current_line = *line;
+                self.current_col  = *col;
+                self.infer_type(path);
+                self.scope_set(var.clone(), "string".to_string());
+            }
+            Stmt::Ask { prompt, var, cast, choices, line, col } => {
+                self.current_line = *line;
+                self.current_col  = *col;
+                self.infer_type(prompt);
+                if let Some(c) = choices { self.infer_type(c); }
+                let ty = match cast.as_deref() {
+                    Some("int") => "int", Some("float") => "float",
+                    Some("bool") => "bool", _ => "string",
+                };
+                self.scope_set(var.clone(), ty.to_string());
+            }
+            Stmt::Await { expr, var, line, col } => {
+                self.current_line = *line;
+                self.current_col  = *col;
+                self.infer_type(expr);
+                if let Some(v) = var {
+                    self.scope_set(v.clone(), "any".to_string());
+                }
+            }
+
             Stmt::Show { value, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;
@@ -367,19 +535,75 @@ impl TypeChecker {
                 self.check_call_types(expr);
             }
 
-            Stmt::Shape { name, type_params, fields, on_create, acts, using: _, line, col, .. } => {
+            // import de módulo: registra el namespace (y los nombres selectivos)
+            // en scope para que `math.sqrt(...)` no se reporte como "no definido".
+            // Imita la resolución del runtime (codegen.rs): alias, o el nombre del
+            // archivo sin extensión del path.
+            Stmt::Use { path, alias, selective, line, col } => {
+                self.current_line = *line;
+                self.current_col  = *col;
+                let ns = alias.clone().unwrap_or_else(|| {
+                    std::path::Path::new(path.as_str())
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(path.as_str())
+                        .to_string()
+                });
+                self.scope_set(ns.clone(), "module".to_string());
+                // El namespace importado no es una "variable asignada y no usada".
+                if let Some(top) = self.written_not_read.last_mut() {
+                    top.remove(&ns);
+                }
+                // `use "x" take [a, b]` trae a/b como nombres sueltos invocables.
+                if let Some(names) = selective {
+                    for n in names {
+                        self.scope_set(n.clone(), "module".to_string());
+                        if let Some(top) = self.written_not_read.last_mut() {
+                            top.remove(n);
+                        }
+                    }
+                }
+            }
+
+            Stmt::Shape { name, type_params, on_create, acts, line, col, .. } => {
                 self.current_line = *line;
                 self.current_col  = *col;
                 self.shape_type_params.insert(name.clone(), type_params.clone());
-                // Verificar on_create y acts con type params en scope
+                // Verificar on_create y acts con type params + campos en scope.
+                // Dentro de un shape los campos se acceden sin `self.` (`top`,
+                // `count`...), así que hay que registrarlos para no reportarlos
+                // como "no definidos". Incluye los campos heredados vía `using`.
+                let all_fields = self.collect_all_fields(name);
                 let check_with_type_params = |checker: &mut TypeChecker, params: &[crate::ast::Param], body: &[Stmt]| {
                     checker.push_scope();
                     for tp in type_params { checker.scope_set(tp.clone(), "any".to_string()); }
+                    // Campos del shape (propios + heredados): visibles como nombres sueltos.
+                    for (fname, fhint) in &all_fields {
+                        let fty = match fhint {
+                            Some(th) if type_params.contains(th) => "any".to_string(),
+                            Some(th) => normalize(th),
+                            None => "any".to_string(),
+                        };
+                        checker.scope_set(fname.clone(), fty);
+                    }
+                    // `self` siempre disponible dentro del cuerpo.
+                    checker.scope_set("self".to_string(), name.clone());
                     for p in params {
-                        if let Some(th) = &p.type_hint {
-                            let resolved = if type_params.contains(th) { "any".to_string() } else { normalize(th) };
-                            checker.scope_set(p.name.clone(), resolved);
-                        }
+                        // Igual que en `Fn`: los params sin anotación valen "any"
+                        // (antes solo se registraban los tipados → falsos positivos
+                        // sobre params sin tipo como `on_create(o, initial)`).
+                        let resolved = match &p.type_hint {
+                            Some(th) if type_params.contains(th) => "any".to_string(),
+                            Some(th) => normalize(th),
+                            None => "any".to_string(),
+                        };
+                        checker.scope_set(p.name.clone(), resolved);
+                    }
+                    // Campos/self/params no leídos no son "asignados y nunca usados".
+                    if let Some(top) = checker.written_not_read.last_mut() {
+                        for (fname, _) in &all_fields { top.remove(fname); }
+                        for p in params { top.remove(&p.name); }
+                        top.remove("self");
                     }
                     checker.check_stmts(body, None);
                     checker.pop_scope();
@@ -390,7 +614,6 @@ impl TypeChecker {
                 for act in acts {
                     check_with_type_params(self, &act.params, &act.body);
                 }
-                let _ = fields;
             }
 
             _ => {}

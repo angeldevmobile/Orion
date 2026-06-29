@@ -488,6 +488,7 @@ fn main() {
             let src_path = &args[2];
             let t0 = Instant::now();
             let src = read_src(src_path);
+            typecheck_gate(&src, src_path, &args);
             let bc = match compile_source(&src, src_path) {
                 Ok(bc) => bc,
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
@@ -525,6 +526,7 @@ fn main() {
             let src_path = &args[2];
             let t_total = Instant::now();
             let src = read_src(src_path);
+            typecheck_gate(&src, src_path, &args);
             let bc = match compile_source(&src, src_path) {
                 Ok(bc) => bc,
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
@@ -549,6 +551,7 @@ fn main() {
             // Guardamos el source para poder renderizar errores con contexto
             let (bc, src) = if path.ends_with(".orx") {
                 let src = read_src(path);
+                typecheck_gate(&src, path, &args);
                 let bc = match compile_source(&src, path) {
                     Ok(bc) => bc,
                     Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
@@ -609,7 +612,7 @@ fn print_help() {
     println!();
 
     let cmds = [
-        ("--run  <archivo.orx>",         "Compilar y ejecutar"),
+        ("--run  <archivo.orx>",         "Compilar y ejecutar  [--no-typecheck]"),
         ("--jit  <archivo.orx>",         "Compilar y ejecutar con JIT Cranelift"),
         ("--compile <archivo.orx>",       "Compilar a .orbc (bytecode)"),
         ("--build <archivo.orx>",         "Compilar a ejecutable nativo  [-o salida]"),
@@ -663,6 +666,41 @@ fn parse_runs_flag(args: &[String], default: u32) -> u32 {
         }
     }
     default
+}
+
+/// Gate de tipos: corre el type checker ANTES de ejecutar. Bloquea con código de
+/// salida 1 si hay errores de tipo (estricto por defecto, como Rust/TS/Go), salvo
+/// que se pase `--no-typecheck`. Los warnings (variable no usada, etc.) NO se
+/// muestran aquí — son ruido para ejecutar; pertenecen a `orion --check --types`.
+///
+/// Si lex/parse fallan, no reporta nada: deja que `compile_source` emita el error
+/// real (evita doble reporte).
+fn typecheck_gate(src: &str, path: &str, args: &[String]) {
+    if args.iter().any(|a| a == "--no-typecheck") {
+        return;
+    }
+    let tokens = match lexer::lex(src) { Ok(t) => t, Err(_) => return };
+    let stmts  = match parser::parse(tokens) { Ok(s) => s, Err(_) => return };
+
+    let errors: Vec<_> = typechecker::type_check(&stmts)
+        .into_iter()
+        .filter(|i| i.kind == "error")
+        .collect();
+    if errors.is_empty() { return; }
+
+    for e in &errors {
+        let err = error::OrionError::new(
+            error::ErrorKind::Type,
+            e.message.clone(),
+            error::Span::new(e.line, e.col.max(1)),
+        ).with_file(path);
+        eprint!("{}", err.render(src));
+    }
+    cli::banner::fail(&format!(
+        "{} error(es) de tipo — ejecución abortada. Usa --no-typecheck para correr de todos modos.",
+        errors.len()
+    ));
+    std::process::exit(1);
 }
 
 /// Lex + parse + codegen → OrionBytecode, o un error estructurado con span.
