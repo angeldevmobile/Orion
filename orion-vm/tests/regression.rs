@@ -477,3 +477,46 @@ m[1] = 7
 if n[1] != 7 { error "set-index no se reflejó en el alias" }"#,
     );
 }
+
+// ── Ecosistema de paquetes: fixes a nivel de lenguaje ─────────────────────────
+
+#[test]
+fn test_split_empty_yields_chars() {
+    // split("") debe partir en caracteres, sin strings vacíos en los bordes.
+    run_ok(
+        r#"p = "abc".split("")
+if len(p) != 3 { error "split vacío: longitud incorrecta" }
+if p[0] != "a" { error "split vacío: primer carácter incorrecto" }
+if p[2] != "c" { error "split vacío: último carácter incorrecto" }"#,
+    );
+}
+
+#[test]
+fn test_unicode_and_hex_escapes() {
+    // \uXXXX y \xHH deben decodificarse a su carácter.
+    run_ok(
+        r#"if "\u0041" != "A" { error "escape \u roto" }
+if "\x41" != "A" { error "escape \x roto" }"#,
+    );
+}
+
+#[test]
+fn test_dict_function_field_shadows_native_method() {
+    // Una función almacenada en un dict (p.ej. namespace de módulo) tiene
+    // prioridad sobre el método nativo de dict del mismo nombre.
+    run_ok(
+        r#"d = {"contains": fn(x) { return x * 2 }}
+if d.contains(21) != 42 { error "función de dict eclipsada por método nativo" }"#,
+    );
+}
+
+#[test]
+fn test_type_name_as_member_after_dot() {
+    // Nombres de tipo (int, list, dict, ...) son válidos como nombre de miembro
+    // tras un punto, y un namespace puede llamarse `list`/`dict`.
+    run_ok(
+        r#"obj = {"int": fn() { return 7 }, "list": fn() { return 9 }}
+if obj.int() != 7 { error "int como miembro falló" }
+if obj.list() != 9 { error "list como miembro falló" }"#,
+    );
+}

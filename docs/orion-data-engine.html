@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<title>Orion Data Engine — Arquitectura</title>
+<style>
+  /* ─────────────────────────────────────────────────────────────
+     ORION DATA ENGINE — blueprint técnico
+     Identidad: esquemático de ingeniería. Mono para estructura,
+     sans para lectura. Acento cian-señal (velocidad de datos),
+     ámbar-estrella para el "camino caliente". Neutros con sesgo
+     navy (Orión = cielo nocturno).
+     ───────────────────────────────────────────────────────────── */
+
+  :root {
+    --bg:        #F6F8FC;
+    --surface:   #FFFFFF;
+    --surface-2: #EDF2F9;
+    --ink:       #0D1626;
+    --ink-2:     #465469;
+    --ink-3:     #6B7A90;
+    --line:      #D6DFEC;
+    --line-2:    #C3CFDF;
+    --accent:    #0C7C8E;
+    --accent-2:  #0A9BB0;
+    --accent-wash:#E2F2F5;
+    --hot:       #B5480A;
+    --hot-wash:  #FBEADC;
+    --good:      #15803D;
+
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+    --maxw: 74rem;
+    --r: 10px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:        #090E18;
+      --surface:   #0F1626;
+      --surface-2: #151F33;
+      --ink:       #E7EEF8;
+      --ink-2:     #9AA8BE;
+      --ink-3:     #6C7C94;
+      --line:      #21304A;
+      --line-2:    #2C3E5C;
+      --accent:    #29C6DB;
+      --accent-2:  #57D6E8;
+      --accent-wash:#0E2A33;
+      --hot:       #F6A82C;
+      --hot-wash:  #2C2010;
+      --good:      #4ADE80;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#090E18; --surface:#0F1626; --surface-2:#151F33;
+    --ink:#E7EEF8; --ink-2:#9AA8BE; --ink-3:#6C7C94;
+    --line:#21304A; --line-2:#2C3E5C;
+    --accent:#29C6DB; --accent-2:#57D6E8; --accent-wash:#0E2A33;
+    --hot:#F6A82C; --hot-wash:#2C2010; --good:#4ADE80;
+  }
+  :root[data-theme="light"] {
+    --bg:#F6F8FC; --surface:#FFFFFF; --surface-2:#EDF2F9;
+    --ink:#0D1626; --ink-2:#465469; --ink-3:#6B7A90;
+    --line:#D6DFEC; --line-2:#C3CFDF;
+    --accent:#0C7C8E; --accent-2:#0A9BB0; --accent-wash:#E2F2F5;
+    --hot:#B5480A; --hot-wash:#FBEADC; --good:#15803D;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    font-size: 17px;
+  }
+
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 1.5rem; }
+
+  /* subtle blueprint grid behind the hero */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--line);
+    background:
+      linear-gradient(var(--bg), var(--bg)) padding-box,
+      repeating-linear-gradient(0deg, transparent 0 39px, var(--line) 39px 40px),
+      repeating-linear-gradient(90deg, transparent 0 39px, var(--line) 39px 40px);
+    background-blend-mode: normal;
+  }
+  .hero::before {
+    content:""; position:absolute; inset:0;
+    background:
+      repeating-linear-gradient(0deg, transparent 0 39px, color-mix(in srgb, var(--line) 55%, transparent) 39px 40px),
+      repeating-linear-gradient(90deg, transparent 0 39px, color-mix(in srgb, var(--line) 55%, transparent) 39px 40px);
+    -webkit-mask-image: radial-gradient(120% 90% at 15% 0%, #000 0%, transparent 65%);
+            mask-image: radial-gradient(120% 90% at 15% 0%, #000 0%, transparent 65%);
+    pointer-events:none;
+  }
+  .hero .wrap { position: relative; padding-top: 4.5rem; padding-bottom: 4rem; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: inline-flex; align-items:center; gap:.6rem;
+    margin: 0 0 1.4rem;
+  }
+  .eyebrow::before {
+    content:""; width: 26px; height:1px; background: var(--accent); display:inline-block;
+  }
+
+  h1 {
+    font-family: var(--sans);
+    font-weight: 760;
+    font-size: clamp(2.1rem, 5.2vw, 3.5rem);
+    line-height: 1.04;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+    margin: 0 0 1.1rem;
+    max-width: 20ch;
+  }
+  h1 .glow { color: var(--accent); }
+
+  .lede {
+    font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+    color: var(--ink-2);
+    max-width: 58ch;
+    margin: 0;
+  }
+  .lede code { color: var(--ink); }
+
+  .flowline {
+    margin-top: 2.2rem;
+    display: flex; flex-wrap: wrap; align-items: center; gap: .55rem;
+    font-family: var(--mono); font-size: .82rem;
+  }
+  .flowline .node {
+    background: var(--surface); border:1px solid var(--line-2);
+    padding: .32rem .7rem; border-radius: 6px; color: var(--ink);
+    white-space: nowrap;
+  }
+  .flowline .node.hot { border-color: var(--hot); color: var(--hot); background: var(--hot-wash); }
+  .flowline .arr { color: var(--accent); font-weight:700; }
+
+  /* section scaffolding */
+  section { padding: 3.6rem 0; border-bottom: 1px solid var(--line); }
+  .kicker {
+    font-family: var(--mono); font-size:.72rem; letter-spacing:.2em; text-transform:uppercase;
+    color: var(--ink-3); margin:0 0 .7rem; display:flex; gap:.7rem; align-items:baseline;
+  }
+  .kicker .n { color: var(--accent); }
+  h2 {
+    font-weight: 720; font-size: clamp(1.5rem, 3vw, 2.05rem);
+    letter-spacing:-0.02em; text-wrap: balance; margin: 0 0 .6rem; line-height:1.1;
+  }
+  .sub { color: var(--ink-2); max-width: 62ch; margin: 0 0 2rem; }
+
+  /* technique cards */
+  .cards { display:grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  .card {
+    background: var(--surface); border:1px solid var(--line);
+    border-radius: var(--r); padding: 1.4rem 1.3rem 1.5rem;
+    display:flex; flex-direction:column; gap:.7rem; position:relative;
+  }
+  .card .tag {
+    font-family: var(--mono); font-size:.68rem; letter-spacing:.14em; text-transform:uppercase;
+    color: var(--accent);
+  }
+  .card h3 { margin:.1rem 0 0; font-size:1.16rem; font-weight:700; letter-spacing:-0.01em; }
+  .card p { margin:0; color: var(--ink-2); font-size:.96rem; }
+  .card .does {
+    margin-top:.35rem; font-family:var(--mono); font-size:.8rem; color: var(--ink);
+    background: var(--accent-wash); border-radius:7px; padding:.55rem .7rem;
+    border:1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  .card .does b { color: var(--accent); font-weight:700; }
+
+  /* layered stack — centerpiece */
+  .stack { display:flex; flex-direction:column; gap: .8rem; }
+  .layer {
+    background: var(--surface); border:1px solid var(--line);
+    border-radius: var(--r); padding: 1.15rem 1.25rem;
+    display:grid; grid-template-columns: 12rem 1fr; gap: 1.2rem; align-items:center;
+  }
+  .layer .meta { display:flex; flex-direction:column; gap:.25rem; }
+  .layer .lname { font-weight:720; font-size:1.05rem; letter-spacing:-0.01em; }
+  .layer .lwho {
+    font-family:var(--mono); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3);
+  }
+  .chips { display:flex; flex-wrap:wrap; gap:.5rem; }
+  .chip {
+    font-family: var(--mono); font-size:.82rem;
+    background: var(--surface-2); border:1px solid var(--line-2);
+    padding:.34rem .68rem; border-radius:6px; color: var(--ink);
+  }
+  .chip .m { color: var(--accent); }
+  .layer.engine { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-wash); }
+  .layer.engine .lwho { color: var(--accent); }
+  .layer.engine .chip { background: var(--surface); border-color: color-mix(in srgb, var(--accent) 30%, var(--line-2)); }
+  .stack .seam {
+    text-align:center; font-family:var(--mono); font-size:.7rem; letter-spacing:.15em;
+    color: var(--ink-3); text-transform:uppercase; margin:-.35rem 0;
+  }
+  .hideveil { color: var(--hot); }
+
+  /* pipeline */
+  .pipe { display:grid; grid-template-columns: repeat(4, 1fr); gap:.9rem; }
+  .stage {
+    background: var(--surface); border:1px solid var(--line); border-radius:var(--r);
+    padding:1.1rem 1.05rem; position:relative; display:flex; flex-direction:column; gap:.5rem;
+  }
+  .stage .num {
+    font-family:var(--mono); font-weight:700; color: var(--accent); font-size:.8rem;
+  }
+  .stage h4 { margin:0; font-size:1rem; font-weight:700; }
+  .stage p { margin:0; font-size:.88rem; color: var(--ink-2); }
+  .stage .cost {
+    margin-top:auto; font-family:var(--mono); font-size:.72rem; color:var(--good);
+    display:inline-flex; align-items:center; gap:.4rem;
+  }
+  .stage.out .cost { color: var(--hot); }
+
+  .callout {
+    margin-top:1.4rem; display:flex; gap:.9rem; align-items:flex-start;
+    background: var(--hot-wash); border:1px solid color-mix(in srgb, var(--hot) 35%, transparent);
+    border-radius:var(--r); padding:1rem 1.15rem;
+  }
+  .callout .mk { font-family:var(--mono); font-weight:700; color:var(--hot); font-size:.95rem; flex:none; }
+  .callout p { margin:0; font-size:.94rem; color: var(--ink); }
+  .callout b { color: var(--hot); }
+
+  /* .odf byte layout */
+  .odf { display:flex; flex-direction:column; gap:.55rem; font-family:var(--mono); }
+  .odf .block {
+    display:grid; grid-template-columns: 9.5rem 1fr; align-items:center; gap:1rem;
+    background: var(--surface); border:1px solid var(--line); border-radius:8px; padding:.7rem .9rem;
+  }
+  .odf .block .lab { font-size:.82rem; color: var(--accent); letter-spacing:.03em; }
+  .odf .block .bytes { display:flex; gap:.3rem; flex-wrap:wrap; }
+  .odf .cell {
+    background: var(--surface-2); border:1px solid var(--line-2); border-radius:4px;
+    padding:.28rem .5rem; font-size:.78rem; color: var(--ink);
+  }
+  .odf .cell.k { background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 30%, var(--line-2)); color: var(--accent); }
+  .odf .note { font-size:.82rem; color: var(--ink-2); font-family: var(--sans); }
+
+  /* code */
+  .code {
+    background: var(--surface); border:1px solid var(--line); border-radius:var(--r);
+    padding:1.25rem 1.35rem; overflow-x:auto; font-family:var(--mono);
+    font-size:.88rem; line-height:1.75;
+  }
+  .code pre { margin:0; }
+  .code .c { color: var(--ink-3); }
+  .code .k { color: var(--accent); }
+  .code .s { color: var(--hot); }
+  .code .f { color: var(--ink); font-weight:600; }
+
+  /* comparison table */
+  .tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:var(--r); }
+  table { border-collapse: collapse; width:100%; min-width: 40rem; font-size:.94rem; }
+  th, td { text-align:left; padding:.85rem 1.1rem; border-bottom:1px solid var(--line); }
+  thead th {
+    font-family:var(--mono); font-size:.72rem; letter-spacing:.12em; text-transform:uppercase;
+    color: var(--ink-3); background: var(--surface-2); font-weight:600;
+  }
+  tbody tr:last-child td { border-bottom:none; }
+  td .old { color: var(--ink-2); }
+  td .new { color: var(--ink); font-weight:600; }
+  td .win { color: var(--accent); font-family:var(--mono); font-size:.85rem; }
+  .rowlab { font-weight:600; }
+
+  /* closing note */
+  .close { padding: 3.2rem 0 4rem; border-bottom:none; }
+  .close .box {
+    background: var(--surface); border:1px solid var(--line); border-left:3px solid var(--accent);
+    border-radius: var(--r); padding:1.4rem 1.5rem;
+  }
+  .close p { margin:.4rem 0 0; color: var(--ink-2); }
+  .close p:first-child { margin-top:0; color: var(--ink); font-weight:600; font-size:1.05rem; }
+  .close b { color: var(--ink); }
+
+  @media (max-width: 860px) {
+    .cards, .pipe { grid-template-columns: 1fr 1fr; }
+    .layer { grid-template-columns: 1fr; gap:.75rem; }
+    .odf .block { grid-template-columns: 1fr; gap:.5rem; }
+  }
+  @media (max-width: 560px) {
+    .cards, .pipe { grid-template-columns: 1fr; }
+    body { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .card, .stage, .layer { transition: transform .18s ease, border-color .18s ease; }
+    .card:hover, .stage:hover { transform: translateY(-2px); border-color: var(--line-2); }
+  }
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Orion · Data Engine</p>
+    <h1>Tres técnicas, una arquitectura: leer <span class="glow">un millón de filas</span> sin sudar.</h1>
+    <p class="lede">El motor que convierte a Orion en un lenguaje serio para datos. Formato binario, memory-map y layout columnar — invisibles para quien escribe el código, decisivos para la velocidad.</p>
+    <div class="flowline">
+      <span class="node hot">TXT · &gt;1M filas</span>
+      <span class="arr">→</span>
+      <span class="node">parse streaming</span>
+      <span class="arr">→</span>
+      <span class="node">Frame columnar</span>
+      <span class="arr">→</span>
+      <span class="node">procesar · SIMD</span>
+      <span class="arr">→</span>
+      <span class="node hot">Excel · por partes</span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- 1 · LAS TRES TÉCNICAS -->
+  <section>
+    <div class="wrap">
+      <p class="kicker"><span class="n">01</span> Las piezas</p>
+      <h2>Qué viene a hacer cada técnica</h2>
+      <p class="sub">Cada una elimina un paso de trabajo. Juntas, son el mismo diseño de las herramientas más rápidas del mundo (Arrow, Polars) — pero como capa propia de Orion.</p>
+      <div class="cards">
+        <article class="card">
+          <span class="tag">Formato binario · .odf</span>
+          <h3>Guardar el número<br>como número</h3>
+          <p>xlsx guarda el <code>30</code> como texto XML: <code>&lt;c&gt;&lt;v&gt;30&lt;/v&gt;&lt;/c&gt;</code>, y hay que deletrearlo. El binario lo guarda como 8 bytes crudos.</p>
+          <div class="does">Elimina el paso de <b>parsear</b>. Leer ≈ un <b>memcpy</b>.</div>
+        </article>
+        <article class="card">
+          <span class="tag">Memory-map · zero-copy</span>
+          <h3>Asomarse al archivo,<br>no copiarlo</h3>
+          <p>En vez de copiar 5 GB del disco a tu RAM, el SO hace que el archivo <em>aparezca</em> como un arreglo en memoria. Trae solo las páginas que tocas.</p>
+          <div class="does">Elimina el paso de <b>copiar</b>. Abre archivos <b>&gt; que tu RAM</b>.</div>
+        </article>
+        <article class="card">
+          <span class="tag">Columnar + SIMD</span>
+          <h3>El procesador<br>en ráfaga</h3>
+          <p>Guardar cada columna junta y contigua deja al CPU sumar 8 valores en una sola instrucción. Es la forma que hace volar las queries analíticas.</p>
+          <div class="does">Elimina los <b>cache-miss</b>. Suma/filtra/agrupa <b>vectorizado</b>.</div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 · ARQUITECTURA EN CAPAS -->
+  <section>
+    <div class="wrap">
+      <p class="kicker"><span class="n">02</span> La arquitectura</p>
+      <h2>Tres capas: el usuario ve una clase, no un motor</h2>
+      <p class="sub">La regla de oro: nadie llama a binario ni a mmap directamente. Viven escondidos en la Capa 1. Arriba solo hay una API limpia de queries.</p>
+
+      <div class="stack">
+        <div class="layer">
+          <div class="meta">
+            <span class="lname">Capa 3 · Query</span>
+            <span class="lwho">Lo que escribes en Orion</span>
+          </div>
+          <div class="chips">
+            <span class="chip">frame.<span class="m">from_txt</span>()</span>
+            <span class="chip">.<span class="m">where</span>()</span>
+            <span class="chip">.<span class="m">group</span>()</span>
+            <span class="chip">.<span class="m">sum</span>()</span>
+            <span class="chip">.<span class="m">to_excel</span>()</span>
+          </div>
+        </div>
+
+        <div class="seam">▲ &nbsp;el usuario solo toca esto&nbsp; ▲</div>
+
+        <div class="layer">
+          <div class="meta">
+            <span class="lname">Capa 2 · Datos</span>
+            <span class="lwho">Tipos propios de Orion</span>
+          </div>
+          <div class="chips">
+            <span class="chip"><span class="m">Frame</span> = { columnas }</span>
+            <span class="chip"><span class="m">Column</span> · Vec tipado contiguo</span>
+            <span class="chip">int · float · str · date</span>
+          </div>
+        </div>
+
+        <div class="seam"><span class="hideveil">✦ frontera: aquí abajo es invisible ✦</span></div>
+
+        <div class="layer engine">
+          <div class="meta">
+            <span class="lname">Capa 1 · Motor</span>
+            <span class="lwho">Rust · oculto</span>
+          </div>
+          <div class="chips">
+            <span class="chip"><span class="m">.odf</span> serializador binario</span>
+            <span class="chip"><span class="m">mmap</span> loader zero-copy</span>
+            <span class="chip"><span class="m">SIMD</span> kernels (sum/filter)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 · EL FLUJO REAL -->
+  <section>
+    <div class="wrap">
+      <p class="kicker"><span class="n">03</span> Tu caso real</p>
+      <h2>TXT de &gt;1M filas → archivos Excel</h2>
+      <p class="sub">Los extremos son fijos: entra TXT, sale Excel. El motor trabaja en el medio. Leer TXT es rápido (no es XML); el cuello de botella real está en escribir el Excel.</p>
+
+      <div class="pipe">
+        <div class="stage">
+          <span class="num">① Entrada</span>
+          <h4>Parsear en streaming</h4>
+          <p>Lee línea por línea partiendo por el separador. Nunca carga todo de golpe.</p>
+          <span class="cost">● memoria O(1)</span>
+        </div>
+        <div class="stage">
+          <span class="num">② Estructura</span>
+          <h4>Frame columnar</h4>
+          <p>Acumula en columnas contiguas. Aquí vive el <code>.odf</code> si hay que persistir.</p>
+          <span class="cost">● cache-friendly</span>
+        </div>
+        <div class="stage">
+          <span class="num">③ Cómputo</span>
+          <h4>Procesar</h4>
+          <p>Filtrar, agrupar, transformar. Vectorizado sobre columnas tipadas.</p>
+          <span class="cost">● SIMD, en ráfaga</span>
+        </div>
+        <div class="stage out">
+          <span class="num">④ Salida</span>
+          <h4>Escribir Excel por partes</h4>
+          <p>Trozos de ≤1M filas → hoja1, hoja2… o archivo1, archivo2…</p>
+          <span class="cost">▲ cuello de botella</span>
+        </div>
+      </div>
+
+      <div class="callout">
+        <span class="mk">! LÍMITE</span>
+        <p>Excel aguanta como máximo <b>1 048 576 filas por hoja</b> (2²⁰, no se puede subir). Si tu TXT tiene más, <b>partir la salida es obligatorio</b> — por eso el paso ④ genera varias hojas o archivos. Tu instinto de “archivos Excel” en plural era correcto.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 · ANATOMÍA DEL .odf -->
+  <section>
+    <div class="wrap">
+      <p class="kicker"><span class="n">04</span> El formato</p>
+      <h2>Anatomía de un archivo <code>.odf</code></h2>
+      <p class="sub">Columnar en disco: primero un encabezado con el mapa, luego cada columna como un bloque de bytes crudos del mismo tipo. Por eso <code>load()</code> es casi un memcpy y el mmap puede apuntar directo.</p>
+
+      <div class="odf">
+        <div class="block">
+          <span class="lab">HEADER</span>
+          <div class="bytes">
+            <span class="cell k">magic "ODF1"</span>
+            <span class="cell">n_filas</span>
+            <span class="cell">n_columnas</span>
+            <span class="cell">nombres</span>
+            <span class="cell">tipos</span>
+            <span class="cell">offsets →</span>
+          </div>
+        </div>
+        <div class="block">
+          <span class="lab">COL "edad" · int64</span>
+          <div class="bytes">
+            <span class="cell">30</span><span class="cell">25</span><span class="cell">41</span><span class="cell">38</span><span class="cell">…</span>
+            <span class="note">← enteros pegados, 8 bytes c/u · el CPU los recorre en ráfaga</span>
+          </div>
+        </div>
+        <div class="block">
+          <span class="lab">COL "monto" · float64</span>
+          <div class="bytes">
+            <span class="cell">1200.5</span><span class="cell">980.0</span><span class="cell">…</span>
+            <span class="note">← floats contiguos · zero-copy: la Column apunta a estos bytes mapeados</span>
+          </div>
+        </div>
+        <div class="block">
+          <span class="lab">COL "region" · str</span>
+          <div class="bytes">
+            <span class="cell">offsets</span><span class="cell">+</span><span class="cell">blob de texto</span>
+            <span class="note">← strings: índice de posiciones + un solo bloque de bytes (sin objeto por celda)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 · EN ORION -->
+  <section>
+    <div class="wrap">
+      <p class="kicker"><span class="n">05</span> La cara visible</p>
+      <h2>Cómo se ve en Orion</h2>
+      <p class="sub">Toda la potencia de las tres técnicas, detrás de cinco líneas legibles. El motor es invisible.</p>
+      <div class="code"><pre><span class="c">-- Conversión de una sola pasada: TXT gigante → Excel por partes</span>
+<span class="k">use</span> <span class="s">"frame"</span> <span class="k">as</span> frame
+
+datos = frame.<span class="f">from_txt</span>(<span class="s">"entrada.txt"</span>, sep: <span class="s">";"</span>)   <span class="c">-- ① streaming, memoria O(1)</span>
+            .<span class="f">where</span>(<span class="s">"monto &gt; 0"</span>)                    <span class="c">-- ③ filtro vectorizado</span>
+            .<span class="f">group</span>(<span class="s">"region"</span>).<span class="f">sum</span>(<span class="s">"monto"</span>)       <span class="c">--    agregación SIMD</span>
+
+datos.<span class="f">to_excel</span>(<span class="s">"salida.xlsx"</span>, split_por: <span class="s">1000000</span>)  <span class="c">-- ④ parte por el límite</span>
+
+
+<span class="c">-- ¿Reprocesas el mismo TXT muchas veces? Guárdalo en binario 1 vez:</span>
+frame.<span class="f">from_txt</span>(<span class="s">"gigante.txt"</span>, sep: <span class="s">";"</span>).<span class="f">save</span>(<span class="s">"gigante.odf"</span>)
+datos = frame.<span class="f">load</span>(<span class="s">"gigante.odf"</span>)   <span class="c">-- ② mmap · carga casi instantánea</span></pre></div>
+    </div>
+  </section>
+
+  <!-- 6 · POR QUÉ VUELA -->
+  <section>
+    <div class="wrap">
+      <p class="kicker"><span class="n">06</span> El porqué</p>
+      <h2>Por qué esto vuela y openpyxl no</h2>
+      <p class="sub">No se gana en complejidad (leer N filas es O(N) siempre). Se gana en el <em>factor constante</em> y en la <em>memoria</em>.</p>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Dimensión</th><th>openpyxl / row-dicts</th><th>Orion · motor de datos</th><th>Efecto</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="rowlab">Objeto por celda</td>
+              <td class="old">1 objeto × 20M celdas</td>
+              <td class="new">1 Vec por columna (≈20)</td>
+              <td class="win">~20M → ~20 allocs</td>
+            </tr>
+            <tr>
+              <td class="rowlab">Lectura del formato</td>
+              <td class="old">parsear XML por etiqueta</td>
+              <td class="new">bytes crudos · memcpy</td>
+              <td class="win">sin parsing</td>
+            </tr>
+            <tr>
+              <td class="rowlab">Carga a memoria</td>
+              <td class="old">copia todo el archivo</td>
+              <td class="new">mmap · páginas on-demand</td>
+              <td class="win">O(n) → O(1)</td>
+            </tr>
+            <tr>
+              <td class="rowlab">Recorrer una columna</td>
+              <td class="old">saltos por el heap (miss)</td>
+              <td class="new">contiguo · SIMD</td>
+              <td class="win">en ráfaga</td>
+            </tr>
+            <tr>
+              <td class="rowlab">Lenguaje base</td>
+              <td class="old">Python interpretado</td>
+              <td class="new">Rust nativo (= C)</td>
+              <td class="win">ya lo tienes</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- CIERRE -->
+  <section class="close">
+    <div class="wrap">
+      <div class="box">
+        <p>El <code>.odf</code> es una pieza del medio, no el destino.</p>
+        <p>Tus extremos son fijos — <b>entra TXT, sale Excel</b> — y el motor trabaja entre ellos. El binario y el mmap se ganan su lugar cuando <b>reprocesas</b> el mismo dato o cuando <b>no cabe en RAM</b>; para una conversión de una sola pasada, streaming directo y listo.</p>
+        <p>Lo que siempre aplica: <b>parsear el TXT en streaming</b>, un <b>Frame columnar</b> para procesar en ráfaga, y <b>partir la salida Excel</b> por el límite de 1M. Esa es la arquitectura que hace a Orion potente en datos.</p>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

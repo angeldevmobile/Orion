@@ -14,6 +14,7 @@ fn aplicar(a, b, op) {
     return b
 }
 
+
 acc = gui.val("acc", 0)
 op  = gui.val("op", "")
 cur = gui.val("cur", "")

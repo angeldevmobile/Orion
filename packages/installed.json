@@ -1,14 +1,26 @@
 {
-  "uuid": {
-    "description": "Generación de UUIDs v4 únicos sin dependencias externas",
-    "file": "uuid.orx",
-    "source": "community",
-    "version": "1.0.0"
-  },
   "colors": {
     "description": "Paleta de colores ANSI para terminal: red, green, blue, bold, reset",
     "file": "colors.orx",
     "source": "community",
+    "version": "1.0.0"
+  },
+  "list": {
+    "description": "Operaciones sobre listas: sum, contains, first, last, flatten, zip, range_of",
+    "file": "list.orx",
+    "source": "builtin",
+    "version": "1.0.0"
+  },
+  "dates": {
+    "description": "Utilidades de fechas: today, format, diff_days, is_weekend, add_days",
+    "file": "dates.orx",
+    "source": "community",
+    "version": "0.9.0"
+  },
+  "math": {
+    "description": "Funciones matemáticas: abs, sqrt, max, min, pow, floor, ceil, round, clamp, average",
+    "file": "math.orx",
+    "source": "remote",
     "version": "1.0.0"
   },
   "validate": {
@@ -17,16 +29,16 @@
     "source": "community",
     "version": "1.0.0"
   },
-  "math": {
-    "description": "Funciones matemáticas: abs, sqrt, max, min, pow, floor, ceil, round, clamp, average",
-    "file": "math.orx",
-    "source": "remote",
-    "version": "1.0.0"
-  },
   "strings": {
     "description": "Utilidades de cadenas: pad_left, pad_right, repeat, count, reverse, title_case",
     "file": "strings.orx",
     "source": "builtin",
+    "version": "1.0.0"
+  },
+  "uuid": {
+    "description": "Generación de UUIDs v4 únicos sin dependencias externas",
+    "file": "uuid.orx",
+    "source": "community",
     "version": "1.0.0"
   }
 }

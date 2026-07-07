@@ -26,6 +26,11 @@ thread_local! {
     pub(crate) static ARG_BUF: RefCell<Vec<i64>> = RefCell::new(Vec::new());
 }
 
+/// Extrae los primeros `n` argumentos del ARG_BUF (elem_0 primero), en orden.
+pub(crate) fn drain_arg_buf(n: usize) -> Vec<i64> {
+    ARG_BUF.with(|b| b.borrow_mut().drain(..n).collect())
+}
+
 // Error activo para attempt/handle — almacena el OrionVal* del mensaje.
 thread_local! {
     static ORION_ERROR: RefCell<Option<i64>> = RefCell::new(None);
@@ -698,6 +703,20 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
             .and_then(|s| s.to_str())
             .unwrap_or(path_str);
 
+        // Path explícito (p.ej. "packages/math") → el archivo .orx tiene prioridad
+        // sobre los módulos nativos del mismo nombre (paridad con la VM).
+        let explicit_path = path_str.contains('/') || path_str.contains('\\');
+        let candidates = [
+            format!("packages/{}.orx", path_str),
+            format!("{}.orx", path_str),
+            format!("lib/{}.orx", path_str),
+        ];
+        if explicit_path {
+            if let Some(file) = candidates.iter().find(|c| std::path::Path::new(c).exists()) {
+                return super::bridge::load_orx_module_jit(file);
+            }
+        }
+
         match base_name {
             "math" => {
                 use std::f64::consts;
@@ -711,21 +730,22 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
                 let raw = Box::into_raw(Box::new(entries)) as i64;
                 alloc_val(TAG_DICT, raw, 0.0)
             }
+            // Módulos nativos Rust (fs, json, random, datetime, ...) → marcador Module.
+            name if crate::modules::is_known_module(name) => {
+                let entries: Vec<(String, i64)> = vec![(
+                    "__native_module__".to_string(),
+                    alloc_val(TAG_STR, string_to_cptr(name.to_string()), 0.0),
+                )];
+                let raw = Box::into_raw(Box::new(entries)) as i64;
+                alloc_val(TAG_DICT, raw, 0.0)
+            }
             _ => {
-                let candidates = [
-                    format!("packages/{}.orx", path_str),
-                    format!("{}.orx", path_str),
-                    format!("lib/{}.orx", path_str),
-                ];
-                let exists = candidates.iter().any(|c| std::path::Path::new(c).exists());
-                if exists {
-                    // Módulos .orx necesitan sub-VM; JIT devuelve dict vacío como placeholder
-                    let entries: Vec<(String, i64)> = Vec::new();
-                    let raw = Box::into_raw(Box::new(entries)) as i64;
-                    alloc_val(TAG_DICT, raw, 0.0)
-                } else {
-                    eprintln!("[JIT] Módulo '{}' no encontrado", path_str);
-                    std::process::exit(1)
+                match candidates.iter().find(|c| std::path::Path::new(c).exists()) {
+                    Some(file) => super::bridge::load_orx_module_jit(file),
+                    None => {
+                        eprintln!("[JIT] Módulo '{}' no encontrado", path_str);
+                        std::process::exit(1)
+                    }
                 }
             }
         }

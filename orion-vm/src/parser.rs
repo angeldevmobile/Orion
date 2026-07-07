@@ -114,6 +114,16 @@ impl Parser {
             // y los captura el brazo `Ident(n)` de arriba.
             Learn    => "learn".to_string(),
             Sense    => "sense".to_string(),
+            // Nombres de tipo usados como método/atributo tras un punto
+            // (p.ej. random.int, x.list, cfg.dict) — son válidos como nombres.
+            TypeInt    => "int".to_string(),
+            TypeFloat  => "float".to_string(),
+            TypeString => "string".to_string(),
+            TypeBool   => "bool".to_string(),
+            TypeList   => "list".to_string(),
+            TypeDict   => "dict".to_string(),
+            TypeAny    => "any".to_string(),
+            TypeAuto   => "auto".to_string(),
             _ => {
                 let line = self.current_line();
                 let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
@@ -550,7 +560,15 @@ impl Parser {
             | TokenKind::TypeString | TokenKind::TypeList | TokenKind::TypeDict
             | TokenKind::TypeAny | TokenKind::TypeAuto => {
                 let name = self.parse_type_name()?;
-                Ok(Expr::Ident(name))
+                // Si el nombre de tipo va seguido de `.` es acceso a miembro sobre una
+                // variable (p.ej. un namespace de módulo importado como `list`/`dict`),
+                // no un cast. Resolver como identificador en minúscula para no chocar
+                // con los nombres de tipo `List`/`Dict`.
+                if matches!(self.peek(), TokenKind::Dot) {
+                    Ok(Expr::Ident(name.to_lowercase()))
+                } else {
+                    Ok(Expr::Ident(name))
+                }
             }
 
             // Paréntesis agrupados

@@ -423,8 +423,31 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
 //     Métodos builtin de Dict
 
 unsafe fn call_method_dict(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
+    use super::bridge::{call_vmfn, orion_to_value, value_to_orion, TAG_VMFN};
     let entries = &*(data_i as *const Vec<(String, i64)>);
     let name    = cstr_to_str(name_ptr);
+
+    // Namespace de módulo nativo (fs, json, random, datetime, ...): el dict lleva
+    // un marcador con el nombre del módulo. Despachar al módulo nativo.
+    if let Some((_, marker)) = entries.iter().find(|(k, _)| k == "__native_module__") {
+        let mod_name = val_to_display(val_ref(*marker));
+        let vm_args: Vec<crate::value::Value> = args.iter().map(|&p| orion_to_value(p)).collect();
+        let eval_args: Vec<crate::eval_value::EvalValue> =
+            vm_args.into_iter().map(crate::vm::value_to_eval).collect();
+        return match crate::modules::call(&mod_name, name, eval_args) {
+            Ok(ev) => value_to_orion(&crate::vm::eval_to_value(ev)),
+            Err(e) => { eprintln!("[JIT] {}.{}: {}", mod_name, name, e); std::process::exit(1) }
+        };
+    }
+
+    // Una función definida en el dict (namespace de paquete `.orx`) tiene
+    // prioridad sobre los métodos nativos de dict del mismo nombre.
+    if let Some((_, v)) = entries.iter().find(|(k, _)| k == name) {
+        if val_ref(*v).tag == TAG_VMFN {
+            return call_vmfn(val_ref(*v).data_i, args);
+        }
+    }
+
     match name {
         "len"      => alloc_val(TAG_INT, entries.len() as i64, 0.0),
         "is_empty" => alloc_val(TAG_BOOL, if entries.is_empty() { 1 } else { 0 }, 0.0),

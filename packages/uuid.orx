@@ -1,7 +1,9 @@
 -- uuid.orx — Generación de identificadores únicos en Orion
--- Sin dependencias externas — basado en números aleatorios
+-- Basado en el módulo nativo `random`.
 -- Uso: use "packages/uuid"
 --      use "packages/uuid" as uuid
+
+use "random"
 
 -- Tabla de caracteres hexadecimales
 fn _hex_chars() {
@@ -14,7 +16,7 @@ fn _hex_segment(n) {
     result = ""
     i = 0
     while i < n {
-        idx = random_int(0, 15)
+        idx = random.int(0, 15)
         result = result + chars[idx]
         i = i + 1
     }
@@ -28,7 +30,7 @@ fn v4() {
     p3 = "4" + _hex_segment(3)
     -- variant bits: 8, 9, a, o b
     variants = ["8","9","a","b"]
-    v_idx = random_int(0, 3)
+    v_idx = random.int(0, 3)
     p4 = variants[v_idx] + _hex_segment(3)
     p5 = _hex_segment(12)
     return p1 + "-" + p2 + "-" + p3 + "-" + p4 + "-" + p5

@@ -363,6 +363,38 @@ impl<'a> Lexer<'a> {
                     Some(b'"')  => { content.push('"');  self.advance(); }
                     Some(b'0')  => { content.push('\0'); self.advance(); }
                     Some(b'$')  => { content.push('$');  self.advance(); }
+                    // \uXXXX — punto de código Unicode (4 dígitos hex)
+                    Some(b'u') => {
+                        self.advance(); // consume 'u'
+                        let mut code: u32 = 0;
+                        let mut n = 0;
+                        while n < 4 {
+                            match self.peek().and_then(|b| (b as char).to_digit(16)) {
+                                Some(d) => { code = code * 16 + d; self.advance(); n += 1; }
+                                None => break,
+                            }
+                        }
+                        match char::from_u32(code) {
+                            Some(ch) => content.push(ch),
+                            None => content.push(char::REPLACEMENT_CHARACTER),
+                        }
+                    }
+                    // \xHH — byte/punto de código (2 dígitos hex)
+                    Some(b'x') => {
+                        self.advance(); // consume 'x'
+                        let mut code: u32 = 0;
+                        let mut n = 0;
+                        while n < 2 {
+                            match self.peek().and_then(|b| (b as char).to_digit(16)) {
+                                Some(d) => { code = code * 16 + d; self.advance(); n += 1; }
+                                None => break,
+                            }
+                        }
+                        match char::from_u32(code) {
+                            Some(ch) => content.push(ch),
+                            None => content.push(char::REPLACEMENT_CHARACTER),
+                        }
+                    }
                     Some(other) => {
                         // escape no reconocido: conservar backslash + char
                         content.push('\\');

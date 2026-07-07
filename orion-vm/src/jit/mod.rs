@@ -9,6 +9,7 @@
 //! }
 //! ```
 
+pub mod bridge;
 pub mod compiler;
 pub mod runtime;
 pub mod runtime_oop;

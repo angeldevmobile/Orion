@@ -55,6 +55,8 @@ struct RuntimeIds {
     get_self_field:     FuncId,  // rt_get_self_field(name_ptr) -> i64
     set_self_field:     FuncId,  // rt_set_self_field(name_ptr, val)
     call_method:        FuncId,  // rt_call_method(obj, name_ptr, n_args) -> i64
+    // Builtins vía puente VM — rt_call_builtin(name_ptr, n_args) -> i64
+    call_builtin:       FuncId,
     // JIT-6: Closures y Async
     make_closure:    FuncId,  // rt_make_closure(fn_name_ptr) -> i64
     call_async:      FuncId,  // rt_call_async(fn_name_ptr, n_args) -> i64
@@ -154,7 +156,7 @@ fn is_eligible(instr: &Instruction) -> bool {
             | Instruction::ReadFile(_)
             | Instruction::WriteFile(_)
             | Instruction::ReadEnv(_)
-            | Instruction::UseModule(_, _)
+            | Instruction::UseModule(_, _, _)
             // JIT-5: OOP
             | Instruction::DefineShape(_)
             | Instruction::GetAttr(_)
@@ -228,6 +230,7 @@ impl JitCompiler {
         sym!("rt_get_self_field",          super::runtime_oop::rt_get_self_field);
         sym!("rt_set_self_field",          super::runtime_oop::rt_set_self_field);
         sym!("rt_call_method",             super::runtime_oop::rt_call_method);
+        sym!("rt_call_builtin",            super::bridge::rt_call_builtin);
         sym!("rt_make_closure",            super::runtime::rt_make_closure);
         sym!("rt_call_async",              super::runtime::rt_call_async);
         sym!("rt_await",                   super::runtime::rt_await);
@@ -298,6 +301,7 @@ impl JitCompiler {
         let get_self_field     = decl!("rt_get_self_field",          [i],       [i]);
         let set_self_field     = decl!("rt_set_self_field",          [i, i],    []);
         let call_method        = decl!("rt_call_method",             [i, i, i], [i]);
+        let call_builtin       = decl!("rt_call_builtin",            [i, i],    [i]);
         let make_closure       = decl!("rt_make_closure",            [i],       [i]);
         let call_async         = decl!("rt_call_async",              [i, i],    [i]);
         let rt_await           = decl!("rt_await",                   [i],       [i]);
@@ -327,6 +331,7 @@ impl JitCompiler {
             read_input, read_input_choices, read_file, write_file, read_env, use_module,
             create_instance, get_attr, set_attr, is_instance,
             get_self, push_self, pop_self, get_self_field, set_self_field, call_method,
+            call_builtin,
             make_closure, call_async, rt_await,
             show, is_truthy,
             add, sub, mul, div, rt_mod, pow, neg,
@@ -353,8 +358,12 @@ impl JitCompiler {
             .collect();
         let eligible = |instr: &Instruction| -> bool {
             match instr {
-                Instruction::Call(name, _) | Instruction::CallAsync(name, _) =>
-                    callable.contains(name.as_str()),
+                // Un Call resuelve a: función de usuario, shape, o builtin puenteable.
+                Instruction::Call(name, _) =>
+                    callable.contains(name.as_str())
+                        || super::bridge::is_jit_builtin(name.as_str()),
+                // Async solo sobre funciones de usuario (no builtins).
+                Instruction::CallAsync(name, _) => callable.contains(name.as_str()),
                 other => is_eligible(other),
             }
         };
@@ -569,6 +578,7 @@ impl JitCompiler {
         let get_self_field_ref     = self.module.declare_func_in_func(rt.get_self_field,     &mut ctx.func);
         let set_self_field_ref     = self.module.declare_func_in_func(rt.set_self_field,     &mut ctx.func);
         let call_method_ref        = self.module.declare_func_in_func(rt.call_method,        &mut ctx.func);
+        let call_builtin_ref       = self.module.declare_func_in_func(rt.call_builtin,       &mut ctx.func);
         let make_closure_ref       = self.module.declare_func_in_func(rt.make_closure,       &mut ctx.func);
         let call_async_ref         = self.module.declare_func_in_func(rt.call_async,         &mut ctx.func);
         let await_ref              = self.module.declare_func_in_func(rt.rt_await,           &mut ctx.func);
@@ -614,8 +624,11 @@ impl JitCompiler {
                     if !var_names.contains(n) { var_names.push(n.clone()); }
                 }
                 // JIT-4: UseModule almacena el namespace bajo su alias
-                Instruction::UseModule(_, alias) => {
+                Instruction::UseModule(_, alias, selective) => {
                     if !var_names.contains(alias) { var_names.push(alias.clone()); }
+                    for n in selective {
+                        if !var_names.contains(n) { var_names.push(n.clone()); }
+                    }
                 }
                 _ => {}
             }
@@ -854,14 +867,30 @@ impl JitCompiler {
                         let n_args_v  = builder.ins().iconst(types::I64, n as i64);
                         let call = builder.ins().call(create_instance_ref, &[name_ptr, n_args_v]);
                         stack.push(builder.inst_results(call)[0]);
-                    } else {
+                    } else if let Some(&fref) = user_fn_refs.get(fname) {
                         let mut args: Vec<cranelift_codegen::ir::Value> = (0..n)
                             .map(|_| stack.pop().ok_or("Call: pila vacía"))
                             .collect::<Result<_, _>>()?;
                         args.reverse();
-                        let fref = *user_fn_refs.get(fname)
-                            .ok_or_else(|| format!("JIT: función '{fname}' no encontrada"))?;
                         let call = builder.ins().call(fref, &args);
+                        stack.push(builder.inst_results(call)[0]);
+                    } else {
+                        // Builtin (str, len, push, range, ...): se despacha vía la VM.
+                        // Args al ARG_BUF en orden (elem_0 primero), luego rt_call_builtin.
+                        let mut args: Vec<cranelift_codegen::ir::Value> = (0..n)
+                            .map(|_| stack.pop().ok_or("Call builtin: pila vacía"))
+                            .collect::<Result<_, _>>()?;
+                        args.reverse();
+                        for &arg in &args {
+                            builder.ins().call(push_arg_ref, &[arg]);
+                        }
+                        let mut bytes = fname.as_bytes().to_vec();
+                        bytes.push(0u8);
+                        let raw = bytes.as_ptr() as i64;
+                        self.string_storage.push(bytes);
+                        let name_ptr = builder.ins().iconst(types::I64, raw);
+                        let n_args_v = builder.ins().iconst(types::I64, n as i64);
+                        let call = builder.ins().call(call_builtin_ref, &[name_ptr, n_args_v]);
                         stack.push(builder.inst_results(call)[0]);
                     }
                 }
@@ -1091,7 +1120,7 @@ impl JitCompiler {
                     let call = builder.ins().call(read_env_ref, &[key, cast_ptr]);
                     stack.push(builder.inst_results(call)[0]);
                 }
-                Instruction::UseModule(path, alias) => {
+                Instruction::UseModule(path, alias, _selective) => {
                     let mut bytes = path.as_bytes().to_vec();
                     bytes.push(0u8);
                     let raw = bytes.as_ptr() as i64;

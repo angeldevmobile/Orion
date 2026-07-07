@@ -98,7 +98,7 @@ pub enum Instruction {
     ServeHTTP(String),   // pop puerto (int) → levanta servidor HTTP, handler = String fn_name
 
     //   Módulos
-    UseModule(String, String),   // (path, alias) → almacena namespace bajo el alias
+    UseModule(String, String, Vec<String>), // (path, alias, selective) → namespace bajo alias + import `take`
 
     //   Debugger
     /// Punto de pausa explícito en código fuente (emitido por `@breakpoint`).

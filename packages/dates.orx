@@ -1,0 +1,33 @@
+-- dates.orx — Utilidades de fechas para Orion
+-- Wrapper de alto nivel sobre el módulo nativo `datetime`.
+-- Uso: use "packages/dates"
+--      show dates.today()
+--      show dates.is_weekend(dates.today())
+
+use "datetime"
+
+-- Fecha de hoy → "YYYY-MM-DD"
+fn today() {
+    return datetime.today()
+}
+
+-- Formatear una fecha con un patrón estilo strftime (p.ej. "%d/%m/%Y")
+fn format(dt, fmt) {
+    return datetime.format(dt, fmt)
+}
+
+-- Días de diferencia entre dos fechas (b - a)
+fn diff_days(a, b) {
+    return datetime.diff_days(a, b)
+}
+
+-- Sumar n días a una fecha
+fn add_days(dt, n) {
+    return datetime.add_days(dt, n)
+}
+
+-- ¿Cae en fin de semana? (sábado o domingo)
+fn is_weekend(dt) {
+    d = datetime.weekday(dt)
+    return d == "Saturday" or d == "Sunday"
+}

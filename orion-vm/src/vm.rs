@@ -166,6 +166,45 @@ impl VM {
         }
     }
 
+    /// Ejecuta una función por nombre en un contexto aislado (sus propias
+    /// funciones, shapes y variables globales), devolviendo el valor de retorno.
+    ///
+    /// Pensado como puente para el JIT: un módulo `.orx` se compila y sus
+    /// funciones corren bajo la VM cuando el código JIT las invoca. Como todo
+    /// vive en nombres simples dentro de este contexto, la recursión, los
+    /// helpers internos y las constantes/`use` del módulo resuelven sin prefijos.
+    pub fn call_named(
+        functions: IndexMap<String, FunctionDef>,
+        shapes: IndexMap<String, ShapeDef>,
+        globals: IndexMap<String, Value>,
+        fn_name: &str,
+        args: Vec<Value>,
+    ) -> Result<Value, String> {
+        let mut vm = VM::new(vec![Instruction::Halt], vec![0], functions, shapes, IndexMap::new());
+        if let Some(frame) = vm.call_stack.first_mut() {
+            for (k, v) in globals {
+                frame.vars.insert(k, v);
+            }
+        }
+        vm.call_value(Value::Str(fn_name.to_string()), args)
+    }
+
+    /// Ejecuta el cuerpo principal y devuelve las variables globales resultantes
+    /// (sin las que empiezan por `_`). Útil para extraer las constantes/`use` de
+    /// un módulo `.orx` al cargarlo desde el JIT.
+    pub fn into_globals(mut self) -> IndexMap<String, Value> {
+        self.run().ok();
+        let mut globals = IndexMap::new();
+        if let Some(frame) = self.call_stack.first() {
+            for (k, v) in &frame.vars {
+                if !k.starts_with('_') {
+                    globals.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        globals
+    }
+
     /// Devuelve las funciones más llamadas, ordenadas de mayor a menor.
     /// Útil para profiling y para decidir qué compilar con JIT.
     pub fn hotspots(&self, top_n: usize) -> Vec<(&str, u64)> {
@@ -509,8 +548,30 @@ impl VM {
             Instruction::Breakpoint => {} // no-op en modo normal; el debugger lo maneja por línea
 
             //    Módulos                                                       
-            Instruction::UseModule(path, alias) => {
+            Instruction::UseModule(path, alias, selective) => {
                 let module_val = self.load_module(&path)?;
+                // Import selectivo `take [a, b]`: trae los nombres indicados al
+                // scope actual sin cualificar, además de exponer el namespace.
+                if !selective.is_empty() {
+                    if let Value::Dict(ns) = &module_val {
+                        for name in &selective {
+                            match ns.get(name) {
+                                Some(v) => {
+                                    let v = v.clone();
+                                    self.call_stack.last_mut().unwrap().vars.insert(name.clone(), v);
+                                }
+                                None => return Err(format!(
+                                    "use ... take: '{}' no existe en el módulo '{}'", name, path
+                                )),
+                            }
+                        }
+                    } else {
+                        return Err(format!(
+                            "use ... take no está soportado para el módulo nativo '{}'; usa '{}.<fn>'",
+                            path, alias
+                        ));
+                    }
+                }
                 let frame = self.call_stack.last_mut().unwrap();
                 frame.vars.insert(alias, module_val);
             }
@@ -680,9 +741,15 @@ impl VM {
                             "split" => {
                                 let sep = args.into_iter().next()
                                     .ok_or("string.split() requiere 1 argumento")?;
-                                let parts: Vec<Value> = s.split(sep.to_string().as_str())
-                                    .map(|p| Value::Str(p.to_string()))
-                                    .collect();
+                                let sep_str = sep.to_string();
+                                // split("") → caracteres (sin strings vacíos en los bordes)
+                                let parts: Vec<Value> = if sep_str.is_empty() {
+                                    s.chars().map(|c| Value::Str(c.to_string())).collect()
+                                } else {
+                                    s.split(sep_str.as_str())
+                                        .map(|p| Value::Str(p.to_string()))
+                                        .collect()
+                                };
                                 Value::list(parts)
                             }
                             "replace" => {
@@ -844,7 +911,21 @@ impl VM {
 
                     //    Métodos de Dict                                   
                     Value::Dict(map) => {
-                        // Primero probar métodos builtin de dict
+                        // Una función definida en el dict (p.ej. un namespace de módulo:
+                        // list.contains, list.get, ...) tiene prioridad sobre los métodos
+                        // nativos de dict del mismo nombre. Así un paquete puede exponer
+                        // `contains`, `get`, `keys`, etc. sin que el método nativo lo eclipse.
+                        let user_fn = map.get(method_name.as_str()).cloned().filter(|v| match v {
+                            Value::Closure { .. } => true,
+                            Value::Str(s) => self.functions.contains_key(s),
+                            _ => false,
+                        });
+                        if let Some(fn_val) = user_fn {
+                            let result = self.call_value(fn_val, args)?;
+                            self.value_stack.push(result);
+                            return Ok(false);
+                        }
+                        // Si no, probar métodos builtin de dict
                         match method_name.as_str() {
                             "len"      => { self.value_stack.push(Value::Int(map.len() as i64)); }
                             "is_empty" => { self.value_stack.push(Value::Bool(map.is_empty())); }
@@ -1272,7 +1353,28 @@ impl VM {
         let base_name = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or(path);
         let prefix = format!("{}__", base_name);
 
-        // 1) Módulos builtin Rust tienen prioridad sobre archivos
+        // Si el path referencia explícitamente un archivo (p.ej. "packages/validate"),
+        // el .orx tiene prioridad sobre el módulo nativo del mismo nombre. Así
+        // `use "validate"` carga el módulo nativo y `use "packages/validate"` carga
+        // el paquete instalado, sin que uno eclipse silenciosamente al otro.
+        let explicit_path = path.contains('/') || path.contains('\\');
+
+        // Candidatos de archivo .orx en packages/ o ruta relativa
+        let orx_candidates = [
+            format!("packages/{}.orx", path),
+            format!("{}.orx", path),
+            format!("lib/{}.orx", path),
+        ];
+
+        if explicit_path {
+            for candidate in &orx_candidates {
+                if std::path::Path::new(candidate).exists() {
+                    return self.load_orx_module(candidate, base_name, &prefix);
+                }
+            }
+        }
+
+        // 1) Módulos builtin Rust tienen prioridad sobre archivos (para imports por nombre)
         match base_name {
             "math" => return Ok(self.builtin_math_module()),
             name if crate::modules::is_known_module(name) => {
@@ -1281,13 +1383,7 @@ impl VM {
             _ => {}
         }
 
-        // 2) Buscar archivo .orx en packages/ o ruta relativa
-        let orx_candidates = [
-            format!("packages/{}.orx", path),
-            format!("{}.orx", path),
-            format!("lib/{}.orx", path),
-        ];
-
+        // 2) Buscar archivo .orx (fallback para imports por nombre sin módulo nativo)
         for candidate in &orx_candidates {
             if std::path::Path::new(candidate).exists() {
                 return self.load_orx_module(candidate, base_name, &prefix);
@@ -1309,24 +1405,66 @@ impl VM {
         let ast = parse(tokens).map_err(|e| format!("Error parseando '{}': {:?}", path, e))?;
         let bc = compile(ast).map_err(|e| format!("Error compilando '{}': {:?}", path, e))?;
 
-        // Copiar funciones del módulo al namespace actual con prefijo
-        let mut ns: IndexMap<String, Value> = IndexMap::new();
-        for (fname, fdef) in &bc.functions {
-            let prefixed = format!("{}{}", prefix, fname);
-            ns.insert(fname.clone(), Value::Str(prefixed.clone()));
-            self.functions.insert(prefixed, fdef.clone());
-        }
+        use std::collections::HashSet;
+        let own_fns: HashSet<String> = bc.functions.keys().cloned().collect();
 
-        // Ejecutar el módulo para obtener variables globales
+        // 1) Ejecutar el módulo en una sub-VM para obtener sus variables/constantes
+        //    globales y los namespaces que haya importado (p.ej. `use "datetime"`).
         let mut sub_vm = VM::new(bc.main.clone(), bc.lines.clone(), bc.functions.clone(), bc.shapes.clone(), bc.extern_fns.clone());
         sub_vm.run().ok(); // ignorar errores de side effects
-        // Extraer vars del frame principal del sub_vm
+        let mut module_globals: IndexMap<String, Value> = IndexMap::new();
         if let Some(frame) = sub_vm.call_stack.first() {
             for (k, v) in &frame.vars {
                 if !k.starts_with('_') {
-                    ns.insert(k.clone(), v.clone());
+                    module_globals.insert(k.clone(), v.clone());
                 }
             }
+        }
+        let global_names: HashSet<String> = module_globals.keys().cloned().collect();
+
+        // 2) Inyectar las globales del módulo en el frame global de la VM principal,
+        //    con prefijo para no colisionar con otros módulos ni con el programa.
+        if let Some(main_frame) = self.call_stack.first_mut() {
+            for (k, v) in &module_globals {
+                main_frame.vars.insert(format!("{}{}", prefix, k), v.clone());
+            }
+        }
+
+        // 3) Registrar las funciones del módulo con prefijo. Se reescriben:
+        //    - llamadas internas entre funciones del propio módulo (recursión/helpers)
+        //    - referencias a globales/constantes del módulo (salvo que un parámetro o
+        //      variable local las haga sombra)
+        let mut ns: IndexMap<String, Value> = IndexMap::new();
+        for (fname, fdef) in &bc.functions {
+            let prefixed = format!("{}{}", prefix, fname);
+            let mut fdef = fdef.clone();
+
+            // Nombres locales de la función: parámetros + destinos de StoreVar
+            let mut locals: HashSet<String> = fdef.params.iter().cloned().collect();
+            for instr in &fdef.body {
+                if let Instruction::StoreVar(n) = instr { locals.insert(n.clone()); }
+            }
+
+            for instr in &mut fdef.body {
+                match instr {
+                    Instruction::Call(callee, _) if own_fns.contains(callee.as_str()) => {
+                        *callee = format!("{}{}", prefix, callee);
+                    }
+                    Instruction::LoadVar(n)
+                        if global_names.contains(n.as_str()) && !locals.contains(n.as_str()) =>
+                    {
+                        *n = format!("{}{}", prefix, n);
+                    }
+                    _ => {}
+                }
+            }
+            ns.insert(fname.clone(), Value::Str(prefixed.clone()));
+            self.functions.insert(prefixed, fdef);
+        }
+
+        // 4) Exponer también las globales/constantes en el namespace del módulo.
+        for (k, v) in module_globals {
+            ns.insert(k, v);
         }
 
         Ok(Value::Dict(ns))
@@ -1953,7 +2091,7 @@ impl VM {
         let _ = request.respond(response);
     }
 
-    fn call_builtin(&self, name: &str, args: Vec<Value>) -> Result<Option<Value>, String> {
+    pub(crate) fn call_builtin(&self, name: &str, args: Vec<Value>) -> Result<Option<Value>, String> {
         match name {
             // slice(obj, start, end) — soporta lista[a:b] y string[a:b].
             // start/end pueden ser Null (extremo abierto); índices negativos cuentan desde el final.

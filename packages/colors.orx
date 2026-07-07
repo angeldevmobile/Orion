@@ -75,7 +75,7 @@ fn success(text) {
     return "\u001b[1m\u001b[32m" + text + "\u001b[0m"
 }
 
-fn error(text) {
+fn err(text) {
     return "\u001b[1m\u001b[31m" + text + "\u001b[0m"
 }
 

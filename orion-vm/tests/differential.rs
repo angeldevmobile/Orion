@@ -396,3 +396,140 @@ fn diff_list_pop_method() {
 fn diff_list_pop_until_empty() {
     assert_vm_jit_match("a = [1]\nx = a.pop()\ny = a.pop()\nshow x\nshow y\nshow a");
 }
+
+// ── Paridad VM ↔ JIT del ecosistema de paquetes ──────────────────────────────
+//
+// `use "packages/..."` y los módulos nativos deben dar el mismo resultado en
+// ambos backends. El JIT puentea los módulos `.orx` ejecutándolos vía VM, así
+// que aquí cazamos cualquier divergencia del puente. Se corre desde la raíz del
+// repo (donde vive packages/), no desde el crate.
+
+fn repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("raíz del repo")
+        .to_path_buf()
+}
+
+/// Igual que `assert_vm_jit_match` pero con cwd = raíz del repo, para que
+/// `use "packages/..."` resuelva los archivos reales del registry.
+fn assert_vm_jit_match_pkg(src: &str) {
+    let path = write_temp(src);
+    let p = path.to_str().unwrap();
+    let root = repo_root();
+
+    let run_in = |args: &[&str]| -> (String, bool) {
+        let out = Command::new(env!("CARGO_BIN_EXE_orion"))
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .expect("ejecutar binario orion");
+        (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.success())
+    };
+
+    let (vm_out, vm_ok) = run_in(&[p]);
+    let (jit_out, jit_ok) = run_in(&["--jit", p]);
+    let _ = fs::remove_file(&path);
+
+    assert!(vm_ok, "VM falló para:\n{src}\n--- stdout ---\n{vm_out}");
+    assert!(jit_ok, "JIT falló para:\n{src}\n--- stdout ---\n{jit_out}");
+    assert_eq!(
+        vm_out, jit_out,
+        "VM y JIT DIVERGEN en paquetes.\n--- programa ---\n{src}\n--- VM ---\n{vm_out}--- JIT ---\n{jit_out}"
+    );
+}
+
+#[test]
+fn diff_pkg_math_orx() {
+    // math.orx vía puente JIT→VM: recursión (factorial) y helpers internos.
+    assert_vm_jit_match_pkg(
+        "use \"packages/math\"\nshow math.factorial(5)\nshow math.clamp(120, 0, 100)\nshow math.pow(2, 10)",
+    );
+}
+
+#[test]
+fn diff_pkg_list_orx() {
+    // list.orx: función `contains` no debe ser eclipsada por el método nativo de dict.
+    assert_vm_jit_match_pkg(
+        "use \"packages/list\"\nshow list.sum([1, 2, 3, 4])\nshow list.contains([1, 2, 3], 2)\nshow list.contains([1, 2, 3], 9)",
+    );
+}
+
+#[test]
+fn diff_pkg_validate_orx() {
+    // validate.orx: el paquete `.orx` (is_email) no debe ser eclipsado por el módulo nativo.
+    assert_vm_jit_match_pkg(
+        "use \"packages/validate\"\nshow validate.is_email(\"a@b.com\")\nshow validate.is_digits(\"123\")\nshow validate.is_digits(\"12a\")",
+    );
+}
+
+#[test]
+fn diff_pkg_native_module() {
+    // Módulo nativo directo bajo JIT (random.int determinista en rango unitario).
+    assert_vm_jit_match_pkg("use \"random\"\nshow random.int(7, 7)");
+}
+
+#[test]
+fn diff_pkg_wrapper_over_native() {
+    // dates.orx envuelve el módulo nativo `datetime` con `use` interno.
+    assert_vm_jit_match_pkg(
+        "use \"packages/dates\"\nshow dates.is_weekend(\"2026-06-27\")\nshow dates.add_days(\"2026-06-29\", 7)",
+    );
+}
+
+// ── Builtins bajo JIT (puente a la VM) ────────────────────────────────────────
+// Antes, CUALQUIER llamada a un builtin (str, len, push, …) descalificaba el
+// programa → fallback a la VM. Ahora el JIT los despacha vía `rt_call_builtin`.
+// Estos tests fijan la paridad exacta VM↔JIT del puente, incluida la mutación
+// in-place con aliasing (push/pop/sort/reverse escriben el backing compartido).
+
+#[test]
+fn diff_builtin_str_len() {
+    assert_vm_jit_match("a = [1, 2, 3]\nshow \"len = \" + str(len(a))\nshow str(a)");
+}
+
+#[test]
+fn diff_builtin_range_sum() {
+    assert_vm_jit_match("show str(sum(range(1, 5)))\nshow str(range(0, 3))");
+}
+
+#[test]
+fn diff_builtin_min_max_abs() {
+    assert_vm_jit_match("show str(min([4, 1, 7]))\nshow str(max([4, 1, 7]))\nshow str(abs(0 - 9))");
+}
+
+#[test]
+fn diff_builtin_push_aliasing() {
+    // El caso estrella: push muta in-place y el alias `b` debe ver el cambio,
+    // igual que la semántica por referencia de la VM.
+    assert_vm_jit_match(
+        "a = [1, 2, 3]\nb = a\npush(a, 99)\nshow a\nshow b\nshow \"len=\" + str(len(a))",
+    );
+}
+
+#[test]
+fn diff_builtin_sort_pop() {
+    assert_vm_jit_match(
+        "xs = [5, 2, 8, 1]\nsort(xs)\nshow xs\nr = pop(xs)\nshow xs\nshow str(r[0])",
+    );
+}
+
+#[test]
+fn diff_builtin_reverse() {
+    assert_vm_jit_match("xs = [1, 2, 3, 4]\nreverse(xs)\nshow xs");
+}
+
+#[test]
+fn diff_builtin_strings() {
+    assert_vm_jit_match(
+        "s = \"Hola Mundo\"\nshow upper(s)\nshow lower(s)\nshow str(len(s))\nshow join(split(s, \" \"), \"-\")",
+    );
+}
+
+#[test]
+fn diff_builtin_mixed_with_userfn() {
+    // Builtins y funciones de usuario en el mismo programa JIT-compilado.
+    assert_vm_jit_match(
+        "fn doble(n) { return n * 2 }\nxs = [1, 2, 3]\npush(xs, doble(5))\nshow xs\nshow str(sum(xs))",
+    );
+}

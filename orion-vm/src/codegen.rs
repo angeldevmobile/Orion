@@ -528,7 +528,7 @@ impl Codegen {
                 self.emit(Instruction::ServeHTTP(fn_name));
             }
 
-            Stmt::Use { path, alias, .. } => {
+            Stmt::Use { path, alias, selective, .. } => {
                 let ns = alias.clone().unwrap_or_else(|| {
                     std::path::Path::new(path.as_str())
                         .file_stem()
@@ -536,7 +536,8 @@ impl Codegen {
                         .unwrap_or(path.as_str())
                         .to_string()
                 });
-                self.emit(Instruction::UseModule(path.clone(), ns));
+                let take = selective.clone().unwrap_or_default();
+                self.emit(Instruction::UseModule(path.clone(), ns, take));
             }
             Stmt::Fn { .. }      => {} // compilado en primer pase
             Stmt::AsyncFn { .. } => {} // compilado en primer pase
