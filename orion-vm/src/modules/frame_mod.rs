@@ -140,8 +140,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // Carga
         "open"       => fn_open(args),
-        "from_txt"   => fn_from_txt(args),
-        "to_excel"   => fn_to_excel(args),
+        "from_txt"     => fn_from_txt(args),
+        "to_excel"     => fn_to_excel(args),
+        "txt_to_excel" => fn_txt_to_excel(args),
         "from_list"  => fn_from_list(args),
         // Exploración
         "peek"       => fn_peek(args),
@@ -178,6 +179,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "save"       => fn_save(args),
         "save_odf"   => fn_save_odf(args),
         "load_odf"   => fn_load_odf(args),
+        "txt_to_odf" => fn_txt_to_odf(args),
         _ => Err(format!("frame.{} no existe", function)),
     }
 }
@@ -290,6 +292,136 @@ fn fn_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             "Excel escrito: {} ({} filas, {} hoja(s))", path, f.rows, n_sheets
         )))
     })
+}
+
+// ── Streaming TXT → Excel (memoria acotada) ──────────────────────────────────
+//
+// txt_to_excel(txt, base, sep = ",", split_por = 1_048_575)
+//
+// A diferencia de `open`+`to_excel` (que carga TODO el frame en RAM), esto
+// transmite el TXT fila por fila y escribe archivos `base_1.xlsx`, `base_2.xlsx`,
+// … de a lo sumo `split_por` filas cada uno, LIBERANDO cada libro tras
+// guardarlo. La memoria queda acotada a ~un archivo, no al tamaño del TXT — así
+// se procesan archivos más grandes que la RAM. Cada archivo respeta el límite de
+// Excel (1 048 576 filas/hoja). Los tipos se infieren por celda.
+
+/// Escribe una fila de texto (delimitada por `sep`) en la hoja, tipando cada
+/// celda: entero → float → texto.
+fn write_txt_row(
+    ws: &mut rust_xlsxwriter::Worksheet,
+    row: u32,
+    line: &str,
+    sep: &str,
+    ncols: usize,
+) -> Result<(), String> {
+    for (c, field) in line.trim_end_matches(['\r', '\n']).split(sep).enumerate() {
+        if c >= ncols { break; }
+        let f = field.trim().trim_matches('"');
+        let cell = c as u16;
+        let res = if let Ok(i) = f.parse::<i64>() {
+            ws.write(row, cell, i)
+        } else if let Ok(fl) = f.parse::<f64>() {
+            ws.write(row, cell, fl)
+        } else {
+            ws.write(row, cell, f)
+        };
+        res.map_err(|e| format!("txt_to_excel: celda ({},{}): {}", row, cell, e))?;
+    }
+    Ok(())
+}
+
+/// Escribe hasta `split` filas desde `reader` a un xlsx nuevo. Devuelve cuántas
+/// filas escribió (0 = no había más → no crea el archivo). El libro se libera al
+/// salir de la función (memoria acotada).
+fn write_one_excel_chunk(
+    path: &str,
+    headers: &[String],
+    sep: &str,
+    reader: &mut BufReader<File>,
+    split: usize,
+) -> Result<usize, String> {
+    use rust_xlsxwriter::{Workbook, Format, Color};
+
+    // ¿Hay al menos una fila de datos? Si no, no creamos archivo.
+    let mut first = String::new();
+    if reader.read_line(&mut first).map_err(|e| e.to_string())? == 0 {
+        return Ok(0);
+    }
+
+    let mut wb = Workbook::new();
+    let count;
+    {
+        let ws = wb.add_worksheet();
+        let header_fmt = Format::new()
+            .set_bold()
+            .set_background_color(Color::RGB(0x2D5F8A))
+            .set_font_color(Color::White);
+        for (c, h) in headers.iter().enumerate() {
+            ws.write_with_format(0, c as u16, h.as_str(), &header_fmt)
+                .map_err(|e| format!("txt_to_excel: cabecera: {}", e))?;
+        }
+
+        let mut r: u32 = 1;
+        write_txt_row(ws, r, &first, sep, headers.len())?;
+        r += 1;
+        let mut n = 1usize;
+        while n < split {
+            let mut line = String::new();
+            if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 { break; }
+            if line.trim().is_empty() { continue; }
+            write_txt_row(ws, r, &line, sep, headers.len())?;
+            r += 1;
+            n += 1;
+        }
+        count = n;
+    }
+    wb.save(path).map_err(|e| format!("txt_to_excel: guardando '{}': {}", path, e))?;
+    Ok(count)
+}
+
+fn fn_txt_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    if args.len() < 2 { return Err("frame.txt_to_excel(txt, base[, sep, split_por])".into()); }
+    let txt_path = arg_str(&args, 0, "frame.txt_to_excel")?;
+    let out_base = arg_str(&args, 1, "frame.txt_to_excel")?;
+    let sep = match args.get(2) {
+        Some(EvalValue::Str(s)) if !s.is_empty() => s.clone(),
+        _ => ",".to_string(),
+    };
+    const EXCEL_MAX: usize = 1_048_576;
+    let split = match args.get(3) {
+        Some(EvalValue::Int(n)) if *n > 0 => (*n as usize).min(EXCEL_MAX - 1),
+        _ => EXCEL_MAX - 1,
+    };
+
+    let file = File::open(&txt_path).map_err(|e| format!("frame.txt_to_excel: {}", e))?;
+    let mut reader = BufReader::new(file);
+
+    // cabecera
+    let mut header_line = String::new();
+    if reader.read_line(&mut header_line).map_err(|e| e.to_string())? == 0 {
+        return Err("frame.txt_to_excel: archivo vacío".into());
+    }
+    let headers: Vec<String> = header_line
+        .trim_end_matches(['\r', '\n'])
+        .split(&sep)
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .collect();
+
+    let mut file_idx = 0usize;
+    let mut total = 0usize;
+    loop {
+        let path = format!("{}_{}.xlsx", out_base, file_idx + 1);
+        let n = write_one_excel_chunk(&path, &headers, &sep, &mut reader, split)?;
+        if n == 0 { break; }
+        file_idx += 1;
+        total += n;
+        if n < split { break; } // último chunk parcial
+    }
+
+    Ok(EvalValue::Str(format!(
+        "Streaming TXT→Excel: {} filas en {} archivo(s) ({}_1.xlsx …)",
+        total, file_idx, out_base
+    )))
 }
 
 fn fn_from_list(args: Vec<EvalValue>) -> Result<EvalValue, String> {
@@ -842,34 +974,39 @@ fn col_tag(col: &Col) -> u8 {
     match col { Col::Float(_) => 0, Col::Int(_) => 1, Col::Str(_) => 2, Col::Bool(_) => 3 }
 }
 
+/// Serializa columnas a bytes en formato .odf (ODF1). Reutilizado por `save_odf`
+/// (frame en RAM) y por `txt_to_odf` (streaming por archivos).
+fn serialize_odf(cols: &[(String, Col)], rows: usize) -> Vec<u8> {
+    let mut buf: Vec<u8> = Vec::with_capacity(16 + rows * cols.len() * 8);
+    buf.extend_from_slice(ODF_MAGIC);
+    buf.extend_from_slice(&(rows as u64).to_le_bytes());
+    buf.extend_from_slice(&(cols.len() as u32).to_le_bytes());
+    for (name, col) in cols {
+        buf.push(col_tag(col));
+        buf.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        buf.extend_from_slice(name.as_bytes());
+    }
+    for (_, col) in cols {
+        match col {
+            Col::Float(v) => for &x in v { buf.extend_from_slice(&x.to_le_bytes()); },
+            Col::Int(v)   => for &x in v { buf.extend_from_slice(&x.to_le_bytes()); },
+            Col::Bool(v)  => for &b in v { buf.push(if b { 1 } else { 0 }); },
+            Col::Str(v)   => for s in v {
+                buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
+                buf.extend_from_slice(s.as_bytes());
+            },
+        }
+    }
+    buf
+}
+
 fn fn_save_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.save_odf(handle, ruta)".into()); }
     let id   = arg_handle(&args, 0)?;
     let path = arg_str(&args, 1, "frame.save_odf")?;
     with_frames(|fs| {
         let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
-        let mut buf: Vec<u8> = Vec::with_capacity(16 + f.rows * f.cols.len() * 8);
-        buf.extend_from_slice(ODF_MAGIC);
-        buf.extend_from_slice(&(f.rows as u64).to_le_bytes());
-        buf.extend_from_slice(&(f.cols.len() as u32).to_le_bytes());
-        // metadatos de columnas
-        for (name, col) in &f.cols {
-            buf.push(col_tag(col));
-            buf.extend_from_slice(&(name.len() as u32).to_le_bytes());
-            buf.extend_from_slice(name.as_bytes());
-        }
-        // datos de columnas (contiguos por columna → cache-friendly)
-        for (_, col) in &f.cols {
-            match col {
-                Col::Float(v) => for &x in v { buf.extend_from_slice(&x.to_le_bytes()); },
-                Col::Int(v)   => for &x in v { buf.extend_from_slice(&x.to_le_bytes()); },
-                Col::Bool(v)  => for &b in v { buf.push(if b { 1 } else { 0 }); },
-                Col::Str(v)   => for s in v {
-                    buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
-                    buf.extend_from_slice(s.as_bytes());
-                },
-            }
-        }
+        let buf = serialize_odf(&f.cols, f.rows);
         std::fs::write(&path, &buf)
             .map_err(|e| format!("frame.save_odf: {}", e))?;
         Ok(EvalValue::Str(format!(
@@ -877,6 +1014,82 @@ fn fn_save_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             path, f.rows, f.cols.len(), buf.len()
         )))
     })
+}
+
+/// Streaming TXT → .odf binario, en varios archivos (memoria acotada).
+///
+/// txt_to_odf(txt, base, sep = ",", chunk = 500_000)
+///
+/// Transmite el TXT y escribe `base_1.odf`, `base_2.odf`, … de `chunk` filas
+/// cada uno, LIBERANDO cada bloque tras guardarlo. Combina lo mejor de las dos
+/// técnicas: memoria acotada (streaming) Y velocidad binaria (~8× más rápido que
+/// xlsx, sin impuesto XML/zip). Cada archivo infiere sus propios tipos de columna
+/// de su chunk. Contraparte rápida de `txt_to_excel` (que es para humanos/Office).
+fn fn_txt_to_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    if args.len() < 2 { return Err("frame.txt_to_odf(txt, base[, sep, chunk])".into()); }
+    let txt_path = arg_str(&args, 0, "frame.txt_to_odf")?;
+    let out_base = arg_str(&args, 1, "frame.txt_to_odf")?;
+    let sep = match args.get(2) {
+        Some(EvalValue::Str(s)) if !s.is_empty() => s.clone(),
+        _ => ",".to_string(),
+    };
+    let chunk = match args.get(3) {
+        Some(EvalValue::Int(n)) if *n > 0 => *n as usize,
+        _ => 500_000,
+    };
+
+    let file = File::open(&txt_path).map_err(|e| format!("frame.txt_to_odf: {}", e))?;
+    let mut reader = BufReader::new(file);
+
+    // cabecera
+    let mut header_line = String::new();
+    if reader.read_line(&mut header_line).map_err(|e| e.to_string())? == 0 {
+        return Err("frame.txt_to_odf: archivo vacío".into());
+    }
+    let headers: Vec<String> = header_line
+        .trim_end_matches(['\r', '\n'])
+        .split(&sep)
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .collect();
+
+    let mut file_idx = 0usize;
+    let mut total = 0usize;
+    loop {
+        // leer hasta `chunk` filas
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        for _ in 0..chunk {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    if line.trim().is_empty() { continue; }
+                    let fields: Vec<String> = line
+                        .trim_end_matches(['\r', '\n'])
+                        .split(&sep)
+                        .map(|s| s.trim().trim_matches('"').to_string())
+                        .collect();
+                    rows.push(fields);
+                }
+                Err(_) => break,
+            }
+        }
+        if rows.is_empty() { break; }
+
+        let n = rows.len();
+        let cols = infer_columns(&headers, &rows);
+        let buf = serialize_odf(&cols, n);
+        drop(rows); // liberar el chunk de texto antes de escribir
+        file_idx += 1;
+        let path = format!("{}_{}.odf", out_base, file_idx);
+        std::fs::write(&path, &buf).map_err(|e| format!("frame.txt_to_odf: {}", e))?;
+        total += n;
+        if n < chunk { break; } // último chunk parcial
+    }
+
+    Ok(EvalValue::Str(format!(
+        "Streaming TXT→.odf: {} filas en {} archivo(s) ({}_1.odf …)",
+        total, file_idx, out_base
+    )))
 }
 
 fn fn_load_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
@@ -1068,6 +1281,96 @@ mod tests {
         match suma { EvalValue::Float(f) => assert!((f - 55.0).abs() < 1e-9), o => panic!("suma edad: {:?}", o) }
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// txt_to_excel transmite el TXT y reparte en varios archivos (memoria
+    /// acotada), respetando split_por. 7 filas con split 3 ⇒ 3 archivos.
+    #[test]
+    fn txt_to_excel_streaming_reparte_archivos() {
+        let dir = std::env::temp_dir();
+        let txt = dir.join(format!("orion_stream_{}.txt", std::process::id()));
+        let mut contenido = String::from("nombre;edad;monto\n");
+        for i in 1..=7 {
+            contenido.push_str(&format!("P{};{};{}.5\n", i, 20 + i, 100 * i));
+        }
+        std::fs::write(&txt, contenido).unwrap();
+
+        let base = dir.join(format!("orion_stream_out_{}", std::process::id()));
+        let base_str = base.to_str().unwrap().to_string();
+
+        let msg = call("txt_to_excel", vec![
+            EvalValue::Str(txt.to_str().unwrap().into()),
+            EvalValue::Str(base_str.clone()),
+            EvalValue::Str(";".into()),
+            EvalValue::Int(3),
+        ]).unwrap();
+        match msg {
+            EvalValue::Str(s) => {
+                assert!(s.contains("7 filas"), "filas: {}", s);
+                assert!(s.contains("3 archivo"), "archivos: {}", s);
+            }
+            o => panic!("no devolvió str: {:?}", o),
+        }
+        // los 3 archivos existen; el 4º no
+        for i in 1..=3 {
+            assert!(std::path::Path::new(&format!("{}_{}.xlsx", base_str, i)).exists(),
+                "falta el archivo {}", i);
+        }
+        assert!(!std::path::Path::new(&format!("{}_4.xlsx", base_str)).exists(),
+            "no debería existir un 4º archivo");
+
+        // limpieza
+        let _ = std::fs::remove_file(&txt);
+        for i in 1..=3 { let _ = std::fs::remove_file(format!("{}_{}.xlsx", base_str, i)); }
+    }
+
+    /// txt_to_odf transmite el TXT a varios .odf binarios (memoria acotada) y
+    /// cada archivo se puede recargar con load_odf preservando tipos.
+    #[test]
+    fn txt_to_odf_streaming_y_roundtrip() {
+        let dir = std::env::temp_dir();
+        let txt = dir.join(format!("orion_odfstream_{}.txt", std::process::id()));
+        let mut contenido = String::from("id;nombre;monto\n");
+        for i in 1..=7 {
+            contenido.push_str(&format!("{};P{};{}.5\n", i, i, 100 * i));
+        }
+        std::fs::write(&txt, contenido).unwrap();
+
+        let base = dir.join(format!("orion_odfstream_out_{}", std::process::id()));
+        let base_str = base.to_str().unwrap().to_string();
+
+        // 7 filas, chunk 3 → 3 archivos
+        let msg = call("txt_to_odf", vec![
+            EvalValue::Str(txt.to_str().unwrap().into()),
+            EvalValue::Str(base_str.clone()),
+            EvalValue::Str(";".into()),
+            EvalValue::Int(3),
+        ]).unwrap();
+        match msg {
+            EvalValue::Str(s) => {
+                assert!(s.contains("7 filas"), "filas: {}", s);
+                assert!(s.contains("3 archivo"), "archivos: {}", s);
+            }
+            o => panic!("no devolvió str: {:?}", o),
+        }
+
+        // recargar el primer archivo: 3 filas, tipos correctos
+        let h = handle(call("load_odf", vec![
+            EvalValue::Str(format!("{}_1.odf", base_str)),
+        ]).unwrap());
+        let size = call("size", vec![EvalValue::Str(h.clone())]).unwrap();
+        if let EvalValue::Dict(m) = &size {
+            match m.get("rows") { Some(EvalValue::Int(3)) => {}, o => panic!("rows: {:?}", o) }
+        } else { panic!("size no dict"); }
+        // 'monto' debe haberse inferido como float y sumar correctamente
+        let suma = call("sum", vec![EvalValue::Str(h), EvalValue::Str("monto".into())]).unwrap();
+        match suma {
+            EvalValue::Float(f) => assert!((f - (100.5 + 200.5 + 300.5)).abs() < 1e-9, "suma: {}", f),
+            o => panic!("sum no float: {:?}", o),
+        }
+
+        let _ = std::fs::remove_file(&txt);
+        for i in 1..=3 { let _ = std::fs::remove_file(format!("{}_{}.odf", base_str, i)); }
     }
 
     /// to_excel reparte en varias hojas cuando el frame supera split_por.
