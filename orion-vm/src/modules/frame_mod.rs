@@ -90,12 +90,12 @@ fn new_handle() -> String {
 
 //   parsing CSV                                ─
 
-fn parse_csv_chunk(reader: &mut BufReader<File>, limit: usize) -> (Vec<String>, Vec<Vec<String>>) {
+fn parse_delim_chunk(reader: &mut BufReader<File>, sep: &str, limit: usize) -> (Vec<String>, Vec<Vec<String>>) {
     let mut headers = Vec::new();
     let mut rows: Vec<Vec<String>> = Vec::new();
     for (i, line) in reader.lines().enumerate() {
         let Ok(l) = line else { break };
-        let fields: Vec<String> = l.split(',').map(|s| s.trim().trim_matches('"').to_string()).collect();
+        let fields: Vec<String> = l.split(sep).map(|s| s.trim().trim_matches('"').to_string()).collect();
         if i == 0 { headers = fields; }
         else {
             rows.push(fields);
@@ -140,6 +140,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // Carga
         "open"       => fn_open(args),
+        "from_txt"   => fn_from_txt(args),
+        "to_excel"   => fn_to_excel(args),
         "from_list"  => fn_from_list(args),
         // Exploración
         "peek"       => fn_peek(args),
@@ -174,6 +176,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "scan_stats" => fn_scan_stats(args),
         // Persistencia
         "save"       => fn_save(args),
+        "save_odf"   => fn_save_odf(args),
+        "load_odf"   => fn_load_odf(args),
         _ => Err(format!("frame.{} no existe", function)),
     }
 }
@@ -187,13 +191,105 @@ fn fn_open(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     };
     let file = File::open(&path).map_err(|e| format!("frame.open: {}", e))?;
     let mut reader = BufReader::new(file);
-    let (headers, rows) = parse_csv_chunk(&mut reader, 0); // 0 = sin límite
+    let (headers, rows) = parse_delim_chunk(&mut reader, ",", 0); // 0 = sin límite
     if headers.is_empty() { return Err("frame.open: archivo vacío o sin cabecera".into()); }
     let n = rows.len();
     let cols = infer_columns(&headers, &rows);
     let id = new_handle();
     with_frames(|fs| fs.insert(id.clone(), Frame { cols, rows: n }));
     Ok(EvalValue::Str(id))
+}
+
+/// from_txt(ruta)            → separador por defecto ","
+/// from_txt(ruta, sep)       → separador configurable (";", "\t", "|", ...)
+///
+/// Entrada del pipeline: un TXT delimitado se parsea a columnas tipadas. A
+/// diferencia de xlsx, partir texto por un separador es trivial y rápido — el
+/// cuello de botella nunca es la entrada.
+fn fn_from_txt(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    let path = arg_str(&args, 0, "frame.from_txt")?;
+    let sep = match args.get(1) {
+        Some(EvalValue::Str(s)) if !s.is_empty() => s.clone(),
+        _ => ",".to_string(),
+    };
+    let file = File::open(&path).map_err(|e| format!("frame.from_txt: {}", e))?;
+    let mut reader = BufReader::new(file);
+    let (headers, rows) = parse_delim_chunk(&mut reader, &sep, 0);
+    if headers.is_empty() { return Err("frame.from_txt: archivo vacío o sin cabecera".into()); }
+    let n = rows.len();
+    let cols = infer_columns(&headers, &rows);
+    let id = new_handle();
+    with_frames(|fs| fs.insert(id.clone(), Frame { cols, rows: n }));
+    Ok(EvalValue::Str(id))
+}
+
+/// to_excel(handle, ruta)              → una hoja (parte por el límite de Excel)
+/// to_excel(handle, ruta, split_por)   → tamaño máximo de filas por hoja
+///
+/// Salida del pipeline: escribe columnas → xlsx directamente (sin materializar
+/// dicts). Excel admite como máximo 1 048 576 filas por hoja; si el frame es
+/// mayor se reparte en hojas "parte_1", "parte_2", … dentro del mismo libro.
+fn fn_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    use rust_xlsxwriter::{Workbook, Format, Color};
+
+    if args.len() < 2 { return Err("frame.to_excel(handle, ruta[, split_por])".into()); }
+    let id   = arg_handle(&args, 0)?;
+    let path = arg_str(&args, 1, "frame.to_excel")?;
+
+    // Límite duro de Excel: 1 048 576 filas por hoja (incluida la cabecera).
+    const EXCEL_MAX: usize = 1_048_576;
+    let split = match args.get(2) {
+        Some(EvalValue::Int(n)) if *n > 0 => (*n as usize).min(EXCEL_MAX - 1),
+        _ => EXCEL_MAX - 1, // por defecto: máximo de datos dejando sitio a la cabecera
+    };
+
+    with_frames(|fs| {
+        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let headers: Vec<&str> = f.cols.iter().map(|(n, _)| n.as_str()).collect();
+
+        let mut wb = Workbook::new();
+        let header_fmt = Format::new()
+            .set_bold()
+            .set_background_color(Color::RGB(0x2D5F8A))
+            .set_font_color(Color::White);
+
+        // número de hojas necesarias (al menos 1, aunque el frame esté vacío)
+        let n_sheets = if f.rows == 0 { 1 } else { (f.rows + split - 1) / split };
+
+        for s in 0..n_sheets {
+            let ws = wb.add_worksheet();
+            let sheet_name = if n_sheets == 1 { "Datos".to_string() } else { format!("parte_{}", s + 1) };
+            ws.set_name(sheet_name.as_str())
+                .map_err(|e| format!("frame.to_excel: nombre de hoja: {}", e))?;
+
+            // cabecera
+            for (c, h) in headers.iter().enumerate() {
+                ws.write_with_format(0, c as u16, *h, &header_fmt)
+                    .map_err(|e| format!("frame.to_excel: cabecera: {}", e))?;
+            }
+
+            let start = s * split;
+            let end = (start + split).min(f.rows);
+            for (out_r, i) in (start..end).enumerate() {
+                let row = out_r as u32 + 1; // +1 por la cabecera
+                for (c, (_, col)) in f.cols.iter().enumerate() {
+                    let cell = c as u16;
+                    let res = match col {
+                        Col::Float(v) => ws.write(row, cell, v[i]),
+                        Col::Int(v)   => ws.write(row, cell, v[i]),
+                        Col::Bool(v)  => ws.write(row, cell, v[i]),
+                        Col::Str(v)   => ws.write(row, cell, v[i].as_str()),
+                    };
+                    res.map_err(|e| format!("frame.to_excel: celda ({},{}): {}", row, cell, e))?;
+                }
+            }
+        }
+
+        wb.save(&path).map_err(|e| format!("frame.to_excel: guardando '{}': {}", path, e))?;
+        Ok(EvalValue::Str(format!(
+            "Excel escrito: {} ({} filas, {} hoja(s))", path, f.rows, n_sheets
+        )))
+    })
 }
 
 fn fn_from_list(args: Vec<EvalValue>) -> Result<EvalValue, String> {
@@ -724,6 +820,125 @@ fn fn_save(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
+//   formato binario .odf                        ─
+//
+// Capa 1 del motor de datos: columnar en disco, en binario crudo.
+// Layout (little-endian):
+//   [4]  magic "ODF1"
+//   [8]  n_filas (u64)      [4]  n_columnas (u32)
+//   por columna (metadatos):  [1] tag (0=f64,1=i64,2=str,3=bool)
+//                             [4] len_nombre (u32) + nombre utf8
+//   por columna (datos, en orden de columnas):
+//     f64 → n_filas*8  |  i64 → n_filas*8  |  bool → n_filas*1
+//     str → por fila: [4] len (u32) + bytes utf8
+//
+// Ventaja vs CSV: cero parsing de texto; los números se leen como bytes crudos
+// (from_le_bytes en bloque), no se re-parsea "1200.5" carácter por carácter.
+// Es la base sobre la que luego se monta el mmap zero-copy.
+
+const ODF_MAGIC: &[u8; 4] = b"ODF1";
+
+fn col_tag(col: &Col) -> u8 {
+    match col { Col::Float(_) => 0, Col::Int(_) => 1, Col::Str(_) => 2, Col::Bool(_) => 3 }
+}
+
+fn fn_save_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    if args.len() < 2 { return Err("frame.save_odf(handle, ruta)".into()); }
+    let id   = arg_handle(&args, 0)?;
+    let path = arg_str(&args, 1, "frame.save_odf")?;
+    with_frames(|fs| {
+        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let mut buf: Vec<u8> = Vec::with_capacity(16 + f.rows * f.cols.len() * 8);
+        buf.extend_from_slice(ODF_MAGIC);
+        buf.extend_from_slice(&(f.rows as u64).to_le_bytes());
+        buf.extend_from_slice(&(f.cols.len() as u32).to_le_bytes());
+        // metadatos de columnas
+        for (name, col) in &f.cols {
+            buf.push(col_tag(col));
+            buf.extend_from_slice(&(name.len() as u32).to_le_bytes());
+            buf.extend_from_slice(name.as_bytes());
+        }
+        // datos de columnas (contiguos por columna → cache-friendly)
+        for (_, col) in &f.cols {
+            match col {
+                Col::Float(v) => for &x in v { buf.extend_from_slice(&x.to_le_bytes()); },
+                Col::Int(v)   => for &x in v { buf.extend_from_slice(&x.to_le_bytes()); },
+                Col::Bool(v)  => for &b in v { buf.push(if b { 1 } else { 0 }); },
+                Col::Str(v)   => for s in v {
+                    buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
+                    buf.extend_from_slice(s.as_bytes());
+                },
+            }
+        }
+        std::fs::write(&path, &buf)
+            .map_err(|e| format!("frame.save_odf: {}", e))?;
+        Ok(EvalValue::Str(format!(
+            "Guardado .odf: {} ({} filas, {} columnas, {} bytes)",
+            path, f.rows, f.cols.len(), buf.len()
+        )))
+    })
+}
+
+fn fn_load_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    let path = arg_str(&args, 0, "frame.load_odf")?;
+    let data = std::fs::read(&path).map_err(|e| format!("frame.load_odf: {}", e))?;
+    let mut p = 0usize;
+
+    // Comprueba que quedan al menos $n bytes desde la posición actual.
+    macro_rules! need {
+        ($n:expr) => {
+            if p + $n > data.len() {
+                return Err("frame.load_odf: archivo .odf truncado o corrupto".into());
+            }
+        };
+    }
+
+    need!(4);
+    if &data[0..4] != ODF_MAGIC {
+        return Err("frame.load_odf: no es un .odf válido (magic incorrecto)".into());
+    }
+    p = 4;
+    need!(8); let n_rows = u64::from_le_bytes(data[p..p+8].try_into().unwrap()) as usize; p += 8;
+    need!(4); let n_cols = u32::from_le_bytes(data[p..p+4].try_into().unwrap()) as usize; p += 4;
+
+    // metadatos
+    let mut metas: Vec<(u8, String)> = Vec::with_capacity(n_cols);
+    for _ in 0..n_cols {
+        need!(1); let tag = data[p]; p += 1;
+        need!(4); let nl = u32::from_le_bytes(data[p..p+4].try_into().unwrap()) as usize; p += 4;
+        need!(nl); let name = String::from_utf8_lossy(&data[p..p+nl]).into_owned(); p += nl;
+        metas.push((tag, name));
+    }
+
+    // datos
+    let mut cols: Vec<(String, Col)> = Vec::with_capacity(n_cols);
+    for (tag, name) in metas {
+        let col = match tag {
+            0 => { need!(n_rows * 8); let mut v = Vec::with_capacity(n_rows);
+                   for _ in 0..n_rows { v.push(f64::from_le_bytes(data[p..p+8].try_into().unwrap())); p += 8; }
+                   Col::Float(v) }
+            1 => { need!(n_rows * 8); let mut v = Vec::with_capacity(n_rows);
+                   for _ in 0..n_rows { v.push(i64::from_le_bytes(data[p..p+8].try_into().unwrap())); p += 8; }
+                   Col::Int(v) }
+            3 => { need!(n_rows); let mut v = Vec::with_capacity(n_rows);
+                   for _ in 0..n_rows { v.push(data[p] != 0); p += 1; }
+                   Col::Bool(v) }
+            2 => { let mut v = Vec::with_capacity(n_rows);
+                   for _ in 0..n_rows {
+                       need!(4); let sl = u32::from_le_bytes(data[p..p+4].try_into().unwrap()) as usize; p += 4;
+                       need!(sl); v.push(String::from_utf8_lossy(&data[p..p+sl]).into_owned()); p += sl;
+                   }
+                   Col::Str(v) }
+            _ => return Err(format!("frame.load_odf: tag de columna desconocido ({})", tag)),
+        };
+        cols.push((name, col));
+    }
+
+    let id = new_handle();
+    with_frames(|fs| fs.insert(id.clone(), Frame { cols, rows: n_rows }));
+    Ok(EvalValue::Str(id))
+}
+
 //   arg helpers                                ─
 
 fn arg_handle(args: &[EvalValue], pos: usize) -> Result<String, String> {
@@ -747,5 +962,136 @@ fn arg_str_list(args: &[EvalValue], pos: usize) -> Result<Vec<String>, String> {
             _ => Err("frame: se esperaba lista de strings".into()),
         }).collect(),
         _ => Err("frame: se esperaba lista de strings".into()),
+    }
+}
+
+//   tests                                       ─
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict(pairs: &[(&str, EvalValue)]) -> EvalValue {
+        let mut m = HashMap::new();
+        for (k, v) in pairs { m.insert((*k).to_string(), v.clone()); }
+        EvalValue::Dict(m)
+    }
+
+    fn handle(v: EvalValue) -> String {
+        match v { EvalValue::Str(s) => s, other => panic!("se esperaba handle, got {:?}", other) }
+    }
+
+    /// El .odf debe preservar exactamente tipos y valores tras save→load.
+    /// Cubre las cuatro columnas (int, float, str, bool) y verifica que las
+    /// operaciones columnares (sum) dan el mismo resultado sobre el frame cargado.
+    #[test]
+    fn odf_roundtrip_preserva_tipos_y_valores() {
+        let rows = EvalValue::List(vec![
+            dict(&[("nombre", EvalValue::Str("Ana".into())),  ("edad", EvalValue::Int(30)),
+                   ("monto", EvalValue::Float(1200.5)),        ("activo", EvalValue::Bool(true))]),
+            dict(&[("nombre", EvalValue::Str("Luis".into())), ("edad", EvalValue::Int(25)),
+                   ("monto", EvalValue::Float(980.0)),         ("activo", EvalValue::Bool(false))]),
+            dict(&[("nombre", EvalValue::Str("Zoe".into())),  ("edad", EvalValue::Int(41)),
+                   ("monto", EvalValue::Float(1500.75)),       ("activo", EvalValue::Bool(true))]),
+        ]);
+
+        let h = handle(call("from_list", vec![rows]).unwrap());
+
+        let mut path = std::env::temp_dir();
+        path.push(format!("orion_odf_test_{}.odf", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+
+        call("save_odf", vec![EvalValue::Str(h.clone()), EvalValue::Str(p.clone())]).unwrap();
+        let h2 = handle(call("load_odf", vec![EvalValue::Str(p.clone())]).unwrap());
+
+        // helpers de aserción (EvalValue no implementa PartialEq)
+        let as_int = |v: Option<&EvalValue>| match v { Some(EvalValue::Int(n)) => *n, o => panic!("esperaba int, got {:?}", o) };
+        let as_str = |v: Option<&EvalValue>| match v { Some(EvalValue::Str(s)) => s.clone(), o => panic!("esperaba str, got {:?}", o) };
+        let as_bool = |v: Option<&EvalValue>| match v { Some(EvalValue::Bool(b)) => *b, o => panic!("esperaba bool, got {:?}", o) };
+
+        // mismas dimensiones
+        let size = call("size", vec![EvalValue::Str(h2.clone())]).unwrap();
+        if let EvalValue::Dict(m) = &size {
+            assert_eq!(as_int(m.get("rows")), 3);
+            assert_eq!(as_int(m.get("cols")), 4);
+        } else { panic!("size no devolvió dict"); }
+
+        // suma de monto idéntica al original (float exacto vía bytes)
+        let suma = call("sum", vec![EvalValue::Str(h2.clone()), EvalValue::Str("monto".into())]).unwrap();
+        match suma {
+            EvalValue::Float(f) => assert!((f - (1200.5 + 980.0 + 1500.75)).abs() < 1e-9, "suma divergió: {}", f),
+            o => panic!("sum no devolvió float: {:?}", o),
+        }
+
+        // valores str/int/bool preservados fila a fila
+        let row0 = call("row", vec![EvalValue::Str(h2.clone()), EvalValue::Int(0)]).unwrap();
+        if let EvalValue::Dict(m) = &row0 {
+            assert_eq!(as_str(m.get("nombre")), "Ana");
+            assert_eq!(as_int(m.get("edad")), 30);
+            assert!(as_bool(m.get("activo")));
+        } else { panic!("row(0) no devolvió dict"); }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Un archivo que no es .odf (magic incorrecto) debe fallar limpio, no panic.
+    #[test]
+    fn odf_load_rechaza_archivo_invalido() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("orion_odf_bad_{}.odf", std::process::id()));
+        std::fs::write(&path, b"esto no es un odf").unwrap();
+        let r = call("load_odf", vec![EvalValue::Str(path.to_str().unwrap().into())]);
+        assert!(r.is_err(), "debería rechazar un archivo con magic inválido");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// from_txt con separador configurable parsea columnas tipadas.
+    #[test]
+    fn from_txt_separador_configurable() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("orion_txt_{}.txt", std::process::id()));
+        std::fs::write(&path, "nombre;edad;monto\nAna;30;1200.5\nLuis;25;980.0\n").unwrap();
+
+        let h = handle(call("from_txt", vec![
+            EvalValue::Str(path.to_str().unwrap().into()),
+            EvalValue::Str(";".into()),
+        ]).unwrap());
+
+        let size = call("size", vec![EvalValue::Str(h.clone())]).unwrap();
+        if let EvalValue::Dict(m) = &size {
+            match m.get("rows") { Some(EvalValue::Int(2)) => {}, o => panic!("rows != 2: {:?}", o) }
+            match m.get("cols") { Some(EvalValue::Int(3)) => {}, o => panic!("cols != 3: {:?}", o) }
+        } else { panic!("size no devolvió dict"); }
+
+        // el separador ';' se respetó → "edad" es una columna numérica real
+        let suma = call("sum", vec![EvalValue::Str(h), EvalValue::Str("edad".into())]).unwrap();
+        match suma { EvalValue::Float(f) => assert!((f - 55.0).abs() < 1e-9), o => panic!("suma edad: {:?}", o) }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// to_excel reparte en varias hojas cuando el frame supera split_por.
+    #[test]
+    fn to_excel_parte_por_split() {
+        // 5 filas via from_list
+        let rows = EvalValue::List((0..5).map(|i| {
+            dict(&[("id", EvalValue::Int(i)), ("v", EvalValue::Float(i as f64 * 1.5))])
+        }).collect());
+        let h = handle(call("from_list", vec![rows]).unwrap());
+
+        let mut path = std::env::temp_dir();
+        path.push(format!("orion_xlsx_{}.xlsx", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+
+        // split_por = 2 → ceil(5/2) = 3 hojas
+        let msg = call("to_excel", vec![
+            EvalValue::Str(h), EvalValue::Str(p.clone()), EvalValue::Int(2),
+        ]).unwrap();
+        match msg {
+            EvalValue::Str(s) => assert!(s.contains("3 hoja"), "esperaba 3 hojas: {}", s),
+            o => panic!("to_excel no devolvió str: {:?}", o),
+        }
+        assert!(path.exists(), "el xlsx no se creó");
+        let _ = std::fs::remove_file(&path);
     }
 }
