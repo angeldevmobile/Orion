@@ -9,11 +9,11 @@
 use crate::eval_value::EvalValue;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-//   tipos columna                               ─
+//   tipos columna                                
 
 #[derive(Clone)]
 enum Col {
@@ -88,9 +88,46 @@ fn new_handle() -> String {
     format!("frame_{}", COUNTER.fetch_add(1, Ordering::SeqCst))
 }
 
-//   parsing CSV                                ─
+//   barra de progreso (streaming)               ─
+//
+// Feedback honesto para operaciones largas: refleja trabajo REAL (filas y
+// archivos procesados), no un porcentaje falso. Solo se dibuja si stderr es una
+// terminal interactiva — nada de ruido en pipes, tests o CI.
 
-fn parse_delim_chunk(reader: &mut BufReader<File>, sep: &str, limit: usize) -> (Vec<String>, Vec<Vec<String>>) {
+/// Formatea un conteo grande de forma legible: 1234567 → "1.23M".
+fn humaniza(n: usize) -> String {
+    if n >= 1_000_000 { format!("{:.2}M", n as f64 / 1_000_000.0) }
+    else if n >= 1_000 { format!("{:.1}k", n as f64 / 1_000.0) }
+    else { n.to_string() }
+}
+
+struct Progress { on: bool, frame: usize, label: &'static str }
+
+impl Progress {
+    fn new(label: &'static str) -> Self {
+        Progress { on: std::io::stderr().is_terminal(), frame: 0, label }
+    }
+    /// Redibuja el spinner con el conteo actual (in situ, sobre la misma línea).
+    fn tick(&mut self, filas: usize, archivos: usize) {
+        if !self.on { return; }
+        const SP: [&str; 10] = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+        let f = SP[self.frame % SP.len()];
+        self.frame += 1;
+        eprint!("\r  \x1b[94m\x1b[1m{f}\x1b[0m  \x1b[2m{}\x1b[0m  \x1b[96m{}\x1b[0m filas  \x1b[2m·\x1b[0m  {} archivo(s)   ",
+            self.label, humaniza(filas), archivos);
+        let _ = std::io::stderr().flush();
+    }
+    /// Limpia la línea del spinner (el llamador imprime luego su resumen).
+    fn finish(&self) {
+        if !self.on { return; }
+        eprint!("\r{:<72}\r", "");
+        let _ = std::io::stderr().flush();
+    }
+}
+
+//   parsing CSV
+
+fn parse_delim_chunk<R: BufRead>(reader: &mut R, sep: &str, limit: usize) -> (Vec<String>, Vec<Vec<String>>) {
     let mut headers = Vec::new();
     let mut rows: Vec<Vec<String>> = Vec::new();
     for (i, line) in reader.lines().enumerate() {
@@ -184,19 +221,33 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-//   carga                                   ─
+//   carga                                    
 
+/// open(ruta) — carga un frame detectando el formato AUTOMÁTICAMENTE.
+///
+/// El usuario nunca elige el formato ni escribe `.odf`: `open` mira los primeros
+/// bytes y decide. Si es binario .odf → lo lee directo (rápido); si es texto →
+/// lo parsea como CSV. Una sola función para todo; el binario es un detalle
+/// interno, no algo que el usuario seleccione.
 fn fn_open(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let path = match args.first() {
         Some(EvalValue::Str(s)) => s.clone(),
-        _ => return Err("frame.open(ruta_csv)".into()),
+        _ => return Err("frame.open(ruta)".into()),
     };
-    let file = File::open(&path).map_err(|e| format!("frame.open: {}", e))?;
-    let mut reader = BufReader::new(file);
-    let (headers, rows) = parse_delim_chunk(&mut reader, ",", 0); // 0 = sin límite
-    if headers.is_empty() { return Err("frame.open: archivo vacío o sin cabecera".into()); }
-    let n = rows.len();
-    let cols = infer_columns(&headers, &rows);
+    let data = std::fs::read(&path).map_err(|e| format!("frame.open: {}", e))?;
+
+    let (cols, n) = if is_odf(&data) {
+        // binario .odf → lectura directa
+        deserialize_odf(&data).map_err(|e| e.replace("frame:", "frame.open:"))?
+    } else {
+        // texto (CSV) → parseo delimitado
+        let mut reader = BufReader::new(std::io::Cursor::new(data));
+        let (headers, rows) = parse_delim_chunk(&mut reader, ",", 0);
+        if headers.is_empty() { return Err("frame.open: archivo vacío o sin cabecera".into()); }
+        let n = rows.len();
+        (infer_columns(&headers, &rows), n)
+    };
+
     let id = new_handle();
     with_frames(|fs| fs.insert(id.clone(), Frame { cols, rows: n }));
     Ok(EvalValue::Str(id))
@@ -294,7 +345,7 @@ fn fn_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-// ── Streaming TXT → Excel (memoria acotada) ──────────────────────────────────
+//    Streaming TXT → Excel (memoria acotada)                                   
 //
 // txt_to_excel(txt, base, sep = ",", split_por = 1_048_575)
 //
@@ -339,6 +390,9 @@ fn write_one_excel_chunk(
     sep: &str,
     reader: &mut BufReader<File>,
     split: usize,
+    prog: &mut Progress,
+    total_before: usize,
+    file_idx: usize,
 ) -> Result<usize, String> {
     use rust_xlsxwriter::{Workbook, Format, Color};
 
@@ -372,6 +426,7 @@ fn write_one_excel_chunk(
             write_txt_row(ws, r, &line, sep, headers.len())?;
             r += 1;
             n += 1;
+            if n % 25_000 == 0 { prog.tick(total_before + n, file_idx); }
         }
         count = n;
     }
@@ -409,14 +464,17 @@ fn fn_txt_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
     let mut file_idx = 0usize;
     let mut total = 0usize;
+    let mut prog = Progress::new("Escribiendo Excel");
     loop {
         let path = format!("{}_{}.xlsx", out_base, file_idx + 1);
-        let n = write_one_excel_chunk(&path, &headers, &sep, &mut reader, split)?;
+        let n = write_one_excel_chunk(&path, &headers, &sep, &mut reader, split, &mut prog, total, file_idx)?;
         if n == 0 { break; }
         file_idx += 1;
         total += n;
+        prog.tick(total, file_idx);
         if n < split { break; } // último chunk parcial
     }
+    prog.finish();
 
     Ok(EvalValue::Str(format!(
         "Streaming TXT→Excel: {} filas en {} archivo(s) ({}_1.xlsx …)",
@@ -455,7 +513,7 @@ fn fn_from_list(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-//   exploración                                ─
+//   exploración                                 
 
 fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
@@ -467,9 +525,9 @@ fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         let widths: Vec<usize> = f.cols.iter().map(|(name, _)| name.len().max(8)).collect();
         // header
         let header: Vec<String> = f.cols.iter().map(|(n, _)| n.clone()).collect();
-        println!("┌{}┐", widths.iter().map(|w| "─".repeat(w + 2)).collect::<Vec<_>>().join("┬"));
+        println!("┌{}┐", widths.iter().map(|w| " ".repeat(w + 2)).collect::<Vec<_>>().join("┬"));
         println!("│{}│", header.iter().zip(&widths).map(|(h, w)| format!(" {:width$} ", h, width=w)).collect::<Vec<_>>().join("│"));
-        println!("├{}┤", widths.iter().map(|w| "─".repeat(w + 2)).collect::<Vec<_>>().join("┼"));
+        println!("├{}┤", widths.iter().map(|w| " ".repeat(w + 2)).collect::<Vec<_>>().join("┼"));
         for i in 0..show {
             let row: Vec<String> = f.cols.iter().zip(&widths).map(|((_, col), w)| {
                 let val = match col {
@@ -482,7 +540,7 @@ fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }).collect();
             println!("│{}│", row.join("│"));
         }
-        println!("└{}┘", widths.iter().map(|w| "─".repeat(w + 2)).collect::<Vec<_>>().join("┴"));
+        println!("└{}┘", widths.iter().map(|w| " ".repeat(w + 2)).collect::<Vec<_>>().join("┴"));
         if f.rows > show { println!("  ... {} filas en total", f.rows); }
         Ok(EvalValue::Null)
     })
@@ -545,7 +603,7 @@ fn fn_to_list(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-//   selección                                 ─
+//   selección                                  
 
 fn fn_keep(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.keep(handle, [cols])".into()); }
@@ -807,7 +865,7 @@ fn fn_group(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-//   columna calculada                             ─
+//   columna calculada                              
 
 fn fn_add_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 3 { return Err("frame.add_col(handle, nombre, lista_valores)".into()); }
@@ -952,7 +1010,7 @@ fn fn_save(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-//   formato binario .odf                        ─
+//   formato binario .odf                         
 //
 // Capa 1 del motor de datos: columnar en disco, en binario crudo.
 // Layout (little-endian):
@@ -1054,6 +1112,7 @@ fn fn_txt_to_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
     let mut file_idx = 0usize;
     let mut total = 0usize;
+    let mut prog = Progress::new("Convirtiendo a binario .odf");
     loop {
         // leer hasta `chunk` filas
         let mut rows: Vec<Vec<String>> = Vec::new();
@@ -1069,6 +1128,7 @@ fn fn_txt_to_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
                         .map(|s| s.trim().trim_matches('"').to_string())
                         .collect();
                     rows.push(fields);
+                    if rows.len() % 25_000 == 0 { prog.tick(total + rows.len(), file_idx); }
                 }
                 Err(_) => break,
             }
@@ -1083,8 +1143,10 @@ fn fn_txt_to_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         let path = format!("{}_{}.odf", out_base, file_idx);
         std::fs::write(&path, &buf).map_err(|e| format!("frame.txt_to_odf: {}", e))?;
         total += n;
+        prog.tick(total, file_idx);
         if n < chunk { break; } // último chunk parcial
     }
+    prog.finish();
 
     Ok(EvalValue::Str(format!(
         "Streaming TXT→.odf: {} filas en {} archivo(s) ({}_1.odf …)",
@@ -1092,29 +1154,30 @@ fn fn_txt_to_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     )))
 }
 
-fn fn_load_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
-    let path = arg_str(&args, 0, "frame.load_odf")?;
-    let data = std::fs::read(&path).map_err(|e| format!("frame.load_odf: {}", e))?;
-    let mut p = 0usize;
+/// True si los bytes empiezan con el magic de un archivo .odf.
+fn is_odf(data: &[u8]) -> bool {
+    data.len() >= 4 && &data[0..4] == ODF_MAGIC
+}
 
-    // Comprueba que quedan al menos $n bytes desde la posición actual.
+/// Deserializa bytes .odf (ODF1) a columnas + nº de filas.
+fn deserialize_odf(data: &[u8]) -> Result<(Vec<(String, Col)>, usize), String> {
+    let mut p = 0usize;
     macro_rules! need {
         ($n:expr) => {
             if p + $n > data.len() {
-                return Err("frame.load_odf: archivo .odf truncado o corrupto".into());
+                return Err("frame: archivo .odf truncado o corrupto".into());
             }
         };
     }
 
     need!(4);
     if &data[0..4] != ODF_MAGIC {
-        return Err("frame.load_odf: no es un .odf válido (magic incorrecto)".into());
+        return Err("frame: no es un .odf válido (magic incorrecto)".into());
     }
     p = 4;
     need!(8); let n_rows = u64::from_le_bytes(data[p..p+8].try_into().unwrap()) as usize; p += 8;
     need!(4); let n_cols = u32::from_le_bytes(data[p..p+4].try_into().unwrap()) as usize; p += 4;
 
-    // metadatos
     let mut metas: Vec<(u8, String)> = Vec::with_capacity(n_cols);
     for _ in 0..n_cols {
         need!(1); let tag = data[p]; p += 1;
@@ -1123,7 +1186,6 @@ fn fn_load_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         metas.push((tag, name));
     }
 
-    // datos
     let mut cols: Vec<(String, Col)> = Vec::with_capacity(n_cols);
     for (tag, name) in metas {
         let col = match tag {
@@ -1142,17 +1204,23 @@ fn fn_load_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
                        need!(sl); v.push(String::from_utf8_lossy(&data[p..p+sl]).into_owned()); p += sl;
                    }
                    Col::Str(v) }
-            _ => return Err(format!("frame.load_odf: tag de columna desconocido ({})", tag)),
+            _ => return Err(format!("frame: tag de columna desconocido ({})", tag)),
         };
         cols.push((name, col));
     }
+    Ok((cols, n_rows))
+}
 
+fn fn_load_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    let path = arg_str(&args, 0, "frame.load_odf")?;
+    let data = std::fs::read(&path).map_err(|e| format!("frame.load_odf: {}", e))?;
+    let (cols, rows) = deserialize_odf(&data).map_err(|e| e.replace("frame:", "frame.load_odf:"))?;
     let id = new_handle();
-    with_frames(|fs| fs.insert(id.clone(), Frame { cols, rows: n_rows }));
+    with_frames(|fs| fs.insert(id.clone(), Frame { cols, rows }));
     Ok(EvalValue::Str(id))
 }
 
-//   arg helpers                                ─
+//   arg helpers                                 
 
 fn arg_handle(args: &[EvalValue], pos: usize) -> Result<String, String> {
     match args.get(pos) {
@@ -1178,7 +1246,7 @@ fn arg_str_list(args: &[EvalValue], pos: usize) -> Result<Vec<String>, String> {
     }
 }
 
-//   tests                                       ─
+//   tests                                        
 
 #[cfg(test)]
 mod tests {
@@ -1322,6 +1390,32 @@ mod tests {
         // limpieza
         let _ = std::fs::remove_file(&txt);
         for i in 1..=3 { let _ = std::fs::remove_file(format!("{}_{}.xlsx", base_str, i)); }
+    }
+
+    /// open() detecta el formato solo: la MISMA función lee .odf binario sin que
+    /// el usuario escriba load_odf ni elija formato.
+    #[test]
+    fn open_autodetecta_odf() {
+        // frame desde una lista → guardar como .odf
+        let rows = EvalValue::List((1..=4).map(|i| {
+            dict(&[("id", EvalValue::Int(i)), ("v", EvalValue::Float(i as f64 * 2.5))])
+        }).collect());
+        let h = handle(call("from_list", vec![rows]).unwrap());
+
+        let mut path = std::env::temp_dir();
+        path.push(format!("orion_autodetect_{}.odf", std::process::id()));
+        let p = path.to_str().unwrap().to_string();
+        call("save_odf", vec![EvalValue::Str(h), EvalValue::Str(p.clone())]).unwrap();
+
+        // abrir con open() (NO load_odf) → debe auto-detectar el binario
+        let h2 = handle(call("open", vec![EvalValue::Str(p.clone())]).unwrap());
+        let size = call("size", vec![EvalValue::Str(h2.clone())]).unwrap();
+        if let EvalValue::Dict(m) = &size {
+            match m.get("rows") { Some(EvalValue::Int(4)) => {}, o => panic!("rows: {:?}", o) }
+            match m.get("cols") { Some(EvalValue::Int(2)) => {}, o => panic!("cols: {:?}", o) }
+        } else { panic!("size no dict"); }
+
+        let _ = std::fs::remove_file(&path);
     }
 
     /// txt_to_odf transmite el TXT a varios .odf binarios (memoria acotada) y

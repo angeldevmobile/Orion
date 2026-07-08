@@ -83,6 +83,9 @@ pub fn print_banner() {
     println!("  {BWHITE}{BOLD}  Language Runtime{RESET}  {DIM}v0.4.0{RESET}  \
               {DIM}·{RESET}  {BCYAN}Fast · Safe · Expressive{RESET}");
     println!("  {ORANGE}{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{RESET}");
+    // Capacidades reales — da confianza de que es un runtime serio
+    println!("  {DIM}JIT nativo{RESET} {BBLUE}·{RESET} {DIM}Motor de datos{RESET} {BBLUE}·{RESET} \
+              {DIM}GUI / TUI{RESET} {BBLUE}·{RESET} {DIM}Paquetes{RESET} {BBLUE}·{RESET} {DIM}FFI{RESET}");
     println!();
 }
 

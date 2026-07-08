@@ -1,0 +1,30 @@
+-- demo_progress.orx — barra de progreso y spinner, escritos EN ORION.
+--
+-- Toda la UI viene del paquete packages/progress.orx (Orion puro); el runtime
+-- solo aporta el primitivo `term`. Córrelo en una terminal real para verlo:
+--
+--   orion run demo/demo_progress.orx
+--
+-- (En un pipe o redirigido a archivo se auto-silencia — así no ensucia la salida.)
+
+use "packages/progress" as pg
+use "tarea" as tarea
+
+-- 1) Barra determinada: cuando conoces el total.
+show "Descargando paquetes:"
+for i in range(0, 101) {
+    pg.barra(i, 100)
+    tarea.sleep(12)
+}
+pg.fin()
+show "  \x1b[32m✓\x1b[0m 100 paquetes listos"
+show ""
+
+-- 2) Spinner indeterminado: cuando NO conoces el total (streaming).
+show "Procesando flujo de datos:"
+for i in range(0, 45) {
+    pg.spinner(i, "Leyendo filas")
+    tarea.sleep(55)
+}
+pg.fin()
+show "  \x1b[32m✓\x1b[0m flujo completado"

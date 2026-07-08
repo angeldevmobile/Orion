@@ -1,0 +1,47 @@
+-- progress.orx — barras de progreso y spinners para la terminal.
+--
+-- Escrito 100% en Orion: toda la lógica visual (marcos, colores, ancho) vive
+-- aquí, NO en el runtime. El runtime solo aporta el primitivo `term` (escribir
+-- crudo + detectar terminal). Copia y edita este archivo para tu propio estilo.
+--
+--   use "packages/progress" as pg
+--   for i in range(0, 100) { pg.barra(i, 100) }
+--   pg.fin()
+
+use "term" as term
+
+-- Barra determinada: [████░░░] 60%  — cuando conoces el total.
+--   barra(actual, total)          → ancho 30
+--   barra(actual, total, ancho)   → ancho a elección
+fn barra(actual, total, ancho = 30) {
+    if not term.is_etty() { return no }   -- silencio en pipes/archivos/CI
+    if total <= 0 { return no }
+
+    frac = float(actual) / float(total)
+    if frac > 1.0 { frac = 1.0 }
+    llenos = int(frac * float(ancho))
+    vacios = ancho - llenos
+    pct = int(frac * 100.0)
+
+    barra_txt = "█".repeat(llenos)
+    resto_txt = "░".repeat(vacios)
+    linea = "\r  \x1b[94m[\x1b[1m" + barra_txt + "\x1b[0m\x1b[2m" + resto_txt + "\x1b[0m\x1b[94m]\x1b[0m  \x1b[38;5;208m\x1b[1m" + str(pct) + "%\x1b[0m   "
+    term.err(linea)
+    return yes
+}
+
+-- Spinner indeterminado: cuando NO conoces el total (streaming).
+--   spinner(paso, etiqueta) — llama con paso creciente 0,1,2,...
+fn spinner(paso, etiqueta = "Procesando") {
+    if not term.is_etty() { return no }
+    marcos = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    f = marcos[paso % 10]
+    term.err("\r  \x1b[94m\x1b[1m" + f + "\x1b[0m  \x1b[2m" + etiqueta + "...\x1b[0m   ")
+    return yes
+}
+
+-- Termina cualquier barra/spinner: limpia la línea para que el siguiente
+-- `show` empiece limpio.
+fn fin() {
+    if term.is_etty() { term.clear_line() }
+}

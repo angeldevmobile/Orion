@@ -171,11 +171,18 @@ fn main() {
         SetConsoleCP(65001);
     }
 
-    let args: Vec<String> = std_env::args().collect();
+    let mut args: Vec<String> = std_env::args().collect();
 
     if args.len() < 2 {
         run_repl();
         return;
+    }
+
+    // Subcomandos modernos (estilo cargo/npm/git): `orion run x.orx`. Se
+    // normalizan a su flag equivalente para reusar el dispatch; los flags
+    // `--run` siguen funcionando (retrocompatibilidad total).
+    if let Some(flag) = subcommand_to_flag(&args[1]) {
+        args[1] = flag.to_string();
     }
 
     match args[1].as_str() {
@@ -547,6 +554,16 @@ fn main() {
 
         //    Ejecutar .orx directamente o cargar .orbc
         path => {
+            // Si no parece un archivo y no existe, es un comando mal escrito.
+            if !path.ends_with(".orx") && !path.ends_with(".orbc")
+                && !std::path::Path::new(path).exists()
+            {
+                cli::banner::fail(&format!("Comando o archivo desconocido: '{path}'"));
+                eprintln!("  Prueba con {BOLD}orion help{RESET} para ver los comandos.",
+                    BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
+                std::process::exit(1);
+            }
+
             let t_total = Instant::now();
 
             // Guardamos el source para poder renderizar errores con contexto
@@ -603,48 +620,94 @@ fn print_hotspots(machine: &vm::VM) {
     eprintln!("  Tip: usa 'orion --jit <archivo.orx>' para compilar con Cranelift.");
 }
 
-//    Helpers                                                                   
+//    Helpers
+
+/// Traduce un subcomando moderno (`run`, `build`, `add`, …) a su flag `--x`.
+/// Devuelve `None` si no es un subcomando conocido (p.ej. una ruta de archivo).
+fn subcommand_to_flag(s: &str) -> Option<&'static str> {
+    Some(match s {
+        "run"                 => "--run",
+        "jit"                 => "--jit",
+        "compile"             => "--compile",
+        "build"               => "--build",
+        "check"               => "--check",
+        "test"                => "--test",
+        "repl"                => "--repl",
+        "new"                 => "--new",
+        "add" | "install"     => "--add",
+        "remove" | "uninstall"=> "--remove",
+        "list"                => "--list",
+        "search"              => "--search",
+        "update" | "upgrade"  => "--update",
+        "publish"             => "--publish",
+        "fmt" | "format"      => "--format",
+        "doctor"              => "--doctor",
+        "bench"               => "--bench",
+        "watch"               => "--watch",
+        "docs"                => "--docs",
+        "debug"               => "--debug",
+        "dap"                 => "--dap",
+        "lex"                 => "--lex",
+        "version"             => "--version",
+        "help"                => "--help",
+        _ => return None,
+    })
+}
 
 fn print_help() {
-    cli::banner::animate_startup();
+    // Sin animación de arranque: `help` debe ser instantáneo.
     cli::banner::print_banner();
     println!("  {BOLD}Uso:{RESET}  orion <comando> [opciones]",
         BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
     println!();
 
-    let cmds = [
-        ("--run  <archivo.orx>",         "Compilar y ejecutar  [--no-typecheck]"),
-        ("--jit  <archivo.orx>",         "Compilar y ejecutar con JIT Cranelift"),
-        ("--compile <archivo.orx>",       "Compilar a .orbc (bytecode)"),
-        ("--build <archivo.orx>",         "Compilar a ejecutable nativo  [-o salida]"),
-        ("--check <archivo.orx>",         "Verificar sintaxis  [--types]"),
-        ("--debug <archivo.orx>",         "Debugger interactivo (breakpoints, step, watches)"),
-        ("--dap   <archivo.orx>",         "DAP server stdio para VS Code"),
-        ("--watch <archivo.orx>",         "Hot reload automático"),
-        ("--bench <archivo.orx>",         "Benchmark  [--runs=N]"),
-        ("--test [carpeta]",              "Ejecutar tests (test_*.orx)"),
-        ("--doctor",                      "Verificar entorno"),
-        ("--new <proyecto>",              "Crear scaffold de proyecto"),
-        ("--repl",                        "Modo interactivo"),
-        ("--lex  <archivo.orx>",          "Imprimir tokens"),
-        ("--format <archivo.orx>",          "Formatear código fuente  [--write]"),
-        ("--docs <archivo|carpeta>",       "Generar docs Markdown  [--output=dir]"),
-        ("--builtins-json",                "Registro de builtins en JSON (para el LSP)"),
-        ("--add  <paquete>",              "Instalar paquete  [--force]"),
-        ("--remove <paquete>",            "Desinstalar paquete"),
-        ("--list",                        "Listar paquetes disponibles"),
-        ("--search <consulta>",           "Buscar paquetes"),
-        ("--update [paquete]",            "Actualizar uno o todos"),
-        ("--publish",                     "Publicar paquete al registry (requiere orion.json)"),
-        ("--version",                     "Versión del runtime"),
+    // Grupos de subcomandos (estilo moderno). Los flags `--x` siguen valiendo.
+    let groups: [(&str, &[(&str, &str)]); 4] = [
+        ("Ejecutar y compilar", &[
+            ("run <archivo.orx>",     "Compilar y ejecutar  [--no-typecheck]"),
+            ("jit <archivo.orx>",     "Ejecutar con JIT Cranelift"),
+            ("build <archivo.orx>",   "Compilar a ejecutable nativo  [-o salida]"),
+            ("compile <archivo.orx>", "Compilar a .orbc (bytecode)"),
+            ("check <archivo.orx>",   "Verificar sintaxis y tipos  [--types]"),
+        ]),
+        ("Proyecto", &[
+            ("new <proyecto>",        "Crear scaffold de proyecto"),
+            ("test [carpeta]",        "Ejecutar tests (test_*.orx)"),
+            ("repl",                  "Modo interactivo"),
+            ("doctor",                "Verificar el entorno"),
+        ]),
+        ("Paquetes", &[
+            ("add <paquete>",         "Instalar paquete  [--force]  (alias: install)"),
+            ("remove <paquete>",      "Desinstalar paquete  (alias: uninstall)"),
+            ("list",                  "Listar paquetes disponibles"),
+            ("search <consulta>",     "Buscar paquetes"),
+            ("update [paquete]",      "Actualizar uno o todos"),
+            ("publish",               "Publicar al registry (requiere orion.json)"),
+        ]),
+        ("Herramientas", &[
+            ("fmt <archivo.orx>",     "Formatear código fuente  [--write]  (alias: format)"),
+            ("watch <archivo.orx>",   "Hot reload automático"),
+            ("bench <archivo.orx>",   "Benchmark  [--runs=N]"),
+            ("debug <archivo.orx>",   "Debugger interactivo (breakpoints, step, watch)"),
+            ("docs <archivo|carpeta>","Generar docs Markdown  [--output=dir]"),
+            ("lex <archivo.orx>",     "Imprimir tokens"),
+        ]),
     ];
 
-    let dim  = cli::banner::DIM;
-    let rst  = cli::banner::RESET;
-    let cyan = cli::banner::CYAN;
-    for (cmd, desc) in &cmds {
-        println!("  {cyan}{cmd:<32}{rst} {dim}{desc}{rst}");
+    let dim   = cli::banner::DIM;
+    let rst   = cli::banner::RESET;
+    let cyan  = cli::banner::CYAN;
+    let bold  = cli::banner::BOLD;
+    for (titulo, cmds) in &groups {
+        println!("  {bold}{titulo}{rst}");
+        for (cmd, desc) in *cmds {
+            println!("    {cyan}{cmd:<26}{rst} {dim}{desc}{rst}");
+        }
+        println!();
     }
+    println!("  {dim}Atajo:{rst}  orion <archivo.orx>        {dim}ejecuta directamente (= orion run)");
+    println!("  {dim}Ayuda:{rst}  orion help  ·  orion version");
+    println!("  {dim}Los flags clásicos (--run, --build, …) siguen funcionando.{rst}");
     println!();
 }
 

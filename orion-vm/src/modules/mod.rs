@@ -3,6 +3,7 @@ pub mod fs;
 pub mod json_mod;
 pub mod random_mod;
 pub mod strings_mod;
+pub mod term_mod;
 pub mod datetime_mod;
 pub mod process_mod;
 pub mod env_mod;
@@ -89,6 +90,7 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "json"     => json_mod::call(function, args),
         "random"   => random_mod::call(function, args),
         "strings"  => strings_mod::call(function, args),
+        "term"     => term_mod::call(function, args),
         "datetime" => datetime_mod::call(function, args),
         "process"  => process_mod::call(function, args),
         "env"      => env_mod::call(function, args),
@@ -161,7 +163,7 @@ pub fn is_known_module(name: &str) -> bool {
     matches!(
         name,
         // Básicos
-        "fs" | "json" | "random" | "strings" | "datetime" |
+        "fs" | "json" | "random" | "strings" | "term" | "datetime" |
         "process" | "env" | "net" |
         // Avanzados
         "ai" | "crypto" | "matrix" | "quantum" |
