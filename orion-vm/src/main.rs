@@ -12,6 +12,7 @@ mod ast;
 mod lexer;
 mod parser;
 mod codegen;
+mod named_args;
 mod pkg;
 mod typechecker;
 mod cli;

@@ -359,9 +359,17 @@ impl JitCompiler {
         let eligible = |instr: &Instruction| -> bool {
             match instr {
                 // Un Call resuelve a: función de usuario, shape, o builtin puenteable.
-                Instruction::Call(name, _) =>
-                    callable.contains(name.as_str())
-                        || super::bridge::is_jit_builtin(name.as_str()),
+                Instruction::Call(name, argc) => {
+                    if let Some(f) = bc.functions.get(name.as_str()) {
+                        // Si la llamada usa valores por defecto (menos args que
+                        // params), el JIT no los rellena → fallback al intérprete.
+                        *argc as usize == f.params.len()
+                    } else if bc.shapes.contains_key(name.as_str()) {
+                        true
+                    } else {
+                        super::bridge::is_jit_builtin(name.as_str())
+                    }
+                }
                 // Async solo sobre funciones de usuario (no builtins).
                 Instruction::CallAsync(name, _) => callable.contains(name.as_str()),
                 other => is_eligible(other),

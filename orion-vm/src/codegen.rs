@@ -7,7 +7,7 @@
 use indexmap::IndexMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::ast::{ActDef, Expr, FieldDef, Handler, Stmt};
+use crate::ast::{ActDef, Expr, FieldDef, Handler, Param, Stmt};
 
 static LAMBDA_COUNTER: AtomicUsize = AtomicUsize::new(0);
 use crate::bytecode::{ActDef as BcActDef, ExternFnDef, FieldDef as BcFieldDef, FunctionDef, OrionBytecode, ShapeDef};
@@ -29,7 +29,9 @@ impl std::fmt::Display for CodegenError {
 
 //    Punto de entrada                                                           
 
-pub fn compile(stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
+pub fn compile(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
+    // Pase previo: reordenar argumentos con nombre (`f(x = 1)`) a posicional.
+    crate::named_args::resolve(&mut stmts)?;
     let mut cg = Codegen::new();
     cg.compile_program(stmts)?;
     Ok(cg.into_bytecode())
@@ -95,11 +97,11 @@ impl Codegen {
         for stmt in &stmts {
             match stmt {
                 Stmt::Fn { name, params, body, .. } => {
-                    let fc = self.compile_fn_body(params.iter().map(|p| p.name.clone()).collect(), body)?;
+                    let fc = self.compile_fn_body(params, body)?;
                     self.functions.insert(name.clone(), fc);
                 }
                 Stmt::AsyncFn { name, params, body, .. } => {
-                    let fc = self.compile_fn_body(params.iter().map(|p| p.name.clone()).collect(), body)?;
+                    let fc = self.compile_fn_body(params, body)?;
                     self.functions.insert(name.clone(), fc);
                     self.async_fns.insert(name.clone());
                 }
@@ -134,7 +136,34 @@ impl Codegen {
 
     //    Función / act                                                          
 
-    fn compile_fn_body(&mut self, params: Vec<String>, body: &[Stmt]) -> Result<FunctionDef, CodegenError> {
+    fn compile_fn_body(&mut self, params: &[Param], body: &[Stmt]) -> Result<FunctionDef, CodegenError> {
+        // Defaults como mini-bytecode (igual que FieldDef.default). Regla: un
+        // parámetro con default no puede ir seguido de uno obligatorio, para que
+        // la ligadura posicional (rellenar la cola) sea inequívoca.
+        let mut param_defaults: Vec<Option<Vec<Instruction>>> = Vec::with_capacity(params.len());
+        let mut seen_default = false;
+        for p in params {
+            if let Some(default_expr) = &p.default {
+                seen_default = true;
+                let mut dfc = FnCompiler::new();
+                dfc.compile_expr(default_expr, &self.async_fns)?;
+                dfc.emit(Instruction::Return);
+                param_defaults.push(Some(dfc.instrs));
+            } else {
+                if seen_default {
+                    return Err(CodegenError {
+                        message: format!(
+                            "el parámetro '{}' no puede ir después de uno con valor por defecto",
+                            p.name
+                        ),
+                        line: 0,
+                    });
+                }
+                param_defaults.push(None);
+            }
+        }
+
+        let param_names: Vec<String> = params.iter().map(|p| p.name.clone()).collect();
         let mut fc = FnCompiler::new();
         for stmt in body {
             fc.compile_stmt(stmt, &self.async_fns)?;
@@ -145,7 +174,7 @@ impl Codegen {
         for (name, func) in fc.pending_lambdas.drain(..) {
             self.functions.insert(name, func);
         }
-        Ok(FunctionDef { params, body: fc.instrs, lines: fc.lines })
+        Ok(FunctionDef { params: param_names, body: fc.instrs, lines: fc.lines, param_defaults })
     }
 
     //    Shape                                                                  
@@ -926,6 +955,7 @@ impl FnCompiler {
                     params: params.iter().map(|p| p.name.clone()).collect(),
                     body: inner.instrs,
                     lines: inner.lines,
+                    param_defaults: Vec::new(),
                 }));
                 self.pending_lambdas.extend(inner.pending_lambdas);
                 // Crear closure y almacenarla como variable local con el nombre de la función
@@ -1022,7 +1052,18 @@ fn compile_expr_into(
             emit!(Instruction::MakeDict(n as u8));
         }
 
-        Expr::Call { callee, args, .. } => {
+        Expr::Call { callee, args, kwargs } => {
+            // Tras el pase de named_args, unos kwargs que sobreviven = no se
+            // pudieron resolver (función desconocida o callee dinámico).
+            if let Some((k, _)) = kwargs.first() {
+                return Err(CodegenError {
+                    message: format!(
+                        "argumento con nombre '{} = ...' no soportado aquí; solo en funciones de usuario conocidas",
+                        k
+                    ),
+                    line: current_line,
+                });
+            }
             if let Expr::Ident(fn_name) = callee.as_ref() {
                 if fn_name == "show" {
                     for a in args { recurse!(a); }
@@ -1043,7 +1084,16 @@ fn compile_expr_into(
             }
         }
 
-        Expr::CallMethod { method, receiver, args, .. } => {
+        Expr::CallMethod { method, receiver, args, kwargs } => {
+            if let Some((k, _)) = kwargs.first() {
+                return Err(CodegenError {
+                    message: format!(
+                        "argumento con nombre '{} = ...' no soportado en métodos; usa posicionales",
+                        k
+                    ),
+                    line: current_line,
+                });
+            }
             // super.metodo(args) → CallSuper (resuelve en el shape padre sobre self)
             if matches!(receiver.as_ref(), Expr::Ident(n) if n == "super") {
                 for a in args { recurse!(a); }
@@ -1114,6 +1164,7 @@ fn compile_expr_into(
                 params: params.clone(),
                 body: fc.instrs,
                 lines: fc.lines,
+                param_defaults: Vec::new(),
             }));
             extra_fns.extend(fc.pending_lambdas);
             // MakeClosure captura el scope actual en tiempo de ejecución

@@ -508,12 +508,7 @@ impl VM {
                 } else if let Some(func) = self.functions.get(&resolved_name).cloned() {
                     // Hotspot counter: registra cuántas veces se llama cada función
                     *self.call_counts.entry(resolved_name.clone()).or_insert(0) += 1;
-                    if args.len() != func.params.len() {
-                        return Err(format!(
-                            "'{}' espera {} argumento(s), recibió {}",
-                            resolved_name, func.params.len(), args.len()
-                        ));
-                    }
+                    args = self.bind_args_with_defaults(&func, args, &resolved_name)?;
                     let mut frame = CallFrame::with_args_named(
                         func.body, func.lines, &resolved_name, &func.params, args
                     );
@@ -1540,6 +1535,7 @@ impl VM {
         let func_def = self.functions.get(&fn_name)
             .ok_or_else(|| format!("Función '{}' no encontrada", fn_name))?
             .clone();
+        let args = self.bind_args_with_defaults(&func_def, args, &fn_name)?;
         let stack_depth = self.call_stack.len();
         let mut frame = CallFrame::with_args_named(
             func_def.body, func_def.lines, &fn_name, &func_def.params, args
@@ -1775,6 +1771,34 @@ impl VM {
             }
         }
         Ok(())
+    }
+
+    /// Ajusta los argumentos a la aridad de la función: si faltan, rellena la
+    /// cola con los valores por defecto (mini-bytecode). Error si sobran o si un
+    /// parámetro obligatorio quedó sin valor.
+    fn bind_args_with_defaults(
+        &mut self,
+        func: &FunctionDef,
+        mut args: Vec<Value>,
+        name: &str,
+    ) -> Result<Vec<Value>, String> {
+        let n = func.params.len();
+        if args.len() > n {
+            return Err(format!("'{}' espera {} argumento(s), recibió {}", name, n, args.len()));
+        }
+        while args.len() < n {
+            let i = args.len();
+            match func.param_defaults.get(i).and_then(|d| d.as_ref()) {
+                Some(instrs) => {
+                    let v = self.eval_mini_bytecode(instrs)?;
+                    args.push(v);
+                }
+                None => {
+                    return Err(format!("'{}' espera {} argumento(s), recibió {}", name, n, args.len()));
+                }
+            }
+        }
+        Ok(args)
     }
 
     fn eval_mini_bytecode(&mut self, instructions: &[Instruction]) -> Result<Value, String> {

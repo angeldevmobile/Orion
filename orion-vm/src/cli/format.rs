@@ -474,13 +474,13 @@ pub fn fmt_expr(expr: &Expr) -> String {
 
         Expr::Call { callee, args, kwargs } => {
             let mut all: Vec<String> = args.iter().map(fmt_expr).collect();
-            for (k, v) in kwargs { all.push(format!("{k}: {}", fmt_expr(v))); }
+            for (k, v) in kwargs { all.push(format!("{k} = {}", fmt_expr(v))); }
             format!("{}({})", fmt_expr(callee), all.join(", "))
         }
 
         Expr::CallMethod { method, receiver, args, kwargs } => {
             let mut all: Vec<String> = args.iter().map(fmt_expr).collect();
-            for (k, v) in kwargs { all.push(format!("{k}: {}", fmt_expr(v))); }
+            for (k, v) in kwargs { all.push(format!("{k} = {}", fmt_expr(v))); }
             format!("{}.{}({})", fmt_expr(receiver), method, all.join(", "))
         }
 

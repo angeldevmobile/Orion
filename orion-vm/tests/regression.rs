@@ -29,6 +29,67 @@ fn run_err(src: &str) -> String {
     machine.run().expect_err("se esperaba un error en tiempo de ejecución")
 }
 
+// ── Valores por defecto en parámetros ───────────────────────────────────────
+
+#[test]
+fn test_default_params_ok() {
+    run_ok("fn f(a, b = 5) { return a + b }\nx = f(1)\ny = f(1, 2)");
+}
+
+#[test]
+fn test_default_falta_arg_obligatorio() {
+    // 'a' es obligatorio; llamar f() debe fallar en runtime con mensaje claro.
+    let err = run_err("fn f(a, b = 5) { return a + b }\nshow f()");
+    assert!(err.contains("espera") && err.contains("recibió"),
+        "mensaje inesperado: {}", err);
+}
+
+#[test]
+fn test_default_demasiados_args() {
+    let err = run_err("fn f(a, b = 5) { return a + b }\nshow f(1, 2, 3)");
+    assert!(err.contains("espera 2"), "mensaje inesperado: {}", err);
+}
+
+#[test]
+fn test_default_orden_invalido_es_error_de_compilacion() {
+    // Un parámetro obligatorio después de uno con default: error en codegen.
+    let tokens = lexer::lex("fn mal(a = 1, b) { return a }").unwrap();
+    let stmts = parser::parse(tokens).unwrap();
+    let err = codegen::compile(stmts).expect_err("se esperaba error de compilación");
+    assert!(err.message.contains("no puede ir después"), "mensaje: {}", err.message);
+}
+
+// ── Argumentos con nombre (named args) ──────────────────────────────────────
+
+#[test]
+fn test_named_args_ok() {
+    run_ok("fn f(a, b = 2, c = 3) { return a + b + c }\nx = f(1, c = 9)\ny = f(c = 1, a = 2)");
+}
+
+fn compile_err(src: &str) -> String {
+    let tokens = lexer::lex(src).unwrap();
+    let stmts = parser::parse(tokens).unwrap();
+    codegen::compile(stmts).expect_err("se esperaba error de compilación").message
+}
+
+#[test]
+fn test_named_arg_param_inexistente() {
+    let e = compile_err("fn f(a, b = 2) { return a }\nshow f(a = 1, zzz = 9)");
+    assert!(e.contains("no tiene un parámetro"), "mensaje: {}", e);
+}
+
+#[test]
+fn test_named_arg_duplicado() {
+    let e = compile_err("fn f(a, b = 2) { return a }\nshow f(1, a = 9)");
+    assert!(e.contains("dado dos veces"), "mensaje: {}", e);
+}
+
+#[test]
+fn test_named_arg_en_funcion_desconocida_es_error() {
+    let e = compile_err("show desconocida(x = 1)");
+    assert!(e.contains("no soportado"), "mensaje: {}", e);
+}
+
 // ── Literales y aritmética ──────────────────────────────────────────────────
 
 #[test]

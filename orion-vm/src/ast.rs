@@ -25,7 +25,9 @@ pub enum Expr {
     List(Vec<Expr>),
     Dict(Vec<(String, Expr)>),
 
-    // Llamadas
+    // Llamadas. `kwargs` = argumentos con nombre (`f(x = 1)`); un pase previo a
+    // codegen los reordena a posicional para funciones de usuario. Lo que quede
+    // sin resolver, codegen lo rechaza con un error claro.
     Call   { callee: Box<Expr>, args: Vec<Expr>, kwargs: Vec<(String, Expr)> },
     CallMethod { method: String, receiver: Box<Expr>, args: Vec<Expr>, kwargs: Vec<(String, Expr)> },
 

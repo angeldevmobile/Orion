@@ -13,6 +13,12 @@ pub struct FunctionDef {
     pub body: Vec<Instruction>,
     #[serde(default)]
     pub lines: Vec<u32>,
+    /// Valor por defecto de cada parámetro, como mini-bytecode (igual que
+    /// `FieldDef.default`). `None` = parámetro obligatorio; `Some(instrs)` =
+    /// tiene default (los params con default deben ir al final). Vec vacío o más
+    /// corto que `params` ⇒ los faltantes son obligatorios (compat. con .orbc viejos).
+    #[serde(default)]
+    pub param_defaults: Vec<Option<Vec<Instruction>>>,
 }
 
 /// Valor por defecto de un campo de shape (mini-bytecode que evalúa al default)

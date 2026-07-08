@@ -533,3 +533,50 @@ fn diff_builtin_mixed_with_userfn() {
         "fn doble(n) { return n * 2 }\nxs = [1, 2, 3]\npush(xs, doble(5))\nshow xs\nshow str(sum(xs))",
     );
 }
+
+// ── Valores por defecto en parámetros ────────────────────────────────────────
+// Una llamada que omite args (usa defaults) hace que el JIT caiga al intérprete
+// (no rellena defaults); estos tests fijan que VM y JIT dan lo mismo igual.
+
+#[test]
+fn diff_default_params_omitidos() {
+    assert_vm_jit_match(
+        "fn saluda(nombre, saludo = \"Hola\", signo = \"!\") { return saludo + \", \" + nombre + signo }\n\
+         show saluda(\"Ana\")\n\
+         show saluda(\"Luis\", \"Buenas\")\n\
+         show saluda(\"Zoe\", \"Hey\", \"?\")",
+    );
+}
+
+#[test]
+fn diff_default_params_numericos() {
+    assert_vm_jit_match(
+        "fn suma(a, b = 10, c = 100) { return a + b + c }\n\
+         show str(suma(1))\n\
+         show str(suma(1, 2))\n\
+         show str(suma(1, 2, 3))",
+    );
+}
+
+// ── Argumentos con nombre (named args) ───────────────────────────────────────
+// El pase de named_args los reordena a posicional (rellenando huecos con
+// defaults) antes de compilar, así que VM y JIT ven el mismo bytecode posicional.
+
+#[test]
+fn diff_named_args_reordenados() {
+    assert_vm_jit_match(
+        "fn area(ancho, alto) { return ancho * alto }\n\
+         show str(area(alto = 3, ancho = 5))\n\
+         show str(area(5, alto = 4))",
+    );
+}
+
+#[test]
+fn diff_named_args_salta_opcional() {
+    assert_vm_jit_match(
+        "fn con(host, puerto = 5432, timeout = 30) { return puerto + timeout }\n\
+         show str(con(\"a\"))\n\
+         show str(con(\"a\", timeout = 60))\n\
+         show str(con(\"a\", puerto = 100))",
+    );
+}

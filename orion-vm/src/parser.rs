@@ -272,16 +272,24 @@ impl Parser {
         let mut kwargs = Vec::new();
 
         while !matches!(self.peek(), TokenKind::RParen | TokenKind::Eof) {
-            // kwarg: ident =
+            // argumento con nombre: `ident = expr`
             if let TokenKind::Ident(name) = self.peek().clone() {
                 if matches!(self.peek_at(1), TokenKind::Assign) {
-                    let n = name.clone();
-                    self.pos += 2; // skip name and '='
+                    self.pos += 2; // salta nombre y '='
                     let val = self.parse_expression()?;
-                    kwargs.push((n, val));
+                    kwargs.push((name, val));
                     if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }
                     continue;
                 }
+            }
+            // un posicional después de uno con nombre es ambiguo
+            if !kwargs.is_empty() {
+                let line = self.current_line();
+                let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
+                return Err(ParseError {
+                    message: "un argumento posicional no puede ir después de uno con nombre".to_string(),
+                    line, col,
+                });
             }
             args.push(self.parse_expression()?);
             if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }

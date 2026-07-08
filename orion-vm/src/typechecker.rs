@@ -623,7 +623,7 @@ impl TypeChecker {
     // Verifica los tipos de argumentos en una llamada a función
     fn check_call_types(&mut self, expr: &Expr) {
         match expr {
-            Expr::Call { callee, args, kwargs: _ } => {
+            Expr::Call { callee, args, .. } => {
                 if let Expr::Ident(fn_name) = callee.as_ref() {
                     let sig = self.fn_sigs.get(fn_name).cloned();
                     if let Some(sig) = sig {
@@ -749,7 +749,7 @@ impl TypeChecker {
                 if op == "not" { Some("bool".into()) } else { self.infer_type(expr) }
             }
 
-            Expr::Call { callee, args, kwargs: _ } => {
+            Expr::Call { callee, args, .. } => {
                 for arg in args { self.infer_type(arg); }
                 match callee.as_ref() {
                     // El nombre en posición de llamada es una FUNCIÓN/builtin, no
