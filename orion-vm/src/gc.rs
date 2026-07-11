@@ -319,6 +319,12 @@ mod tests {
 
         assert_eq!(freed, 0, "ninguno debe liberarse con un root activo");
         assert_eq!(gc.heap_size(), 2);
+
+        // Limpieza: romper el ciclo antes de salir (LSan exige exit limpio)
+        drop(roots);
+        drop(a);
+        drop(b);
+        assert_eq!(gc.collect(&[]), 2, "sin roots el ciclo debe liberarse");
     }
 
     #[test]
@@ -357,11 +363,17 @@ mod tests {
         if let Value::List(items) = &lst {
             let alias = Value::List(Rc::clone(items));
             items.borrow_mut().push(alias); // la lista se contiene a sí misma
+            gc.register_list(items);
         }
 
-        let freed = gc.collect(&[lst]);
+        let freed = gc.collect(&[lst.clone()]);
         assert_eq!(freed, 0, "la instancia dentro de la lista cíclica es alcanzable");
         assert_eq!(gc.heap_size(), 1);
+
+        // Limpieza: sin roots, el auto-ciclo debe liberarse (exit limpio)
+        drop(lst);
+        drop(inst);
+        gc.collect(&[]);
     }
 
     #[test]
@@ -378,11 +390,17 @@ mod tests {
             env: Rc::clone(&env),
         });
         env.borrow_mut().insert("dato".to_string(), Value::Instance(Rc::clone(&inst)));
+        gc.register_env(&env);
 
         let root = Value::Closure { fn_name: "rec".to_string(), env };
-        let freed = gc.collect(&[root]);
+        let freed = gc.collect(&[root.clone()]);
         assert_eq!(freed, 0, "la instancia capturada por el env cíclico es alcanzable");
         assert_eq!(gc.heap_size(), 1);
+
+        // Limpieza: sin roots, el env cíclico debe liberarse (exit limpio)
+        drop(root);
+        drop(inst);
+        gc.collect(&[]);
     }
 
     #[test]
@@ -460,6 +478,12 @@ mod tests {
         let freed = gc.collect(&[a.clone()]);
         assert_eq!(freed, 0);
         assert_eq!(ra.borrow().len(), 2, "contenido intacto: [1, a]");
+
+        // Limpieza: sin roots, el auto-ciclo debe liberarse (exit limpio)
+        let weak = Rc::downgrade(ra);
+        drop(a);
+        gc.collect(&[]);
+        assert!(weak.upgrade().is_none());
     }
 
     #[test]

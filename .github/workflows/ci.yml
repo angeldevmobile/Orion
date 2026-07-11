@@ -31,6 +31,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            orion-vm/target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('orion-vm/Cargo.lock') }}
+
       - name: cargo test (unit)
         run: cargo test --lib
 
@@ -45,3 +54,57 @@ jobs:
 
       - name: cargo test (stdlib smoke)
         run: cargo test --test modules_smoke
+
+  # ── Análisis dinámico: AddressSanitizer + LeakSanitizer ────────────────────
+  # Corre la suite completa con el heap instrumentado: detecta use-after-free,
+  # buffer overflows y FUGAS de memoria (LSan viene incluido en ASan en Linux
+  # y falla el job si al salir queda memoria inalcanzable sin liberar).
+  # Complementa al GC: los tests de ciclos verifican que el GC libera; esto
+  # verifica que NADA en el runtime (VM, JIT, módulos nativos) pierde bytes.
+  # Requiere nightly (-Zsanitizer). El --target explícito evita instrumentar
+  # build-scripts y proc-macros (fallarían).
+  sanitizer:
+    name: ASan + LeakSanitizer (nightly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: orion-vm
+    env:
+      RUSTFLAGS: "-Zsanitizer=address"
+      ASAN_OPTIONS: "detect_leaks=1"
+      RUST_BACKTRACE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libffi-dev libssl-dev libssh2-1-dev \
+            libx11-dev libxcb-composite0-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            orion-vm/target
+          key: ${{ runner.os }}-cargo-asan-${{ hashFiles('orion-vm/Cargo.lock') }}
+
+      # Se excluyen differential y differential_fuzz: ejecutan `orion --jit`
+      # y ASan no soporta código máquina generado en caliente (Cranelift) —
+      # el código JIT no está instrumentado y ASan lo reporta como fallo.
+      # La paridad VM↔JIT la cubre el job estable de arriba; aquí se vigila
+      # la memoria de la VM, el GC y los módulos nativos.
+      - name: cargo test bajo ASan + LSan
+        run: >
+          cargo test --lib --test regression --test typecheck
+          --test modules_smoke --test gui_reactive
+          --target x86_64-unknown-linux-gnu

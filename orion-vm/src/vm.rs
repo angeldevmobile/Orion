@@ -143,6 +143,16 @@ pub struct VM {
     call_counts: HashMap<String, u64>,
 }
 
+impl Drop for VM {
+    fn drop(&mut self) {
+        // No colectar durante un panic: un RefCell podría estar prestado y
+        // el borrow_mut del sweep convertiría el panic en abort.
+        if !std::thread::panicking() {
+            self.gc_teardown();
+        }
+    }
+}
+
 impl VM {
     pub fn new(
         main: Vec<Instruction>,
@@ -236,6 +246,14 @@ impl VM {
             }
         }
         self.gc.collect(&roots);
+    }
+
+    /// Pasada final del GC al morir la VM: sin roots, TODO lo registrado se
+    /// barre → los ciclos residuales (push(a,a), closures recursivas…) se
+    /// rompen y el Rc devuelve cada byte antes de salir del proceso. Es lo
+    /// que mantiene a Orion limpio bajo LeakSanitizer (CI job `sanitizer`).
+    fn gc_teardown(&mut self) {
+        self.gc.collect(&[]);
     }
 
     /// Construye una cadena de stack trace con todos los frames activos.

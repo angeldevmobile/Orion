@@ -571,7 +571,7 @@ fn render_table(ui: &mut egui::Ui, headers: &[String], rows: &[Vec<String>], hei
     egui::Frame::none()
         .fill(stripe_a)
         .rounding(egui::Rounding::same(8.0))
-        .stroke(egui::Stroke::new(1.0, border_color))
+        .stroke(egui::Stroke::new(1.0_f32, border_color))
         .show(ui, |ui| {
             egui::ScrollArea::both()
                 .max_height(height)
@@ -770,7 +770,7 @@ fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
                     let pts: PlotPoints = vals.iter().enumerate()
                         .map(|(i, &v)| [i as f64, v])
                         .collect();
-                    pu.line(Line::new(pts).name(name).color(color).width(2.0));
+                    pu.line(Line::new(pts).name(name).color(color).width(2.0_f32));
                 }
             });
         }
@@ -781,7 +781,7 @@ fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
                     let pts: PlotPoints = vals.iter().enumerate()
                         .map(|(i, &v)| [i as f64, v])
                         .collect();
-                    pu.line(Line::new(pts).name(name).color(color).width(2.0).fill(0.0));
+                    pu.line(Line::new(pts).name(name).color(color).width(2.0_f32).fill(0.0_f32));
                 }
             });
         }
@@ -792,7 +792,7 @@ fn render_chart(ui: &mut egui::Ui, cfg: &ChartConfig) {
                     let pts: PlotPoints = cfg.xs.iter().zip(vals.iter())
                         .map(|(&x, &y)| [x, y])
                         .collect();
-                    pu.points(Points::new(pts).name(name).color(color).radius(4.0));
+                    pu.points(Points::new(pts).name(name).color(color).radius(4.0_f32));
                 }
             });
         }
