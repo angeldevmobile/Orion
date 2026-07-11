@@ -1,0 +1,10 @@
+-- Estrés del GC: 200.000 listas cíclicas huérfanas (push(a, a) y rebind).
+-- Antes de la recolección de ciclos de listas (2026-07-11) esto fugaba
+-- ~79MB; con el GC extendido la RAM pico se queda en la línea base (~11MB).
+i = 0
+while i < 200000 {
+    a = [1]
+    push(a, a)
+    i = i + 1
+}
+show "fin"

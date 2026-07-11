@@ -1,0 +1,3 @@
+use "frame" as frame
+h = frame.open("data.csv")
+show frame.save_odf(h, "data.odf")

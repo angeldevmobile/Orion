@@ -1,0 +1,5 @@
+use "frame" as frame
+h = frame.open("data.odf")
+show frame.size(h)
+show frame.sum(h, "venta")
+show frame.mean(h, "venta")

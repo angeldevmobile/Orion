@@ -1,7 +1,7 @@
 use std::fmt;
 use std::rc::Rc;
 use indexmap::IndexMap;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
 /// Datos internos de una instancia de shape
@@ -9,6 +9,85 @@ use std::sync::{Arc, Mutex};
 pub struct InstanceData {
     pub shape_name: String,
     pub fields: IndexMap<String, Value>,
+}
+
+thread_local! {
+    /// Cola de valores pendientes de destruir (ver `Drop for InstanceData`
+    /// y `Drop for ListData`).
+    static DROP_QUEUE: RefCell<Vec<Value>> = RefCell::new(Vec::new());
+    /// `true` mientras un drop de nivel superior está drenando la cola.
+    static DROP_DRAINING: Cell<bool> = Cell::new(false);
+}
+
+/// Drena la cola de drops si nadie la está drenando ya. Los drops anidados
+/// que se disparan dentro del bucle solo encolan y retornan (guardado por
+/// `DROP_DRAINING`), así la profundidad de llamadas queda acotada sea cual
+/// sea la profundidad de la estructura que se destruye.
+fn drain_drop_queue() {
+    DROP_DRAINING.with(|draining| {
+        if draining.get() {
+            return; // ya hay un drenador más arriba en la pila
+        }
+        draining.set(true);
+        loop {
+            // Sacar con el borrow cerrado ANTES de soltar el valor: ese
+            // drop puede re-entrar aquí y volver a encolar.
+            let next = DROP_QUEUE.with(|q| q.borrow_mut().pop());
+            match next {
+                Some(v) => drop(v),
+                None => break,
+            }
+        }
+        draining.set(false);
+    });
+}
+
+/// Drop iterativo: sin esto, soltar una cadena de instancias enlazadas
+/// (nodo.next → nodo.next → …) destruye recursivamente y desborda el call
+/// stack nativo con ~100k nodos. En vez de descender, cada instancia mueve
+/// sus fields a la cola thread-local y deja que el drenador del nivel
+/// superior los suelte en un bucle.
+impl Drop for InstanceData {
+    fn drop(&mut self) {
+        if self.fields.is_empty() {
+            return;
+        }
+        DROP_QUEUE.with(|q| {
+            let mut q = q.borrow_mut();
+            for (_, v) in self.fields.drain(..) {
+                q.push(v);
+            }
+        });
+        drain_drop_queue();
+    }
+}
+
+/// Backing de una lista por referencia. Newtype sobre `Vec<Value>` con
+/// `Deref`/`DerefMut` para que el resto del código use la API de Vec como
+/// siempre; existe SOLO para poder colgarle el mismo Drop iterativo que a
+/// `InstanceData` — sin él, soltar listas anidadas a mucha profundidad
+/// ([[[[…]]]]) recorría la cadena Rc→RefCell→Vec→Value con el drop glue
+/// recursivo de Rust y desbordaba el stack.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListData(pub Vec<Value>);
+
+impl std::ops::Deref for ListData {
+    type Target = Vec<Value>;
+    fn deref(&self) -> &Vec<Value> { &self.0 }
+}
+
+impl std::ops::DerefMut for ListData {
+    fn deref_mut(&mut self) -> &mut Vec<Value> { &mut self.0 }
+}
+
+impl Drop for ListData {
+    fn drop(&mut self) {
+        if self.0.is_empty() {
+            return;
+        }
+        DROP_QUEUE.with(|q| q.borrow_mut().append(&mut self.0));
+        drain_drop_queue();
+    }
 }
 
 /// Versión thread-safe de Value (sin Rc) para paso entre tareas async
@@ -48,7 +127,7 @@ pub enum Value {
     /// Lista por referencia: el contenido es compartido (Rc<RefCell>) para que
     /// `xs.push(x)` y demás mutaciones se vean en todos los alias (`ys = xs`).
     /// La igualdad (`==`) sigue siendo estructural; `Clone` comparte el backing.
-    List(Rc<RefCell<Vec<Value>>>),
+    List(Rc<RefCell<ListData>>),
     Dict(IndexMap<String, Value>),
     Instance(Rc<RefCell<InstanceData>>),
     /// Closure: función + variables capturadas del scope donde fue creada.
@@ -114,7 +193,7 @@ impl Value {
     /// Construye una lista nueva a partir de un Vec, envolviéndola en el backing
     /// compartido. Usar SIEMPRE esto en vez de `Value::List(vec)` directo.
     pub fn list(items: Vec<Value>) -> Value {
-        Value::List(Rc::new(RefCell::new(items)))
+        Value::List(Rc::new(RefCell::new(ListData(items))))
     }
 
     pub fn type_name(&self) -> String {
@@ -196,7 +275,7 @@ impl Value {
             (Value::List(a), Value::List(b))        => {
                 // Concatenación: produce una lista NUEVA e independiente (no muta
                 // ninguno de los operandos). Snapshot de ambos backings.
-                let mut result = a.borrow().clone();
+                let mut result = a.borrow().0.clone();
                 result.extend(b.borrow().iter().cloned());
                 Ok(Value::list(result))
             }

@@ -245,7 +245,7 @@ pub extern "C" fn rt_call_builtin(name_ptr: i64, argc: i64) -> i64 {
         None
     };
 
-    let vm = VM::new(
+    let mut vm = VM::new(
         vec![Instruction::Halt],
         vec![0],
         IndexMap::new(),

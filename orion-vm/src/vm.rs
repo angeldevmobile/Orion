@@ -285,6 +285,14 @@ impl VM {
 
     /// Ejecuta un solo ciclo del loop principal. Retorna Ok(true) si el programa terminó.
     fn step(&mut self) -> Result<bool, String> {
+        // Safepoint del GC: SOLO aquí es seguro colectar. Entre instrucciones
+        // ningún local de Rust retiene Values fuera de los roots; colectar en
+        // medio de una instrucción (como hacía instantiate_shape) barría la
+        // instancia recién creada o los args aún no insertados en el frame.
+        if self.gc.should_collect() {
+            self.gc_collect();
+        }
+
         // Fin de frame
         {
             let frame = match self.call_stack.last_mut() {
@@ -640,10 +648,11 @@ impl VM {
                 let env = self.call_stack.last()
                     .map(|f| f.vars.clone())
                     .unwrap_or_default();
-                self.value_stack.push(Value::Closure {
-                    fn_name,
-                    env: Rc::new(RefCell::new(env)),
-                });
+                let env_rc = Rc::new(RefCell::new(env));
+                // Un env puede ciclarse (closure recursiva que se captura a sí
+                // misma vía write-back); registrarlo permite al GC romperlo.
+                self.gc.register_env(&env_rc);
+                self.value_stack.push(Value::Closure { fn_name, env: env_rc });
             }
             Instruction::IsInstance(shape_name) => {
                 let obj = self.pop()?;
@@ -812,6 +821,11 @@ impl VM {
                             "push" | "append" => {
                                 let item = args.into_iter().next()
                                     .ok_or("list.push() requiere 1 argumento")?;
+                                // Guardar un contenedor dentro de la lista puede
+                                // cerrar un ciclo → registrarla para el GC.
+                                if crate::gc::is_container(&item) {
+                                    self.gc.register_list(&list);
+                                }
                                 list.borrow_mut().push(item);
                                 Value::List(list)
                             }
@@ -838,7 +852,7 @@ impl VM {
                             "map" => {
                                 let cb = args.into_iter().next()
                                     .ok_or("list.map() requiere una función/lambda")?;
-                                let items = list.borrow().clone();
+                                let items = list.borrow().0.clone();
                                 let mut out = Vec::with_capacity(items.len());
                                 for item in items {
                                     let r = self.call_value(cb.clone(), vec![item])?;
@@ -849,7 +863,7 @@ impl VM {
                             "filter" => {
                                 let cb = args.into_iter().next()
                                     .ok_or("list.filter() requiere una función/lambda")?;
-                                let items = list.borrow().clone();
+                                let items = list.borrow().0.clone();
                                 let mut out = Vec::new();
                                 for item in items {
                                     let r = self.call_value(cb.clone(), vec![item.clone()])?;
@@ -862,7 +876,7 @@ impl VM {
                                 let cb  = it.next().ok_or("list.reduce() requiere función y acumulador")?;
                                 let acc = it.next().ok_or("list.reduce() requiere acumulador inicial")?;
                                 let mut acc = acc;
-                                let items = list.borrow().clone();
+                                let items = list.borrow().0.clone();
                                 for item in items {
                                     acc = self.call_value(cb.clone(), vec![acc, item])?;
                                 }
@@ -1072,6 +1086,9 @@ impl VM {
                 let obj = self.pop()?;
                 match (obj, idx) {
                     (Value::List(items), Value::Int(i)) => {
+                        if crate::gc::is_container(&val) {
+                            self.gc.register_list(&items);
+                        }
                         {
                             let mut items_mut = items.borrow_mut();
                             let i_usize = if i < 0 {
@@ -1206,7 +1223,7 @@ impl VM {
                 // Si hay choices, están en el stack debajo del prompt (ya extraímos prompt)
                 let choices_list: Option<Vec<Value>> = if choices {
                     let c = self.pop()?;
-                    if let Value::List(v) = c { Some(v.borrow().clone()) } else { None }
+                    if let Value::List(v) = c { Some(v.borrow().0.clone()) } else { None }
                 } else {
                     None
                 };
@@ -1558,7 +1575,7 @@ impl VM {
     // excel.compute(data, { "col": fn(row) { expr }, ... }) → list con nuevas columnas
     fn excel_compute(&mut self, args: Vec<Value>) -> Result<Value, String> {
         let data = match args.get(0) {
-            Some(Value::List(l)) => l.borrow().clone(),
+            Some(Value::List(l)) => l.borrow().0.clone(),
             Some(other) => return Err(format!(
                 "excel.compute: primer argumento debe ser lista, se recibió {:?}", other
             )),
@@ -1689,10 +1706,11 @@ impl VM {
             shape_name: shape_name.to_string(),
             fields,
         }));
+        // Solo registrar: colectar AQUÍ corrompía — inst_rc y args viven en
+        // locals de Rust, fuera de los roots, y el sweep les vaciaba los
+        // fields (cada instancia nº 512 nacía sin campos). La colección
+        // ocurre en el safepoint de step().
         self.gc.register(&inst_rc);
-        if self.gc.should_collect() {
-            self.gc_collect();
-        }
 
         let on_create = self.find_on_create(shape_name).cloned();
 
@@ -2115,7 +2133,7 @@ impl VM {
         let _ = request.respond(response);
     }
 
-    pub(crate) fn call_builtin(&self, name: &str, args: Vec<Value>) -> Result<Option<Value>, String> {
+    pub(crate) fn call_builtin(&mut self, name: &str, args: Vec<Value>) -> Result<Option<Value>, String> {
         match name {
             // slice(obj, start, end) — soporta lista[a:b] y string[a:b].
             // start/end pueden ser Null (extremo abierto); índices negativos cuentan desde el final.
@@ -2200,7 +2218,14 @@ impl VM {
                 let list = it.next().ok_or("push() requiere al menos 2 argumentos")?;
                 let val  = it.next().ok_or("push() requiere al menos 2 argumentos")?;
                 match list {
-                    Value::List(v) => { v.borrow_mut().push(val); Ok(Some(Value::List(v))) }
+                    Value::List(v) => {
+                        // Un contenedor dentro de la lista puede cerrar un ciclo.
+                        if crate::gc::is_container(&val) {
+                            self.gc.register_list(&v);
+                        }
+                        v.borrow_mut().push(val);
+                        Ok(Some(Value::List(v)))
+                    }
                     _ => Err("push(): el primer argumento debe ser una lista".to_string()),
                 }
             }
@@ -2383,7 +2408,7 @@ impl VM {
                 // max(a, b) o max(lista)
                 let items = if args.len() == 1 {
                     match args.into_iter().next().unwrap() {
-                        Value::List(v) => v.borrow().clone(),
+                        Value::List(v) => v.borrow().0.clone(),
                         other => vec![other],
                     }
                 } else { args };
@@ -2394,7 +2419,7 @@ impl VM {
                 if args.is_empty() { return Err("min() requiere argumentos".to_string()); }
                 let items = if args.len() == 1 {
                     match args.into_iter().next().unwrap() {
-                        Value::List(v) => v.borrow().clone(),
+                        Value::List(v) => v.borrow().0.clone(),
                         other => vec![other],
                     }
                 } else { args };
@@ -2452,7 +2477,7 @@ impl VM {
             }
             "sum" => {
                 let items = match args.into_iter().next().unwrap_or_else(|| Value::list(vec![])) {
-                    Value::List(v) => v.borrow().clone(),
+                    Value::List(v) => v.borrow().0.clone(),
                     other => vec![other],
                 };
                 let mut total = 0.0_f64;

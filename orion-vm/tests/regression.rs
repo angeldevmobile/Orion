@@ -581,3 +581,91 @@ if obj.int() != 7 { error "int como miembro falló" }
 if obj.list() != 9 { error "list como miembro falló" }"#,
     );
 }
+
+// ── GC: estructuras cíclicas y profundas no deben tumbar la VM ──────────────
+
+#[test]
+fn test_gc_self_referential_list_survives_collection() {
+    // push(a, a): la lista se contiene a sí misma (legal con listas por
+    // referencia). El bucle asigna >512 instancias para forzar al menos una
+    // colección con la lista cíclica en los roots — antes el mark recursivo
+    // sin set de visitados para listas no terminaba nunca (stack overflow).
+    run_ok(
+        r#"shape P { x: 0 }
+a = [1]
+push(a, a)
+i = 0
+while i < 600 {
+    p = P()
+    i = i + 1
+}"#,
+    );
+}
+
+#[test]
+fn test_gc_deep_instance_chain_survives() {
+    // Lista enlazada de 5000 instancias: fuerza varias colecciones con una
+    // cadena cada vez más profunda en los roots, y al final el drop de toda
+    // la cadena. (La profundidad extrema de 200k se cubre en los unit tests
+    // de gc.rs; aquí validamos el pipeline completo sin hacer lento el suite.)
+    run_ok(
+        r#"shape Node { next: 0 }
+head = Node()
+i = 0
+while i < 5000 {
+    n = Node()
+    n.next = head
+    head = n
+    i = i + 1
+}"#,
+    );
+}
+
+#[test]
+fn test_deep_nested_lists_survive_drop() {
+    // Torre de listas anidadas construida en Orion: al terminar el programa
+    // se suelta entera de golpe. Con el drop recursivo esto desbordaba el
+    // stack nativo; el Drop iterativo de ListData lo desmonta en un bucle.
+    run_ok(
+        r#"a = [0]
+i = 0
+while i < 50000 {
+    a = [a]
+    i = i + 1
+}"#,
+    );
+}
+
+#[test]
+fn test_gc_safepoint_no_corrompe_instancias_nuevas() {
+    // Regresión del bug del safepoint: gc_collect() corría DENTRO de
+    // instantiate_shape, cuando la instancia recién creada y los args aún
+    // viven en locals de Rust (fuera de los roots) → el sweep les vaciaba
+    // los fields y cada instancia nº 512 nacía sin campos. Cruzamos varios
+    // umbrales (512) verificando el campo en cada una.
+    run_ok(
+        r#"shape P { v: 7 }
+i = 0
+while i < 1200 {
+    p = P()
+    if p.v != 7 { error "instancia corrupta en la iteracion ${i}" }
+    i = i + 1
+}"#,
+    );
+}
+
+#[test]
+fn test_gc_args_sobreviven_instanciacion_anidada() {
+    // Variante: la instancia interior Q(9) viaja como arg de P(...) justo
+    // cuando el umbral dispara la colección; antes el sweep podía vaciarla.
+    run_ok(
+        r#"shape Q { w: 0 on_create(x) { w = x } }
+shape P { q: 0 on_create(a) { q = a } }
+i = 0
+while i < 700 {
+    p = P(Q(9))
+    if p.q.w != 9 { error "arg corrupto en la iteracion ${i}" }
+    i = i + 1
+}"#,
+    );
+}
