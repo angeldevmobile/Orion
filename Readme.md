@@ -12,7 +12,7 @@ Sintaxis limpia, tipado opcional, OOP nativa, 44+ módulos integrados y pipeline
 ![Demo - Terminal](assets/demo_terminal.jpeg)
 
 ```orion
--- demo/demo_ventas_q1.orx  —  70 líneas · 67 ms
+-- demo/demo_ventas_q1.orx  —  70 líneas · 16 ms
 use "excel" as excel
 
 datos_full = excel.cruzar(vendedores, presupuestos, "region", "left")
@@ -38,7 +38,7 @@ excel.write_multi("reporte_analisis.xlsx", {
 ║  → demo/reporte_analisis.xlsx  (5 hojas)     ║
 ║  → demo/reporte_detalle.xlsx   (con estilos) ║
 ╚══════════════════════════════════════════════╝
-[Orion] 67.700 ms
+[Orion] 15.978 ms
 ```
 
 ![Demo - Excel Output](assets/demo_excel.jpeg)
@@ -50,7 +50,7 @@ excel.write_multi("reporte_analisis.xlsx", {
 - **Sin boilerplate** — el código se lee como pseudocódigo. Una tarea = máximo 5 líneas.
 - **Real** — pensado para construir cosas reales: APIs, automatizaciones, pipelines de datos.
 - **Moderno** — OOP, type hints, interpolación, async/await, IA nativa, regex, AI como keyword.
-- **Rápido** — pipeline completo en Rust: lexer → parser → type checker → codegen → VM.
+- **Rápido** — pipeline completo en Rust: lexer → parser → type checker → codegen → VM. Cargar y agregar 500k filas de CSV: **2× más rápido que Python con la misma RAM** ([benchmark reproducible](bench/)).
 - **Seguro** — queries parametrizadas, validación en frontera, crypto nativo.
 
 ---
@@ -66,7 +66,7 @@ cargo build --release --manifest-path orion-vm/Cargo.toml
 ```
 
 **Extensión VSCode** — incluye el binario bundleado, zero-config:
-1. Instalar `orion-lang` desde el marketplace
+1. Instalar el paquete local: `code --install-extension vscode-orion/orion-lang/orion-lang-0.5.0.vsix` *(publicación en el Marketplace: en camino)*
 2. Abrir cualquier `.orx` — funciona de inmediato
 
 ---
@@ -638,13 +638,34 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 
 ---
 
-## Rendimiento
+## Rendimiento — medido, no prometido
 
-| Escenario | Tiempo | vs Python |
-|---|---|---|
-| Hola mundo | < 1 ms | ~50x más rápido |
-| CSV 15 filas + 6 operaciones regex | ~8 ms | ~30x más rápido |
-| Pipeline startup | ~1 ms | Python: 150-400 ms solo de startup |
+Benchmark reproducible en [`bench/`](bench/) (un comando: `bench\run_all.ps1`).
+Misma tarea en ambos lenguajes: cargar 500k filas de CSV a columnas tipadas +
+`sum` + `mean`. Los resultados numéricos coinciden **dígito a dígito** — el
+benchmark es también un test cruzado de corrección.
+
+| Pipeline (500k filas × 4 cols)   | Tiempo  | RAM pico |
+|----------------------------------|---------|----------|
+| Python 3.13 (csv stdlib, en C)   | 516 ms  | 105 MB   |
+| **Orion `frame.open` CSV**       | **264 ms** | **104 MB** |
+| **Orion `frame.open` .odf**      | **88 ms**  | **73 MB**  |
+
+- **CSV: 2× más rápido que Python con la misma RAM** — carga columnar en Rust
+  (las celdas van directo a un `Vec` por columna, las columnas de texto se
+  mueven sin re-alocar).
+- **.odf (formato binario propio): ~6× más rápido** — cero parsing de texto,
+  los números se leen como bytes crudos.
+- **A escala 5M filas**: −46% de RAM pico en la carga y agregaciones
+  data-parallel con rayon (`sum/std/min/max` usan todos los núcleos a partir
+  de 1M elementos).
+- **Y en 3× menos líneas**: las ~15 líneas de bucle+tipado manual de Python
+  son 5 líneas de Orion (`frame.open` infiere tipos y layout solo).
+
+Además del throughput, el runtime está endurecido para datos grandes:
+estructuras de 200k+ niveles de profundidad y ciclos de referencias
+(`push(a, a)`) no crashean ni fugan — el GC los recolecta y la VM devuelve
+cada byte al salir, verificado con LeakSanitizer en CI.
 
 ---
 
@@ -692,6 +713,9 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 | FFI — librerías nativas externas | ✅ Completo | libloading |
 | Package manager (add/remove/list/search/publish) | ✅ Completo | Rust |
 | Registry oficial en GitHub | ✅ Completo | GitHub API |
+| GC mark-and-sweep (ciclos; mark y drop iterativos, sin límite de profundidad) | ✅ Completo | Rust |
+| Cero fugas al salir (verificado con LeakSanitizer en CI) | ✅ Completo | Rust + ASan |
+| Benchmark reproducible vs Python ([`bench/`](bench/)) | ✅ Completo | PowerShell + Python |
 | Módulos stdlib | ✅ 44+ módulos | Rust |
 | Cloud native (S3 / SSH / Docker) | ✅ Completo | Rust |
 | CLI completo | ✅ Completo | Rust |
@@ -1060,13 +1084,16 @@ resp = table.ask(t, "¿Qué región vende más en verano?")
 ```orion
 use "frame"
 
--- Carga columnar: 1M filas usa ~40MB en lugar de ~800MB
+-- Carga columnar directa (sin materializar filas): 2× más rápido que
+-- Python stdlib con la misma RAM — medido en bench/ (500k y 5M filas).
+-- open() auto-detecta el formato: CSV o el binario .odf (~6× más rápido).
 f = frame.open("ventas_1M.csv")
 frame.schema(f)          -- tipos inferidos por columna
 frame.peek(f, 5)         -- tabla bonita sin cargar todo
 frame.size(f)            -- {rows: 1000000, cols: 8}
 
--- Stats directas sobre Vec<f64> — sin hash lookups
+-- Stats directas sobre Vec<f64> — sin hash lookups; a partir de 1M
+-- elementos usan todos los núcleos (rayon)
 frame.mean(f, "venta")
 frame.stats(f, "venta")  -- {count, mean, std, min, p25, median, p75, max}
 
