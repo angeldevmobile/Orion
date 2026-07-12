@@ -3528,6 +3528,7 @@ dependencies = [
  "printpdf",
  "rand",
  "ratatui",
+ "rayon",
  "regex",
  "rsa",
  "rusqlite",

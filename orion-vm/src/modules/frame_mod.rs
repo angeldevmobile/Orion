@@ -127,19 +127,78 @@ impl Progress {
 
 //   parsing CSV
 
-fn parse_delim_chunk<R: BufRead>(reader: &mut R, sep: &str, limit: usize) -> (Vec<String>, Vec<Vec<String>>) {
-    let mut headers = Vec::new();
-    let mut rows: Vec<Vec<String>> = Vec::new();
+/// Parseo column-major para cargas COMPLETAS (open/from_txt): las celdas van
+/// directo a un Vec por columna, sin un Vec por fila. Junto con
+/// `infer_columns_owned` (que MUEVE las columnas de texto en vez de
+/// clonarlas) reduce la RAM pico de la carga CSV a casi la mitad frente al
+/// camino row-major + infer_columns. El row-major sigue existiendo porque el
+/// streaming (txt_to_excel/txt_to_odf) escribe fila a fila.
+fn parse_delim_columnar<R: BufRead>(reader: &mut R, sep: &str) -> (Vec<String>, Vec<Vec<String>>) {
+    let mut headers: Vec<String> = Vec::new();
+    let mut cols: Vec<Vec<String>> = Vec::new();
     for (i, line) in reader.lines().enumerate() {
         let Ok(l) = line else { break };
-        let fields: Vec<String> = l.split(sep).map(|s| s.trim().trim_matches('"').to_string()).collect();
-        if i == 0 { headers = fields; }
-        else {
-            rows.push(fields);
-            if limit > 0 && rows.len() >= limit { break; }
+        if i == 0 {
+            headers = l.split(sep).map(|s| s.trim().trim_matches('"').to_string()).collect();
+            cols = headers.iter().map(|_| Vec::new()).collect();
+        } else {
+            let mut ci = 0;
+            for field in l.split(sep) {
+                if ci >= cols.len() { break; } // campos extra: se ignoran (como row-major)
+                cols[ci].push(field.trim().trim_matches('"').to_string());
+                ci += 1;
+            }
+            // filas cortas: rellenar con "" para mantener las columnas parejas
+            for c in cols.iter_mut().skip(ci) {
+                c.push(String::new());
+            }
         }
     }
-    (headers, rows)
+    (headers, cols)
+}
+
+/// Inferencia de tipos consumiendo las celdas crudas: las columnas numéricas
+/// liberan sus strings al convertirse y las de texto se MUEVEN a `Col::Str`
+/// sin re-alocar. Misma lógica de decisión que `infer_columns` (todo-o-nada
+/// por columna: float → int exacto → bool → string).
+fn infer_columns_owned(headers: Vec<String>, cols_raw: Vec<Vec<String>>) -> Vec<(String, Col)> {
+    headers.into_iter().zip(cols_raw).map(|(name, vals)| {
+        // intentar float (corta al primer fallo: no paga el parseo completo
+        // de una columna de texto)
+        let mut floats: Vec<f64> = Vec::with_capacity(vals.len());
+        let mut all_float = true;
+        for v in &vals {
+            match v.parse::<f64>() {
+                Ok(f) => floats.push(f),
+                Err(_) => { all_float = false; break; }
+            }
+        }
+        if all_float {
+            drop(vals); // liberar las celdas crudas antes de materializar
+            if floats.iter().all(|f| f.fract() == 0.0) {
+                return (name, Col::Int(floats.iter().map(|&f| f as i64).collect()));
+            }
+            return (name, Col::Float(floats));
+        }
+        drop(floats);
+
+        // intentar bool
+        let mut bools: Vec<bool> = Vec::with_capacity(vals.len());
+        let mut all_bool = true;
+        for v in &vals {
+            match v.as_str() {
+                "yes" | "true" | "1"  => bools.push(true),
+                "no"  | "false" | "0" => bools.push(false),
+                _ => { all_bool = false; break; }
+            }
+        }
+        if all_bool {
+            return (name, Col::Bool(bools));
+        }
+
+        // string por defecto: mover, cero copias
+        (name, Col::Str(vals))
+    }).collect()
 }
 
 fn infer_columns(headers: &[String], rows: &[Vec<String>]) -> Vec<(String, Col)> {
@@ -240,12 +299,12 @@ fn fn_open(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // binario .odf → lectura directa
         deserialize_odf(&data).map_err(|e| e.replace("frame:", "frame.open:"))?
     } else {
-        // texto (CSV) → parseo delimitado
+        // texto (CSV) → parseo delimitado column-major (mitad de RAM pico)
         let mut reader = BufReader::new(std::io::Cursor::new(data));
-        let (headers, rows) = parse_delim_chunk(&mut reader, ",", 0);
+        let (headers, cols_raw) = parse_delim_columnar(&mut reader, ",");
         if headers.is_empty() { return Err("frame.open: archivo vacío o sin cabecera".into()); }
-        let n = rows.len();
-        (infer_columns(&headers, &rows), n)
+        let n = cols_raw.first().map(|c| c.len()).unwrap_or(0);
+        (infer_columns_owned(headers, cols_raw), n)
     };
 
     let id = new_handle();
@@ -267,10 +326,10 @@ fn fn_from_txt(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     };
     let file = File::open(&path).map_err(|e| format!("frame.from_txt: {}", e))?;
     let mut reader = BufReader::new(file);
-    let (headers, rows) = parse_delim_chunk(&mut reader, &sep, 0);
+    let (headers, cols_raw) = parse_delim_columnar(&mut reader, &sep);
     if headers.is_empty() { return Err("frame.from_txt: archivo vacío o sin cabecera".into()); }
-    let n = rows.len();
-    let cols = infer_columns(&headers, &rows);
+    let n = cols_raw.first().map(|c| c.len()).unwrap_or(0);
+    let cols = infer_columns_owned(headers, cols_raw);
     let id = new_handle();
     with_frames(|fs| fs.insert(id.clone(), Frame { cols, rows: n }));
     Ok(EvalValue::Str(id))
@@ -764,6 +823,44 @@ fn fn_sort(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 //   estadísticas columnar (directo sobre Vec<f64>)               
 
+/// A partir de cuántos elementos las agregaciones usan rayon. Por debajo,
+/// secuencial: repartir el trabajo entre hilos cuesta más de lo que ahorra,
+/// y además el resultado flotante queda bit a bit idéntico al histórico en
+/// datasets pequeños (la suma paralela reasocia y puede diferir en los
+/// últimos ulps).
+const PAR_UMBRAL: usize = 1_000_000;
+
+/// Estadística sobre un slice f64: data-parallel con rayon cuando el volumen
+/// lo amerita. Es paralelismo DENTRO del módulo nativo — la semántica del
+/// lenguaje (VM single-thread, Rc) no se toca; Rust garantiza sin data races.
+fn stat_slice(v: &[f64], stat: &str) -> f64 {
+    use rayon::prelude::*;
+    let n = v.len() as f64;
+    let par = v.len() >= PAR_UMBRAL;
+    let suma = |v: &[f64]| -> f64 {
+        if par { v.par_iter().sum() } else { v.iter().sum() }
+    };
+    match stat {
+        "sum"  => suma(v),
+        "mean" => suma(v) / n,
+        "min"  => {
+            if par { v.par_iter().cloned().reduce(|| f64::INFINITY, f64::min) }
+            else   { v.iter().cloned().fold(f64::INFINITY, f64::min) }
+        }
+        "max"  => {
+            if par { v.par_iter().cloned().reduce(|| f64::NEG_INFINITY, f64::max) }
+            else   { v.iter().cloned().fold(f64::NEG_INFINITY, f64::max) }
+        }
+        "std"  => {
+            let m = suma(v) / n;
+            let sq = if par { v.par_iter().map(|x| (x - m).powi(2)).sum::<f64>() }
+                     else   { v.iter().map(|x| (x - m).powi(2)).sum::<f64>() };
+            (sq / n).sqrt()
+        }
+        _ => 0.0,
+    }
+}
+
 fn fn_col_stat(args: Vec<EvalValue>, stat: &str) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err(format!("frame.{}(handle, columna)", stat)); }
     let id   = arg_handle(&args, 0)?;
@@ -771,17 +868,15 @@ fn fn_col_stat(args: Vec<EvalValue>, stat: &str) -> Result<EvalValue, String> {
     with_frames(|fs| {
         let f    = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
         let col  = f.col(&name).ok_or(format!("columna '{}' no existe", name))?;
-        let vals = col.as_floats().ok_or(format!("columna '{}' no es numérica", name))?;
-        let result = match stat {
-            "mean" => vals.iter().sum::<f64>() / vals.len() as f64,
-            "sum"  => vals.iter().sum(),
-            "min"  => vals.iter().cloned().fold(f64::INFINITY, f64::min),
-            "max"  => vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
-            "std"  => {
-                let m = vals.iter().sum::<f64>() / vals.len() as f64;
-                (vals.iter().map(|x| (x - m).powi(2)).sum::<f64>() / vals.len() as f64).sqrt()
+        // Float opera prestado (sin el clon de 8 bytes/fila que hacía
+        // as_floats); Int convierte una vez, que es inevitable.
+        let result = match col {
+            Col::Float(v) => stat_slice(v, stat),
+            Col::Int(v)   => {
+                let fl: Vec<f64> = v.iter().map(|&x| x as f64).collect();
+                stat_slice(&fl, stat)
             }
-            _ => 0.0,
+            _ => return Err(format!("columna '{}' no es numérica", name)),
         };
         Ok(EvalValue::Float(result))
     })

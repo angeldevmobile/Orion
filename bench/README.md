@@ -27,30 +27,33 @@ pandas ni contra un Python artificialmente lento.
   (working set muestreado cada 10 ms).
 - Los tiempos "internos" (sin arranque del proceso) los imprime cada script.
 
-## Resultados (2026-07-11)
+## Resultados (2026-07-11, tras el parsing columnar + rayon)
 
 Intel i7-1165G7, 24 GB RAM, Windows 11, Python 3.13, Orion release.
 
 | Pipeline                    | interno | pared  | RAM pico |
 |-----------------------------|---------|--------|----------|
-| Python 3.13 stdlib csv      | 591 ms  | 746 ms | 104 MB   |
-| Orion `frame.open` CSV      | 481 ms  | 516 ms | 171 MB   |
-| **Orion `frame.open` .odf** | **77 ms** | **101 ms** | **58 MB** |
+| Python 3.13 stdlib csv      | 516 ms  | 654 ms | 105 MB   |
+| Orion `frame.open` CSV      | **264 ms** | **307 ms** | **104 MB** |
+| **Orion `frame.open` .odf** | **88 ms** | **121 ms** | **73 MB** |
 
 Bonus de corrección: la suma y la media que imprimen Python y Orion
 coinciden dígito a dígito — el benchmark es también un test cruzado.
 
 Lecturas honestas:
 
-- **Con `.odf`, Orion es ~7-8× más rápido y usa ~la mitad de RAM que
-  Python** en el mismo pipeline. El binario columnar elimina el parsing de
-  texto: los números se leen como bytes crudos.
-- **En CSV, Orion ≈ Python** (±20% según la corrida): el cuello es el
-  parsing de texto, no el lenguaje. Este resultado *valida* la decisión de
-  diseño del `.odf`.
-- Pendiente conocido: `frame.open` sobre CSV usa más RAM que Python (171 vs
-  104 MB) porque la inferencia de tipos materializa las celdas crudas y las
-  columnas tipadas a la vez. Optimizable.
+- **En CSV, Orion es ~2× más rápido que Python con la misma RAM** desde el
+  rediseño columnar de la carga (2026-07-11): las celdas van directo a un
+  Vec por columna y las columnas de texto se mueven sin re-alocar. Antes de
+  ese cambio Orion empataba con Python en tiempo y usaba 171 MB.
+- **Con `.odf`, ~6× más rápido que Python y ~30% menos RAM**: el binario
+  columnar elimina el parsing de texto (los números se leen como bytes
+  crudos).
+- A escala 5M filas (medido aparte): carga CSV 1.35 GB → 722 MB de pico
+  (−46%) y −28% de tiempo; las agregaciones (`sum/std/min/max`) usan rayon
+  a partir de 1M elementos (~20% más rápido el pipeline completo de stats;
+  por debajo del umbral son secuenciales y bit a bit idénticas al
+  histórico).
 
 ## Estrés del GC (`gc_ciclos.orx`)
 
