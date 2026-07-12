@@ -410,12 +410,13 @@ fn main() {
             let src_path = match args[2..].iter().find(|a| !a.starts_with("--")) {
                 Some(p) => p.as_str(),
                 None => {
-                    cli::banner::fail("Uso: orion --format <archivo.orx> [--write]");
+                    cli::banner::fail("Uso: orion --format <archivo.orx> [--write | --check]");
                     std::process::exit(1);
                 }
             };
             let write_back = args.iter().any(|a| a == "--write");
-            cli::format::run_format(src_path, write_back);
+            let check_only = args.iter().any(|a| a == "--check");
+            cli::format::run_format(src_path, write_back, check_only);
         }
 
         //    Generar documentación Markdown
@@ -685,7 +686,7 @@ fn print_help() {
             ("publish",               "Publicar al registry (requiere orion.json)"),
         ]),
         ("Herramientas", &[
-            ("fmt <archivo.orx>",     "Formatear código fuente  [--write]  (alias: format)"),
+            ("fmt <archivo.orx>",     "Formatear código fuente  [--write | --check]  (alias: format)"),
             ("watch <archivo.orx>",   "Hot reload automático"),
             ("bench <archivo.orx>",   "Benchmark  [--runs=N]"),
             ("debug <archivo.orx>",   "Debugger interactivo (breakpoints, step, watch)"),

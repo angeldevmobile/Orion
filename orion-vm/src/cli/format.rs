@@ -7,7 +7,10 @@ const INDENT: &str = "    ";
 
 //   Punto de entrada                    
 
-pub fn run_format(path: &str, write_back: bool) {
+/// `write_back`: reescribe el archivo formateado.
+/// `check_only`: no toca nada — sale con código 1 si el archivo NO está
+/// formateado. Es el modo para CI: `orion fmt archivo.orx --check`.
+pub fn run_format(path: &str, write_back: bool, check_only: bool) {
     let src = match fs::read_to_string(path) {
         Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
         Err(e) => {
@@ -33,6 +36,18 @@ pub fn run_format(path: &str, write_back: bool) {
     };
 
     let formatted = format_program(&stmts);
+
+    if check_only {
+        if src == formatted {
+            banner::ok(&format!("Formato correcto: {path}"));
+        } else {
+            banner::fail(&format!(
+                "'{path}' no está formateado — corre: orion fmt {path} --write"
+            ));
+            std::process::exit(1);
+        }
+        return;
+    }
 
     if write_back {
         match fs::write(path, &formatted) {
