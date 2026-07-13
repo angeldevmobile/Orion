@@ -5,7 +5,8 @@ use std::sync::Mutex;
 
 // Historial de chat de sesión (para chat sessions)
 static CHAT_HISTORY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
-static ACTIVE_MODEL: Mutex<Option<String>> = Mutex::new(None);
+// System prompt de la sesión de chat (lo fija chat_start)
+static CHAT_SYSTEM: Mutex<Option<String>> = Mutex::new(None);
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
@@ -208,12 +209,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // --- Chat session (memoria de conversación) ---
 
-        // chat_say(message) → inicia sesión con system prompt
+        // chat_start(system) → confirmación; define el system prompt de la sesión
         "chat_start" | "chat_say" => {
             let system = one_str(function, args)?;
-            let mut hist = CHAT_HISTORY.lock().unwrap();
-            hist.clear();
-            drop(hist);
+            CHAT_HISTORY.lock().unwrap().clear();
+            *CHAT_SYSTEM.lock().unwrap() = Some(system.clone());
             Ok(EvalValue::Str(format!("[chat iniciado: {}]", system)))
         }
 
@@ -226,43 +226,50 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .map(|(role, content)| serde_json::json!({"role": role, "content": content}))
                 .collect();
             drop(hist);
-            let response = ai_call_messages(messages, 1024)?;
+            let system = CHAT_SYSTEM.lock().unwrap().clone();
+            let response = ai::ai_call_chat(&messages, system.as_deref(), 1024)?;
             let mut hist2 = CHAT_HISTORY.lock().unwrap();
             hist2.push(("assistant".into(), response.clone()));
             Ok(EvalValue::Str(response))
         }
 
-        // chat_reset() → limpia historial
+        // chat_reset() → limpia historial y system prompt
         "chat_reset" => {
             CHAT_HISTORY.lock().unwrap().clear();
+            *CHAT_SYSTEM.lock().unwrap() = None;
             Ok(EvalValue::Str("[chat reseteado]".into()))
         }
 
         // --- Utilidades de modelo ---
 
-        // set_model(name) → nombre del modelo
+        // set_model(name) → nombre del modelo; afecta a TODAS las funciones ai.*
         "set_model" => {
             let name = one_str("set_model", args)?;
-            *ACTIVE_MODEL.lock().unwrap() = Some(name.clone());
+            ai::set_model_override(Some(name.clone()));
             Ok(EvalValue::Str(name))
         }
 
         // provider() → "anthropic" | "openai" | "none"
         "provider" => {
-            let env = load_env();
-            let p = detect_provider(&env);
-            Ok(EvalValue::Str(p.unwrap_or_else(|| "none".into())))
+            let env = ai::env_vars();
+            let p = ai::detect_provider(&env).unwrap_or("none");
+            Ok(EvalValue::Str(p.into()))
         }
 
-        // status() → info del estado AI
+        // status() → {configured, provider, model, memory, chat}
         "status" => {
-            let env = load_env();
-            let p = detect_provider(&env);
-            let msg = match p {
-                Some(ref provider) => format!("AI activo — proveedor: {}", provider),
-                None => "AI no configurado. Agrega ANTHROPIC_API_KEY o OPENAI_API_KEY en tu .env".into(),
-            };
-            Ok(EvalValue::Str(msg))
+            let env = ai::env_vars();
+            let p = ai::detect_provider(&env);
+            let mut m = HashMap::new();
+            m.insert("configured".into(), EvalValue::Bool(p.is_some()));
+            m.insert("provider".into(),   EvalValue::Str(p.unwrap_or("none").into()));
+            m.insert("model".into(),      EvalValue::Str(match p {
+                Some(prov) => ai::model_for(&env, prov),
+                None => "none".into(),
+            }));
+            m.insert("memory".into(), EvalValue::Int(ai::memory_size() as i64));
+            m.insert("chat".into(),   EvalValue::Int(CHAT_HISTORY.lock().unwrap().len() as i64));
+            Ok(EvalValue::Dict(m))
         }
 
         // memory_size() → int
@@ -283,137 +290,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 //     Helpers internos                                                          
 
+// Toda la selección de proveedor/modelo y el HTTP viven en crate::ai; aquí
+// solo se arma el prompt. Así set_model y AI_MODEL aplican parejo en todo ai.*.
 fn ai_call_with_system(prompt: &str, system: &str, max_tokens: u32) -> Result<String, String> {
-    let env = load_env();
-    let has_anthropic = env.contains_key("ANTHROPIC_API_KEY");
-    let has_openai    = env.contains_key("OPENAI_API_KEY");
-    let pref = env.get("AI_MODEL").map(|s| s.to_lowercase());
-
-    let use_anthropic = match pref.as_deref() {
-        Some("openai") if has_openai    => false,
-        Some("claude") if has_anthropic => true,
-        _                               => has_anthropic,
-    };
-
-    if use_anthropic {
-        call_anthropic_with_system(&env, prompt, system, max_tokens)
-    } else if has_openai {
-        call_openai_with_system(&env, prompt, system, max_tokens)
-    } else {
-        Err("No hay API key configurada. Agrega ANTHROPIC_API_KEY o OPENAI_API_KEY en tu .env".into())
-    }
-}
-
-fn call_anthropic_with_system(env: &std::collections::HashMap<String, String>, prompt: &str, system: &str, max_tokens: u32) -> Result<String, String> {
-    let key   = env.get("ANTHROPIC_API_KEY").ok_or("ANTHROPIC_API_KEY no configurada")?;
-    let model = get_model(env, "anthropic");
-    let body  = serde_json::json!({
-        "model": model,
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": [{"role": "user", "content": prompt}]
-    });
-    let resp = ureq::post("https://api.anthropic.com/v1/messages")
-        .set("Content-Type", "application/json")
-        .set("x-api-key", key)
-        .set("anthropic-version", "2023-06-01")
-        .send_json(body)
-        .map_err(|e| format!("ai error: {}", e))?;
-    let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
-    json["content"][0]["text"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| format!("Respuesta inesperada: {}", json))
-}
-
-fn call_openai_with_system(env: &std::collections::HashMap<String, String>, prompt: &str, system: &str, max_tokens: u32) -> Result<String, String> {
-    let key   = env.get("OPENAI_API_KEY").ok_or("OPENAI_API_KEY no configurada")?;
-    let model = get_model(env, "openai");
-    let body  = serde_json::json!({
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user",   "content": prompt}
-        ]
-    });
-    let resp = ureq::post("https://api.openai.com/v1/chat/completions")
-        .set("Content-Type", "application/json")
-        .set("Authorization", &format!("Bearer {}", key))
-        .send_json(body)
-        .map_err(|e| format!("ai error: {}", e))?;
-    let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
-    json["choices"][0]["message"]["content"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| format!("Respuesta inesperada: {}", json))
-}
-
-fn ai_call_messages(messages: Vec<serde_json::Value>, max_tokens: u32) -> Result<String, String> {
-    let env = load_env();
-    if let Some(key) = env.get("ANTHROPIC_API_KEY") {
-        let model = get_model(&env, "anthropic");
-        let body = serde_json::json!({
-            "model": model, "max_tokens": max_tokens, "messages": messages
-        });
-        let resp = ureq::post("https://api.anthropic.com/v1/messages")
-            .set("Content-Type", "application/json")
-            .set("x-api-key", key)
-            .set("anthropic-version", "2023-06-01")
-            .send_json(body).map_err(|e| format!("chat error: {}", e))?;
-        let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
-        return json["content"][0]["text"].as_str().map(|s| s.to_string())
-            .ok_or_else(|| "Respuesta inesperada".into());
-    }
-    if let Some(key) = env.get("OPENAI_API_KEY") {
-        let model = get_model(&env, "openai");
-        let body = serde_json::json!({
-            "model": model, "max_tokens": max_tokens, "messages": messages
-        });
-        let resp = ureq::post("https://api.openai.com/v1/chat/completions")
-            .set("Content-Type", "application/json")
-            .set("Authorization", &format!("Bearer {}", key))
-            .send_json(body).map_err(|e| format!("chat error: {}", e))?;
-        let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
-        return json["choices"][0]["message"]["content"].as_str().map(|s| s.to_string())
-            .ok_or_else(|| "Respuesta inesperada".into());
-    }
-    Err("No hay API key configurada".into())
-}
-
-fn get_model(env: &std::collections::HashMap<String, String>, provider: &str) -> String {
-    if let Some(m) = ACTIVE_MODEL.lock().unwrap().clone() { return m; }
-    match provider {
-        "anthropic" => env.get("ANTHROPIC_MODEL").cloned().unwrap_or_else(|| "claude-haiku-4-5-20251001".into()),
-        "openai"    => env.get("OPENAI_MODEL").cloned().unwrap_or_else(|| "gpt-4o-mini".into()),
-        _           => "unknown".into(),
-    }
-}
-
-fn load_env() -> std::collections::HashMap<String, String> {
-    let mut vars: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let mut path = std::env::current_dir().unwrap_or_default();
-    for _ in 0..4 {
-        let env_file = path.join(".env");
-        if let Ok(content) = std::fs::read_to_string(&env_file) {
-            for line in content.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') { continue; }
-                if let Some(eq) = line.find('=') {
-                    let key = line[..eq].trim().to_string();
-                    let val = line[eq+1..].trim().trim_matches('"').trim_matches('\'').to_string();
-                    if !key.is_empty() && !vars.contains_key(&key) { vars.insert(key, val); }
-                }
-            }
-            break;
-        }
-        if !path.pop() { break; }
-    }
-    vars
-}
-
-fn detect_provider(env: &std::collections::HashMap<String, String>) -> Option<String> {
-    let has_a = env.contains_key("ANTHROPIC_API_KEY");
-    let has_o = env.contains_key("OPENAI_API_KEY");
-    if has_a { Some("anthropic".into()) }
-    else if has_o { Some("openai".into()) }
-    else { None }
+    ai::ai_call(prompt, Some(system), max_tokens)
 }
 
 fn clean_json(raw: &str) -> String {

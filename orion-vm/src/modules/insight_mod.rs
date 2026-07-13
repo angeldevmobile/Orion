@@ -72,7 +72,7 @@ fn analyze_with_ai(path: &str, question: &str) -> Result<EvalValue, String> {
     let env = load_env();
 
     if let Some(key) = env.get("ANTHROPIC_API_KEY") {
-        let model = env.get("ANTHROPIC_MODEL").cloned().unwrap_or_else(|| "claude-haiku-4-5-20251001".into());
+        let model = env.get("ANTHROPIC_MODEL").cloned().unwrap_or_else(|| "claude-haiku-4-5".into());
         let body = serde_json::json!({
             "model": model,
             "max_tokens": 1024,

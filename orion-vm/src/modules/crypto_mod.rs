@@ -3,8 +3,19 @@ use std::collections::HashMap;
 use hmac::{Hmac, Mac};
 use sha2::{Sha256, Digest};
 use rand::Rng;
+use subtle::ConstantTimeEq;
+use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// Compara dos secretos en TIEMPO CONSTANTE. Un `==` normal corta en el primer
+/// byte distinto y filtra, por diferencia de tiempo, cuántos bytes acertó el
+/// atacante — suficiente para reconstruir una firma byte a byte.
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() { return false; }
+    a.ct_eq(b).into()
+}
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
@@ -28,7 +39,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let salt = parts[1];
             let hash = parts[2];
             let expected = do_hash(&data, salt, algo);
-            Ok(EvalValue::Bool(expected == hash))
+            Ok(EvalValue::Bool(ct_eq(&expected, hash)))
         }
         // sha256(data) → hex string
         "sha256" => {
@@ -37,10 +48,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             hasher.update(data.as_bytes());
             Ok(EvalValue::Str(hex_encode(&hasher.finalize())))
         }
-        // md5(data) → hex string (implementación manual simple)
+        // md5(data) → hex string (MD5 real, para checksums — NO para seguridad)
         "md5" => {
             let data = one_str("md5", args)?;
-            Ok(EvalValue::Str(simple_md5(data.as_bytes())))
+            use md5::Digest as _;
+            let mut h = md5::Md5::new();
+            h.update(data.as_bytes());
+            Ok(EvalValue::Str(hex_encode(&h.finalize())))
         }
         // sign(data, key) → hex signature (HMAC-SHA256)
         "sign" => {
@@ -57,30 +71,36 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let sig  = to_str(&args[1]);
             let key  = to_str(&args[2]);
             let expected = hmac_sign(data.as_bytes(), key.as_bytes())?;
-            Ok(EvalValue::Bool(expected == sig))
+            Ok(EvalValue::Bool(ct_eq(&expected, &sig)))
         }
-        // encrypt(data, key?) → {cipher, key, mode}
+        // encrypt(data, key?) → {cipher, key, mode}  — AES-256-GCM (autenticado)
         "encrypt" => {
             if args.is_empty() { return Err("crypto.encrypt requiere (data, key?)".into()); }
             let data = to_str(&args[0]);
             let key  = if args.len() > 1 { to_str(&args[1]) } else { random_hex(16) };
-            let (cipher, used_key) = xor_encrypt(data.as_bytes(), &key);
+            let cipher_b64 = aes_encrypt(data.as_bytes(), &key)?;
             let mut m = HashMap::new();
-            m.insert("cipher".into(), EvalValue::Str(b64_encode(&cipher)));
-            m.insert("key".into(),    EvalValue::Str(used_key));
-            m.insert("mode".into(),   EvalValue::Str("xor".into()));
+            m.insert("cipher".into(), EvalValue::Str(cipher_b64));
+            m.insert("key".into(),    EvalValue::Str(key));
+            m.insert("mode".into(),   EvalValue::Str("aes-256-gcm".into()));
             Ok(EvalValue::Dict(m))
         }
         // decrypt(cipher, key, mode?) → string
+        // mode "xor" descifra datos del formato antiguo (inseguro, solo migración).
         "decrypt" => {
             if args.len() < 2 { return Err("crypto.decrypt requiere (cipher, key)".into()); }
             let cipher_b64 = to_str(&args[0]);
             let key        = to_str(&args[1]);
-            let cipher = b64_decode(&cipher_b64).map_err(|e| format!("crypto.decrypt: {}", e))?;
-            let (plain, _) = xor_encrypt(&cipher, &key);
-            String::from_utf8(plain)
-                .map(EvalValue::Str)
-                .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".into())
+            let mode = args.get(2).map(to_str).unwrap_or_else(|| "aes-256-gcm".into());
+
+            if mode == "xor" {
+                let cipher = b64_decode(&cipher_b64).map_err(|e| format!("crypto.decrypt: {}", e))?;
+                let (plain, _) = xor_encrypt(&cipher, &key);
+                return String::from_utf8(plain)
+                    .map(EvalValue::Str)
+                    .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".into());
+            }
+            aes_decrypt(&cipher_b64, &key).map(EvalValue::Str)
         }
         // token(length?) → hex token aleatorio
         "token" => {
@@ -138,13 +158,53 @@ fn do_hash(data: &str, salt: &str, _algo: &str) -> String {
 //     HMAC-SHA256                                                               
 
 fn hmac_sign(data: &[u8], key: &[u8]) -> Result<String, String> {
-    let mut mac = HmacSha256::new_from_slice(key)
+    // Desambiguar: aes_gcm::KeyInit también aporta new_from_slice al scope.
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(key)
         .map_err(|e| format!("crypto.sign: clave inválida: {}", e))?;
     mac.update(data);
     Ok(hex_encode(&mac.finalize().into_bytes()))
 }
 
-//     XOR encrypt (fallback sin AES)                                           
+//     AES-256-GCM — cifrado autenticado real
+
+/// Clave AES = SHA256(clave del usuario). Nonce aleatorio de 12 bytes por
+/// mensaje, antepuesto al ciphertext: base64(nonce ‖ ct ‖ tag).
+fn aes_encrypt(data: &[u8], key: &str) -> Result<String, String> {
+    let k = Sha256::digest(key.as_bytes());
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k));
+
+    let mut nonce_bytes = [0u8; 12];
+    rand::thread_rng().fill(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ct = cipher.encrypt(nonce, data)
+        .map_err(|e| format!("crypto.encrypt: {}", e))?;
+
+    let mut out = nonce_bytes.to_vec();
+    out.extend_from_slice(&ct);
+    Ok(b64_encode(&out))
+}
+
+fn aes_decrypt(cipher_b64: &str, key: &str) -> Result<String, String> {
+    let raw = b64_decode(cipher_b64).map_err(|e| format!("crypto.decrypt: {}", e))?;
+    if raw.len() < 12 + 16 {
+        return Err("crypto.decrypt: ciphertext demasiado corto o corrupto".into());
+    }
+    let (nonce_bytes, ct) = raw.split_at(12);
+
+    let k = Sha256::digest(key.as_bytes());
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k));
+
+    // GCM autentica: clave incorrecta o dato manipulado ⇒ error, no basura.
+    let plain = cipher.decrypt(Nonce::from_slice(nonce_bytes), ct)
+        .map_err(|_| "crypto.decrypt: clave incorrecta o datos manipulados".to_string())?;
+
+    String::from_utf8(plain)
+        .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".to_string())
+}
+
+//     XOR — LEGACY, inseguro. Solo para descifrar datos del formato antiguo
+//     (crypto.decrypt(c, k, "xor")). No se usa para cifrar nunca más.
 
 fn xor_encrypt(data: &[u8], key: &str) -> (Vec<u8>, String) {
     let mut hasher = Sha256::new();
@@ -229,18 +289,7 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-//     MD5 simple (para compatibilidad, no seguro)                               
-
-fn simple_md5(input: &[u8]) -> String {
-    // Implementación básica de MD5 — solo para compatibilidad, no para seguridad
-    // Usamos sha256 con prefijo "md5:" para simplificar
-    let mut hasher = Sha256::new();
-    hasher.update(b"md5:");
-    hasher.update(input);
-    hex_encode(&hasher.finalize()[..16])
-}
-
-//     Helpers                                                                   
+//     Helpers
 
 fn one_str(fn_name: &str, args: Vec<EvalValue>) -> Result<String, String> {
     if args.is_empty() { return Err(format!("crypto.{}() requiere 1 argumento", fn_name)); }

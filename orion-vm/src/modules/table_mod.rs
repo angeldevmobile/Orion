@@ -1218,8 +1218,10 @@ fn ai_call(prompt: &str) -> Result<EvalValue, String> {
     let is_anthropic = std::env::var("ANTHROPIC_API_KEY").is_ok();
 
     if is_anthropic {
+        let model = std::env::var("ANTHROPIC_MODEL")
+            .unwrap_or_else(|_| "claude-haiku-4-5".to_string());
         let body = serde_json::json!({
-            "model": "claude-haiku-4-5-20251001",
+            "model": model,
             "max_tokens": 512,
             "messages": [{ "role": "user", "content": prompt }]
         });

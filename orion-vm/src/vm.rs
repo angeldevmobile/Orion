@@ -135,8 +135,6 @@ pub struct VM {
     extern_libs: IndexMap<String, libloading::Library>,
     current_line: u32,
     error_handlers: Vec<ErrorHandler>,
-    /// Memoria de sesión para instrucciones AiLearn / AiSense
-    ai_memory: Vec<String>,
     /// Mark-and-sweep GC para instancias con ciclos de referencias
     gc: Gc,
     /// Contadores de llamadas por función (hotspot detection)
@@ -170,7 +168,6 @@ impl VM {
             extern_libs: IndexMap::new(),
             current_line: 0,
             error_handlers: Vec::new(),
-            ai_memory: Vec::new(),
             gc: Gc::new(),
             call_counts: HashMap::new(),
         }
@@ -1329,31 +1326,24 @@ impl VM {
                 self.value_stack.push(result);
             }
 
-            //    IA nativa (Fase 4)                                             
+            //    IA nativa (Fase 4) — delega en crate::ai, igual que el módulo
+            //    `ai`, para compartir memoria de sesión, modelo y proveedor.
             Instruction::AiAsk => {
                 let prompt = self.pop()?;
-                let response = ai_call(prompt.to_string(), None)?;
+                let response = crate::ai::think(&prompt.to_string())?;
                 self.value_stack.push(Value::Str(response));
             }
 
             Instruction::AiLearn => {
                 let text = self.pop()?;
-                self.ai_memory.push(text.to_string());
-                let msg = format!("[aprendido: {} entradas en memoria]", self.ai_memory.len());
+                let msg = crate::ai::learn(&text.to_string());
                 self.value_stack.push(Value::Str(msg));
             }
 
             Instruction::AiSense => {
                 let query = self.pop()?;
-                if self.ai_memory.is_empty() {
-                    self.value_stack.push(Value::Str(
-                        "[sense: memoria vacía — usa 'learn' primero]".to_string(),
-                    ));
-                } else {
-                    let context = self.ai_memory.join("\n---\n");
-                    let response = ai_call(query.to_string(), Some(context))?;
-                    self.value_stack.push(Value::Str(response));
-                }
+                let response = crate::ai::sense(&query.to_string())?;
+                self.value_stack.push(Value::Str(response));
             }
 
             //    Servidor HTTP nativo (Fase 7)                               
@@ -2886,120 +2876,7 @@ fn json_to_value(v: serde_json::Value) -> Value {
     }
 }
 
-/// Carga variables de un archivo .env (sin dependencias externas).
-fn load_dotenv() {
-    use std::io::{BufRead, BufReader};
-    let candidates = ["..env", ".env", "../.env", "../../.env"];
-    for path in &candidates {
-        if let Ok(f) = std::fs::File::open(path) {
-            for line in BufReader::new(f).lines().flatten() {
-                let line = line.trim().to_string();
-                if line.is_empty() || line.starts_with('#') { continue; }
-                if let Some((k, v)) = line.split_once('=') {
-                    let key = k.trim();
-                    let val = v.trim().trim_matches('"').trim_matches('\'');
-                    if std::env::var(key).is_err() {
-                        std::env::set_var(key, val);
-                    }
-                }
-            }
-            return;
-        }
-    }
-}
-
-/// Llama a la API de IA (Anthropic o OpenAI).
-/// `context`: si se proporciona, se usa como system prompt de recuperación de memoria.
-fn ai_call(prompt: String, context: Option<String>) -> Result<String, String> {
-    load_dotenv();
-
-    let anthropic_key = std::env::var("ANTHROPIC_API_KEY").ok();
-    let openai_key    = std::env::var("OPENAI_API_KEY").ok();
-
-    match (anthropic_key, openai_key) {
-        (Some(key), _) => ai_call_anthropic(prompt, context, key),
-        (None, Some(key)) => ai_call_openai(prompt, context, key),
-        _ => Err(
-            "No hay API key configurada.\n\
-             Agrega en tu .env:\n  ANTHROPIC_API_KEY=sk-ant-...\no\n  OPENAI_API_KEY=sk-...".to_string()
-        ),
-    }
-}
-
-fn ai_call_anthropic(prompt: String, context: Option<String>, key: String) -> Result<String, String> {
-    let model = std::env::var("ANTHROPIC_MODEL")
-        .unwrap_or_else(|_| "claude-3-5-haiku-20241022".to_string());
-
-    let system_prompt = context.map(|ctx| {
-        format!(
-            "Responde usando ÚNICAMENTE la siguiente información almacenada:\n\n{}\n\n\
-             Si la respuesta no está en la información, dilo claramente.",
-            ctx
-        )
-    });
-
-    let mut body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1024,
-        "messages": [{"role": "user", "content": prompt}]
-    });
-    if let Some(sys) = system_prompt {
-        body["system"] = serde_json::Value::String(sys);
-    }
-
-    let resp = ureq::post("https://api.anthropic.com/v1/messages")
-        .set("Content-Type", "application/json")
-        .set("x-api-key", &key)
-        .set("anthropic-version", "2023-06-01")
-        .send_json(body)
-        .map_err(|e| format!("Error HTTP Anthropic: {}", e))?;
-
-    let json: serde_json::Value = resp.into_json()
-        .map_err(|e| format!("Error JSON Anthropic: {}", e))?;
-
-    json["content"][0]["text"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| format!("Respuesta inesperada de Anthropic: {}", json))
-}
-
-fn ai_call_openai(prompt: String, context: Option<String>, key: String) -> Result<String, String> {
-    let model = std::env::var("OPENAI_MODEL")
-        .unwrap_or_else(|_| "gpt-4o-mini".to_string());
-
-    let mut messages = vec![];
-    if let Some(ctx) = context {
-        messages.push(serde_json::json!({
-            "role": "system",
-            "content": format!(
-                "Responde usando ÚNICAMENTE la siguiente información almacenada:\n\n{}\n\n\
-                 Si la respuesta no está en la información, dilo claramente.",
-                ctx
-            )
-        }));
-    }
-    messages.push(serde_json::json!({ "role": "user", "content": prompt }));
-
-    let resp = ureq::post("https://api.openai.com/v1/chat/completions")
-        .set("Content-Type", "application/json")
-        .set("Authorization", &format!("Bearer {}", key))
-        .send_json(serde_json::json!({
-            "model": model,
-            "max_tokens": 1024,
-            "messages": messages
-        }))
-        .map_err(|e| format!("Error HTTP OpenAI: {}", e))?;
-
-    let json: serde_json::Value = resp.into_json()
-        .map_err(|e| format!("Error JSON OpenAI: {}", e))?;
-
-    json["choices"][0]["message"]["content"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| format!("Respuesta inesperada de OpenAI: {}", json))
-}
-
-//     Bridge Value ↔ EvalValue (para módulos stdlib en el bytecode VM)         
+//     Bridge Value ↔ EvalValue (para módulos stdlib en el bytecode VM)
 
 pub fn value_to_eval(v: Value) -> crate::eval_value::EvalValue {
     use crate::eval_value::EvalValue as E;

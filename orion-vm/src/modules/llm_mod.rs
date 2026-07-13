@@ -36,15 +36,35 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let emb   = get_embedding_for_model(&model, &text)?;
             Ok(EvalValue::List(emb.into_iter().map(EvalValue::Float).collect()))
         }
-        // llm.models() → List<string>  (consulta las APIs reales; solo Anthropic usa fallback estático)
+        // llm.models() → List<string>  (consulta las APIs reales de cada proveedor)
         "models" => {
             let env = load_env();
             let mut list = Vec::new();
 
-            // Anthropic: no tiene endpoint público de modelos → fallback mínimo
-            if env.contains_key("ANTHROPIC_API_KEY") {
-                for m in &["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"] {
-                    list.push(EvalValue::Str(m.to_string()));
+            // Anthropic: GET /v1/models → lista real; fallback estático si falla la red
+            if let Some(key) = env.get("ANTHROPIC_API_KEY") {
+                let mut fetched = false;
+                if let Ok(resp) = ureq::get("https://api.anthropic.com/v1/models")
+                    .set("x-api-key", key)
+                    .set("anthropic-version", "2023-06-01")
+                    .call()
+                {
+                    if let Ok(json) = resp.into_json::<serde_json::Value>() {
+                        if let Some(data) = json["data"].as_array() {
+                            for m in data {
+                                if let Some(id) = m["id"].as_str() {
+                                    list.push(EvalValue::Str(id.to_string()));
+                                    fetched = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if !fetched {
+                    // Alias sin fecha: no se pudren cuando sale un snapshot nuevo
+                    for m in &["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"] {
+                        list.push(EvalValue::Str(m.to_string()));
+                    }
                 }
             }
 
@@ -386,7 +406,7 @@ fn embed_ollama(env: &HashMap<String, String>, model: &str, text: &str) -> Resul
 fn default_model(env: &HashMap<String, String>, provider: &str, kind: &str) -> String {
     match (provider, kind) {
         ("anthropic", _)    => env.get("ANTHROPIC_MODEL").cloned()
-                                  .unwrap_or_else(|| "claude-haiku-4-5-20251001".into()),
+                                  .unwrap_or_else(|| "claude-haiku-4-5".into()),
         ("openai",  "chat") => env.get("OPENAI_MODEL").cloned()
                                   .unwrap_or_else(|| "gpt-4o-mini".into()),
         ("openai",  "embed")=> env.get("OPENAI_EMBED_MODEL").cloned()

@@ -50,7 +50,7 @@ fn compress_zip(src: &str, dest: &str) -> Result<EvalValue, String> {
     if src_path.is_dir() {
         add_dir(&mut writer, src_path, src_path, opts, &mut count)?;
     } else {
-        add_file(&mut writer, src_path, opts, &mut count)?;
+        add_file(&mut writer, src_path.parent().unwrap_or(Path::new("")), src_path, opts, &mut count)?;
     }
     writer.finish().map_err(|e| format!("zip.compress: {}", e))?;
     Ok(EvalValue::Int(count))
@@ -69,7 +69,7 @@ fn add_dir(
         if path.is_dir() {
             add_dir(writer, base, &path, opts, count)?;
         } else {
-            add_file(writer, &path, opts, count)?;
+            add_file(writer, base, &path, opts, count)?;
         }
     }
     Ok(())
@@ -77,11 +77,15 @@ fn add_dir(
 
 fn add_file(
     writer: &mut zip::ZipWriter<fs::File>,
+    base:   &Path,
     path:   &Path,
     opts:   zip::write::SimpleFileOptions,
     count:  &mut i64,
 ) -> Result<(), String> {
-    let name = path.to_string_lossy().replace('\\', "/");
+    // Nombre RELATIVO a la base: comprimir "sb/a.txt" debe guardar "a.txt",
+    // no "sb/a.txt" (extraer a X creaba X/sb/a.txt y filtraba la ruta local).
+    let name = path.strip_prefix(base).unwrap_or(path)
+        .to_string_lossy().replace('\\', "/");
     writer.start_file(&name, opts)
         .map_err(|e| format!("zip.compress: {}", e))?;
     let mut buf = Vec::new();
@@ -105,7 +109,18 @@ fn decompress_zip(src: &str, dest: &str) -> Result<EvalValue, String> {
     for i in 0..archive.len() {
         let mut entry    = archive.by_index(i).map_err(|e| format!("zip.decompress: {}", e))?;
         let entry_name   = entry.name().to_string();
-        let out_path     = Path::new(dest).join(&entry_name);
+
+        // Zip-slip: una entrada "../x" o absoluta escribiría FUERA de dest.
+        {
+            use std::path::Component;
+            let p = Path::new(&entry_name);
+            if p.is_absolute() || p.components().any(|c| matches!(c, Component::ParentDir | Component::Prefix(_))) {
+                return Err(format!(
+                    "zip.decompress: entrada insegura '{}' (path traversal)", entry_name
+                ));
+            }
+        }
+        let out_path = Path::new(dest).join(&entry_name);
 
         if entry_name.ends_with('/') {
             fs::create_dir_all(&out_path).map_err(|e| format!("zip.decompress: {}", e))?;

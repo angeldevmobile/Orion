@@ -13,6 +13,14 @@ pub fn run_watch(path: &str) {
     ));
     println!();
 
+    // Servidores: `serve` bloquea dentro de la evaluación, así que el script
+    // corre como proceso hijo que se mata y relanza en cada cambio (estilo
+    // nodemon). Hay que detectarlo ANTES de la primera evaluación in-process.
+    if script_has_serve(path) {
+        run_watch_server(path);
+        return;
+    }
+
     // Activar watch mode: gui.run() no bloqueará, solo registra los componentes
     gui::state::IS_WATCH_MODE.store(true, Ordering::Relaxed);
 
@@ -41,6 +49,68 @@ pub fn run_watch(path: &str) {
 
 fn mtime(path: &str) -> Option<SystemTime> {
     fs::metadata(path).ok()?.modified().ok()
+}
+
+/// ¿El script usa `serve`? Se decide a nivel de tokens (no hace falta parsear,
+/// y así cuenta también un serve dentro de una función). Strings y comentarios
+/// no llegan como keyword, por lo que no dan falsos positivos.
+fn script_has_serve(path: &str) -> bool {
+    let Ok(src) = fs::read_to_string(path) else { return false };
+    let Ok(tokens) = lexer::lex(&src) else { return false };
+    tokens.iter().any(|t| matches!(t.kind, crate::token::TokenKind::Serve))
+}
+
+/// Watch para servidores: el script corre en un proceso hijo (`orion run`) que
+/// se termina y relanza en cada cambio. Si el servidor muere solo (error de
+/// arranque, puerto ocupado…), el watcher queda esperando el próximo guardado.
+fn run_watch_server(path: &str) {
+    use std::process::{Child, Command};
+
+    let exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "orion".to_string());
+
+    let spawn = |reason: &str| -> Option<Child> {
+        banner::info(&format!(
+            "{reason}  {DIM}(servidor como proceso hijo){RESET}",
+            DIM = banner::DIM, RESET = banner::RESET
+        ));
+        match Command::new(&exe).arg("run").arg(path).spawn() {
+            Ok(c) => Some(c),
+            Err(e) => { banner::fail(&format!("No se pudo lanzar el servidor: {e}")); None }
+        }
+    };
+
+    let mut child = spawn("Servidor iniciado");
+    let mut last_mtime = mtime(path);
+
+    loop {
+        thread::sleep(Duration::from_millis(400));
+
+        // ¿El servidor murió solo? Avisar una vez y esperar cambios.
+        if let Some(c) = child.as_mut() {
+            if let Ok(Some(status)) = c.try_wait() {
+                banner::fail(&format!(
+                    "El servidor terminó ({status}) — esperando cambios para reiniciar"
+                ));
+                child = None;
+            }
+        }
+
+        let cur = mtime(path);
+        if cur != last_mtime {
+            last_mtime = cur;
+            // Pausa breve para que el editor termine de escribir el archivo
+            thread::sleep(Duration::from_millis(80));
+            println!("\n  {DIM}{}  cambio detectado{RESET}", "─".repeat(44),
+                DIM = banner::DIM, RESET = banner::RESET);
+            if let Some(mut c) = child.take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+            child = spawn("Servidor reiniciado");
+        }
+    }
 }
 
 fn compile_and_run(path: &str) {

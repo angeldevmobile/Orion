@@ -85,8 +85,10 @@ printpdf  = "0.6"
 toml    = "0.8"                                      # config_mod: parseo TOML
 zip     = "2"                                        # zip_mod: crear/extraer .zip
 flate2  = "1"                                        # zip_mod: gzip/gunzip
-aes-gcm = "0.10"                                     # crypto2_mod: AES-256-GCM
+aes-gcm = "0.10"                                     # crypto2_mod + crypto_mod: AES-256-GCM
 rsa     = { version = "0.9", features = ["pem", "sha2"] }  # crypto2_mod: RSA + PEM + SHA2 OID
+subtle  = "2.5"                                      # crypto_mod: comparación en tiempo constante
+md-5    = "0.10"                                     # crypto_mod: MD5 real (checksums, no seguridad)
 
 # ── Bloque E — Cloud native ────────────────────────────────────────────────────
 ssh2 = "0.9"                                         # ssh_mod: SSH/SCP (libssh2)

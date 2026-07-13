@@ -2821,6 +2821,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
+
+[[package]]
 name = "md5"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3523,6 +3533,7 @@ dependencies = [
  "libffi",
  "libloading",
  "lopdf 0.32.0",
+ "md-5",
  "minijinja",
  "petgraph",
  "printpdf",
@@ -3537,6 +3548,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "ssh2",
+ "subtle",
  "tiny_http",
  "toml",
  "tungstenite",

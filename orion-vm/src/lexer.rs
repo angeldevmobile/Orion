@@ -506,8 +506,10 @@ fn keyword_or_ident(word: &str) -> TokenKind {
         "ask"    => TokenKind::Ask,
         "read"   => TokenKind::Read,
         "write"  => TokenKind::Write,
-        "env"    => TokenKind::Env,
         "append" => TokenKind::Append,
+        // "env" NO es keyword: ninguna regla del parser consumía TokenKind::Env
+        // y reservarlo hacía imposible usar el módulo `env` (env.get(...) no
+        // parseaba). Ahora es un identificador normal.
 
         "serve"   => TokenKind::Serve,
         "with"    => TokenKind::With,

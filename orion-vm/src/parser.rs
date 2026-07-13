@@ -24,7 +24,35 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, ParseError> {
     p.parse_program()
 }
 
-//   Parser                                   
+/// Une los argumentos de un `show` multi-argumento en una sola expresión
+/// (`str(a) + " " + str(b)`), separados por espacio como el print de Python.
+/// Con un solo argumento se devuelve tal cual (sin envolver en str()).
+fn join_show_args(mut values: Vec<Expr>) -> Expr {
+    if values.is_empty() { return Expr::Str(String::new()); }
+    if values.len() == 1 { return values.pop().unwrap(); }
+    let to_str = |v: Expr| Expr::Call {
+        callee: Box::new(Expr::Ident("str".into())),
+        args: vec![v],
+        kwargs: Vec::new(),
+    };
+    let mut it = values.into_iter();
+    let mut acc = to_str(it.next().unwrap());
+    for v in it {
+        let spaced = Expr::BinaryOp {
+            op: "+".into(),
+            left: Box::new(acc),
+            right: Box::new(Expr::Str(" ".into())),
+        };
+        acc = Expr::BinaryOp {
+            op: "+".into(),
+            left: Box::new(spaced),
+            right: Box::new(to_str(v)),
+        };
+    }
+    acc
+}
+
+//   Parser
 
 struct Parser {
     tokens: Vec<Token>,
@@ -94,43 +122,26 @@ impl Parser {
         }
     }
 
-    /// Como expect_ident pero también acepta keywords como nombres de atributo/método.
-    /// Usado después de `.` para permitir `obj.append(...)`, `obj.len`, etc.
+    /// Como expect_ident pero también acepta CUALQUIER keyword como nombre de
+    /// atributo/método. Después de un `.` no hay ambigüedad sintáctica posible
+    /// (igual que en Python/JS), así que reservar palabras ahí solo rompe APIs
+    /// legítimas: `ai.ask()`, `fs.read()`, `random.int()`, `net.error`…
+    /// Antes era una whitelist y cualquier keyword olvidada volvía inusable a
+    /// la función del módulo.
     fn expect_attr_name(&mut self) -> Result<String, ParseError> {
-        use crate::token::TokenKind::*;
+        use crate::token::TokenKind::Ident;
         let name = match self.peek().clone() {
             Ident(n) => n,
-            // Keywords que pueden usarse como nombres de método/atributo después de un punto
-            Append   => "append".to_string(),
-            Read     => "read".to_string(),
-            Write    => "write".to_string(),
-            Env      => "env".to_string(),
-            Match    => "match".to_string(),
-            Use      => "use".to_string(),
-            In       => "in".to_string(),
-            Is       => "is".to_string(),
-            With     => "with".to_string(),
-            // send/receive/sync/pipe/task/stream se des-reservaron → ahora son Ident
-            // y los captura el brazo `Ident(n)` de arriba.
-            Learn    => "learn".to_string(),
-            Sense    => "sense".to_string(),
-            // Nombres de tipo usados como método/atributo tras un punto
-            // (p.ej. random.int, x.list, cfg.dict) — son válidos como nombres.
-            TypeInt    => "int".to_string(),
-            TypeFloat  => "float".to_string(),
-            TypeString => "string".to_string(),
-            TypeBool   => "bool".to_string(),
-            TypeList   => "list".to_string(),
-            TypeDict   => "dict".to_string(),
-            TypeAny    => "any".to_string(),
-            TypeAuto   => "auto".to_string(),
-            _ => {
-                let line = self.current_line();
-                let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
-                return Err(ParseError {
-                    message: format!("Se esperaba un identificador, pero se encontró {:?}", self.peek()),
-                    line, col,
-                });
+            other => match other.keyword_text() {
+                Some(kw) => kw.to_string(),
+                None => {
+                    let line = self.current_line();
+                    let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
+                    return Err(ParseError {
+                        message: format!("Se esperaba un identificador, pero se encontró {:?}", self.peek()),
+                        line, col,
+                    });
+                }
             }
         };
         self.pos += 1;
@@ -664,11 +675,40 @@ impl Parser {
                 Ok(Stmt::Const { name, value, doc, line, col })
             }
 
-            //   show expr
+            //   show expr[, expr...]  |  show(expr, expr...)
+            // Multi-argumento estilo print de Python: se desugara a
+            // str(a) + " " + str(b) para no tocar VM/JIT (la instrucción
+            // Show sigue recibiendo UNA expresión).
             TokenKind::Show => {
                 self.pos += 1;
-                let value = self.parse_expression()?;
-                Ok(Stmt::Show { value, line, col })
+                let mut values: Vec<Expr> = Vec::new();
+                let save = self.pos;
+                match self.parse_expression() {
+                    Ok(first) => {
+                        values.push(first);
+                        while matches!(self.peek(), TokenKind::Comma) {
+                            self.pos += 1;
+                            values.push(self.parse_expression()?);
+                        }
+                    }
+                    Err(e) => {
+                        // `show("a: ", x)`: el grupo parentizado aborta en la
+                        // coma → reintentar como lista de argumentos de llamada.
+                        if !matches!(self.tokens.get(save).map(|t| &t.kind), Some(TokenKind::LParen)) {
+                            return Err(e);
+                        }
+                        self.pos = save + 1; // saltar LParen
+                        if !matches!(self.peek(), TokenKind::RParen) {
+                            values.push(self.parse_expression()?);
+                            while matches!(self.peek(), TokenKind::Comma) {
+                                self.pos += 1;
+                                values.push(self.parse_expression()?);
+                            }
+                        }
+                        self.expect(&TokenKind::RParen)?;
+                    }
+                }
+                Ok(Stmt::Show { value: join_show_args(values), line, col })
             }
 
             //   return [expr]
@@ -1167,6 +1207,21 @@ mod tests {
     fn test_show() {
         let stmts = parse_src(r#"show "hola""#);
         assert!(matches!(&stmts[0], Stmt::Show { .. }));
+    }
+
+    #[test]
+    fn test_show_multi_arg() {
+        // Estilo llamada: show("a: ", x) — antes fallaba con "Se esperaba RParen"
+        let stmts = parse_src(r#"show("total: ", x)"#);
+        assert!(matches!(&stmts[0], Stmt::Show { value: Expr::BinaryOp { .. }, .. }));
+
+        // Estilo bare: show a, b, c
+        let stmts = parse_src("show a, b, c");
+        assert!(matches!(&stmts[0], Stmt::Show { value: Expr::BinaryOp { .. }, .. }));
+
+        // Un solo argumento sigue intacto (sin envolver en str())
+        let stmts = parse_src("show(42)");
+        assert!(matches!(&stmts[0], Stmt::Show { value: Expr::Int(42), .. }));
     }
 
     #[test]

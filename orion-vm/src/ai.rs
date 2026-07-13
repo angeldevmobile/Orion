@@ -9,6 +9,13 @@ use std::sync::Mutex;
 
 static SESSION_MEMORY: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
+/// Modelo fijado con `ai.set_model(...)`; tiene prioridad sobre .env.
+static MODEL_OVERRIDE: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn set_model_override(name: Option<String>) {
+    *MODEL_OVERRIDE.lock().unwrap() = name;
+}
+
 //     Carga de .env                                                             
 
 fn load_env_vars() -> HashMap<String, String> {
@@ -75,24 +82,37 @@ fn http_post(
 
 //     Llamadas por proveedor                                                    
 
+/// Modelo efectivo para un proveedor: override de set_model > .env > default.
+/// Los defaults son ALIAS sin fecha (el proveedor los apunta al snapshot
+/// vigente); quien necesite reproducibilidad pinnea la versión datada en .env.
+pub fn model_for(env: &HashMap<String, String>, provider: &str) -> String {
+    if let Some(m) = MODEL_OVERRIDE.lock().unwrap().clone() {
+        return m;
+    }
+    match provider {
+        "anthropic" => env.get("ANTHROPIC_MODEL").cloned()
+            .unwrap_or_else(|| "claude-haiku-4-5".into()),
+        "openai" => env.get("OPENAI_MODEL").cloned()
+            .unwrap_or_else(|| "gpt-4o-mini".into()),
+        _ => "unknown".into(),
+    }
+}
+
 fn call_anthropic(
     env: &HashMap<String, String>,
-    prompt: &str,
+    messages: &[serde_json::Value],
     system: Option<&str>,
     max_tokens: u32,
 ) -> Result<String, String> {
     let key = env
         .get("ANTHROPIC_API_KEY")
         .ok_or("ANTHROPIC_API_KEY no configurada — agrégala en tu .env")?;
-    let model = env
-        .get("ANTHROPIC_MODEL")
-        .map(|s| s.as_str())
-        .unwrap_or("claude-haiku-4-5-20251001");
+    let model = model_for(env, "anthropic");
 
     let mut body = serde_json::json!({
         "model":      model,
         "max_tokens": max_tokens,
-        "messages":   [{"role": "user", "content": prompt}]
+        "messages":   messages
     });
     if let Some(sys) = system {
         body["system"] = serde_json::Value::String(sys.to_string());
@@ -116,23 +136,20 @@ fn call_anthropic(
 
 fn call_openai(
     env: &HashMap<String, String>,
-    prompt: &str,
+    history: &[serde_json::Value],
     system: Option<&str>,
     max_tokens: u32,
 ) -> Result<String, String> {
     let key = env
         .get("OPENAI_API_KEY")
         .ok_or("OPENAI_API_KEY no configurada — agrégala en tu .env")?;
-    let model = env
-        .get("OPENAI_MODEL")
-        .map(|s| s.as_str())
-        .unwrap_or("gpt-4o-mini");
+    let model = model_for(env, "openai");
 
     let mut messages: Vec<serde_json::Value> = Vec::new();
     if let Some(sys) = system {
         messages.push(serde_json::json!({"role": "system", "content": sys}));
     }
-    messages.push(serde_json::json!({"role": "user", "content": prompt}));
+    messages.extend_from_slice(history);
 
     let result = http_post(
         "https://api.openai.com/v1/chat/completions",
@@ -153,10 +170,9 @@ fn call_openai(
         .ok_or_else(|| format!("Respuesta inesperada de OpenAI: {}", result))
 }
 
-/// Selecciona proveedor y hace la llamada al modelo.
-fn ai_call(prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String, String> {
-    let env = load_env_vars();
-
+/// Proveedor efectivo según keys presentes y preferencia AI_MODEL:
+/// Some("anthropic") | Some("openai") | None.
+pub fn detect_provider(env: &HashMap<String, String>) -> Option<&'static str> {
     let has_anthropic = env.contains_key("ANTHROPIC_API_KEY");
     let has_openai    = env.contains_key("OPENAI_API_KEY");
     let pref          = env.get("AI_MODEL").map(|s| s.to_lowercase());
@@ -167,19 +183,40 @@ fn ai_call(prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String
         _                               => has_anthropic,
     };
 
-    if use_anthropic {
-        call_anthropic(&env, prompt, system, max_tokens)
-    } else if has_openai {
-        call_openai(&env, prompt, system, max_tokens)
-    } else {
-        Err(
+    if use_anthropic { Some("anthropic") }
+    else if has_openai { Some("openai") }
+    else { None }
+}
+
+/// Entorno efectivo (proceso + .env). Expuesto para ai_mod (status/provider).
+pub fn env_vars() -> HashMap<String, String> {
+    load_env_vars()
+}
+
+/// Selecciona proveedor y hace la llamada al modelo (un solo turno de usuario).
+pub fn ai_call(prompt: &str, system: Option<&str>, max_tokens: u32) -> Result<String, String> {
+    let messages = vec![serde_json::json!({"role": "user", "content": prompt})];
+    ai_call_chat(&messages, system, max_tokens)
+}
+
+/// Igual que `ai_call` pero con historial de mensajes (chat multi-turno).
+pub fn ai_call_chat(
+    messages: &[serde_json::Value],
+    system: Option<&str>,
+    max_tokens: u32,
+) -> Result<String, String> {
+    let env = load_env_vars();
+    match detect_provider(&env) {
+        Some("anthropic") => call_anthropic(&env, messages, system, max_tokens),
+        Some("openai")    => call_openai(&env, messages, system, max_tokens),
+        _ => Err(
             "No hay API key de AI configurada.\n\
              Agrega en tu .env:\n\
                ANTHROPIC_API_KEY=sk-ant-...\n\
              o\n\
                OPENAI_API_KEY=sk-..."
             .into(),
-        )
+        ),
     }
 }
 

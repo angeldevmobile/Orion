@@ -430,6 +430,35 @@ fn smoke_external_modules_wired() {
     }
 }
 
+// ── ai: lo que funciona SIN API key (estado, memoria, chat local) ────────────
+
+#[test]
+fn smoke_ai_offline() {
+    // status() → dict estructurado (no string), con claves estables
+    let st = call("ai", "status", vec![]);
+    match st {
+        EvalValue::Dict(m) => {
+            assert!(matches!(m.get("configured"), Some(EvalValue::Bool(_))), "status.configured es Bool");
+            assert!(matches!(m.get("provider"),   Some(EvalValue::Str(_))),  "status.provider es Str");
+            assert!(matches!(m.get("model"),      Some(EvalValue::Str(_))),  "status.model es Str");
+            assert!(matches!(m.get("memory"),     Some(EvalValue::Int(_))),  "status.memory es Int");
+        }
+        o => panic!("ai.status debe devolver Dict, fue {o:?}"),
+    }
+    // provider() → "anthropic" | "openai" | "none"
+    let p = as_str(call("ai", "provider", vec![]));
+    assert!(["anthropic", "openai", "none"].contains(&p.as_str()), "provider inesperado: {p}");
+    // learn/memory_size/memory_clear (memoria de sesión, sin red)
+    call("ai", "memory_clear", vec![]);
+    call("ai", "learn", vec![s("orion es un lenguaje")]);
+    assert_eq!(as_int(call("ai", "memory_size", vec![])), 1);
+    call("ai", "memory_clear", vec![]);
+    assert_eq!(as_int(call("ai", "memory_size", vec![])), 0);
+    // chat_start guarda el system prompt de la sesión (bug: antes lo descartaba)
+    call("ai", "chat_start", vec![s("responde en mayúsculas")]);
+    call("ai", "chat_reset", vec![]);
+}
+
 #[test]
 fn smoke_cosmos() {
     assert!(ok("cosmos", "star", vec![i(3)]), "cosmos.star genera estrellas");

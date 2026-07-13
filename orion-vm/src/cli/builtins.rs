@@ -68,7 +68,53 @@ pub fn registry() -> Vec<BuiltinDoc> {
     string_methods(&mut v);
     dict_methods(&mut v);
     modules(&mut v);
+    math_module(&mut v);
+
+    // Resto de la stdlib: entradas extraídas de los match-arms de src/modules/*.rs
+    // (node scripts/gen_builtins.js). Lo curado a mano arriba tiene prioridad:
+    // se descarta todo qualified ya presente.
+    let seen: std::collections::HashSet<String> = v.iter().map(|e| e.qualified.clone()).collect();
+    let mut generated = Vec::new();
+    super::builtins_gen::generated_modules(&mut generated);
+    v.extend(generated.into_iter().filter(|e| !seen.contains(&e.qualified)));
     v
+}
+
+/// Módulo `math`: vive en la VM (builtin_math_module en vm.rs), no en
+/// src/modules/, así que el generador no lo ve — se documenta aquí.
+fn math_module(v: &mut Vec<BuiltinDoc>) {
+    for (name, sig, desc) in [
+        ("PI",  "math.PI → float",  "Constante π (3.14159…)."),
+        ("E",   "math.E → float",   "Constante e (2.71828…)."),
+        ("TAU", "math.TAU → float", "Constante τ = 2π."),
+        ("PHI", "math.PHI → float", "Razón áurea (1.61803…)."),
+        ("INF", "math.INF → float", "Infinito positivo."),
+        ("sqrt",      "math.sqrt(x) → float",        "Raíz cuadrada."),
+        ("abs",       "math.abs(x) → number",        "Valor absoluto."),
+        ("floor",     "math.floor(x) → int",         "Redondea hacia abajo."),
+        ("ceil",      "math.ceil(x) → int",          "Redondea hacia arriba."),
+        ("round",     "math.round(x) → int",         "Redondea al entero más cercano."),
+        ("sin",       "math.sin(x) → float",         "Seno (radianes)."),
+        ("cos",       "math.cos(x) → float",         "Coseno (radianes)."),
+        ("tan",       "math.tan(x) → float",         "Tangente (radianes)."),
+        ("log",       "math.log(x) → float",         "Logaritmo natural."),
+        ("log10",     "math.log10(x) → float",       "Logaritmo base 10."),
+        ("log2",      "math.log2(x) → float",        "Logaritmo base 2."),
+        ("exp",       "math.exp(x) → float",         "e elevado a x."),
+        ("pow",       "math.pow(a, b) → float",      "Potencia a^b."),
+        ("max",       "math.max(a, b) → number",     "Máximo de dos valores."),
+        ("min",       "math.min(a, b) → number",     "Mínimo de dos valores."),
+        ("clamp",     "math.clamp(x, lo, hi) → number", "Acota x al rango [lo, hi]."),
+        ("factorial", "math.factorial(n) → int",     "Factorial de n."),
+        ("sign",      "math.sign(x) → int",          "Signo: -1, 0 o 1."),
+        ("degrees",   "math.degrees(r) → float",     "Radianes → grados."),
+        ("radians",   "math.radians(d) → float",     "Grados → radianes."),
+        ("hypot",     "math.hypot(a, b) → float",    "Hipotenusa √(a²+b²)."),
+        ("rand",      "math.rand() → float",         "Float aleatorio en [0, 1)."),
+        ("randint",   "math.randint(a, b) → int",    "Entero aleatorio en [a, b]."),
+    ] {
+        v.push(f("math", name, sig, desc, ""));
+    }
 }
 
 fn keywords(v: &mut Vec<BuiltinDoc>) {
@@ -235,7 +281,7 @@ fn mod_json(v: &mut Vec<BuiltinDoc>) {
     v.push(f("json", "forge", "json.forge(valor) → string", "Serializa un valor a string JSON (claves ordenadas).", "json.forge({ \"a\": 1 })"));
     v.push(f("json", "sort_keys", "json.sort_keys(dict) → dict", "Ordena las claves del dict.", "json.sort_keys(d)"));
     v.push(f("json", "merge_deep", "json.merge_deep(a, b) → dict", "Combina dos dicts en profundidad.", "json.merge_deep(base, override)"));
-    v.push(f("json", "validate", "json.validate(texto) → bool", "¿Es JSON válido?", "json.validate(entrada)"));
+    v.push(f("json", "validate", "json.validate(obj, schema) → bool", "Valida un valor contra un schema ({campo: tipo}).", "json.validate(usuario, {\"nombre\": \"string\", \"edad\": \"int\"})"));
 }
 
 fn mod_fs(v: &mut Vec<BuiltinDoc>) {

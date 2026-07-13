@@ -7,6 +7,7 @@ pub mod doctor;
 pub mod new_project;
 pub mod docs;
 pub mod builtins;
+pub mod builtins_gen;
 pub mod build_native;
 pub mod format;
 pub mod debug;

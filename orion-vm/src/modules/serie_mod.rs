@@ -227,14 +227,19 @@ fn fn_slice(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id    = arg_handle(&args, 0)?;
     let desde = match &args[1] { EvalValue::Int(n) => *n as usize, _ => return Err("serie.slice: índices deben ser int".into()) };
     let hasta = match &args[2] { EvalValue::Int(n) => *n as usize, _ => return Err("serie.slice: índices deben ser int".into()) };
-    with_series(|s| {
+    // OJO: store_serie vuelve a tomar el lock de SERIES — llamarlo DENTRO del
+    // closure de with_series deadlockea (Mutex no reentrante). Calcular dentro,
+    // guardar fuera. (Aplica a todas las transformaciones de este módulo.)
+    let (values, timestamps) = with_series(|s| {
         let sr  = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
         let end = hasta.min(sr.values.len());
         let ini = desde.min(end);
-        let values     = sr.values[ini..end].to_vec();
-        let timestamps = sr.timestamps.as_ref().map(|ts| ts[ini..end.min(ts.len())].to_vec());
-        Ok(EvalValue::Str(store_serie(values, timestamps)))
-    })
+        Ok::<_, String>((
+            sr.values[ini..end].to_vec(),
+            sr.timestamps.as_ref().map(|ts| ts[ini..end.min(ts.len())].to_vec()),
+        ))
+    })?;
+    Ok(EvalValue::Str(store_serie(values, timestamps)))
 }
 
 fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
@@ -262,7 +267,7 @@ fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_moving_avg(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id     = arg_handle(&args, 0)?;
     let window = arg_window(&args, 1, "moving_avg")?;
-    with_series(|s| {
+    let (result, ts) = with_series(|s| {
         let sr     = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
         let vals   = &sr.values;
         let result: Vec<f64> = (0..vals.len()).map(|i| {
@@ -270,15 +275,15 @@ fn fn_moving_avg(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let slice = &vals[start..=i];
             slice.iter().sum::<f64>() / slice.len() as f64
         }).collect();
-        let ts = sr.timestamps.clone();
-        Ok(EvalValue::Str(store_serie(result, ts)))
-    })
+        Ok::<_, String>((result, sr.timestamps.clone()))
+    })?;
+    Ok(EvalValue::Str(store_serie(result, ts)))
 }
 
 fn fn_rolling_std(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id     = arg_handle(&args, 0)?;
     let window = arg_window(&args, 1, "rolling_std")?;
-    with_series(|s| {
+    let (result, ts) = with_series(|s| {
         let sr   = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
         let vals = &sr.values;
         let result: Vec<f64> = (0..vals.len()).map(|i| {
@@ -286,44 +291,50 @@ fn fn_rolling_std(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let slice = &vals[start..=i];
             std_of(slice)
         }).collect();
-        let ts = sr.timestamps.clone();
-        Ok(EvalValue::Str(store_serie(result, ts)))
-    })
+        Ok::<_, String>((result, sr.timestamps.clone()))
+    })?;
+    Ok(EvalValue::Str(store_serie(result, ts)))
 }
 
 fn fn_diff(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
-    with_series(|s| {
+    let out = with_series(|s| {
         let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
-        if sr.values.len() < 2 { return Ok(EvalValue::Str(id.clone())); }
+        if sr.values.len() < 2 { return Ok::<_, String>(None); }
         let result: Vec<f64> = sr.values.windows(2).map(|w| w[1] - w[0]).collect();
-        let ts = sr.timestamps.as_ref().map(|ts| ts[1..].to_vec());
-        Ok(EvalValue::Str(store_serie(result, ts)))
-    })
+        Ok(Some((result, sr.timestamps.as_ref().map(|ts| ts[1..].to_vec()))))
+    })?;
+    match out {
+        Some((result, ts)) => Ok(EvalValue::Str(store_serie(result, ts))),
+        None => Ok(EvalValue::Str(id)),
+    }
 }
 
 fn fn_pct_change(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
-    with_series(|s| {
+    let out = with_series(|s| {
         let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
-        if sr.values.len() < 2 { return Ok(EvalValue::Str(id.clone())); }
+        if sr.values.len() < 2 { return Ok::<_, String>(None); }
         let result: Vec<f64> = sr.values.windows(2).map(|w| {
             if w[0] == 0.0 { 0.0 } else { (w[1] - w[0]) / w[0] * 100.0 }
         }).collect();
-        let ts = sr.timestamps.as_ref().map(|ts| ts[1..].to_vec());
-        Ok(EvalValue::Str(store_serie(result, ts)))
-    })
+        Ok(Some((result, sr.timestamps.as_ref().map(|ts| ts[1..].to_vec()))))
+    })?;
+    match out {
+        Some((result, ts)) => Ok(EvalValue::Str(store_serie(result, ts))),
+        None => Ok(EvalValue::Str(id)),
+    }
 }
 
 fn fn_cumsum(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
-    with_series(|s| {
+    let (result, ts) = with_series(|s| {
         let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
         let mut acc = 0.0_f64;
         let result: Vec<f64> = sr.values.iter().map(|&v| { acc += v; acc }).collect();
-        let ts = sr.timestamps.clone();
-        Ok(EvalValue::Str(store_serie(result, ts)))
-    })
+        Ok::<_, String>((result, sr.timestamps.clone()))
+    })?;
+    Ok(EvalValue::Str(store_serie(result, ts)))
 }
 
 fn fn_smooth(args: Vec<EvalValue>) -> Result<EvalValue, String> {
@@ -334,18 +345,21 @@ fn fn_smooth(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         EvalValue::Int(n)   => *n as f64,
         _ => return Err("serie.smooth: alpha debe ser número".into()),
     };
-    with_series(|s| {
+    let out = with_series(|s| {
         let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
-        if sr.values.is_empty() { return Ok(EvalValue::Str(id.clone())); }
+        if sr.values.is_empty() { return Ok::<_, String>(None); }
         let mut result = Vec::with_capacity(sr.values.len());
         result.push(sr.values[0]);
         for &v in &sr.values[1..] {
             let prev = *result.last().unwrap();
             result.push(alpha * v + (1.0 - alpha) * prev);
         }
-        let ts = sr.timestamps.clone();
-        Ok(EvalValue::Str(store_serie(result, ts)))
-    })
+        Ok(Some((result, sr.timestamps.clone())))
+    })?;
+    match out {
+        Some((result, ts)) => Ok(EvalValue::Str(store_serie(result, ts))),
+        None => Ok(EvalValue::Str(id)),
+    }
 }
 
 // ── análisis ──────────────────────────────────────────────────────────────────

@@ -141,6 +141,35 @@ pub enum TokenKind {
     Eof,
 }
 
+impl TokenKind {
+    /// Si el token es una palabra clave, su texto original.
+    ///
+    /// Sirve para permitir keywords como nombres de miembro tras un punto
+    /// (`ai.ask`, `fs.read`, `net.error`…), igual que Python/JS: después de `.`
+    /// no hay ambigüedad sintáctica posible. Debe cubrir TODAS las keywords del
+    /// lexer — si se agrega una nueva allí, agregarla aquí también.
+    pub fn keyword_text(&self) -> Option<&'static str> {
+        use TokenKind::*;
+        Some(match self {
+            Show => "show", Return => "return", Break => "break", Continue => "continue",
+            Fn => "fn", Const => "const", For => "for", In => "in", If => "if",
+            Else => "else", While => "while", Match => "match", Use => "use",
+            Attempt => "attempt", Handle => "handle", ErrorKw => "error", As => "as",
+            Take => "take", Extern => "extern",
+            TypeInt => "int", TypeFloat => "float", TypeBool => "bool",
+            TypeString => "string", TypeList => "list", TypeDict => "dict",
+            TypeAny => "any", TypeAuto => "auto",
+            Shape => "shape", Act => "act", Using => "using", Is => "is",
+            OnCreate => "on_create", OnError => "on_error", Me => "me", Super => "super",
+            Spawn => "spawn", Async => "async", Await => "await",
+            Ask => "ask", Read => "read", Write => "write", Env => "env", Append => "append",
+            Serve => "serve", With => "with", Choices => "choices",
+            Think => "think", Learn => "learn", Sense => "sense",
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
