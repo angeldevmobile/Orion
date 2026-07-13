@@ -49,14 +49,37 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 }
 
 // ── AES-256-GCM ──────────────────────────────────────────────────────────────
+//
+// La clave AES se deriva del password con Argon2id + salt aleatorio de 16 bytes
+// (memory-hard: resiste fuerza bruta en GPU). Un SHA-256 plano del password —el
+// esquema anterior— es rapidísimo de romper y sin salt permite rainbow tables
+// compartidas entre todos los usuarios. Formato versionado:
+//   v1 (actual):  base64( 0x01 ‖ salt[16] ‖ nonce[12] ‖ ciphertext )
+//   legacy:       base64(                    nonce[12] ‖ ciphertext )  (SHA-256)
+// Al descifrar se intenta v1 y, si el tag GCM no valida, se cae a legacy: el tag
+// autenticado desambigua sin riesgo de descifrar basura.
 
-fn derive_aes_key(password: &str) -> Key<Aes256Gcm> {
+const AES_V1: u8 = 0x01;
+
+/// Argon2id(password, salt) → 32 bytes de clave AES-256.
+fn kdf_argon2(password: &str, salt: &[u8]) -> Result<Key<Aes256Gcm>, String> {
+    let mut key = [0u8; 32];
+    argon2::Argon2::default()
+        .hash_password_into(password.as_bytes(), salt, &mut key)
+        .map_err(|e| format!("crypto2: derivación de clave: {}", e))?;
+    Ok(*Key::<Aes256Gcm>::from_slice(&key))
+}
+
+/// KDF legacy (SHA-256 plano) — SOLO para descifrar datos del formato viejo.
+fn kdf_legacy(password: &str) -> Key<Aes256Gcm> {
     let hash = Sha256::digest(password.as_bytes());
     *Key::<Aes256Gcm>::from_slice(&hash)
 }
 
 fn aes_encrypt(plaintext: &str, password: &str) -> Result<EvalValue, String> {
-    let key    = derive_aes_key(password);
+    let mut salt = [0u8; 16];
+    rand_fill(&mut salt);
+    let key    = kdf_argon2(password, &salt)?;
     let cipher = Aes256Gcm::new(&key);
 
     let mut nonce_bytes = [0u8; 12];
@@ -67,8 +90,11 @@ fn aes_encrypt(plaintext: &str, password: &str) -> Result<EvalValue, String> {
         .encrypt(nonce, plaintext.as_bytes())
         .map_err(|e| format!("crypto2.aes_encrypt: {}", e))?;
 
-    // Formato final: base64(nonce‖ciphertext)
-    let mut combined = nonce_bytes.to_vec();
+    // Formato v1: base64(0x01 ‖ salt ‖ nonce ‖ ciphertext)
+    let mut combined = Vec::with_capacity(1 + 16 + 12 + ciphertext.len());
+    combined.push(AES_V1);
+    combined.extend_from_slice(&salt);
+    combined.extend_from_slice(&nonce_bytes);
     combined.extend_from_slice(&ciphertext);
     Ok(EvalValue::Str(B64.encode(&combined)))
 }
@@ -76,19 +102,35 @@ fn aes_encrypt(plaintext: &str, password: &str) -> Result<EvalValue, String> {
 fn aes_decrypt(encoded: &str, password: &str) -> Result<EvalValue, String> {
     let raw = B64.decode(encoded)
         .map_err(|e| format!("crypto2.aes_decrypt base64: {}", e))?;
-    if raw.len() < 12 {
-        return Err("crypto2.aes_decrypt: datos corruptos (demasiado cortos)".into());
+
+    // Intento formato v1 (Argon2id + salt).
+    if raw.first() == Some(&AES_V1) && raw.len() >= 1 + 16 + 12 {
+        let salt  = &raw[1..17];
+        let nonce = Nonce::from_slice(&raw[17..29]);
+        let ct    = &raw[29..];
+        let key   = kdf_argon2(password, salt)?;
+        if let Ok(plain) = Aes256Gcm::new(&key).decrypt(nonce, ct) {
+            return String::from_utf8(plain)
+                .map(EvalValue::Str)
+                .map_err(|e| format!("crypto2.aes_decrypt UTF-8: {}", e));
+        }
+        // Si el tag no valida, puede ser un dato legacy que empieza por 0x01:
+        // caemos al intento legacy antes de rendirnos.
     }
-    let nonce      = Nonce::from_slice(&raw[..12]);
-    let ciphertext = &raw[12..];
-    let key        = derive_aes_key(password);
-    let cipher     = Aes256Gcm::new(&key);
-    let plain      = cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|_| "crypto2.aes_decrypt: clave incorrecta o datos corruptos".to_string())?;
-    String::from_utf8(plain)
-        .map(EvalValue::Str)
-        .map_err(|e| format!("crypto2.aes_decrypt UTF-8: {}", e))
+
+    // Formato legacy (SHA-256, sin salt): nonce[12] ‖ ct.
+    if raw.len() >= 12 {
+        let nonce = Nonce::from_slice(&raw[..12]);
+        let ct    = &raw[12..];
+        let key   = kdf_legacy(password);
+        if let Ok(plain) = Aes256Gcm::new(&key).decrypt(nonce, ct) {
+            return String::from_utf8(plain)
+                .map(EvalValue::Str)
+                .map_err(|e| format!("crypto2.aes_decrypt UTF-8: {}", e));
+        }
+    }
+
+    Err("crypto2.aes_decrypt: clave incorrecta o datos corruptos".into())
 }
 
 // ── RSA ──────────────────────────────────────────────────────────────────────

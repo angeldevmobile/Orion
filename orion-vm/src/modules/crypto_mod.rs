@@ -166,11 +166,29 @@ fn hmac_sign(data: &[u8], key: &[u8]) -> Result<String, String> {
 }
 
 //     AES-256-GCM — cifrado autenticado real
+//
+// Clave AES derivada del password con Argon2id + salt aleatorio (memory-hard).
+// La clave puede venir del usuario (posible password débil), así que un SHA-256
+// plano —el esquema viejo— la dejaba rompible por fuerza bruta en GPU y sin salt
+// exponía a rainbow tables. Formato versionado:
+//   v1 (actual):  base64( 0x01 ‖ salt[16] ‖ nonce[12] ‖ ct )
+//   legacy:       base64(                    nonce[12] ‖ ct )   (SHA-256)
+// GCM autentica el tag, lo que desambigua v1 vs legacy al descifrar.
 
-/// Clave AES = SHA256(clave del usuario). Nonce aleatorio de 12 bytes por
-/// mensaje, antepuesto al ciphertext: base64(nonce ‖ ct ‖ tag).
+const AES_V1: u8 = 0x01;
+
+fn kdf_argon2(key: &str, salt: &[u8]) -> Result<[u8; 32], String> {
+    let mut out = [0u8; 32];
+    argon2::Argon2::default()
+        .hash_password_into(key.as_bytes(), salt, &mut out)
+        .map_err(|e| format!("crypto: derivación de clave: {}", e))?;
+    Ok(out)
+}
+
 fn aes_encrypt(data: &[u8], key: &str) -> Result<String, String> {
-    let k = Sha256::digest(key.as_bytes());
+    let mut salt = [0u8; 16];
+    rand::thread_rng().fill(&mut salt);
+    let k = kdf_argon2(key, &salt)?;
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k));
 
     let mut nonce_bytes = [0u8; 12];
@@ -180,27 +198,38 @@ fn aes_encrypt(data: &[u8], key: &str) -> Result<String, String> {
     let ct = cipher.encrypt(nonce, data)
         .map_err(|e| format!("crypto.encrypt: {}", e))?;
 
-    let mut out = nonce_bytes.to_vec();
+    let mut out = Vec::with_capacity(1 + 16 + 12 + ct.len());
+    out.push(AES_V1);
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&nonce_bytes);
     out.extend_from_slice(&ct);
     Ok(b64_encode(&out))
 }
 
 fn aes_decrypt(cipher_b64: &str, key: &str) -> Result<String, String> {
     let raw = b64_decode(cipher_b64).map_err(|e| format!("crypto.decrypt: {}", e))?;
-    if raw.len() < 12 + 16 {
-        return Err("crypto.decrypt: ciphertext demasiado corto o corrupto".into());
+
+    // Formato v1: Argon2id + salt.
+    if raw.first() == Some(&AES_V1) && raw.len() >= 1 + 16 + 12 {
+        let k = kdf_argon2(key, &raw[1..17])?;
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k));
+        if let Ok(plain) = cipher.decrypt(Nonce::from_slice(&raw[17..29]), &raw[29..]) {
+            return String::from_utf8(plain)
+                .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".to_string());
+        }
     }
-    let (nonce_bytes, ct) = raw.split_at(12);
 
-    let k = Sha256::digest(key.as_bytes());
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k));
+    // Formato legacy: SHA-256 sin salt, nonce[12] ‖ ct.
+    if raw.len() >= 12 {
+        let k = Sha256::digest(key.as_bytes());
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k));
+        if let Ok(plain) = cipher.decrypt(Nonce::from_slice(&raw[..12]), &raw[12..]) {
+            return String::from_utf8(plain)
+                .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".to_string());
+        }
+    }
 
-    // GCM autentica: clave incorrecta o dato manipulado ⇒ error, no basura.
-    let plain = cipher.decrypt(Nonce::from_slice(nonce_bytes), ct)
-        .map_err(|_| "crypto.decrypt: clave incorrecta o datos manipulados".to_string())?;
-
-    String::from_utf8(plain)
-        .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".to_string())
+    Err("crypto.decrypt: clave incorrecta o datos manipulados".into())
 }
 
 //     XOR — LEGACY, inseguro. Solo para descifrar datos del formato antiguo

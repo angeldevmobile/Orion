@@ -198,6 +198,39 @@ fn smoke_crypto2_aes_roundtrip() {
     assert_eq!(as_str(dec), "secreto");
 }
 
+// La clave AES se deriva con Argon2id + salt aleatorio, NO con SHA-256 plano.
+// Verificamos: (1) formato v1 con salt, (2) dos cifrados del mismo texto+clave
+// difieren (salt+nonce frescos), (3) sigue descifrando el formato legacy viejo.
+#[test]
+fn smoke_crypto2_aes_kdf_hardened() {
+    // (1) el output empieza por el byte de versión 0x01 tras decodificar base64
+    use base64::Engine as _;
+    let enc = as_str(call("crypto2", "aes_encrypt", vec![s("x"), s("pw")]));
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(&enc).expect("base64 válido");
+    assert_eq!(raw[0], 0x01, "el ciphertext debe llevar el marcador de versión v1");
+    assert!(raw.len() >= 1 + 16 + 12, "debe incluir salt(16)+nonce(12)");
+
+    // (2) mismo plaintext + misma clave ⇒ ciphertexts distintos (salt aleatorio)
+    let a = as_str(call("crypto2", "aes_encrypt", vec![s("igual"), s("k")]));
+    let b = as_str(call("crypto2", "aes_encrypt", vec![s("igual"), s("k")]));
+    assert_ne!(a, b, "el salt/nonce aleatorio debe hacer cada cifrado único");
+
+    // (3) compatibilidad: un dato del formato legacy (SHA-256, sin versión) se
+    // sigue descifrando. Construimos uno con la derivación vieja.
+    use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};
+    use sha2::{Sha256, Digest};
+    let legacy_key = Sha256::digest(b"klegacy");
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&legacy_key));
+    let nonce = [7u8; 12];
+    let ct = cipher.encrypt(Nonce::from_slice(&nonce), b"antiguo".as_ref()).unwrap();
+    let mut blob = nonce.to_vec();
+    blob.extend_from_slice(&ct);
+    let legacy_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
+    let dec = call("crypto2", "aes_decrypt", vec![s(&legacy_b64), s("klegacy")]);
+    assert_eq!(as_str(dec), "antiguo", "debe descifrar el formato legacy");
+}
+
 #[test]
 fn smoke_matrix() {
     assert!(ok("matrix", "add", vec![mat(&[&[1,2],&[3,4]]), mat(&[&[1,1],&[1,1]])]));
