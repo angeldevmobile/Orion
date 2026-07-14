@@ -179,7 +179,10 @@ fn fn_correlation(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let den_x: f64 = x.iter().map(|a| (a - mx).powi(2)).sum::<f64>().sqrt();
     let den_y: f64 = y.iter().map(|b| (b - my).powi(2)).sum::<f64>().sqrt();
     if den_x * den_y == 0.0 { return Ok(EvalValue::Float(0.0)); }
-    Ok(EvalValue::Float(num / (den_x * den_y)))
+    // Redondeo a 1e-12: sin él una correlación perfecta da 0.9999999999999998
+    // (misma convención que quantum/vector, que también redondean)
+    let r = num / (den_x * den_y);
+    Ok(EvalValue::Float((r * 1e12).round() / 1e12))
 }
 
 fn fn_regression(args: Vec<EvalValue>) -> Result<EvalValue, String> {

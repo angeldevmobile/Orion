@@ -3,6 +3,8 @@
 /// EvalValue: un estado N-qubit es List([List([re, im]), ...]) con 2^N elementos.
 use crate::eval_value::EvalValue;
 use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // Número complejo (re, im)
 type C = (f64, f64);
@@ -15,10 +17,22 @@ type Gate = Vec<Vec<C>>;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // qubit(alpha_re?, alpha_im?, beta_re?, beta_im?) → estado |qubit>
+        // qubit(alpha_re?, alpha_im?, beta_re?, beta_im?) → estado |qubit> (sin args: |0>)
         "qubit" | "zero" => {
-            let state = normalize(vec![(1.0, 0.0), (0.0, 0.0)]);
-            Ok(state_to_eval(&state))
+            if args.is_empty() {
+                return Ok(state_to_eval(&vec![(1.0, 0.0), (0.0, 0.0)]));
+            }
+            if args.len() < 4 {
+                return Err("quantum.qubit: () para |0> o (alpha_re, alpha_im, beta_re, beta_im)".into());
+            }
+            let raw = vec![
+                (to_f64v(&args[0])?, to_f64v(&args[1])?),
+                (to_f64v(&args[2])?, to_f64v(&args[3])?),
+            ];
+            if raw.iter().map(|&a| c_abs2(a)).sum::<f64>() < 1e-15 {
+                return Err("quantum.qubit: amplitudes todas cero (estado inválido)".into());
+            }
+            Ok(state_to_eval(&normalize(raw)))
         }
         "one" => {
             let state = normalize(vec![(0.0, 0.0), (1.0, 0.0)]);
@@ -151,7 +165,140 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-//     Puertas estándar                                                          
+//     Circuitos: registro de n qubits con puertas dirigidas a qubits concretos
+//
+//     Las puertas de 1 qubit se aplican en O(2^n) recorriendo pares de índices
+//     que difieren solo en el bit del qubit objetivo — nunca se construye la
+//     matriz 2^n × 2^n. Es el mismo esquema de los simuladores de verdad y
+//     permite ~24 qubits en un portátil. Convención: qubit 0 = bit más
+//     significativo (coincide con state_from_bits y las claves "010...").
+
+struct Circuit {
+    n:     usize,
+    state: State,
+}
+
+const MAX_QUBITS: usize = 24; // 2^24 amplitudes × 16 bytes = 256 MB
+
+static CIRCUITS: Mutex<Option<HashMap<u64, Circuit>>> = Mutex::new(None);
+static NEXT_CIRCUIT: AtomicU64 = AtomicU64::new(1);
+
+fn with_circuits<F, T>(f: F) -> T
+where
+    F: FnOnce(&mut HashMap<u64, Circuit>) -> T,
+{
+    let mut guard = CIRCUITS.lock().unwrap();
+    if guard.is_none() { *guard = Some(HashMap::new()); }
+    f(guard.as_mut().unwrap())
+}
+
+fn circuit_id(args: &[EvalValue]) -> Result<u64, String> {
+    match args.first() {
+        Some(EvalValue::Int(n)) if *n > 0 => Ok(*n as u64),
+        _ => Err("quantum: se esperaba un id de circuito (int)".into()),
+    }
+}
+
+fn qubit_arg(args: &[EvalValue], pos: usize, n: usize, fname: &str) -> Result<usize, String> {
+    match args.get(pos) {
+        Some(EvalValue::Int(q)) if *q >= 0 && (*q as usize) < n => Ok(*q as usize),
+        Some(EvalValue::Int(q)) => Err(format!("quantum.{}: qubit {} fuera de rango (el circuito tiene {})", fname, q, n)),
+        _ => Err(format!("quantum.{}: se esperaba índice de qubit (int)", fname)),
+    }
+}
+
+fn theta_arg(args: &[EvalValue], pos: usize, fname: &str) -> Result<f64, String> {
+    match args.get(pos) {
+        Some(EvalValue::Float(f)) => Ok(*f),
+        Some(EvalValue::Int(n))   => Ok(*n as f64),
+        _ => Err(format!("quantum.{}: se esperaba ángulo theta (número, radianes)", fname)),
+    }
+}
+
+// Aplica una puerta 2×2 al qubit `q`, opcionalmente condicionada a que TODOS
+// los bits de `controls` estén en 1. O(2^n).
+fn apply_1q(circ: &mut Circuit, q: usize, g: &[[C; 2]; 2], controls: &[usize]) {
+    let bit = 1usize << (circ.n - 1 - q);
+    let cmask: usize = controls.iter().map(|&c| 1usize << (circ.n - 1 - c)).sum();
+    let size = circ.state.len();
+    for i in 0..size {
+        if i & bit == 0 && (i & cmask) == cmask {
+            let j = i | bit;
+            let a = circ.state[i];
+            let b = circ.state[j];
+            circ.state[i] = c_add(c_mul(g[0][0], a), c_mul(g[0][1], b));
+            circ.state[j] = c_add(c_mul(g[1][0], a), c_mul(g[1][1], b));
+        }
+    }
+}
+
+fn gate2(m: [[C; 2]; 2]) -> [[C; 2]; 2] { m }
+
+fn named_gate(name: &str, theta: f64) -> Option<[[C; 2]; 2]> {
+    let s = 1.0 / 2.0f64.sqrt();
+    let (ht2c, ht2s) = ((theta / 2.0).cos(), (theta / 2.0).sin());
+    Some(match name {
+        "h"     => gate2([[(s,0.0),(s,0.0)], [(s,0.0),(-s,0.0)]]),
+        "x"     => gate2([[(0.0,0.0),(1.0,0.0)], [(1.0,0.0),(0.0,0.0)]]),
+        "y"     => gate2([[(0.0,0.0),(0.0,-1.0)], [(0.0,1.0),(0.0,0.0)]]),
+        "z"     => gate2([[(1.0,0.0),(0.0,0.0)], [(0.0,0.0),(-1.0,0.0)]]),
+        "s"     => gate2([[(1.0,0.0),(0.0,0.0)], [(0.0,0.0),(0.0,1.0)]]),
+        "t"     => gate2([[(1.0,0.0),(0.0,0.0)], [(0.0,0.0),((std::f64::consts::FRAC_PI_4).cos(),(std::f64::consts::FRAC_PI_4).sin())]]),
+        "rx"    => gate2([[(ht2c,0.0),(0.0,-ht2s)], [(0.0,-ht2s),(ht2c,0.0)]]),
+        "ry"    => gate2([[(ht2c,0.0),(-ht2s,0.0)], [(ht2s,0.0),(ht2c,0.0)]]),
+        "rz"    => gate2([[(ht2c,-ht2s),(0.0,0.0)], [(0.0,0.0),(ht2c,ht2s)]]),
+        "phase" => gate2([[(1.0,0.0),(0.0,0.0)], [(0.0,0.0),(theta.cos(),theta.sin())]]),
+        _ => return None,
+    })
+}
+
+// Convierte EvalValue [[..],[..]] en puerta 2×2 (para ugate/cugate)
+fn eval_to_gate2(v: &EvalValue) -> Result<[[C; 2]; 2], String> {
+    let g = eval_to_gate(v)?;
+    if g.len() != 2 || g[0].len() != 2 || g[1].len() != 2 {
+        return Err("quantum.ugate: la puerta debe ser 2×2 ([[a,b],[c,d]] con [re,im] o números)".into());
+    }
+    // Unitariedad: G·G† = I (si no, el estado deja de ser físico)
+    let (a, b, c, d) = (g[0][0], g[0][1], g[1][0], g[1][1]);
+    let row1 = c_abs2(a) + c_abs2(b);
+    let row2 = c_abs2(c) + c_abs2(d);
+    let cross = c_add(c_mul(a, c_conj(c)), c_mul(b, c_conj(d)));
+    if (row1 - 1.0).abs() > 1e-9 || (row2 - 1.0).abs() > 1e-9 || c_abs2(cross) > 1e-18 {
+        return Err("quantum.ugate: la matriz no es unitaria (G·G† ≠ I)".into());
+    }
+    Ok([[g[0][0], g[0][1]], [g[1][0], g[1][1]]])
+}
+
+// Ejecuta una puerta con nombre sobre un circuito: (id, q) o (id, q, theta)
+fn circuit_gate(name: &str, args: Vec<EvalValue>, parametric: bool) -> Result<EvalValue, String> {
+    let id = circuit_id(&args)?;
+    with_circuits(|cs| {
+        let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+        let q = qubit_arg(&args, 1, circ.n, name)?;
+        let theta = if parametric { theta_arg(&args, 2, name)? } else { 0.0 };
+        let g = named_gate(name, theta).ok_or(format!("quantum.{}: puerta desconocida", name))?;
+        apply_1q(circ, q, &g, &[]);
+        Ok(EvalValue::Int(id as i64))
+    })
+}
+
+// Puerta con nombre controlada: (id, control, target) o (id, control, target, theta)
+fn circuit_cgate(name: &str, args: Vec<EvalValue>, parametric: bool) -> Result<EvalValue, String> {
+    let id = circuit_id(&args)?;
+    with_circuits(|cs| {
+        let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+        let ctrl = qubit_arg(&args, 1, circ.n, name)?;
+        let tgt  = qubit_arg(&args, 2, circ.n, name)?;
+        if ctrl == tgt { return Err(format!("quantum.{}: control y target deben ser distintos", name)); }
+        let theta = if parametric { theta_arg(&args, 3, name)? } else { 0.0 };
+        let base = match name { "cnot" => "x", "cz" => "z", "cphase" => "phase", other => other };
+        let g = named_gate(base, theta).ok_or(format!("quantum.{}: puerta desconocida", name))?;
+        apply_1q(circ, tgt, &g, &[ctrl]);
+        Ok(EvalValue::Int(id as i64))
+    })
+}
+
+//     Puertas estándar
 
 fn hadamard() -> Gate {
     let s = 1.0 / 2.0f64.sqrt();

@@ -36,7 +36,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("fs", "ensure", "fs.ensure(…)", "Función del módulo fs."));
     v.push(f("fs", "backup", "fs.backup(…)", "Función del módulo fs."));
     v.push(f("fs", "mkdir", "fs.mkdir(…)", "Función del módulo fs."));
-    v.push(f("fs", "rmdir", "fs.rmdir(…)", "Función del módulo fs."));
+    v.push(f("fs", "rmdir", "fs.rmdir(path)", "Yes si existía y se borró, no si no existía (idempotente, como fs.delete); otros errores (permisos, bloqueo) sí se reportan"));
     v.push(f("fs", "clear_dir", "fs.clear_dir(…)", "Función del módulo fs."));
     v.push(f("fs", "info", "fs.info(…)", "Función del módulo fs."));
     v.push(f("fs", "size", "fs.size(…)", "Función del módulo fs."));
@@ -208,7 +208,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("matrix", "amplify", "matrix.amplify(A, factor)", "Alias de matrix.scale."));
     v.push(f("matrix", "collapse", "matrix.collapse(A)", "Tanh(sum de todos los elementos)"));
     // quantum (quantum_mod.rs)
-    v.push(f("quantum", "qubit", "quantum.qubit(alpha_re?, alpha_im?, beta_re?, beta_im?)", "Estado |qubit>"));
+    v.push(f("quantum", "qubit", "quantum.qubit(alpha_re?, alpha_im?, beta_re?, beta_im?)", "Estado |qubit> (sin args: |0>)"));
     v.push(f("quantum", "zero", "quantum.zero(alpha_re?, alpha_im?, beta_re?, beta_im?)", "Alias de quantum.qubit."));
     v.push(f("quantum", "one", "quantum.one(…)", "Función del módulo quantum."));
     v.push(f("quantum", "rand", "quantum.rand()", "Qubit aleatorio"));

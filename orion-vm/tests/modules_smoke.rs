@@ -633,3 +633,46 @@ fn smoke_csv_stats_interpolated_and_fs_rmdir_idempotent() {
 
     assert!(!as_bool(call("fs", "rmdir", vec![s("dir_que_jamas_existio_xyz")])));
 }
+
+// ── Regresión validación 2026-07-13 (lote HPC: stat/vector/grafo/quantum) ────
+
+// quantum.qubit documentaba (a_re, a_im, b_re, b_im) pero IGNORABA los args
+// (qubit(0,0,1,0) devolvía |0>). Ahora los honra, normaliza, y rechaza el
+// estado nulo.
+#[test]
+fn smoke_quantum_qubit_honors_args() {
+    let q = call("quantum", "qubit", vec![i(0), i(0), i(1), i(0)]);
+    let one = call("quantum", "one", vec![]);
+    let fid = as_float(call("quantum", "fidelity", vec![q, one]));
+    assert_eq!(fid, 1.0, "qubit(0,0,1,0) debe ser |1>");
+    // (3,0,4,0) normaliza a probs 0.36/0.64
+    let q2 = call("quantum", "qubit", vec![i(3), i(0), i(4), i(0)]);
+    let EvalValue::Dict(p) = call("quantum", "measure_probs", vec![q2]) else { panic!() };
+    assert_eq!(as_float(p.get("1").unwrap().clone()), 0.64);
+    assert!(modules::call("quantum", "qubit", vec![i(0), i(0), i(0), i(0)]).is_err(), "estado nulo");
+}
+
+// stat.correlation devolvía 0.9999999999999998 para correlación perfecta
+// (ruido f64); ahora redondea a 1e-12 como quantum/vector.
+#[test]
+fn smoke_stat_correlation_rounded() {
+    let x = flist(&[1.0, 2.0, 3.0]);
+    let y = flist(&[2.0, 4.0, 6.0]);
+    assert_eq!(as_float(call("stat", "correlation", vec![x.clone(), y])), 1.0);
+    let y_inv = flist(&[6.0, 4.0, 2.0]);
+    assert_eq!(as_float(call("stat", "correlation", vec![x, y_inv])), -1.0);
+}
+
+// grafo: camino mínimo respeta pesos (a→b→c coste 2 gana a a→c coste 5)
+// y el grafo es dirigido (sin retorno).
+#[test]
+fn smoke_grafo_weighted_directed_path() {
+    let g = call("grafo", "create", vec![]);
+    for (from, to, w) in [("a", "b", 1), ("b", "c", 1), ("a", "c", 5)] {
+        call("grafo", "edge", vec![g.clone(), s(from), s(to), i(w)]);
+    }
+    let EvalValue::List(p) = call("grafo", "path", vec![g.clone(), s("a"), s("c")]) else { panic!() };
+    assert_eq!(p.len(), 3, "debe ir por b (coste 2), no directo (coste 5)");
+    assert!(matches!(call("grafo", "path", vec![g.clone(), s("c"), s("a")]), EvalValue::Null), "dirigido");
+    call("grafo", "delete", vec![g]);
+}
