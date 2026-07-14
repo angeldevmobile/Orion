@@ -279,9 +279,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let avg = sum / n as f64;
             let variance = sorted.iter().map(|x| (x - avg).powi(2)).sum::<f64>() / n as f64;
             let std = variance.sqrt();
+            // Interpolación lineal entre vecinos (mismo criterio que serie):
+            // median de [1,2,3,4] = 2.5, no 2
             let percentile = |p: f64| -> f64 {
-                let idx = (p / 100.0 * (n - 1) as f64) as usize;
-                sorted[idx.min(n - 1)]
+                let idx = p / 100.0 * (n - 1) as f64;
+                let lo  = idx.floor() as usize;
+                let hi  = (idx.ceil() as usize).min(n - 1);
+                if lo == hi { return sorted[lo]; }
+                sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo as f64)
             };
 
             let mut result = HashMap::new();

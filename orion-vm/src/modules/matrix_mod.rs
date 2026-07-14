@@ -3,6 +3,10 @@ use crate::eval_value::EvalValue;
 // Tipo interno: matriz de f64
 type Mat = Vec<Vec<f64>>;
 
+fn arg0<'a>(args: &'a [EvalValue], f: &str) -> Result<&'a EvalValue, String> {
+    args.first().ok_or_else(|| format!("matrix.{f} requiere (A)"))
+}
+
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // add(A, B) → A + B
@@ -48,22 +52,22 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // transpose(A) → A^T
         "transpose" => {
-            let a = parse_mat(&args[0])?;
+            let a = parse_mat(arg0(&args, "transpose")?)?;
             Ok(mat_to_eval(transpose(&a)))
         }
         // det(A) → determinante (f64)
         "det" => {
-            let a = parse_mat(&args[0])?;
+            let a = parse_mat(arg0(&args, "det")?)?;
             Ok(EvalValue::Float(det(&a)?))
         }
         // inverse(A) → A^-1
         "inverse" => {
-            let a = parse_mat(&args[0])?;
+            let a = parse_mat(arg0(&args, "inverse")?)?;
             Ok(mat_to_eval(inverse(&a)?))
         }
         // trace(A) → suma de la diagonal
         "trace" => {
-            let a = parse_mat(&args[0])?;
+            let a = parse_mat(arg0(&args, "trace")?)?;
             let t: f64 = (0..a.len().min(a[0].len())).map(|i| a[i][i]).sum();
             Ok(EvalValue::Float(t))
         }
@@ -88,7 +92,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // shape(A) → [rows, cols]
         "shape" => {
-            let a = parse_mat(&args[0])?;
+            let a = parse_mat(arg0(&args, "shape")?)?;
             let rows = a.len() as i64;
             let cols = a.first().map(|r| r.len()).unwrap_or(0) as i64;
             Ok(EvalValue::List(vec![EvalValue::Int(rows), EvalValue::Int(cols)]))
@@ -126,7 +130,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // flatten(A) → lista 1D
         "flatten" => {
-            let a = parse_mat(&args[0])?;
+            let a = parse_mat(arg0(&args, "flatten")?)?;
             let flat: Vec<EvalValue> = a.into_iter().flatten().map(EvalValue::Float).collect();
             Ok(EvalValue::List(flat))
         }
@@ -139,7 +143,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // collapse(A) → tanh(sum de todos los elementos)
         "collapse" => {
-            let a = parse_mat(&args[0])?;
+            let a = parse_mat(arg0(&args, "collapse")?)?;
             let flat: f64 = a.iter().flatten().sum();
             Ok(EvalValue::Float(flat.tanh()))
         }
@@ -187,14 +191,28 @@ fn det(a: &Mat) -> Result<f64, String> {
     if r != c { return Err("matrix.det: la matriz debe ser cuadrada".into()); }
     if r == 1 { return Ok(a[0][0]); }
     if r == 2 { return Ok(a[0][0]*a[1][1] - a[0][1]*a[1][0]); }
-    let mut total = 0.0f64;
-    for col in 0..r {
-        let minor: Mat = a[1..].iter().map(|row| {
-            row.iter().enumerate().filter(|(j, _)| *j != col).map(|(_, v)| *v).collect()
-        }).collect();
-        total += (if col % 2 == 0 { 1.0 } else { -1.0 }) * a[0][col] * det(&minor)?;
+    if r == 3 {
+        // Regla de Sarrus: exacta para enteros pequeños (sin redondeo de eliminación)
+        return Ok(a[0][0]*(a[1][1]*a[2][2] - a[1][2]*a[2][1])
+                - a[0][1]*(a[1][0]*a[2][2] - a[1][2]*a[2][0])
+                + a[0][2]*(a[1][0]*a[2][1] - a[1][1]*a[2][0]));
     }
-    Ok(total)
+    // Eliminación gaussiana con pivoteo parcial: O(n³), apta para matrices grandes
+    let mut m = a.clone();
+    let mut sign = 1.0f64;
+    for i in 0..r {
+        let pivot_row = (i..r).max_by(|&x, &y| {
+            m[x][i].abs().partial_cmp(&m[y][i].abs()).unwrap_or(std::cmp::Ordering::Equal)
+        }).unwrap();
+        if m[pivot_row][i].abs() < 1e-12 { return Ok(0.0); }
+        if pivot_row != i { m.swap(i, pivot_row); sign = -sign; }
+        for j in i+1..r {
+            let factor = m[j][i] / m[i][i];
+            let row_i = m[i].clone();
+            for k in i..r { m[j][k] -= factor * row_i[k]; }
+        }
+    }
+    Ok(sign * (0..r).map(|i| m[i][i]).product::<f64>())
 }
 
 fn inverse(a: &Mat) -> Result<Mat, String> {

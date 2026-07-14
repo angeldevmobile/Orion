@@ -127,8 +127,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "trend"       => fn_trend(args),
         "anomalies"   => fn_anomalies(args),
         "describe"    => fn_describe(args),
+        // free(handle) → libera la serie; yes si existía
+        "free"        => fn_free(args),
+        // count() → número de series vivas en memoria
+        "count"       => Ok(EvalValue::Int(with_series(|s| s.len() as i64))),
         _ => Err(format!("serie.{} no existe", function)),
     }
+}
+
+// free(handle) → libera la serie (las transformaciones crean series nuevas;
+// en procesos largos conviene soltar las intermedias). Devuelve yes si existía.
+fn fn_free(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    let id = arg_handle(&args, 0)?;
+    Ok(EvalValue::Bool(with_series(|s| s.remove(&id).is_some())))
 }
 
 // ── construcción ─────────────────────────────────────────────────────────────

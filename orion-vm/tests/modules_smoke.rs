@@ -569,3 +569,67 @@ fn smoke_gui_headless_widgets() {
     ]);
     assert!(ok("gui", "chart", vec![datos, s("bar"), dict(&[("x", s("mes")), ("y", s("v"))])]));
 }
+
+// ── Regresión validación 2026-07-13 (lote no-cripto) ─────────────────────────
+
+fn as_float(v: EvalValue) -> f64 {
+    match v { EvalValue::Float(f) => f, EvalValue::Int(n) => n as f64, o => panic!("se esperaba número, fue {o:?}") }
+}
+
+// det pasó de cofactores O(n!) a eliminación gaussiana O(n³): 20×20 era
+// inviable (~10⁹ años) y ahora es instantáneo. Verifica valores exactos.
+#[test]
+fn smoke_matrix_det_correct_and_fast() {
+    assert_eq!(as_float(call("matrix", "det", vec![mat(&[&[1,2],&[3,4]])])), -2.0);
+    assert_eq!(as_float(call("matrix", "det", vec![mat(&[&[6,1,1],&[4,-2,5],&[2,8,7]])])), -306.0);
+    // singular → 0, no error
+    assert_eq!(as_float(call("matrix", "det", vec![mat(&[&[1,2],&[2,4]])])), 0.0);
+    // 20×20 identidad: solo termina si det es polinómico
+    let n = 20usize;
+    let rows: Vec<EvalValue> = (0..n).map(|r| {
+        EvalValue::List((0..n).map(|c| i(if r == c { 1 } else { 0 })).collect())
+    }).collect();
+    let d = as_float(call("matrix", "det", vec![EvalValue::List(rows)]));
+    assert!((d - 1.0).abs() < 1e-9, "det(I20) = {d}");
+}
+
+// Sin argumentos las funciones de matrix devolvían panic (crash de la VM);
+// ahora deben devolver Err.
+#[test]
+fn smoke_matrix_no_args_is_err_not_panic() {
+    for f in ["det", "inverse", "transpose", "trace", "shape", "flatten", "collapse"] {
+        assert!(modules::call("matrix", f, vec![]).is_err(), "matrix.{f}() debe dar Err");
+    }
+    assert!(modules::call("matrix", "inverse", vec![mat(&[&[1,2],&[2,4]])]).is_err(), "inversa de singular");
+}
+
+// serie.free/count: las transformaciones acumulan handles en un mapa global;
+// free permite soltarlos en procesos largos.
+#[test]
+fn smoke_serie_free_count() {
+    // Los tests corren en paralelo y SERIES es global: no comparamos counts
+    // exactos (otro test puede crear series entre medias), solo monotonicidad
+    // y el contrato de free.
+    let before = as_int(call("serie", "count", vec![]));
+    let h = call("serie", "new", vec![flist(&[1.0, 2.0])]);
+    assert!(as_int(call("serie", "count", vec![])) >= before + 1);
+    assert!(as_bool(call("serie", "free", vec![h.clone()])), "free primera vez → yes");
+    assert!(!as_bool(call("serie", "free", vec![h])), "free doble → no");
+}
+
+// csv.stats interpolaba percentiles por índice truncado (median de [1,2,3,4]
+// daba 2); ahora interpola linealmente como serie. fs.rmdir ahora es
+// idempotente: no-existe → Bool(no), no Err.
+#[test]
+fn smoke_csv_stats_interpolated_and_fs_rmdir_idempotent() {
+    let rows = EvalValue::List(vec![
+        dict(&[("v", i(1))]), dict(&[("v", i(2))]),
+        dict(&[("v", i(3))]), dict(&[("v", i(4))]),
+    ]);
+    let st = call("csv", "stats", vec![rows, s("v")]);
+    let EvalValue::Dict(m) = st else { panic!("stats debe ser dict") };
+    assert_eq!(as_float(m.get("median").unwrap().clone()), 2.5);
+    assert_eq!(as_float(m.get("p75").unwrap().clone()), 3.25);
+
+    assert!(!as_bool(call("fs", "rmdir", vec![s("dir_que_jamas_existio_xyz")])));
+}

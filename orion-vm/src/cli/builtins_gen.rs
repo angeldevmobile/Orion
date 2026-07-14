@@ -455,6 +455,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("serie", "trend", "serie.trend(…)", "Función del módulo serie."));
     v.push(f("serie", "anomalies", "serie.anomalies(…)", "Función del módulo serie."));
     v.push(f("serie", "describe", "serie.describe(…)", "Función del módulo serie."));
+    v.push(f("serie", "free", "serie.free(handle)", "Libera la serie; yes si existía"));
+    v.push(f("serie", "count", "serie.count()", "Número de series vivas en memoria"));
     // frame (frame_mod.rs)
     v.push(f("frame", "open", "frame.open(…)", "Carga"));
     v.push(f("frame", "from_txt", "frame.from_txt(…)", "Función del módulo frame."));
@@ -781,7 +783,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("llm", "query_with", "llm.query_with(…)", "Llm.query_with(model, prompt, system) → string"));
     v.push(f("llm", "chat", "llm.chat(…)", "Llm.chat(model, messages) → string  (messages: [{role, content}, ...])"));
     v.push(f("llm", "embed", "llm.embed(…)", "Llm.embed(model, text) → List<float>"));
-    v.push(f("llm", "models", "llm.models(…)", "Llm.models() → List<string>  (consulta las APIs reales; solo Anthropic usa fallback estático)"));
+    v.push(f("llm", "models", "llm.models(…)", "Llm.models() → List<string>  (consulta las APIs reales de cada proveedor)"));
     v.push(f("llm", "providers", "llm.providers(…)", "Llm.providers() → List<string>"));
     // embed (embed_mod.rs)
     v.push(f("embed", "text", "embed.text(…)", "Embed.text(text, model?) → List<float>"));

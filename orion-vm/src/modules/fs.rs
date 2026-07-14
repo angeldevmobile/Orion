@@ -129,10 +129,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             std_fs::create_dir_all(&path).map_err(|e| format!("fs.mkdir: {}", e))?;
             Ok(EvalValue::Null)
         }
+        // rmdir(path) → yes si existía y se borró, no si no existía (idempotente,
+        // como fs.delete); otros errores (permisos, bloqueo) sí se reportan
         "rmdir" => {
             let path = one_str("rmdir", args)?;
-            std_fs::remove_dir_all(&path).map_err(|e| format!("fs.rmdir: {}", e))?;
-            Ok(EvalValue::Null)
+            match std_fs::remove_dir_all(&path) {
+                Ok(())                                             => Ok(EvalValue::Bool(true)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(EvalValue::Bool(false)),
+                Err(e)                                             => Err(format!("fs.rmdir: {}", e)),
+            }
         }
         "clear_dir" => {
             let path = one_str("clear_dir", args)?;
