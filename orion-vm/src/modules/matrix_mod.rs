@@ -1,7 +1,21 @@
 use crate::eval_value::EvalValue;
+use nalgebra::DMatrix;
 
 // Tipo interno: matriz de f64
 type Mat = Vec<Vec<f64>>;
+
+// Umbral para delegar en nalgebra (microkernels tipo BLAS + LU optimizada).
+// Por debajo, los caminos propios evitan la asignación de DMatrix y conservan
+// resultados exactos para enteros pequeños (Sarrus, cofactores 2×2).
+const FAST_N: usize = 32;
+
+fn to_dmatrix(m: &Mat) -> DMatrix<f64> {
+    DMatrix::from_fn(m.len(), m[0].len(), |i, j| m[i][j])
+}
+
+fn from_dmatrix(d: &DMatrix<f64>) -> Mat {
+    (0..d.nrows()).map(|i| (0..d.ncols()).map(|j| d[(i, j)]).collect()).collect()
+}
 
 fn arg0<'a>(args: &'a [EvalValue], f: &str) -> Result<&'a EvalValue, String> {
     args.first().ok_or_else(|| format!("matrix.{f} requiere (A)"))
@@ -148,6 +162,76 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Float(flat.tanh()))
         }
 
+        // ── Álgebra lineal numérica (nalgebra) ───────────────────────────────
+
+        // solve(A, b) → x tal que A·x = b (b vector o matriz; LU con pivoteo)
+        "solve" => {
+            if args.len() < 2 { return Err("matrix.solve requiere (A, b)".into()); }
+            let a = parse_mat(&args[0])?;
+            let (r, c) = shape(&a);
+            if r != c { return Err("matrix.solve: A debe ser cuadrada".into()); }
+            // b puede ser vector plano [..] o matriz [[..], ..]
+            let (b_mat, b_is_vec) = match &args[1] {
+                EvalValue::List(items) if items.iter().all(|x| matches!(x, EvalValue::Int(_) | EvalValue::Float(_))) => {
+                    let v: Result<Vec<f64>, _> = items.iter().map(to_f64).collect();
+                    (v?.into_iter().map(|x| vec![x]).collect::<Mat>(), true)
+                }
+                other => (parse_mat(other)?, false),
+            };
+            if b_mat.len() != r {
+                return Err(format!("matrix.solve: b tiene {} filas, A es {}x{}", b_mat.len(), r, c));
+            }
+            let lu = to_dmatrix(&a).lu();
+            let x = lu.solve(&to_dmatrix(&b_mat))
+                .ok_or("matrix.solve: sistema singular (sin solución única)")?;
+            if b_is_vec {
+                Ok(EvalValue::List((0..x.nrows()).map(|i| EvalValue::Float(x[(i, 0)])).collect()))
+            } else {
+                Ok(mat_to_eval(from_dmatrix(&x)))
+            }
+        }
+        // eig(A) → valores propios; lista de floats si son reales, si no [re, im]
+        "eig" | "eigenvalues" => {
+            let a = parse_mat(arg0(&args, "eig")?)?;
+            let (r, c) = shape(&a);
+            if r != c { return Err("matrix.eig: la matriz debe ser cuadrada".into()); }
+            let eig = to_dmatrix(&a).complex_eigenvalues();
+            let all_real = eig.iter().all(|z| z.im.abs() < 1e-10);
+            let mut vals: Vec<(f64, f64)> = eig.iter().map(|z| (z.re, z.im)).collect();
+            vals.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            if all_real {
+                Ok(EvalValue::List(vals.into_iter().map(|(re, _)| EvalValue::Float(round12(re))).collect()))
+            } else {
+                Ok(EvalValue::List(vals.into_iter().map(|(re, im)| EvalValue::List(vec![
+                    EvalValue::Float(round12(re)), EvalValue::Float(round12(im)),
+                ])).collect()))
+            }
+        }
+        // svd(A) → dict {u, s, vt}: A = U · diag(s) · Vt
+        "svd" => {
+            let a = parse_mat(arg0(&args, "svd")?)?;
+            let svd = to_dmatrix(&a).svd(true, true);
+            let u  = svd.u.ok_or("matrix.svd: no se pudo calcular U")?;
+            let vt = svd.v_t.ok_or("matrix.svd: no se pudo calcular Vt")?;
+            let s: Vec<EvalValue> = svd.singular_values.iter()
+                .map(|&x| EvalValue::Float(round12(x))).collect();
+            let mut m = std::collections::HashMap::new();
+            m.insert("u".to_string(),  mat_to_eval(from_dmatrix(&u)));
+            m.insert("s".to_string(),  EvalValue::List(s));
+            m.insert("vt".to_string(), mat_to_eval(from_dmatrix(&vt)));
+            Ok(EvalValue::Dict(m))
+        }
+        // rank(A) → rango numérico (tolerancia 1e-9)
+        "rank" => {
+            let a = parse_mat(arg0(&args, "rank")?)?;
+            Ok(EvalValue::Int(to_dmatrix(&a).rank(1e-9) as i64))
+        }
+        // norm(A) → norma de Frobenius
+        "norm" => {
+            let a = parse_mat(arg0(&args, "norm")?)?;
+            Ok(EvalValue::Float(to_dmatrix(&a).norm()))
+        }
+
         f => Err(format!("matrix.{}() no existe", f)),
     }
 }
@@ -168,6 +252,10 @@ fn mat_mul(a: &Mat, b: &Mat) -> Result<Mat, String> {
     let (r1, c1) = shape(a);
     let (r2, c2) = shape(b);
     if c1 != r2 { return Err(format!("matrix.mul: dimensiones incompatibles ({}x{}) × ({}x{})", r1, c1, r2, c2)); }
+    // Grandes → nalgebra (microkernels con SIMD y cache blocking)
+    if r1.max(c1).max(c2) >= FAST_N {
+        return Ok(from_dmatrix(&(to_dmatrix(a) * to_dmatrix(b))));
+    }
     let mut result = vec![vec![0.0; c2]; r1];
     for i in 0..r1 {
         for j in 0..c2 {
@@ -176,6 +264,8 @@ fn mat_mul(a: &Mat, b: &Mat) -> Result<Mat, String> {
     }
     Ok(result)
 }
+
+fn round12(x: f64) -> f64 { (x * 1e12).round() / 1e12 }
 
 fn scalar_mul(s: f64, a: &Mat) -> Mat {
     a.iter().map(|row| row.iter().map(|x| x * s).collect()).collect()
@@ -196,6 +286,10 @@ fn det(a: &Mat) -> Result<f64, String> {
         return Ok(a[0][0]*(a[1][1]*a[2][2] - a[1][2]*a[2][1])
                 - a[0][1]*(a[1][0]*a[2][2] - a[1][2]*a[2][0])
                 + a[0][2]*(a[1][0]*a[2][1] - a[1][1]*a[2][0]));
+    }
+    // Grandes → LU de nalgebra
+    if r >= FAST_N {
+        return Ok(to_dmatrix(a).determinant());
     }
     // Eliminación gaussiana con pivoteo parcial: O(n³), apta para matrices grandes
     let mut m = a.clone();
@@ -218,6 +312,12 @@ fn det(a: &Mat) -> Result<f64, String> {
 fn inverse(a: &Mat) -> Result<Mat, String> {
     let n = a.len();
     if shape(a).0 != shape(a).1 { return Err("matrix.inverse: debe ser cuadrada".into()); }
+    // Grandes → nalgebra
+    if n >= FAST_N {
+        return to_dmatrix(a).try_inverse()
+            .map(|inv| from_dmatrix(&inv))
+            .ok_or_else(|| "matrix.inverse: matriz singular".into());
+    }
     let id = identity(n);
     let mut m: Mat = a.iter().zip(&id).map(|(ar, ir)| ar.iter().chain(ir).copied().collect()).collect();
     for i in 0..n {

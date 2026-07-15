@@ -676,3 +676,89 @@ fn smoke_grafo_weighted_directed_path() {
     assert!(matches!(call("grafo", "path", vec![g.clone(), s("c"), s("a")]), EvalValue::Null), "dirigido");
     call("grafo", "delete", vec![g]);
 }
+
+// ── Circuitos cuánticos (2026-07-13): puertas por qubit en O(2^n) ────────────
+// Antes las puertas solo aplicaban al estado completo (O(4^n), ~10 qubits max,
+// sin targeting). Ahora: circuit(n) + h/x/rx/cnot/ccx/ugate sobre qubits
+// concretos, Grover funciona en Orion puro y GHZ-20 corre en ~25ms.
+
+#[test]
+fn smoke_quantum_circuit_bell_and_phase() {
+    let c = call("quantum", "circuit", vec![i(2)]);
+    call("quantum", "h", vec![c.clone(), i(0)]);
+    call("quantum", "cnot", vec![c.clone(), i(0), i(1)]);
+    let EvalValue::Dict(p) = call("quantum", "probs", vec![c.clone()]) else { panic!() };
+    assert_eq!(as_float(p.get("00").unwrap().clone()), 0.5);
+    assert_eq!(as_float(p.get("11").unwrap().clone()), 0.5);
+    assert!(p.get("01").is_none(), "probs omite amplitudes nulas");
+    assert!(as_bool(call("quantum", "free", vec![c])));
+
+    // La fase importa: H·RZ(π)·H = X (un fake de probabilidades falla aquí)
+    let c2 = call("quantum", "circuit", vec![i(1)]);
+    call("quantum", "h", vec![c2.clone(), i(0)]);
+    call("quantum", "rz", vec![c2.clone(), i(0), EvalValue::Float(std::f64::consts::PI)]);
+    call("quantum", "h", vec![c2.clone(), i(0)]);
+    let EvalValue::Dict(p2) = call("quantum", "probs", vec![c2.clone()]) else { panic!() };
+    assert_eq!(as_float(p2.get("1").unwrap().clone()), 1.0);
+    call("quantum", "free", vec![c2]);
+}
+
+#[test]
+fn smoke_quantum_circuit_guards() {
+    // qubit fuera de rango, circuito inexistente, ugate no unitaria, n>24
+    let c = call("quantum", "circuit", vec![i(2)]);
+    assert!(modules::call("quantum", "h", vec![c.clone(), i(5)]).is_err());
+    assert!(modules::call("quantum", "h", vec![i(999_999), i(0)]).is_err());
+    let bad = EvalValue::List(vec![
+        EvalValue::List(vec![i(1), i(1)]),
+        EvalValue::List(vec![i(1), i(1)]),
+    ]);
+    assert!(modules::call("quantum", "ugate", vec![c.clone(), i(0), bad]).is_err(), "no unitaria");
+    assert!(modules::call("quantum", "circuit", vec![i(30)]).is_err(), "límite de qubits");
+    call("quantum", "free", vec![c]);
+}
+
+// ── Matrix HPC (2026-07-13): nalgebra para grandes + solve/eig/svd/rank/norm ──
+// mul/det/inverse delegan en nalgebra a partir de 32×32 (microkernels, LU);
+// por debajo conservan los caminos exactos propios.
+
+#[test]
+fn smoke_matrix_linalg_new_functions() {
+    // solve exacto
+    let a = mat(&[&[1, 1], &[1, -1]]);
+    let b = flist(&[3.0, 1.0]);
+    let EvalValue::List(x) = call("matrix", "solve", vec![a, b]) else { panic!() };
+    assert_eq!(as_float(x[0].clone()), 2.0);
+    assert_eq!(as_float(x[1].clone()), 1.0);
+    // eig de simétrica
+    let EvalValue::List(e) = call("matrix", "eig", vec![mat(&[&[2, 1], &[1, 2]])]) else { panic!() };
+    assert_eq!(as_float(e[0].clone()), 1.0);
+    assert_eq!(as_float(e[1].clone()), 3.0);
+    // svd: valores singulares descendentes
+    let EvalValue::Dict(s) = call("matrix", "svd", vec![mat(&[&[3, 0], &[0, 4]])]) else { panic!() };
+    let EvalValue::List(sv) = s.get("s").unwrap().clone() else { panic!() };
+    assert_eq!(as_float(sv[0].clone()), 4.0);
+    // rank y norm
+    assert_eq!(as_int(call("matrix", "rank", vec![mat(&[&[1, 2], &[2, 4]])])), 1);
+    assert_eq!(as_float(call("matrix", "norm", vec![mat(&[&[3, 4]])])), 5.0);
+    // singular → Err
+    assert!(modules::call("matrix", "solve", vec![mat(&[&[1, 2], &[2, 4]]), flist(&[1.0, 2.0])]).is_err());
+}
+
+#[test]
+fn smoke_matrix_nalgebra_path_consistent() {
+    // El camino nalgebra (n≥32) debe dar los mismos resultados que el propio:
+    // det(2·I₄₀) = 2^40 y A·A⁻¹ = I
+    let n = 40usize;
+    let rows: Vec<EvalValue> = (0..n).map(|r| {
+        EvalValue::List((0..n).map(|c| i(if r == c { 2 } else { 0 })).collect())
+    }).collect();
+    let a = EvalValue::List(rows);
+    let d = as_float(call("matrix", "det", vec![a.clone()]));
+    assert!((d - 2f64.powi(40)).abs() < 1.0, "det(2I40) = {d}");
+    let inv = call("matrix", "inverse", vec![a.clone()]);
+    let prod = call("matrix", "mul", vec![a, inv]);
+    let EvalValue::List(p) = prod else { panic!() };
+    let EvalValue::List(row0) = p[0].clone() else { panic!() };
+    assert_eq!(as_float(row0[0].clone()), 1.0);
+}

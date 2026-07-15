@@ -207,6 +207,12 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("matrix", "scale", "matrix.scale(A, factor)", "Multiplica todos los elementos"));
     v.push(f("matrix", "amplify", "matrix.amplify(A, factor)", "Alias de matrix.scale."));
     v.push(f("matrix", "collapse", "matrix.collapse(A)", "Tanh(sum de todos los elementos)"));
+    v.push(f("matrix", "solve", "matrix.solve(…)", "── Álgebra lineal numérica (nalgebra) ─────────────────────────────── solve(A, b) → x tal que A·x = b (b vector o matriz; LU con pivoteo)"));
+    v.push(f("matrix", "eig", "matrix.eig(A)", "Valores propios; lista de floats si son reales, si no [re, im]"));
+    v.push(f("matrix", "eigenvalues", "matrix.eigenvalues(A)", "Alias de matrix.eig."));
+    v.push(f("matrix", "svd", "matrix.svd(A)", "Dict {u, s, vt}: A = U · diag(s) · Vt"));
+    v.push(f("matrix", "rank", "matrix.rank(A)", "Rango numérico (tolerancia 1e-9)"));
+    v.push(f("matrix", "norm", "matrix.norm(A)", "Norma de Frobenius"));
     // quantum (quantum_mod.rs)
     v.push(f("quantum", "qubit", "quantum.qubit(alpha_re?, alpha_im?, beta_re?, beta_im?)", "Estado |qubit> (sin args: |0>)"));
     v.push(f("quantum", "zero", "quantum.zero(alpha_re?, alpha_im?, beta_re?, beta_im?)", "Alias de quantum.qubit."));
@@ -223,6 +229,34 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("quantum", "bloch", "quantum.bloch(qubit_state)", "[x, y, z]"));
     v.push(f("quantum", "state_from_bits", "quantum.state_from_bits(\"01\")", "Estado |01>"));
     v.push(f("quantum", "amplitudes", "quantum.amplitudes(state)", "Lista de [re, im, prob]"));
+    v.push(f("quantum", "circuit", "quantum.circuit(…)", "── Circuitos (registro de n qubits, puertas por qubit, O(2^n)) ────── circuit(n) → id; registro de n qubits inicializado en |0...0> (máx 24)"));
+    v.push(f("quantum", "circuito", "quantum.circuito(…)", "Alias de quantum.circuit."));
+    v.push(f("quantum", "h", "quantum.h(id, q)", "Hadamard sobre el qubit q"));
+    v.push(f("quantum", "x", "quantum.x(id, q)", "NOT cuántico sobre el qubit q"));
+    v.push(f("quantum", "y", "quantum.y(id, q)", "Pauli-Y sobre el qubit q"));
+    v.push(f("quantum", "z", "quantum.z(id, q)", "Pauli-Z sobre el qubit q"));
+    v.push(f("quantum", "sgate", "quantum.sgate(id, q)", "Puerta de fase S (π/2)"));
+    v.push(f("quantum", "tgate", "quantum.tgate(id, q)", "Puerta de fase T (π/4)"));
+    v.push(f("quantum", "rx", "quantum.rx(id, q, theta)", "Rotación paramétrica en X (radianes)"));
+    v.push(f("quantum", "ry", "quantum.ry(id, q, theta)", "Rotación paramétrica en Y (radianes)"));
+    v.push(f("quantum", "rz", "quantum.rz(id, q, theta)", "Rotación paramétrica en Z (radianes)"));
+    v.push(f("quantum", "phase", "quantum.phase(id, q, theta)", "Fase relativa e^(i·theta) sobre |1>"));
+    v.push(f("quantum", "cnot", "quantum.cnot(id, control, target)", "X sobre target si control es 1"));
+    v.push(f("quantum", "cx", "quantum.cx(id, control, target)", "Alias de quantum.cnot."));
+    v.push(f("quantum", "cz", "quantum.cz(id, control, target)", "Z controlada"));
+    v.push(f("quantum", "cphase", "quantum.cphase(id, control, target, theta)", "Fase controlada (para QFT)"));
+    v.push(f("quantum", "swap", "quantum.swap(id, a, b)", "Intercambia dos qubits (3 CNOTs)"));
+    v.push(f("quantum", "ccx", "quantum.ccx(id, c1, c2, target)", "Toffoli: X si ambos controles son 1"));
+    v.push(f("quantum", "toffoli", "quantum.toffoli(id, c1, c2, target)", "Alias de quantum.ccx."));
+    v.push(f("quantum", "ugate", "quantum.ugate(id, q, matriz2x2)", "Puerta DEFINIDA POR EL USUARIO (se valida unitariedad)"));
+    v.push(f("quantum", "cugate", "quantum.cugate(id, control, target, matriz2x2)", "Puerta custom controlada"));
+    v.push(f("quantum", "state", "quantum.state(id)", "Amplitudes del circuito (mismo formato que zero()/bell())"));
+    v.push(f("quantum", "probs", "quantum.probs(id)", "Dict {\"010\": prob, ...} solo con probabilidades > 1e-12"));
+    v.push(f("quantum", "sample", "quantum.sample(id, shots?)", "Dict de conteos {\"010\": n, ...} (regla de Born, no colapsa)"));
+    v.push(f("quantum", "collapse", "quantum.collapse(id, q)", "Mide el qubit q: devuelve 0 o 1 y COLAPSA el estado"));
+    v.push(f("quantum", "reset", "quantum.reset(id)", "Devuelve el circuito a |0...0>"));
+    v.push(f("quantum", "nqubits", "quantum.nqubits(id)", "Número de qubits del circuito"));
+    v.push(f("quantum", "free", "quantum.free(id)", "Libera el circuito; yes si existía"));
     // cosmos (cosmos_mod.rs)
     v.push(f("cosmos", "body", "cosmos.body(name, mass, x, y, z, vx, vy, vz)", "Dict body"));
     v.push(f("cosmos", "random_star", "cosmos.random_star()", "Body con masa y posición aleatorias"));
