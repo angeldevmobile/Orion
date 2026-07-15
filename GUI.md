@@ -119,6 +119,42 @@ if gui.pressed("+1") { gui.set("contador", n + 1) }   -- escribe
 
 `gui.fade(id, mostrar) … gui.end()` · `gui.slide_in(id) … gui.end()`
 
+### Reloj — `gui.tick(ms)`
+
+Dispara el evento `"tick"` cada `ms` milisegundos y re-ejecuta el script,
+igual que un clic. Con eso cualquier cosa se anima en Orion puro: el script
+avanza su estado un paso por tick y redibuja.
+
+```orion
+if gui.pressed("tick") { gui.set("x", gui.val("x", 0) + 2) }
+if gui.val("animando", no) { gui.tick(30) }   -- pedirlo en CADA re-ejecución
+```
+
+- Los clics del usuario tienen prioridad: la animación nunca se traga un botón.
+- No es pegajoso: si el script deja de llamar `gui.tick`, el reloj se apaga.
+- Pídelo solo mientras haya algo que animar (no gastar CPU en reposo).
+
+### Lienzo — `gui.canvas(ancho, alto) … gui.end()`
+
+Dibujo 2D libre con coordenadas locales al lienzo (`(0,0)` = esquina superior
+izquierda). Las formas van dentro del bloque; los colores aceptan nombres del
+tema (`accent`, `success`…), básicos (`gray`, `red`…) o hex (`#ff7a00`).
+
+| Forma | Descripción |
+|---|---|
+| `gui.circle(x, y, r, color?, fill?)` | círculo (`fill: no` = solo contorno) |
+| `gui.line(x1, y1, x2, y2, color?, grosor?)` | segmento |
+| `gui.rect(x, y, w, h, color?, fill?)` | rectángulo |
+| `gui.arrow(x1, y1, x2, y2, color?, grosor?)` | flecha con punta en `(x2, y2)` |
+| `gui.text_at(x, y, texto, tamaño?, color?)` | texto centrado en `(x, y)` |
+
+```orion
+gui.canvas(240, 240)
+  gui.circle(120, 120, 90, "gray", no)      -- órbita
+  gui.arrow(120, 120, x, y, "accent", 3)    -- vector que se mueve por tick
+gui.end()
+```
+
 ---
 
 Ejemplos completos: [`demo/demo_design.orx`](demo/demo_design.orx) (dashboard),
@@ -126,4 +162,6 @@ Ejemplos completos: [`demo/demo_design.orx`](demo/demo_design.orx) (dashboard),
 [`demo/demo_widgets.orx`](demo/demo_widgets.orx) (widgets nuevos),
 [`demo/demo_calc.orx`](demo/demo_calc.orx) (calculadora reactiva),
 [`demo/demo_tasks.orx`](demo/demo_tasks.orx) (gestor de tareas: GUI + módulo
-`state` + persistencia a disco — las tareas sobreviven al reinicio).
+`state` + persistencia a disco — las tareas sobreviven al reinicio),
+[`demo/demo_bloch_anim.orx`](demo/demo_bloch_anim.orx) (esfera de Bloch
+animada: `tick` + `canvas` + física cuántica real paso a paso).

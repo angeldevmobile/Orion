@@ -528,17 +528,28 @@ use "cosmos"
 ```
 
 ```orion
--- matrix — álgebra lineal
+-- matrix — álgebra lineal numérica (motor nalgebra a partir de 32×32:
+-- mul tipo BLAS, LU con pivoteo; 512×512 en decenas de ms)
 A   = [[1,2],[3,4]]
-B   = matrix.transpose(A)
-C   = matrix.mul(A, B)
 det = matrix.det(A)
 inv = matrix.inverse(A)
+x   = matrix.solve([[1,1],[1,-1]], [3, 1])   -- sistemas lineales por LU
+e   = matrix.eig([[2,1],[1,2]])              -- valores propios: [1.0, 3.0]
+s   = matrix.svd(A)                          -- {u, s, vt}
+r   = matrix.rank([[1,2],[2,4]])             -- 1 (rango numérico)
 
--- quantum — simulación cuántica
-q   = quantum.qubit()
-q2  = quantum.apply(q, quantum.gate_H)
-med = quantum.measure(q2, shots: 1000)   -- {0: 512, 1: 488}
+-- quantum — simulador de CIRCUITOS real (hasta 24 qubits, puertas O(2^n)
+-- paralelizadas; la fase importa: Grover funciona en Orion puro)
+c = quantum.circuit(2)
+quantum.h(c, 0)                     -- Hadamard sobre el qubit 0
+quantum.cnot(c, 0, 1)               -- par de Bell construido por ti
+quantum.rx(c, 0, 3.14159)           -- rotaciones paramétricas (rx/ry/rz/phase)
+quantum.ugate(c, 0, [[0,1],[1,0]])  -- TU propia puerta 2×2 (valida unitariedad)
+show quantum.probs(c)               -- {"00": 0.5, "11": 0.5}
+m = quantum.sample(c, 1000)         -- regla de Born, no colapsa
+b = quantum.collapse(c, 0)          -- mide un qubit y COLAPSA el estado
+-- Grover completo en demo/demo_grover.orx (P=0.945 exacto) y esfera de
+-- Bloch animada con física real en demo/demo_bloch_anim.orx
 
 -- cosmos — simulación N-cuerpos
 u   = cosmos.create(5)
