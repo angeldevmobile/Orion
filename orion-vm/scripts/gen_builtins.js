@@ -29,7 +29,12 @@ for (const m of modRs.matchAll(/^\s*((?:"[a-z_0-9]+"\s*\|\s*)*"[a-z_0-9]+")\s*=>
 // 2. Extraer arms del `pub fn call` de cada módulo, con su comentario.
 function extractFns(file) {
     let src;
-    try { src = fs.readFileSync(path.join(SRC, file), 'utf8'); } catch { return []; }
+    try { src = fs.readFileSync(path.join(SRC, file), 'utf8'); }
+    catch {
+        // Módulos-directorio (gui, tui): "gui" => gui::call vive en gui/mod.rs
+        try { src = fs.readFileSync(path.join(SRC, file.replace(/\.rs$/, ''), 'mod.rs'), 'utf8'); }
+        catch { return []; }
+    }
     const lines = src.split(/\r?\n/);
 
     // Localizar `pub fn call` y recorrer con profundidad de llaves para
@@ -71,6 +76,11 @@ function parseDoc(mod, name, comment) {
     let description = `Función del módulo ${mod}.`;
     // Fuera separadores de sección tipo "--- Archivos ---"
     comment = (comment || '').replace(/-{2,}[^-]*-{2,}/g, '').trim();
+    // Si el contrato aparece más adentro (títulos de sección acumulados antes,
+    // o convención "gui.progress(...)" con módulo incluido), cortar hasta él.
+    const at = Math.max(comment.indexOf(name + '('), comment.indexOf(mod + '.' + name + '('));
+    if (at > 0) comment = comment.slice(at).replace(new RegExp('^' + mod + '\\.'), '');
+    if (comment.startsWith(mod + '.')) comment = comment.slice(mod.length + 1);
     if (comment) {
         const arrow = comment.split(/\s*→\s*/);
         const head = arrow[0].trim();
@@ -129,7 +139,15 @@ for (const { names, file } of moduleMap) {
 }
 out += `}\n`;
 
-fs.writeFileSync(OUT, out, 'utf8');
-console.log(`OK → ${OUT}`);
+// Escritura idempotente: si el contenido no cambió, no tocar el mtime
+// (build.rs corre esto en cada build; reescribir igual forzaría recompilar).
+let prev = '';
+try { prev = fs.readFileSync(OUT, 'utf8'); } catch {}
+if (prev === out) {
+    console.log(`OK (sin cambios) → ${OUT}`);
+} else {
+    fs.writeFileSync(OUT, out, 'utf8');
+    console.log(`OK → ${OUT}`);
+}
 console.log(`${total} funciones en ${perMod.length} módulos`);
 console.log(perMod.join('  '));
