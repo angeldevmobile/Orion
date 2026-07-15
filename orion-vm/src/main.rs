@@ -541,6 +541,11 @@ fn main() {
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
             let profile = args.iter().any(|a| a == "--profile");
+            // Registrar ruta para que gui.run() re-evalúe en modo reactivo.
+            // Sin esto, `orion run app.orx` abría la GUI en modo estático:
+            // los botones se dibujaban pero ningún evento re-corría el script
+            // (la ruta solo se registraba en la invocación directa `orion app.orx`).
+            modules::gui::state::set_script_path(src_path);
             let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
             match machine.run() {
                 Ok(_) => {}
