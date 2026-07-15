@@ -161,6 +161,182 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
+        // ── Circuitos (registro de n qubits, puertas por qubit, O(2^n)) ──────
+
+        // circuit(n) → id; registro de n qubits inicializado en |0...0> (máx 24)
+        "circuit" | "circuito" => {
+            let n = to_i64(args.first().ok_or("quantum.circuit requiere (n_qubits)")?)? as usize;
+            if n == 0 || n > MAX_QUBITS {
+                return Err(format!("quantum.circuit: n debe estar entre 1 y {} qubits", MAX_QUBITS));
+            }
+            let mut state = vec![(0.0, 0.0); 1 << n];
+            state[0] = (1.0, 0.0);
+            let id = NEXT_CIRCUIT.fetch_add(1, Ordering::SeqCst);
+            with_circuits(|cs| cs.insert(id, Circuit { n, state }));
+            Ok(EvalValue::Int(id as i64))
+        }
+        // h(id, q) → Hadamard sobre el qubit q
+        "h" => circuit_gate("h", args, false),
+        // x(id, q) → NOT cuántico sobre el qubit q
+        "x" => circuit_gate("x", args, false),
+        // y(id, q) → Pauli-Y sobre el qubit q
+        "y" => circuit_gate("y", args, false),
+        // z(id, q) → Pauli-Z sobre el qubit q
+        "z" => circuit_gate("z", args, false),
+        // sgate(id, q) → puerta de fase S (π/2)
+        "sgate" => circuit_gate("s", args, false),
+        // tgate(id, q) → puerta de fase T (π/4)
+        "tgate" => circuit_gate("t", args, false),
+        // rx(id, q, theta) → rotación paramétrica en X (radianes)
+        "rx" => circuit_gate("rx", args, true),
+        // ry(id, q, theta) → rotación paramétrica en Y (radianes)
+        "ry" => circuit_gate("ry", args, true),
+        // rz(id, q, theta) → rotación paramétrica en Z (radianes)
+        "rz" => circuit_gate("rz", args, true),
+        // phase(id, q, theta) → fase relativa e^(i·theta) sobre |1>
+        "phase" => circuit_gate("phase", args, true),
+        // cnot(id, control, target) → X sobre target si control es 1
+        "cnot" | "cx" => circuit_cgate("cnot", args, false),
+        // cz(id, control, target) → Z controlada
+        "cz" => circuit_cgate("cz", args, false),
+        // cphase(id, control, target, theta) → fase controlada (para QFT)
+        "cphase" => circuit_cgate("cphase", args, true),
+        // swap(id, a, b) → intercambia dos qubits (3 CNOTs)
+        "swap" => {
+            let id = circuit_id(&args)?;
+            with_circuits(|cs| {
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let a = qubit_arg(&args, 1, circ.n, "swap")?;
+                let b = qubit_arg(&args, 2, circ.n, "swap")?;
+                if a == b { return Err("quantum.swap: qubits deben ser distintos".into()); }
+                let x = named_gate("x", 0.0).unwrap();
+                apply_1q(circ, b, &x, &[a]);
+                apply_1q(circ, a, &x, &[b]);
+                apply_1q(circ, b, &x, &[a]);
+                Ok(EvalValue::Int(id as i64))
+            })
+        }
+        // ccx(id, c1, c2, target) → Toffoli: X si ambos controles son 1
+        "ccx" | "toffoli" => {
+            let id = circuit_id(&args)?;
+            with_circuits(|cs| {
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let c1 = qubit_arg(&args, 1, circ.n, "ccx")?;
+                let c2 = qubit_arg(&args, 2, circ.n, "ccx")?;
+                let t  = qubit_arg(&args, 3, circ.n, "ccx")?;
+                if c1 == c2 || c1 == t || c2 == t { return Err("quantum.ccx: los tres qubits deben ser distintos".into()); }
+                let x = named_gate("x", 0.0).unwrap();
+                apply_1q(circ, t, &x, &[c1, c2]);
+                Ok(EvalValue::Int(id as i64))
+            })
+        }
+        // ugate(id, q, matriz2x2) → puerta DEFINIDA POR EL USUARIO (se valida unitariedad)
+        "ugate" => {
+            if args.len() < 3 { return Err("quantum.ugate requiere (id, qubit, matriz 2x2)".into()); }
+            let id = circuit_id(&args)?;
+            let g  = eval_to_gate2(&args[2])?;
+            with_circuits(|cs| {
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let q = qubit_arg(&args, 1, circ.n, "ugate")?;
+                apply_1q(circ, q, &g, &[]);
+                Ok(EvalValue::Int(id as i64))
+            })
+        }
+        // cugate(id, control, target, matriz2x2) → puerta custom controlada
+        "cugate" => {
+            if args.len() < 4 { return Err("quantum.cugate requiere (id, control, target, matriz 2x2)".into()); }
+            let id = circuit_id(&args)?;
+            let g  = eval_to_gate2(&args[3])?;
+            with_circuits(|cs| {
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let ctrl = qubit_arg(&args, 1, circ.n, "cugate")?;
+                let tgt  = qubit_arg(&args, 2, circ.n, "cugate")?;
+                if ctrl == tgt { return Err("quantum.cugate: control y target deben ser distintos".into()); }
+                apply_1q(circ, tgt, &g, &[ctrl]);
+                Ok(EvalValue::Int(id as i64))
+            })
+        }
+        // state(id) → amplitudes del circuito (mismo formato que zero()/bell())
+        "state" => {
+            let id = circuit_id(&args)?;
+            with_circuits(|cs| {
+                let circ = cs.get(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                Ok(state_to_eval(&circ.state))
+            })
+        }
+        // probs(id) → dict {"010": prob, ...} solo con probabilidades > 1e-12
+        "probs" => {
+            let id = circuit_id(&args)?;
+            with_circuits(|cs| {
+                let circ = cs.get(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let m: HashMap<String, EvalValue> = circ.state.iter().enumerate()
+                    .filter_map(|(i, &amp)| {
+                        let p = c_abs2(amp);
+                        if p < 1e-12 { return None; }
+                        let key = format!("{:0>width$b}", i, width = circ.n);
+                        Some((key, EvalValue::Float((p * 1e10).round() / 1e10)))
+                    })
+                    .collect();
+                Ok(EvalValue::Dict(m))
+            })
+        }
+        // sample(id, shots?) → dict de conteos {"010": n, ...} (regla de Born, no colapsa)
+        "sample" => {
+            let id = circuit_id(&args)?;
+            let shots = match args.get(1) { Some(v) => to_i64(v)? as usize, None => 1024 };
+            with_circuits(|cs| {
+                let circ = cs.get(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let counts = measure(&circ.state, shots);
+                let m: HashMap<String, EvalValue> = counts.into_iter()
+                    .map(|(k, v)| (k, EvalValue::Int(v as i64)))
+                    .collect();
+                Ok(EvalValue::Dict(m))
+            })
+        }
+        // collapse(id, q) → mide el qubit q: devuelve 0 o 1 y COLAPSA el estado
+        "collapse" => {
+            let id = circuit_id(&args)?;
+            with_circuits(|cs| {
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let q = qubit_arg(&args, 1, circ.n, "collapse")?;
+                let bit = 1usize << (circ.n - 1 - q);
+                let p1: f64 = circ.state.iter().enumerate()
+                    .filter(|(i, _)| i & bit != 0)
+                    .map(|(_, &a)| c_abs2(a)).sum();
+                use rand::Rng;
+                let outcome = if rand::thread_rng().gen::<f64>() < p1 { 1usize } else { 0 };
+                for (i, a) in circ.state.iter_mut().enumerate() {
+                    let has_bit = (i & bit != 0) as usize;
+                    if has_bit != outcome { *a = (0.0, 0.0); }
+                }
+                circ.state = normalize(std::mem::take(&mut circ.state));
+                Ok(EvalValue::Int(outcome as i64))
+            })
+        }
+        // reset(id) → devuelve el circuito a |0...0>
+        "reset" => {
+            let id = circuit_id(&args)?;
+            with_circuits(|cs| {
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                circ.state.iter_mut().for_each(|a| *a = (0.0, 0.0));
+                circ.state[0] = (1.0, 0.0);
+                Ok(EvalValue::Int(id as i64))
+            })
+        }
+        // nqubits(id) → número de qubits del circuito
+        "nqubits" => {
+            let id = circuit_id(&args)?;
+            with_circuits(|cs| {
+                let circ = cs.get(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                Ok(EvalValue::Int(circ.n as i64))
+            })
+        }
+        // free(id) → libera el circuito; yes si existía
+        "free" => {
+            let id = circuit_id(&args)?;
+            Ok(EvalValue::Bool(with_circuits(|cs| cs.remove(&id).is_some())))
+        }
+
         f => Err(format!("quantum.{}() no existe", f)),
     }
 }
@@ -216,18 +392,48 @@ fn theta_arg(args: &[EvalValue], pos: usize, fname: &str) -> Result<f64, String>
 }
 
 // Aplica una puerta 2×2 al qubit `q`, opcionalmente condicionada a que TODOS
-// los bits de `controls` estén en 1. O(2^n).
+// los bits de `controls` estén en 1. O(2^n), y en paralelo (rayon) a partir
+// de 2^16 amplitudes: cada k del subespacio comprimido mapea a un par (i, j)
+// disjunto, así que las escrituras nunca chocan.
+const PAR_THRESHOLD: usize = 1 << 16;
+
 fn apply_1q(circ: &mut Circuit, q: usize, g: &[[C; 2]; 2], controls: &[usize]) {
     let bit = 1usize << (circ.n - 1 - q);
     let cmask: usize = controls.iter().map(|&c| 1usize << (circ.n - 1 - c)).sum();
     let size = circ.state.len();
-    for i in 0..size {
-        if i & bit == 0 && (i & cmask) == cmask {
+    let low = bit - 1; // bits por debajo del qubit objetivo
+    let g = *g;
+    let pair_op = move |a: C, b: C| -> (C, C) {
+        (c_add(c_mul(g[0][0], a), c_mul(g[0][1], b)),
+         c_add(c_mul(g[1][0], a), c_mul(g[1][1], b)))
+    };
+    if size >= PAR_THRESHOLD {
+        use rayon::prelude::*;
+        struct Ptr(*mut C);
+        unsafe impl Send for Ptr {}
+        unsafe impl Sync for Ptr {}
+        let ptr = Ptr(circ.state.as_mut_ptr());
+        let p = &ptr;
+        (0..size >> 1).into_par_iter().for_each(|k| {
+            // inserta un 0 en la posición del bit objetivo → i con bit=0
+            let i = ((k & !low) << 1) | (k & low);
+            if (i & cmask) != cmask { return; }
             let j = i | bit;
-            let a = circ.state[i];
-            let b = circ.state[j];
-            circ.state[i] = c_add(c_mul(g[0][0], a), c_mul(g[0][1], b));
-            circ.state[j] = c_add(c_mul(g[1][0], a), c_mul(g[1][1], b));
+            // SAFETY: (i, j) es único por k; ningún otro k toca estos índices
+            unsafe {
+                let (na, nb) = pair_op(*p.0.add(i), *p.0.add(j));
+                *p.0.add(i) = na;
+                *p.0.add(j) = nb;
+            }
+        });
+    } else {
+        for k in 0..size >> 1 {
+            let i = ((k & !low) << 1) | (k & low);
+            if (i & cmask) != cmask { continue; }
+            let j = i | bit;
+            let (na, nb) = pair_op(circ.state[i], circ.state[j]);
+            circ.state[i] = na;
+            circ.state[j] = nb;
         }
     }
 }

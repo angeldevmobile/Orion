@@ -1,0 +1,128 @@
+-- demo_quantum_lab.orx — Laboratorio cuántico interactivo de 1 qubit.
+--
+-- Playground educativo: aplica puertas con botones, gira con rotaciones
+-- paramétricas, observa la esfera de Bloch y las probabilidades en vivo,
+-- y mide (colapsa) el qubit de verdad. Todo corre sobre el simulador de
+-- circuitos de Orion — sin Jupyter, sin pip, un solo binario.
+--
+--   orion run demo/demo_quantum_lab.orx
+
+use "gui" as gui
+use "quantum" as q
+
+PI = 3.141592653589793
+
+-- El circuito vive en el proceso; el id persiste entre re-ejecuciones reactivas
+cid = gui.val("qc", 0)
+if cid == 0 {
+    cid = q.circuit(1)
+    gui.set("qc", cid)
+}
+
+-- ── Eventos primero, render después ─────────────────────────────────────────
+for g in ["H", "X", "Y", "Z", "S", "T"] {
+    if gui.pressed(g) {
+        if g == "H" { q.h(cid, 0) }
+        if g == "X" { q.x(cid, 0) }
+        if g == "Y" { q.y(cid, 0) }
+        if g == "Z" { q.z(cid, 0) }
+        if g == "S" { q.sgate(cid, 0) }
+        if g == "T" { q.tgate(cid, 0) }
+        gui.set("ultimo", "puerta " + g)
+    }
+}
+
+-- en el primer frame el slider aún no tiene valor ("")
+theta_raw = gui.value("theta")
+grados = 90.0
+if theta_raw != "" {
+    grados = float(theta_raw)
+}
+rad = grados * PI / 180.0
+for r in ["RX", "RY", "RZ"] {
+    if gui.pressed(r) {
+        if r == "RX" { q.rx(cid, 0, rad) }
+        if r == "RY" { q.ry(cid, 0, rad) }
+        if r == "RZ" { q.rz(cid, 0, rad) }
+        gui.set("ultimo", r + "(" + grados + "°)")
+    }
+}
+
+if gui.pressed("Medir (colapsa)") {
+    r = q.collapse(cid, 0)
+    gui.set("ultimo", "medido → |" + r + ">")
+}
+if gui.pressed("Reiniciar |0>") {
+    q.reset(cid)
+    gui.set("ultimo", "reiniciado")
+}
+
+-- ── Estado actual ────────────────────────────────────────────────────────────
+p = q.probs(cid)
+p0 = 0.0
+p1 = 0.0
+if p.keys().contains("0") { p0 = p["0"] }
+if p.keys().contains("1") { p1 = p["1"] }
+b = q.bloch(q.state(cid))
+
+-- ── UI ───────────────────────────────────────────────────────────────────────
+gui.panel("Laboratorio Cuántico — 1 qubit", 640, 640)
+
+gui.heading("Estado del qubit")
+gui.caption("Última acción: " + gui.val("ultimo", "ninguna"))
+gui.spacer(6)
+
+gui.row()
+  gui.card()
+    gui.caption("P(|0>)")
+    gui.heading(str(p0))
+    gui.progress(p0, "accent")
+  gui.end()
+  gui.card()
+    gui.caption("P(|1>)")
+    gui.heading(str(p1))
+    gui.progress(p1, "success")
+  gui.end()
+gui.end()
+
+gui.card()
+  gui.caption("ESFERA DE BLOCH  [x, y, z]  —  |0> = polo norte (z=+1)")
+  gui.heading("x=" + b[0] + "   y=" + b[1] + "   z=" + b[2])
+gui.end()
+gui.spacer(8)
+
+gui.caption("PUERTAS FIJAS")
+gui.grid(6)
+  gui.press("H")
+  gui.press("X")
+  gui.press("Y")
+  gui.press("Z")
+  gui.press("S")
+  gui.press("T")
+gui.end()
+gui.spacer(6)
+
+gui.caption("ROTACIONES PARAMÉTRICAS — ángulo en grados")
+gui.slide("theta", 0, 360, 5)
+gui.grid(3)
+  gui.press("RX")
+  gui.press("RY")
+  gui.press("RZ")
+gui.end()
+gui.spacer(8)
+
+gui.row()
+  gui.press("Medir (colapsa)", "accent", "white")
+  gui.press("Reiniciar |0>", "error", "white")
+gui.end()
+gui.spacer(8)
+
+-- histograma de 300 mediciones simuladas (no colapsan el estado)
+m = q.sample(cid, 300)
+datos = []
+for k in m.keys() {
+    datos = datos.push({"estado": "|" + k + ">", "n": m[k]})
+}
+gui.chart(datos, "bar", {"x": "estado", "y": "n", "titulo": "300 mediciones (regla de Born)", "height": 180})
+
+gui.run()

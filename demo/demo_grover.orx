@@ -1,0 +1,56 @@
+-- demo_grover.orx — Búsqueda de Grover en Orion puro.
+--
+-- Busca el estado "101" entre 8 posibilidades usando un circuito de 3 qubits.
+-- Clásicamente se necesitan ~4 consultas en promedio; Grover lo encuentra con
+-- 2 iteraciones y ~94.5% de probabilidad. Todo el circuito lo diseña el
+-- developer con puertas primitivas: no hay nada precocinado.
+--
+--   orion run demo/demo_grover.orx
+
+use "quantum" as q
+
+BUSCADO = "101"
+
+-- Oráculo: invierte la fase SOLO del estado buscado.
+-- Los qubits en 0 del objetivo se envuelven en X para que el CCZ
+-- (= H·CCX·H sobre el último qubit) dispare exactamente en |101>.
+fn oraculo(c) {
+    q.x(c, 1)
+    q.h(c, 2)
+    q.ccx(c, 0, 1, 2)
+    q.h(c, 2)
+    q.x(c, 1)
+}
+
+-- Difusor de Grover: reflexión sobre la media (amplifica lo marcado).
+fn difusor(c) {
+    for i in 0..3 { q.h(c, i) }
+    for i in 0..3 { q.x(c, i) }
+    q.h(c, 2)
+    q.ccx(c, 0, 1, 2)
+    q.h(c, 2)
+    for i in 0..3 { q.x(c, i) }
+    for i in 0..3 { q.h(c, i) }
+}
+
+c = q.circuit(3)
+
+-- superposición uniforme: los 8 estados con probabilidad 12.5%
+for i in 0..3 { q.h(c, i) }
+show "Antes:  P(" + BUSCADO + ") = " + q.probs(c)[BUSCADO]
+
+-- 2 iteraciones de Grover (óptimo para 8 estados: ~pi/4 * sqrt(8))
+for iter in 0..2 {
+    oraculo(c)
+    difusor(c)
+}
+show "Después: P(" + BUSCADO + ") = " + q.probs(c)[BUSCADO]
+
+-- medición real: 1000 disparos según la regla de Born
+conteos = q.sample(c, 1000)
+show "1000 mediciones:"
+for k in conteos.keys() {
+    show "  |" + k + ">  " + conteos[k]
+}
+
+q.free(c)
