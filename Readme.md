@@ -667,7 +667,7 @@ benchmark es también un test cruzado de corrección.
   mueven sin re-alocar).
 - **.odf (formato binario propio): ~6× más rápido** - cero parsing de texto,
   los números se leen como bytes crudos.
-- **A escala 5M filas**: −46% de RAM pico en la carga y agregaciones
+- **A escala 5M filas**: -46% de RAM pico en la carga y agregaciones
   data-parallel con rayon (`sum/std/min/max` usan todos los núcleos a partir
   de 1M elementos).
 - **Y en 3× menos líneas**: las ~15 líneas de bucle+tipado manual de Python
