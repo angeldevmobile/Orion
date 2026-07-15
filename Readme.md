@@ -1,9 +1,9 @@
 # Orion Language
 
 Orion es un lenguaje de programación moderno orientado a backend y automatización.
-Sintaxis limpia, tipado opcional, OOP nativa, 44+ módulos integrados y pipeline completo en Rust.
+Sintaxis limpia, tipado opcional, OOP nativa, 58 módulos integrados y pipeline completo en Rust.
 
-> Construido por **Angel Zapata** · 2025–2026
+> Construido por **Angel Zapata** · 2025-2026
 
 ---
 
@@ -12,7 +12,7 @@ Sintaxis limpia, tipado opcional, OOP nativa, 44+ módulos integrados y pipeline
 ![Demo - Terminal](assets/demo_terminal.jpeg)
 
 ```orion
--- demo/demo_ventas_q1.orx  —  70 líneas · 16 ms
+-- demo/demo_ventas_q1.orx  -  70 líneas · 16 ms
 use "excel" as excel
 
 datos_full = excel.cruzar(vendedores, presupuestos, "region", "left")
@@ -47,11 +47,11 @@ excel.write_multi("reporte_analisis.xlsx", {
 
 ## Filosofía
 
-- **Sin boilerplate** — el código se lee como pseudocódigo. Una tarea = máximo 5 líneas.
-- **Real** — pensado para construir cosas reales: APIs, automatizaciones, pipelines de datos.
-- **Moderno** — OOP, type hints, interpolación, async/await, IA nativa, regex, AI como keyword.
-- **Rápido** — pipeline completo en Rust: lexer → parser → type checker → codegen → VM. Cargar y agregar 500k filas de CSV: **2× más rápido que Python con la misma RAM** ([benchmark reproducible](bench/)).
-- **Seguro** — queries parametrizadas, validación en frontera, crypto nativo.
+- **Sin boilerplate** - el código se lee como pseudocódigo. Una tarea = máximo 5 líneas.
+- **Real** - pensado para construir cosas reales: APIs, automatizaciones, pipelines de datos.
+- **Moderno** - OOP, type hints, interpolación, async/await, IA nativa, regex, AI como keyword.
+- **Rápido** - pipeline completo en Rust: lexer → parser → type checker → codegen → VM. Cargar y agregar 500k filas de CSV: **2× más rápido que Python con la misma RAM** ([benchmark reproducible](bench/)).
+- **Seguro** - queries parametrizadas, validación en frontera, crypto nativo.
 
 ---
 
@@ -65,9 +65,9 @@ cargo build --release --manifest-path orion-vm/Cargo.toml
 ./orion-vm/target/release/orion archivo.orx
 ```
 
-**Extensión VSCode** — incluye el binario bundleado, zero-config:
-1. Instalar el paquete local: `code --install-extension vscode-orion/orion-lang/orion-lang-0.5.0.vsix` *(publicación en el Marketplace: en camino)*
-2. Abrir cualquier `.orx` — funciona de inmediato
+**Extensión VSCode** - incluye el binario bundleado, zero-config:
+1. Instalar el paquete local: `code --install-extension vscode-orion/orion-lang/orion-lang-0.7.0.vsix` *(publicación en el Marketplace: en camino)*
+2. Abrir cualquier `.orx` - funciona de inmediato
 
 ---
 
@@ -213,7 +213,7 @@ async fn fetch(url) {
 datos = await fetch("https://api.ejemplo.com")
 ```
 
-### OOP — Shapes
+### OOP - Shapes
 
 ```orion
 shape Persona {
@@ -290,7 +290,7 @@ serve en 8080 {
 }
 ```
 
-### IA nativa — `think`, `learn`, `sense`
+### IA nativa - `think`, `learn`, `sense`
 
 ```orion
 -- Sin módulos, sin imports: IA como statement nativo
@@ -327,7 +327,7 @@ resultado = await procesar(datos)
 
 ---
 
-## Módulos stdlib (20 módulos)
+## Módulos stdlib - tour con ejemplos
 
 ### Datos y archivos
 
@@ -340,7 +340,7 @@ use "table"
 use "regex" as re
 ```
 
-#### `fs` — Sistema de archivos
+#### `fs` - Sistema de archivos
 ```orion
 contenido = fs.read("config.toml")
 fs.write("output.json", datos)
@@ -350,7 +350,7 @@ fs.mkdir("reportes/2026")
 info = fs.info("archivo.txt")   -- {size, modified, is_file}
 ```
 
-#### `csv` — Datos tabulares
+#### `csv` - Datos tabulares
 ```orion
 data    = csv.read("ventas.csv")
 norte   = csv.filter(data, "region", "Norte")
@@ -359,7 +359,7 @@ ordenado = csv.sort(data, "venta", "desc")
 csv.write("reporte.csv", data)
 ```
 
-#### `json` — Serialización JSON
+#### `json` - Serialización JSON
 ```orion
 obj  = json.parse(texto)
 txt  = json.forge_pretty(obj)
@@ -368,14 +368,14 @@ json.emit("salida.json", data)
 val  = json.trace(obj, "usuario.perfil.nombre")
 ```
 
-#### `excel` — Hojas de cálculo
+#### `excel` - Hojas de cálculo
 ```orion
 hojas = excel.sheets("reporte.xlsx")
 data  = excel.read("datos.xlsx", "Ventas")
 excel.write("salida.xlsx", datos, "Reporte 2026")
 ```
 
-#### `table` — Análisis de datos
+#### `table` - Análisis de datos
 ```orion
 t = table.load("datos.csv")   -- auto-detecta CSV/Excel/JSON
 table.peek(t, 5)              -- imprime las primeras 5 filas bonito
@@ -388,7 +388,7 @@ t4 = table.sort(t, "venta")
 t5 = table.join(t, t2, "id")
 ```
 
-#### `regex` — Expresiones regulares
+#### `regex` - Expresiones regulares
 ```orion
 use "regex" as re
 
@@ -406,7 +406,7 @@ use "net"
 use "env"
 ```
 
-#### `net` — HTTP client
+#### `net` - HTTP client
 ```orion
 resp  = net.get("https://api.github.com/users/octocat")
 datos = net.post("https://api.com/datos", {token: key, id: 1})
@@ -415,7 +415,7 @@ ip    = net.resolve("ejemplo.com")
 ping  = net.pulse("ejemplo.com", 443)   -- {alive, latency_ms}
 ```
 
-#### `env` — Configuración
+#### `env` - Configuración
 ```orion
 puerto = env.pull("PORT", 8080)
 modo   = env.pull("MODE", "produccion")
@@ -528,7 +528,7 @@ use "cosmos"
 ```
 
 ```orion
--- matrix — álgebra lineal numérica (motor nalgebra a partir de 32×32:
+-- matrix - álgebra lineal numérica (motor nalgebra a partir de 32×32:
 -- mul tipo BLAS, LU con pivoteo; 512×512 en decenas de ms)
 A   = [[1,2],[3,4]]
 det = matrix.det(A)
@@ -538,7 +538,7 @@ e   = matrix.eig([[2,1],[1,2]])              -- valores propios: [1.0, 3.0]
 s   = matrix.svd(A)                          -- {u, s, vt}
 r   = matrix.rank([[1,2],[2,4]])             -- 1 (rango numérico)
 
--- quantum — simulador de CIRCUITOS real (hasta 24 qubits, puertas O(2^n)
+-- quantum - simulador de CIRCUITOS real (hasta 24 qubits, puertas O(2^n)
 -- paralelizadas; la fase importa: Grover funciona en Orion puro)
 c = quantum.circuit(2)
 quantum.h(c, 0)                     -- Hadamard sobre el qubit 0
@@ -551,7 +551,7 @@ b = quantum.collapse(c, 0)          -- mide un qubit y COLAPSA el estado
 -- Grover completo en demo/demo_grover.orx (P=0.945 exacto) y esfera de
 -- Bloch animada con física real en demo/demo_bloch_anim.orx
 
--- cosmos — simulación N-cuerpos
+-- cosmos - simulación N-cuerpos
 u   = cosmos.create(5)
 u   = cosmos.run(u, steps: 100)
 show cosmos.summary(u)
@@ -649,11 +649,11 @@ vm.rs           ← ejecución (Rust nativo, sin GIL)
 
 ---
 
-## Rendimiento — medido, no prometido
+## Rendimiento - medido, no prometido
 
 Benchmark reproducible en [`bench/`](bench/) (un comando: `bench\run_all.ps1`).
 Misma tarea en ambos lenguajes: cargar 500k filas de CSV a columnas tipadas +
-`sum` + `mean`. Los resultados numéricos coinciden **dígito a dígito** — el
+`sum` + `mean`. Los resultados numéricos coinciden **dígito a dígito** - el
 benchmark es también un test cruzado de corrección.
 
 | Pipeline (500k filas × 4 cols)   | Tiempo  | RAM pico |
@@ -662,10 +662,10 @@ benchmark es también un test cruzado de corrección.
 | **Orion `frame.open` CSV**       | **264 ms** | **104 MB** |
 | **Orion `frame.open` .odf**      | **88 ms**  | **73 MB**  |
 
-- **CSV: 2× más rápido que Python con la misma RAM** — carga columnar en Rust
+- **CSV: 2× más rápido que Python con la misma RAM** - carga columnar en Rust
   (las celdas van directo a un `Vec` por columna, las columnas de texto se
   mueven sin re-alocar).
-- **.odf (formato binario propio): ~6× más rápido** — cero parsing de texto,
+- **.odf (formato binario propio): ~6× más rápido** - cero parsing de texto,
   los números se leen como bytes crudos.
 - **A escala 5M filas**: −46% de RAM pico en la carga y agregaciones
   data-parallel con rayon (`sum/std/min/max` usan todos los núcleos a partir
@@ -675,7 +675,7 @@ benchmark es también un test cruzado de corrección.
 
 Además del throughput, el runtime está endurecido para datos grandes:
 estructuras de 200k+ niveles de profundidad y ciclos de referencias
-(`push(a, a)`) no crashean ni fugan — el GC los recolecta y la VM devuelve
+(`push(a, a)`) no crashean ni fugan - el GC los recolecta y la VM devuelve
 cada byte al salir, verificado con LeakSanitizer en CI.
 
 ---
@@ -695,7 +695,7 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 - Import graph
 - Debugger DAP
 - REPL integrado
-- **Binario bundleado** — zero-config, sin instalar nada extra
+- **Binario bundleado** - zero-config, sin instalar nada extra
 
 ---
 
@@ -717,33 +717,33 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 | IA nativa (think/learn/sense) | ✅ Completo | Rust |
 | Errores con span y contexto visual | ✅ Completo | Rust |
 | Debugger interactivo (breakpoints, step, watches) | ✅ Completo | Rust |
-| DAP — Debug Adapter Protocol (VSCode) | ✅ Completo | Rust |
-| LSP — diagnósticos en tiempo real | ✅ Completo | Rust |
-| JIT — Cranelift (I/O, módulos, OOP) | ✅ Completo | Cranelift |
-| AOT — compilación a ejecutable nativo | ✅ Completo | Cranelift |
-| FFI — librerías nativas externas | ✅ Completo | libloading |
+| DAP - Debug Adapter Protocol (VSCode) | ✅ Completo | Rust |
+| LSP - diagnósticos en tiempo real | ✅ Completo | Rust |
+| JIT - Cranelift (I/O, módulos, OOP) | ✅ Completo | Cranelift |
+| AOT - compilación a ejecutable nativo | ✅ Completo | Cranelift |
+| FFI - librerías nativas externas | ✅ Completo | libloading |
 | Package manager (add/remove/list/search/publish) | ✅ Completo | Rust |
 | Registry oficial en GitHub | ✅ Completo | GitHub API |
 | GC mark-and-sweep (ciclos; mark y drop iterativos, sin límite de profundidad) | ✅ Completo | Rust |
 | Cero fugas al salir (verificado con LeakSanitizer en CI) | ✅ Completo | Rust + ASan |
 | Benchmark reproducible vs Python ([`bench/`](bench/)) | ✅ Completo | PowerShell + Python |
-| Módulos stdlib | ✅ 44+ módulos | Rust |
+| Módulos stdlib | ✅ 58 módulos (875 funciones) | Rust |
 | Cloud native (S3 / SSH / Docker) | ✅ Completo | Rust |
 | CLI completo | ✅ Completo | Rust |
 | Extensión VSCode con binario bundleado | ✅ Completo | TypeScript |
 
 ---
 
-## Stdlib completa (44+ módulos)
+## Stdlib completa (58 módulos)
 
 ### Core
-`fs` `json` `strings` `datetime` `random` `regex` `env` `process` `crypto`
+`fs` `json` `strings` `datetime` `random` `regex` `env` `process` `crypto` `term`
 
 ### Sistema moderno
-`log` `config` `secret` `zip` `stream` `crypto2`
+`log` `config` `secret` `zip` `stream` `crypto2` `state`
 
-### Red
-`net` `ws` `serve`
+### Red y web
+`net` `ws` `serve` `router` `middleware` `sse` `proto`
 
 ### Backend
 `db` `auth` `cache` `mail` `validate`
@@ -751,8 +751,8 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 ### Automatización
 `tarea` `cola` `watch`
 
-### Datos
-`csv` `excel` `table` `matrix`
+### Datos y ciencia
+`csv` `excel` `excel_f` `table` `frame` `serie` `stat` `matrix` `search`
 
 ### Utilidades modernas
 `template` `formato` `grafo` `pdf`
@@ -760,15 +760,18 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 ### AI nativa (Bloque C)
 `llm` `embed` `vector` `ai`
 
+### Interfaces
+`gui` `tui`
+
 ### Avanzado
-`vision` `insight` `gui` `quantum` `cosmos` `timewarp`
+`vision` `insight` `quantum` `cosmos` `timewarp`
 
 ### Cloud native (Bloque E)
 `s3` `ssh` `docker`
 
 ---
 
-## Ecosistema — Roadmap de librerías modernas
+## Ecosistema - Roadmap de librerías modernas
 
 > Orion no copia Python. Cada módulo está diseñado para 2025: API simple, rápida y sin configuración.
 
@@ -785,7 +788,7 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 
 ---
 
-### Bloque D — Sistema moderno ✅
+### Bloque D - Sistema moderno ✅
 *Base de cualquier aplicación real. Sin estas, cualquier app queda incompleta.*
 
 | # | Módulo | Descripción | Crate Rust | Estado |
@@ -798,7 +801,7 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 | 6 | `use "stream"` | Pipelines de datos: filter, pluck, sum, avg, unique, flatten | nativo | ✅ Completo |
 
 ```orion
--- log — logging estructurado con tags, timers y separadores
+-- log - logging estructurado con tags, timers y separadores
 use "log"
 
 log.divider("inicio")
@@ -813,14 +816,14 @@ log.level("debug")                  -- activa mensajes debug
 log.debug("Request: GET /api/v1/users", "net")
 log.divider()
 
--- config — cargar TOML / JSON como configuración tipada
+-- config - cargar TOML / JSON como configuración tipada
 use "config"
 
 cfg  = config.load("orion.toml")
 port = config.get(cfg, "server.port")
 cfg2 = config.merge(cfg, "local.toml")   -- local.toml sobreescribe
 
--- secret — secrets seguros desde .env
+-- secret - secrets seguros desde .env
 use "secret"
 
 secret.load(".env")
@@ -828,7 +831,7 @@ db_url = secret.require("DATABASE_URL")   -- error claro si falta
 api_key = secret.get("API_KEY", "dev")
 show secret.mask(api_key)                 -- "sk***y"
 
--- zip — comprimir y descomprimir
+-- zip - comprimir y descomprimir
 use "zip"
 
 zip.compress("src/", "release.zip")      -- comprime carpeta entera
@@ -837,7 +840,7 @@ entradas = zip.list("release.zip")       -- [{name, size, is_dir}, ...]
 zip.gzip("datos.csv", "datos.csv.gz")
 zip.gunzip("datos.csv.gz", "datos.csv")
 
--- stream — pipelines de datos sin dependencias
+-- stream - pipelines de datos sin dependencias
 use "stream" as st
 
 usuarios = [
@@ -851,7 +854,7 @@ nombres = st.pluck(activos, "nombre")     -- ["Ana", "Eva"]
 total   = st.sum(st.pluck(activos, "venta"))  -- 7300
 top3    = st.take(st.reverse(st.range(1, 100)), 3)  -- [99, 98, 97]
 
--- crypto2 — AES-256-GCM y RSA
+-- crypto2 - AES-256-GCM y RSA
 use "crypto2"
 
 -- AES-256-GCM (cifrado simétrico autenticado)
@@ -868,7 +871,7 @@ valido  = crypto2.rsa_verify("contrato", firma, claves.public_key)  -- yes
 
 ---
 
-### Bloque B — Web moderna ✅
+### Bloque B - Web moderna ✅
 *Más allá del `serve` básico: middleware, routing avanzado, protocolos modernos.*
 
 | # | Módulo | Descripción | Crate Rust | Estado |
@@ -876,10 +879,10 @@ valido  = crypto2.rsa_verify("contrato", firma, claves.public_key)  -- yes
 | 7 | `use "router"` | Routing declarativo con parámetros `:id` y wildcards `*` | nativo | ✅ Completo |
 | 8 | `use "middleware"` | Rate limit, CORS, logging, auth JWT en cadena | nativo | ✅ Completo |
 | 9 | `use "sse"` | Server-Sent Events para streaming HTTP en tiempo real | nativo | ✅ Completo |
-| 10 | `use "proto"` | Serialización binaria MessagePack — 10x más compacto que JSON | nativo | ✅ Completo |
+| 10 | `use "proto"` | Serialización binaria MessagePack - 10x más compacto que JSON | nativo | ✅ Completo |
 
 ```orion
--- router + serve integrado — el combo completo
+-- router + serve integrado - el combo completo
 use "router"
 use "middleware"
 
@@ -919,7 +922,7 @@ match = router.match(r, "GET", "/usuarios/42")
 
 show router.routes(r)   -- lista todas las rutas registradas
 
--- middleware — rate limit, CORS, auth JWT
+-- middleware - rate limit, CORS, auth JWT
 use "middleware"
 
 limiter = middleware.rate_limit(100, 60)   -- 100 req / 60 seg
@@ -932,7 +935,7 @@ resultado = middleware.auth_bearer(token, "mi-secreto")
 middleware.log_req("GET", "/api/usuarios", 200, 12)
 -- 14:32:01  GET     /api/usuarios   200  12ms
 
--- sse — Server-Sent Events
+-- sse - Server-Sent Events
 use "sse"
 
 headers = sse.headers()   -- {Content-Type: "text/event-stream", ...}
@@ -942,7 +945,7 @@ ev = sse.json_event("usuarios", [{nombre: "Ana"}])
 ev = sse.retry(3000)                             -- "retry: 3000\n\n"
 ev = sse.keep_alive()                            -- ": keep-alive\n\n"
 
--- proto — serialización binaria MessagePack
+-- proto - serialización binaria MessagePack
 use "proto"
 
 datos = {nombre: "Ana", edad: 25, activo: yes}
@@ -957,7 +960,7 @@ recuperado = proto.decode_b64(b64)
 
 ---
 
-### Bloque C — AI nativa ✅
+### Bloque C - AI nativa ✅
 *La diferenciación más fuerte de Orion. AI de primera clase, sin pip, sin configuración.*
 
 | # | Módulo | Descripción | Crate Rust | Estado |
@@ -1025,7 +1028,7 @@ show llm.models()      -- ["claude-haiku-4-5-20251001", "gpt-4o", "ollama:llama3
 
 ---
 
-### Bloque A — Datos modernos
+### Bloque A - Datos modernos
 *El reemplazo de pandas: más rápido, API más simple, sin dependencias pesadas.*
 
 | # | Módulo | Descripción | Implementación | Estado |
@@ -1034,7 +1037,7 @@ show llm.models()      -- ["claude-haiku-4-5-20251001", "gpt-4o", "ollama:llama3
 | 15 | `use "frame"` | DataFrames **columnar**: 10x menos RAM, chunk streaming, scan sin cargar | Vec columnar | ✅ Completo |
 | 16 | `use "stat"` | Estadística: mean, std, percentil, correlación, regresión, z-score, histograma | Vec nativo | ✅ Completo |
 | 17 | `use "serie"` | Series de tiempo: moving_avg, diff, pct_change, forecast, trend, smooth | Vec nativo | ✅ Completo |
-| 18 | `use "search"` | Búsqueda rápida en TXT/CSV/Excel/dir — streaming, regex, contexto, multi-col | BufReader nativo | ✅ Completo |
+| 18 | `use "search"` | Búsqueda rápida en TXT/CSV/Excel/dir - streaming, regex, contexto, multi-col | BufReader nativo | ✅ Completo |
 
 > Sin polars, sin ndarray, sin dependencias pesadas. Arquitectura: `table` para exploración rápida, `frame` para producción y grandes volúmenes.
 
@@ -1043,7 +1046,7 @@ show llm.models()      -- ["claude-haiku-4-5-20251001", "gpt-4o", "ollama:llama3
 | Volumen | Módulo | Por qué |
 |---------|--------|---------|
 | < 50K filas | `table` | API más rica, exploración, AI integrada |
-| 50K – 5M filas | `frame` | Columnar, 10x menos RAM, ops directas sobre `Vec<f64>` |
+| 50K - 5M filas | `frame` | Columnar, 10x menos RAM, ops directas sobre `Vec<f64>` |
 | > 5M filas | `frame.each_chunk` / `frame.scan_stats` | Nunca carga todo, procesa por bloques |
 | Buscar en archivos | `search` | Streaming, para al primer match, multi-archivo |
 
@@ -1090,20 +1093,20 @@ table.describe_ai(t)       -- descripción generada por AI
 resp = table.ask(t, "¿Qué región vende más en verano?")
 ```
 
-#### `frame` — DataFrames columnar para grandes volúmenes
+#### `frame` - DataFrames columnar para grandes volúmenes
 
 ```orion
 use "frame"
 
 -- Carga columnar directa (sin materializar filas): 2× más rápido que
--- Python stdlib con la misma RAM — medido en bench/ (500k y 5M filas).
+-- Python stdlib con la misma RAM - medido en bench/ (500k y 5M filas).
 -- open() auto-detecta el formato: CSV o el binario .odf (~6× más rápido).
 f = frame.open("ventas_1M.csv")
 frame.schema(f)          -- tipos inferidos por columna
 frame.peek(f, 5)         -- tabla bonita sin cargar todo
 frame.size(f)            -- {rows: 1000000, cols: 8}
 
--- Stats directas sobre Vec<f64> — sin hash lookups; a partir de 1M
+-- Stats directas sobre Vec<f64> - sin hash lookups; a partir de 1M
 -- elementos usan todos los núcleos (rayon)
 frame.mean(f, "venta")
 frame.stats(f, "venta")  -- {count, mean, std, min, p25, median, p75, max}
@@ -1125,15 +1128,15 @@ for chunk in chunks {
 
 -- Scan completo de una columna sin cargar el archivo
 stats = frame.scan_stats("ventas_100M.csv", "venta")
--- → {count, mean, std, min, max, sum} — solo itera esa columna
+-- → {count, mean, std, min, max, sum} - solo itera esa columna
 ```
 
-#### `search` — Búsqueda rápida en cualquier archivo
+#### `search` - Búsqueda rápida en cualquier archivo
 
 ```orion
 use "search"
 
--- TXT / LOG — streaming, nunca carga todo en RAM
+-- TXT / LOG - streaming, nunca carga todo en RAM
 errores    = search.text("app.log", "ERROR")
 -- → [{line: 42, content: "ERROR: conexión rechazada"}, ...]
 
@@ -1141,14 +1144,14 @@ errores    = search.text("app.log", "ERROR")
 fechas = search.regex("archivo.txt", "(\\d{4}-\\d{2}-\\d{2})")
 -- → [{line, content, matches: ["2026-05-15"]}, ...]
 
--- CSV — busca por columna sin cargar el archivo
+-- CSV - busca por columna sin cargar el archivo
 clientes = search.csv("clientes.csv", "ciudad", "Monterrey")
 -- → [{nombre: "Ana", ciudad: "Monterrey", ...}, ...]
 
--- CSV — busca en múltiples columnas
+-- CSV - busca en múltiples columnas
 hits = search.columns("productos.csv", ["nombre", "descripcion"], "orion")
 
--- Excel — busca en toda la hoja
+-- Excel - busca en toda la hoja
 filas = search.excel("reporte.xlsx", "pendiente")
 filas = search.excel("reporte.xlsx", "Norte", "Ventas Q1")  -- hoja específica
 
@@ -1167,14 +1170,14 @@ primero = search.first("clientes.csv", "Ana García")
 hits = search.in_dir("logs/", "timeout")           -- todos los archivos
 hits = search.in_dir("data/", "Norte", "csv")      -- solo .csv
 
--- Contexto — N líneas antes/después (como grep -C)
+-- Contexto - N líneas antes/después (como grep -C)
 ctx = search.context("deploy.log", "FAILED", 3)
 -- → [{line, content, before: [...], after: [...]}]
 ```
 
 ---
 
-### Bloque E — Cloud native ✅
+### Bloque E - Cloud native ✅
 *Sin pip, sin npm. Cloud como stdlib.*
 
 | # | Módulo | Descripción | Crate Rust | Estado |
@@ -1184,7 +1187,7 @@ ctx = search.context("deploy.log", "FAILED", 3)
 | 20 | `use "docker"` | Controlar contenedores Docker via API REST | `ureq` | ✅ Completo |
 
 ```orion
--- s3 — compatible con AWS S3, Cloudflare R2 y MinIO
+-- s3 - compatible con AWS S3, Cloudflare R2 y MinIO
 use "s3"
 
 s3.config("https://s3.amazonaws.com", env.pull("AWS_KEY"), env.pull("AWS_SECRET"), "us-east-1")
@@ -1205,7 +1208,7 @@ if s3.exists("mi-bucket", "backups/viejo.csv") {
     s3.delete("mi-bucket", "backups/viejo.csv")
 }
 
--- MinIO / R2 — mismo API, diferente endpoint
+-- MinIO / R2 - mismo API, diferente endpoint
 s3.config("http://localhost:9000", "minio", "minio123", "us-east-1")
 s3.upload("datos", "archivo.json", "salida.json")
 
@@ -1213,7 +1216,7 @@ s3.upload("datos", "archivo.json", "salida.json")
 s3.config("https://<account>.r2.cloudflarestorage.com", env.pull("R2_KEY"), env.pull("R2_SECRET"), "auto")
 
 
--- ssh — conexión remota con contraseña o clave
+-- ssh - conexión remota con contraseña o clave
 use "ssh"
 
 -- Contraseña
@@ -1240,7 +1243,7 @@ if ssh.test(s) { show "servidor accesible" }
 ssh.close(s)
 
 
--- docker — control del daemon via REST API
+-- docker - control del daemon via REST API
 use "docker"
 
 -- Configurar endpoint (default: http://localhost:2375)
@@ -1299,7 +1302,7 @@ Bloque D ✅ → Bloque B ✅ → Bloque C ✅ → Bloque A ✅ → Bloque E ✅
 
 ---
 
-## Roadmap — Excel & Automation 2026
+## Roadmap - Excel & Automation 2026
 
 > Orion no copia pandas ni openpyxl. Cada feature tiene nombre propio, API más limpia y funciona con `|>`.
 
@@ -1337,7 +1340,7 @@ excel.write_styled("report.xlsx", data, {
 })
 ```
 
-### Lo que viene — 9 features con API diseñada
+### Lo que viene - 9 features con API diseñada
 
 | # | Feature | Pandas equivalente | Estado |
 |---|---|---|---|
@@ -1353,9 +1356,9 @@ excel.write_styled("report.xlsx", data, {
 
 ---
 
-### F-1 `compute` — columnas calculadas
+### F-1 `compute` - columnas calculadas
 
-El lambda recibe la fila completa — acceso cruzado entre campos. Múltiples columnas en una pasada.
+El lambda recibe la fila completa - acceso cruzado entre campos. Múltiples columnas en una pasada.
 
 ```orion
 data = excel.compute(data, {
@@ -1367,7 +1370,7 @@ data = excel.compute(data, {
 
 ---
 
-### F-2 `sort` — múltiples columnas
+### F-2 `sort` - múltiples columnas
 
 ```orion
 -- Estilo explícito
@@ -1382,7 +1385,7 @@ data = excel.sort(data, "region+", "sales-", "name+")
 
 ---
 
-### F-3 `group` — múltiples agregaciones por campo
+### F-3 `group` - múltiples agregaciones por campo
 
 ```orion
 by_region = excel.group(data, "region", {
@@ -1397,7 +1400,7 @@ Funciones disponibles: `sum` `avg` `max` `min` `count` `first` `last` `std` `med
 
 ---
 
-### F-4 `long` — wide to long (unpivot)
+### F-4 `long` - wide to long (unpivot)
 
 Convierte formato ancho en formato largo. Nombre claro: `long`, no `melt`.
 
@@ -1431,7 +1434,7 @@ Partes: `"year"` `"month"` `"day"` `"quarter"` `"weekday"` `"week"` `"hour"`
 
 ---
 
-### F-6 `join` — múltiples claves
+### F-6 `join` - múltiples claves
 
 ```orion
 -- Una clave (sin cambios)
@@ -1443,7 +1446,7 @@ data = excel.join(sellers, targets, ["region", "product"], "left")
 
 ---
 
-### F-7 `chart` — gráficos declarativos en Excel
+### F-7 `chart` - gráficos declarativos en Excel
 
 Sin objetos intermedios, sin series manuales. Una llamada.
 
@@ -1469,10 +1472,10 @@ Tipos: `"bars"` `"stacked_bars"` `"lines"` `"area"` `"pie"` `"scatter"`
 
 ---
 
-### F-8 `formula` — fórmulas vivas en Excel
+### F-8 `formula` - fórmulas vivas en Excel
 
 Orion no expone strings de fórmulas Excel. En cambio, un builder con nombres claros.
-Las columnas marcadas como fórmulas quedan vivas en el archivo — se recalculan al abrir en Excel.
+Las columnas marcadas como fórmulas quedan vivas en el archivo - se recalculan al abrir en Excel.
 
 ```orion
 f = excel.f
@@ -1491,14 +1494,14 @@ Funciones: `f.sum` `f.avg` `f.pct` `f.ratio` `f.rank` `f.cumulative` `f.if_`
 
 ---
 
-### F-9 `sheet` — control total celda por celda
+### F-9 `sheet` - control total celda por celda
 
 Builder declarativo. Sin iterar celdas manualmente.
 
 ```orion
 sheet = excel.sheet("Sales Report")
 
-sheet.put("A1", "Q1 2026 — Sales Report", { bold: yes, size: 16, merge: "A1:F1" })
+sheet.put("A1", "Q1 2026 - Sales Report", { bold: yes, size: 16, merge: "A1:F1" })
 sheet.put("A2", "Generated: " + datetime.today(), { color: "#888888" })
 sheet.data("A4", sellers, { header: yes, stripe: yes })
 sheet.chart("H4", { type: "bars", x: "region", y: "sales", width: 400, height: 300 })
@@ -1511,7 +1514,7 @@ excel.save(sheet, "custom_report.xlsx")
 
 ---
 
-### Pipeline completo — lo que Orion hace que Python no hace en una sola API
+### Pipeline completo - lo que Orion hace que Python no hace en una sola API
 
 ```orion
 use "excel" as excel
@@ -1571,4 +1574,4 @@ orion --publish   # requiere orion.json + ORION_GITHUB_TOKEN
 
 ---
 
-*Orion — construido por Angel Zapata · 2025–2026*
+*Orion - construido por Angel Zapata · 2025-2026*
