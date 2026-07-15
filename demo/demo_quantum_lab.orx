@@ -19,7 +19,7 @@ if cid == 0 {
     gui.set("qc", cid)
 }
 
--- ── Eventos primero, render después ─────────────────────────────────────────
+--   Eventos primero, render después                      
 for g in ["H", "X", "Y", "Z", "S", "T"] {
     if gui.pressed(g) {
         if g == "H" { q.h(cid, 0) }
@@ -57,7 +57,7 @@ if gui.pressed("Reiniciar |0>") {
     gui.set("ultimo", "reiniciado")
 }
 
--- ── Estado actual ────────────────────────────────────────────────────────────
+--   Estado actual                               
 p = q.probs(cid)
 p0 = 0.0
 p1 = 0.0
@@ -65,7 +65,7 @@ if p.keys().contains("0") { p0 = p["0"] }
 if p.keys().contains("1") { p1 = p["1"] }
 b = q.bloch(q.state(cid))
 
--- ── UI ───────────────────────────────────────────────────────────────────────
+--   UI                                     
 gui.panel("Laboratorio Cuántico — 1 qubit", 640, 640)
 
 gui.heading("Estado del qubit")

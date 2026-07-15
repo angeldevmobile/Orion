@@ -1,0 +1,160 @@
+-- demo_bloch_anim.orx — Esfera de Bloch ANIMADA con física real.
+--
+-- Cada botón lanza una rotación de 180° que se aplica en pasos de 6° por
+-- tick: el vector gira porque el estado cuántico realmente rota (no hay
+-- interpolación falsa). Construido solo con primitivas genéricas del motor:
+-- gui.tick (reloj) + gui.canvas/circle/line/arrow/text_at (lienzo).
+--
+--   orion run demo/demo_bloch_anim.orx
+
+use "gui" as gui
+use "quantum" as q
+
+PI = 3.141592653589793
+PASO = 6.0
+
+-- circuito persistente entre re-ejecuciones
+cid = gui.val("qc", 0)
+if cid == 0 {
+    cid = q.circuit(1)
+    gui.set("qc", cid)
+}
+
+--    Eventos                                                                   
+eje = gui.val("eje", "")
+resto = gui.val("resto", 0.0)
+
+for b in ["Girar X", "Girar Y", "Girar Z"] {
+    if gui.pressed(b) {
+        if b == "Girar X" { gui.set("eje", "x") }
+        if b == "Girar Y" { gui.set("eje", "y") }
+        if b == "Girar Z" { gui.set("eje", "z") }
+        gui.set("resto", 180.0)
+        eje = gui.val("eje", "")
+        resto = 180.0
+    }
+}
+
+if gui.pressed("H") {
+    q.h(cid, 0)
+    gui.set("trail", [])
+}
+if gui.pressed("Medir") {
+    q.collapse(cid, 0)
+    gui.set("resto", 0.0)
+    resto = 0.0
+    gui.set("trail", [])
+}
+if gui.pressed("Reiniciar") {
+    q.reset(cid)
+    gui.set("resto", 0.0)
+    gui.set("trail", [])
+    resto = 0.0
+}
+
+-- tick de animación: aplicar el siguiente paso de la rotación REAL
+if gui.pressed("tick") and resto > 0.0 {
+    rad = PASO * PI / 180.0
+    if eje == "x" { q.rx(cid, 0, rad) }
+    if eje == "y" { q.ry(cid, 0, rad) }
+    if eje == "z" { q.rz(cid, 0, rad) }
+    resto = resto - PASO
+    gui.set("resto", resto)
+
+    -- rastro: últimas 45 posiciones del vector
+    b = q.bloch(q.state(cid))
+    t = gui.val("trail", [])
+    t = t.push([b[0], b[1], b[2]])
+    if t.len() > 45 {
+        t = slice(t, t.len() - 45, t.len())
+    }
+    gui.set("trail", t)
+}
+
+-- solo pedimos reloj mientras hay animación pendiente (no gastar CPU en reposo)
+if resto > 0.0 {
+    gui.tick(30)
+}
+
+--    Estado actual                                                              
+b = q.bloch(q.state(cid))
+p = q.probs(cid)
+p0 = 0.0
+p1 = 0.0
+if p.keys().contains("0") { p0 = p["0"] }
+if p.keys().contains("1") { p1 = p["1"] }
+trail = gui.val("trail", [])
+
+-- proyección de un punto de Bloch al lienzo (centro 120,120, radio 90)
+fn px(v) { return 120.0 + v * 90.0 }
+fn py(v) { return 120.0 - v * 90.0 }
+
+--    UI                                                                         
+gui.panel("Esfera de Bloch — animación con física real", 620, 660)
+
+gui.caption("El vector gira porque el estado ROTA de verdad, paso a paso (6°/tick)")
+gui.spacer(4)
+
+gui.row()
+  -- Vista frontal: plano X–Z (|0> arriba, |1> abajo)
+  gui.card()
+    gui.caption("VISTA FRONTAL  (x, z)")
+    gui.canvas(240, 240)
+      gui.circle(120, 120, 90, "gray", no)
+      gui.line(30, 120, 210, 120, "gray", 1)
+      gui.line(120, 30, 120, 210, "gray", 1)
+      gui.text_at(120, 18, "|0>", 13, "text")
+      gui.text_at(120, 224, "|1>", 13, "text")
+      gui.text_at(222, 120, "+x", 12, "gray")
+      for pt in trail {
+        gui.circle(px(pt[0]), py(pt[2]), 2, "gray")
+      }
+      gui.arrow(120, 120, px(b[0]), py(b[2]), "accent", 3)
+      gui.circle(px(b[0]), py(b[2]), 5, "accent")
+    gui.end()
+  gui.end()
+
+  -- Vista superior: plano X–Y (mirando desde el polo norte)
+  gui.card()
+    gui.caption("VISTA SUPERIOR  (x, y)")
+    gui.canvas(240, 240)
+      gui.circle(120, 120, 90, "gray", no)
+      gui.line(30, 120, 210, 120, "gray", 1)
+      gui.line(120, 30, 120, 210, "gray", 1)
+      gui.text_at(222, 120, "+x", 12, "gray")
+      gui.text_at(120, 18, "+y", 12, "gray")
+      for pt in trail {
+        gui.circle(px(pt[0]), py(pt[1]), 2, "gray")
+      }
+      gui.arrow(120, 120, px(b[0]), py(b[1]), "success", 3)
+      gui.circle(px(b[0]), py(b[1]), 5, "success")
+    gui.end()
+  gui.end()
+gui.end()
+
+gui.spacer(6)
+gui.row()
+  gui.card()
+    gui.caption("P(|0>)")
+    gui.progress(p0, "accent")
+  gui.end()
+  gui.card()
+    gui.caption("P(|1>)")
+    gui.progress(p1, "success")
+  gui.end()
+gui.end()
+
+gui.spacer(8)
+gui.grid(3)
+  gui.press("Girar X")
+  gui.press("Girar Y")
+  gui.press("Girar Z")
+gui.end()
+gui.spacer(4)
+gui.grid(3)
+  gui.press("H")
+  gui.press("Medir", "warning", "black")
+  gui.press("Reiniciar", "error", "white")
+gui.end()
+
+gui.run()

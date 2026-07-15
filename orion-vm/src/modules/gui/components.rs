@@ -115,6 +115,24 @@ pub enum Component {
     Image { path: String, width: Option<f32>, height: Option<f32> },
     /// Diálogo modal centrado (contenedor).
     Modal { title: String, children: Vec<Component> },
+
+    //    Canvas — dibujo 2D libre (primitivas genéricas; el dev diseña lo que
+    //    quiera: animaciones, diagramas, visualizaciones). Coordenadas locales
+    //    al lienzo, (0,0) = esquina superior izquierda.
+    Canvas { width: f32, height: f32, children: Vec<Component> },
+    Shape(Shape),
+}
+
+/// Formas primitivas para gui.canvas. Ninguna sabe de dominios concretos:
+/// con esto el developer dibuja esferas de Bloch, grafos, partículas o lo que
+/// invente — el motor solo aporta el lienzo.
+#[derive(Clone)]
+pub enum Shape {
+    Circle { x: f32, y: f32, r: f32, color: [u8; 3], fill: bool, stroke: f32 },
+    Line   { x1: f32, y1: f32, x2: f32, y2: f32, color: [u8; 3], width: f32 },
+    RectS  { x: f32, y: f32, w: f32, h: f32, color: [u8; 3], fill: bool, stroke: f32 },
+    Arrow  { x1: f32, y1: f32, x2: f32, y2: f32, color: [u8; 3], width: f32 },
+    TextAt { x: f32, y: f32, text: String, size: f32, color: [u8; 3] },
 }
 
 //     Render
@@ -518,6 +536,63 @@ pub fn render(
                     }
                 });
         }
+
+        Component::Canvas { width, height, children } => {
+            let (response, painter) =
+                ui.allocate_painter(egui::vec2(*width, *height), egui::Sense::hover());
+            let origin = response.rect.min;
+            for child in children {
+                if let Component::Shape(shape) = child {
+                    render_shape(&painter, origin, shape);
+                }
+                // Widgets no-Shape dentro de canvas se ignoran: el lienzo es
+                // solo de dibujo (los widgets van fuera).
+            }
+        }
+        Component::Shape(_) => {
+            // Una forma fuera de gui.canvas no tiene lienzo: no-op.
+        }
+    }
+}
+
+/// Dibuja una forma primitiva sobre el painter del canvas, trasladando las
+/// coordenadas locales del developer al rect asignado en pantalla.
+fn render_shape(painter: &egui::Painter, origin: egui::Pos2, shape: &Shape) {
+    let c32 = |c: &[u8; 3]| egui::Color32::from_rgb(c[0], c[1], c[2]);
+    let at = |x: f32, y: f32| egui::pos2(origin.x + x, origin.y + y);
+    match shape {
+        Shape::Circle { x, y, r, color, fill, stroke } => {
+            if *fill {
+                painter.circle_filled(at(*x, *y), *r, c32(color));
+            } else {
+                painter.circle_stroke(at(*x, *y), *r, egui::Stroke::new(*stroke, c32(color)));
+            }
+        }
+        Shape::Line { x1, y1, x2, y2, color, width } => {
+            painter.line_segment([at(*x1, *y1), at(*x2, *y2)], egui::Stroke::new(*width, c32(color)));
+        }
+        Shape::RectS { x, y, w, h, color, fill, stroke } => {
+            let rect = egui::Rect::from_min_size(at(*x, *y), egui::vec2(*w, *h));
+            if *fill {
+                painter.rect_filled(rect, 0.0, c32(color));
+            } else {
+                painter.rect_stroke(rect, 0.0, egui::Stroke::new(*stroke, c32(color)));
+            }
+        }
+        Shape::Arrow { x1, y1, x2, y2, color, width } => {
+            let a = at(*x1, *y1);
+            let b = at(*x2, *y2);
+            painter.arrow(a, b - a, egui::Stroke::new(*width, c32(color)));
+        }
+        Shape::TextAt { x, y, text, size, color } => {
+            painter.text(
+                at(*x, *y),
+                egui::Align2::CENTER_CENTER,
+                text,
+                egui::FontId::proportional(*size),
+                c32(color),
+            );
+        }
     }
 }
 
@@ -529,7 +604,7 @@ fn is_container(c: &Component) -> bool {
         Component::Card { .. } | Component::Row(_) | Component::Col(_) |
         Component::Grid(..) | Component::Sidebar(..) | Component::Zone(..) |
         Component::Modal { .. } | Component::FadeGroup { .. } | Component::SlideIn { .. } |
-        Component::Chart(_) | Component::Table { .. }
+        Component::Chart(_) | Component::Table { .. } | Component::Canvas { .. }
     )
 }
 

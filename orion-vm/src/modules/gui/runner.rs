@@ -4,9 +4,9 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use super::components::{Component, render};
-use super::state::{with_state, IS_REACTIVE_MODE};
+use super::state::{with_state, IS_REACTIVE_MODE, TICK_MS};
 use super::theme;
 
 //    Lanzador normal                                                            
@@ -168,6 +168,9 @@ fn rerun_script(
         s.is_reactive = true;
     });
     IS_REACTIVE_MODE.store(true, Ordering::Relaxed);
+    // La animación no es pegajosa: si el script deja de llamar gui.tick en
+    // esta re-ejecución, el reloj se apaga.
+    TICK_MS.store(0, Ordering::Relaxed);
 
     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
     if let Err(e) = machine.run() {
@@ -344,6 +347,7 @@ pub fn launch_reactive(
                 path,
                 components,
                 field_vals,
+                last_tick: Instant::now(),
             }))
         }),
     )
@@ -354,12 +358,29 @@ struct OrionAppReactive {
     path:       String,
     components: Vec<Component>,
     field_vals: HashMap<String, String>,
+    last_tick:  Instant,
 }
 
 impl eframe::App for OrionAppReactive {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut fired_event: Option<String> = None;
         render_root(ctx, &self.components, &mut self.field_vals, &mut fired_event);
+
+        // Animación: si el script pidió gui.tick(ms) y no hubo evento de UI en
+        // este frame, disparamos "tick" cuando toca. Los eventos del usuario
+        // tienen prioridad: la animación nunca se traga un clic.
+        let tick_ms = TICK_MS.load(Ordering::Relaxed);
+        if tick_ms > 0 {
+            if fired_event.is_none()
+                && self.last_tick.elapsed().as_millis() as u32 >= tick_ms
+            {
+                fired_event = Some("tick".into());
+                self.last_tick = Instant::now();
+            }
+            // Mantener vivo el loop de render sin girar la CPU: despertar como
+            // muy tarde en el próximo tick (tope 16ms ≈ 60fps).
+            ctx.request_repaint_after(Duration::from_millis(tick_ms.min(16) as u64));
+        }
 
         // Si se disparó un evento, re-evaluar el script EN ESTE MISMO HILO de UI.
         // El state_store vive en el thread_local STATE de este hilo; correrlo en

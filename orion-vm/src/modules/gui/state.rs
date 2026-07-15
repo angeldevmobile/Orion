@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 use super::components::Component;
 use crate::eval_value::EvalValue;
 
@@ -8,6 +8,10 @@ use crate::eval_value::EvalValue;
 pub static IS_WATCH_MODE:    AtomicBool = AtomicBool::new(false);
 /// En true, el script está corriendo como re-evaluación reactiva (evento de UI).
 pub static IS_REACTIVE_MODE: AtomicBool = AtomicBool::new(false);
+/// Intervalo de animación en ms fijado por gui.tick(ms); 0 = sin animación.
+/// El runner lo resetea antes de cada re-run: el script debe volver a llamar
+/// gui.tick en cada ejecución para mantener viva la animación.
+pub static TICK_MS: AtomicU32 = AtomicU32::new(0);
 
 thread_local! {
     /// Ruta del script actual — necesaria para re-evaluación reactiva.

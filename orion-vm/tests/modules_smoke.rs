@@ -762,3 +762,24 @@ fn smoke_matrix_nalgebra_path_consistent() {
     let EvalValue::List(row0) = p[0].clone() else { panic!() };
     assert_eq!(as_float(row0[0].clone()), 1.0);
 }
+
+// ── gui.tick + gui.canvas (2026-07-14): primitivas genéricas de animación ────
+// tick(ms) fija el reloj del runner reactivo; canvas(w,h)...end() agrupa
+// formas (circle/line/rect/arrow/text_at). Headless: solo el árbol, sin ventana.
+
+#[test]
+fn smoke_gui_tick_and_canvas() {
+    use orion_vm::modules::gui::state::TICK_MS;
+    use std::sync::atomic::Ordering;
+    assert!(ok("gui", "tick", vec![i(30)]));
+    assert_eq!(TICK_MS.load(Ordering::Relaxed), 30, "tick registra el intervalo");
+    TICK_MS.store(0, Ordering::Relaxed);
+
+    assert!(ok("gui", "canvas", vec![i(240), i(240)]));
+    assert!(ok("gui", "circle", vec![i(120), i(120), i(90), s("gray"), EvalValue::Bool(false)]));
+    assert!(ok("gui", "line", vec![i(0), i(0), i(100), i(100), s("#ff7a00")]));
+    assert!(ok("gui", "rect", vec![i(10), i(10), i(50), i(30)]));
+    assert!(ok("gui", "arrow", vec![i(120), i(120), i(200), i(60), s("accent"), i(3)]));
+    assert!(ok("gui", "text_at", vec![i(120), i(18), s("|0>")]));
+    assert!(ok("gui", "end", vec![]), "end cierra el canvas");
+}

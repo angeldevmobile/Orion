@@ -5,8 +5,15 @@ pub mod theme;
 
 use std::sync::atomic::Ordering;
 use crate::eval_value::EvalValue;
-use components::{Component, Style, ChartKind, ChartConfig};
+use components::{Component, Style, ChartKind, ChartConfig, Shape};
 use state::{with_state, IS_WATCH_MODE, IS_REACTIVE_MODE, get_script_path};
+
+/// Color de una forma de canvas: nombre/hex en args[pos], o el accent del tema.
+fn shape_color(args: &[EvalValue], pos: usize) -> [u8; 3] {
+    args.get(pos)
+        .and_then(|v| match v { EvalValue::Str(s) => parse_color(s), _ => None })
+        .unwrap_or_else(|| with_state(|s| s.theme.accent).unwrap_or([108, 99, 255]))
+}
 
 //     Dispatcher principal — gui.función(args)
 
@@ -174,6 +181,79 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             with_state(|s| s.container_stack.push((format!("grid|{}", cols), s.components.len())));
             Ok(EvalValue::Null)
         }
+
+        // ── Animación y dibujo libre ─────────────────────────────────────────
+        // Primitivas genéricas: el motor aporta el reloj y el lienzo; qué se
+        // anima o dibuja lo decide el developer en su script.
+
+        // tick(ms) → dispara el evento "tick" cada ms milisegundos (re-corre el script)
+        "tick" => {
+            let ms = args.get(0).and_then(|v| v.to_i64().ok()).unwrap_or(0).max(0) as u32;
+            state::TICK_MS.store(ms, Ordering::Relaxed);
+            Ok(EvalValue::Null)
+        }
+        // canvas(width, height) … gui.end() → lienzo de dibujo 2D (coordenadas locales)
+        "canvas" => {
+            let w = f32_arg(&args, 0).unwrap_or(300.0);
+            let h = f32_arg(&args, 1).unwrap_or(300.0);
+            with_state(|s| s.container_stack.push((format!("canvas|{}|{}", w, h), s.components.len())));
+            Ok(EvalValue::Null)
+        }
+        // circle(x, y, r, color?, fill?) → círculo; fill=no lo dibuja como contorno
+        "circle" => {
+            let color = shape_color(&args, 3);
+            let fill  = args.get(4).map(|v| matches!(v, EvalValue::Bool(true))).unwrap_or(true);
+            push(Component::Shape(Shape::Circle {
+                x: f32_arg(&args, 0).unwrap_or(0.0),
+                y: f32_arg(&args, 1).unwrap_or(0.0),
+                r: f32_arg(&args, 2).unwrap_or(10.0),
+                color, fill, stroke: 2.0,
+            }))
+        }
+        // line(x1, y1, x2, y2, color?, width?) → segmento de línea
+        "line" => {
+            push(Component::Shape(Shape::Line {
+                x1: f32_arg(&args, 0).unwrap_or(0.0),
+                y1: f32_arg(&args, 1).unwrap_or(0.0),
+                x2: f32_arg(&args, 2).unwrap_or(0.0),
+                y2: f32_arg(&args, 3).unwrap_or(0.0),
+                color: shape_color(&args, 4),
+                width: f32_arg(&args, 5).unwrap_or(2.0),
+            }))
+        }
+        // rect(x, y, w, h, color?, fill?) → rectángulo
+        "rect" => {
+            let color = shape_color(&args, 4);
+            let fill  = args.get(5).map(|v| matches!(v, EvalValue::Bool(true))).unwrap_or(true);
+            push(Component::Shape(Shape::RectS {
+                x: f32_arg(&args, 0).unwrap_or(0.0),
+                y: f32_arg(&args, 1).unwrap_or(0.0),
+                w: f32_arg(&args, 2).unwrap_or(10.0),
+                h: f32_arg(&args, 3).unwrap_or(10.0),
+                color, fill, stroke: 2.0,
+            }))
+        }
+        // arrow(x1, y1, x2, y2, color?, width?) → flecha con punta en (x2, y2)
+        "arrow" => {
+            push(Component::Shape(Shape::Arrow {
+                x1: f32_arg(&args, 0).unwrap_or(0.0),
+                y1: f32_arg(&args, 1).unwrap_or(0.0),
+                x2: f32_arg(&args, 2).unwrap_or(0.0),
+                y2: f32_arg(&args, 3).unwrap_or(0.0),
+                color: shape_color(&args, 4),
+                width: f32_arg(&args, 5).unwrap_or(2.5),
+            }))
+        }
+        // text_at(x, y, texto, size?, color?) → texto centrado en (x, y)
+        "text_at" => {
+            push(Component::Shape(Shape::TextAt {
+                x: f32_arg(&args, 0).unwrap_or(0.0),
+                y: f32_arg(&args, 1).unwrap_or(0.0),
+                text: str_arg(&args, 2).unwrap_or_default(),
+                size: f32_arg(&args, 3).unwrap_or(13.0),
+                color: shape_color(&args, 4),
+            }))
+        }
         // gui.sidebar(ancho?) … gui.end() — barra lateral fija (SidePanel izquierdo).
         // El ancho lo decide el dev; 220 es solo el fallback si no se indica.
         "sidebar" => {
@@ -244,6 +324,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     } else if kind.starts_with("modal|") {
                         let title = kind.strip_prefix("modal|").unwrap_or("").to_string();
                         Component::Modal { title, children }
+                    } else if kind.starts_with("canvas|") {
+                        let p: Vec<&str> = kind.split('|').collect();
+                        let w = p.get(1).and_then(|s| s.parse::<f32>().ok()).unwrap_or(300.0);
+                        let h = p.get(2).and_then(|s| s.parse::<f32>().ok()).unwrap_or(300.0);
+                        Component::Canvas { width: w, height: h, children }
                     } else {
                         Component::Col(children)
                     };
