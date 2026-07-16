@@ -469,6 +469,25 @@ impl TypeChecker {
                 }
             }
 
+            // with h = modulo.abrir(...) { } — h vive en el scope del bloque
+            // con el tipo inferido del init (los handles de módulo suelen ser
+            // string o int; si no se sabe, any — nunca un falso positivo).
+            Stmt::With { var, init, body, line, col } => {
+                self.current_line = *line;
+                self.current_col  = *col;
+                self.check_call_types(init);
+                let ty = self.infer_type(init).unwrap_or_else(|| "any".into());
+                self.push_scope();
+                self.scope_set(var.clone(), ty);
+                // El handle puede usarse solo como recurso implícito (el free
+                // del desugar lo lee); no avisar "asignado pero nunca leído".
+                if let Some(top) = self.written_not_read.last_mut() {
+                    top.remove(var);
+                }
+                self.check_stmts(body, return_type);
+                self.pop_scope();
+            }
+
             Stmt::AssignIndex { object, index, value, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;

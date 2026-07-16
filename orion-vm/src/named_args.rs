@@ -205,6 +205,10 @@ fn walk_stmt(s: &mut Stmt, sigs: &Sigs) -> Result<(), CodegenError> {
                 walk_expr(v, sigs)?;
             }
         }
+        Stmt::With { init, body, .. } => {
+            walk_expr(init, sigs)?;
+            walk_stmts(body, sigs)?;
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Use { .. } | Stmt::ExternFn { .. } => {}
         Stmt::Fn { params, body, .. } | Stmt::AsyncFn { params, body, .. } => {
             for p in params.iter_mut() {

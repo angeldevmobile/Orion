@@ -47,7 +47,7 @@ Probados con aserciones reales sobre su salida:
 | `cosmos` | star, universe (simulación) |
 | `table` | from (lista de dicts) |
 | `serie` | new (serie temporal) |
-| `frame` | from_list |
+| `frame` | barrido e2e completo (2026-07-15, `tests/test_frame.orx`, 16 tests / ~80 checks exactos): from_list/schema/size/col/row/to_list, keep/drop/rename, where_ por tipo, head/tail/sort, sum/mean/min/max/std, stats con percentiles interpolados, group (sum/avg/count/min/max), add_col, save→open CSV, save_odf→load_odf + autodetección, from_txt con separador, scan_stats, each_chunk, to_excel/txt_to_odf/txt_to_excel, free/frames (gestión del store) |
 | `timewarp` | timestamp |
 | `tarea` | now |
 | `log` | info |

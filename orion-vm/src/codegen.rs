@@ -464,6 +464,22 @@ impl Codegen {
                 self.patch(end_patch, Instruction::EndAttempt(end));
             }
 
+            // `with` compila vía desugar (assign + attempt + free); el JIT
+            // hereda la semántica porque compila desde este mismo bytecode.
+            Stmt::With { var, init, body, line, col } => {
+                self.current_line = line;
+                let receiver = match &init {
+                    Expr::CallMethod { receiver, .. } => receiver.as_ref().clone(),
+                    _ => return Err(CodegenError {
+                        message: "with: el inicializador debe ser modulo.fn(...)".into(),
+                        line,
+                    }),
+                };
+                for s in crate::ast::desugar_with(&var, &init, &receiver, body, line, col) {
+                    self.compile_stmt(s)?;
+                }
+            }
+
             Stmt::ErrorStmt { msg, line, .. } => {
                 self.current_line = line;
                 self.compile_expr_main(&msg)?;
@@ -837,6 +853,22 @@ impl FnCompiler {
                 }
                 let end = self.addr();
                 self.patch(end_patch, Instruction::EndAttempt(end));
+            }
+
+            // `with` compila vía desugar (assign + attempt + free), igual que
+            // en el codegen del script principal.
+            Stmt::With { var, init, body, line, col } => {
+                self.current_line = *line;
+                let receiver = match init {
+                    Expr::CallMethod { receiver, .. } => receiver.as_ref().clone(),
+                    _ => return Err(CodegenError {
+                        message: "with: el inicializador debe ser modulo.fn(...)".into(),
+                        line: *line,
+                    }),
+                };
+                for s in crate::ast::desugar_with(var, init, &receiver, body.clone(), *line, *col) {
+                    self.compile_stmt(&s, async_fns)?;
+                }
             }
 
             Stmt::ErrorStmt { msg, line, .. } => {
@@ -1349,6 +1381,19 @@ mod tests {
         let has_begin = bc.main.iter().any(|i| matches!(i, Instruction::BeginAttempt(_)));
         let has_end   = bc.main.iter().any(|i| matches!(i, Instruction::EndAttempt(_)));
         assert!(has_begin && has_end);
+    }
+
+    #[test]
+    fn test_with_desugar_emite_attempt_y_dos_free() {
+        // with = assign + attempt(+free en el handler) + free normal:
+        // debe haber BeginAttempt, Raise (re-lanzado) y DOS CallMethod("free").
+        let bc = cg("with f = frame.open(\"d.csv\") { k = frame.count(f) }");
+        let frees = bc.main.iter().filter(|i| {
+            matches!(i, Instruction::CallMethod(m, 1) if m == "free")
+        }).count();
+        assert_eq!(frees, 2, "un free en el handler y otro en el camino normal");
+        assert!(bc.main.iter().any(|i| matches!(i, Instruction::BeginAttempt(_))));
+        assert!(bc.main.contains(&Instruction::Raise));
     }
 
     #[test]

@@ -519,12 +519,14 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("frame", "group", "frame.group(…)", "Agregación"));
     v.push(f("frame", "count", "frame.count(…)", "Función del módulo frame."));
     v.push(f("frame", "add_col", "frame.add_col(…)", "Columna calculada"));
-    v.push(f("frame", "each_chunk", "frame.each_chunk(…)", "Chunked (grandes volúmenes sin cargar todo)"));
+    v.push(f("frame", "each_chunk", "frame.each_chunk(ruta, chunk_size?)", "Lista de handles, un frame por bloque"));
     v.push(f("frame", "scan_stats", "frame.scan_stats(…)", "Función del módulo frame."));
     v.push(f("frame", "save", "frame.save(…)", "Persistencia"));
     v.push(f("frame", "save_odf", "frame.save_odf(…)", "Función del módulo frame."));
     v.push(f("frame", "load_odf", "frame.load_odf(…)", "Función del módulo frame."));
     v.push(f("frame", "txt_to_odf", "frame.txt_to_odf(…)", "Función del módulo frame."));
+    v.push(f("frame", "free", "frame.free(handle)", "Libera el frame; yes si existía"));
+    v.push(f("frame", "frames", "frame.frames()", "Número de frames vivos en memoria"));
     // search (search_mod.rs)
     v.push(f("search", "in_file", "search.in_file(…)", "Función del módulo search."));
     v.push(f("search", "text", "search.text(…)", "Función del módulo search."));

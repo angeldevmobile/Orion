@@ -874,6 +874,33 @@ impl Parser {
                 Ok(Stmt::Attempt { body, handler, line, col })
             }
 
+            //   with h = modulo.abrir(...) { ... }  — recurso con ámbito:
+            //   libera con modulo.free(h) al salir, también si hay error.
+            TokenKind::With => {
+                self.pos += 1;
+                let var = self.expect_ident()?;
+                self.expect(&TokenKind::Assign)?;
+                let init = self.parse_expression()?;
+                // El init debe ser `ident.fn(...)`: es lo que le dice al
+                // compilador QUÉ free llamar (modulo.free). Sin esa forma no
+                // hay módulo dueño conocido y la liberación sería adivinanza.
+                match &init {
+                    Expr::CallMethod { receiver, .. }
+                        if matches!(receiver.as_ref(), Expr::Ident(_)) => {}
+                    _ => return Err(ParseError {
+                        message: "with espera un recurso de módulo: `with h = modulo.abrir(...) { ... }` (el bloque libera con modulo.free(h))".into(),
+                        line, col,
+                    }),
+                }
+                let body = self.parse_block()?;
+                // La garantía de with es "el recurso SIEMPRE se libera al
+                // salir del bloque". return salta directo fuera de la función
+                // y break/continue fuera del bloque, saltándose el free — se
+                // rechazan en vez de fugar en silencio.
+                validate_with_body(&body, 0)?;
+                Ok(Stmt::With { var, init, body, line, col })
+            }
+
             //   error expr
             TokenKind::ErrorKw => {
                 self.pos += 1;
@@ -1185,7 +1212,55 @@ impl Parser {
     }
 }
 
-//   Tests                                    
+//   Validación del cuerpo de `with`
+
+/// La garantía de `with` es que el recurso se libera SIEMPRE al salir del
+/// bloque. `return` (sale de la función) y `break`/`continue` (salen del
+/// bloque hacia un loop exterior) esquivarían el free — se rechazan con un
+/// error claro en vez de fugar en silencio. Los loops DENTRO del cuerpo sí
+/// pueden usar break/continue (saltan dentro del bloque), y las funciones
+/// anidadas (fn/lambda/shape) son ámbitos nuevos: no se recorren.
+fn validate_with_body(body: &[Stmt], loop_depth: usize) -> Result<(), ParseError> {
+    for s in body {
+        match s {
+            Stmt::Return { line, col, .. } => {
+                return Err(ParseError {
+                    message: "return dentro de `with` se saltaría la liberación del recurso; asigna el resultado a una variable y retorna después del bloque".into(),
+                    line: *line, col: *col,
+                });
+            }
+            Stmt::Break { line, col } | Stmt::Continue { line, col } if loop_depth == 0 => {
+                return Err(ParseError {
+                    message: "break/continue dentro de `with` saltaría fuera del bloque sin liberar el recurso; sal del loop después del bloque".into(),
+                    line: *line, col: *col,
+                });
+            }
+            Stmt::While { body, .. } | Stmt::For { body, .. } => {
+                validate_with_body(body, loop_depth + 1)?;
+            }
+            Stmt::If { then_body, else_body, .. } => {
+                validate_with_body(then_body, loop_depth)?;
+                validate_with_body(else_body, loop_depth)?;
+            }
+            Stmt::Match { arms, .. } => {
+                for arm in arms { validate_with_body(&arm.body, loop_depth)?; }
+            }
+            Stmt::Attempt { body, handler, .. } => {
+                validate_with_body(body, loop_depth)?;
+                if let Some(h) = handler { validate_with_body(&h.body, loop_depth)?; }
+            }
+            Stmt::With { body, .. } => {
+                // el with anidado ya validó su propio cuerpo al parsearse,
+                // pero respecto al with EXTERIOR aplican las mismas reglas
+                validate_with_body(body, loop_depth)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+//   Tests
 
 #[cfg(test)]
 mod tests {
@@ -1264,5 +1339,33 @@ mod tests {
     fn test_attempt_handle() {
         let stmts = parse_src("attempt { x = 1 } handle err { show err }");
         assert!(matches!(&stmts[0], Stmt::Attempt { handler: Some(_), .. }));
+    }
+
+    #[test]
+    fn test_with_parsea() {
+        let stmts = parse_src("with f = frame.open(\"d.csv\") { k = frame.count(f) }");
+        match &stmts[0] {
+            Stmt::With { var, init, body, .. } => {
+                assert_eq!(var, "f");
+                assert!(matches!(init, Expr::CallMethod { .. }));
+                assert_eq!(body.len(), 1);
+            }
+            other => panic!("se esperaba Stmt::With, dio {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_with_rechaza_init_no_modulo() {
+        let tokens = crate::lexer::lex("with h = [1, 2] { show h }").unwrap();
+        let err = parse(tokens).expect_err("init sin modulo.fn(...) debe fallar");
+        assert!(err.message.contains("recurso de módulo"));
+    }
+
+    #[test]
+    fn test_with_permite_break_en_loop_interno() {
+        // el break vive en un loop DEL cuerpo: legal
+        let stmts = parse_src(
+            "with f = m.abrir(1) { while yes { break } }");
+        assert!(matches!(&stmts[0], Stmt::With { .. }));
     }
 }

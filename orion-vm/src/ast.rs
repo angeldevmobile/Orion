@@ -93,6 +93,11 @@ pub enum Stmt {
     ErrorStmt { msg: Expr, line: u32, col: u32 },
     Attempt   { body: Vec<Stmt>, handler: Option<Handler>, line: u32, col: u32 },
 
+    // Recursos con ámbito: `with h = modulo.abrir(...) { ... }` libera el
+    // handle con `modulo.free(h)` al salir del bloque, también si el cuerpo
+    // lanza error (en ese caso el error se re-lanza tras liberar).
+    With    { var: String, init: Expr, body: Vec<Stmt>, line: u32, col: u32 },
+
     // I/O nativo
     Ask     { prompt: Expr, var: String, cast: Option<String>, choices: Option<Expr>, line: u32, col: u32 },
     Read    { path: Expr, var: String, line: u32, col: u32 },
@@ -160,4 +165,50 @@ pub struct ActDef {
     pub params: Vec<Param>,
     pub ret_type: Option<String>,
     pub body: Vec<Stmt>,
+}
+
+//   Desugar de `with`
+
+/// Reescribe `with var = modulo.abrir(...) { body }` en términos de nodos que
+/// codegen ya sabe compilar (el JIT hereda la semántica gratis porque compila
+/// desde bytecode):
+///
+/// ```text
+/// var = modulo.abrir(...)
+/// attempt { body } handle __with_err {
+///     modulo.free(var)
+///     error __with_err        -- re-lanza tras liberar
+/// }
+/// modulo.free(var)            -- camino sin error
+/// ```
+///
+/// `receiver` es el receptor del init (p. ej. `Ident("frame")` o un alias de
+/// `use`); se clona para la llamada a `free`, así la resolución de módulo es
+/// idéntica a la del init. El parser garantiza que init es `ident.fn(...)`.
+pub fn desugar_with(var: &str, init: &Expr, receiver: &Expr, body: Vec<Stmt>, line: u32, col: u32) -> Vec<Stmt> {
+    let free_call = |l: u32, c: u32| Stmt::Expr {
+        expr: Expr::CallMethod {
+            method: "free".into(),
+            receiver: Box::new(receiver.clone()),
+            args: vec![Expr::Ident(var.to_string())],
+            kwargs: vec![],
+        },
+        line: l, col: c,
+    };
+    let err_name = format!("__with_err_l{}", line);
+    vec![
+        Stmt::Assign { name: var.to_string(), value: init.clone(), line, col },
+        Stmt::Attempt {
+            body,
+            handler: Some(Handler {
+                err_name: err_name.clone(),
+                body: vec![
+                    free_call(line, col),
+                    Stmt::ErrorStmt { msg: Expr::Ident(err_name), line, col },
+                ],
+            }),
+            line, col,
+        },
+        free_call(line, col),
+    ]
 }

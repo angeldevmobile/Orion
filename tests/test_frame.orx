@@ -1,0 +1,210 @@
+-- Barrido funcional e2e del módulo frame (motor de datos columnar) con
+-- valores exactos. Ejecutar desde la raíz del repo: orion test tests
+use "frame" as frame
+use "fs" as fs
+
+fn near(a, b) {
+    d = a - b
+    if d < 0 { d = 0 - d }
+    return d < 0.000001
+}
+
+fn mk() {
+    filas = [
+        { "nombre": "ana",   "region": "norte", "venta": 100, "precio": 1.5, "activo": yes },
+        { "nombre": "beto",  "region": "norte", "venta": 200, "precio": 2.5, "activo": no },
+        { "nombre": "carla", "region": "sur",   "venta": 300, "precio": 3.5, "activo": yes },
+        { "nombre": "dan",   "region": "sur",   "venta": 400, "precio": 4.5, "activo": no },
+        { "nombre": "eva",   "region": "este",  "venta": 500, "precio": 5.5, "activo": yes },
+        { "nombre": "fede",  "region": "este",  "venta": 600, "precio": 6.5, "activo": no }
+    ]
+    return frame.from_list(filas)
+}
+
+fn test_schema_infiere_tipos() {
+    sch = frame.schema(mk())
+    assert_eq(sch["nombre"], "string", "schema nombre")
+    assert_eq(sch["venta"],  "int",    "schema venta")
+    assert_eq(sch["precio"], "float",  "schema precio")
+    assert_eq(sch["activo"], "bool",   "schema activo")
+}
+
+fn test_size_count_col_row() {
+    f = mk()
+    tam = frame.size(f)
+    assert_eq(tam["rows"], 6, "size rows")
+    assert_eq(tam["cols"], 5, "size cols")
+    assert_eq(frame.count(f), 6, "count")
+    ventas = frame.col(f, "venta")
+    assert_eq(ventas[0], 100, "col venta[0]")
+    assert_eq(ventas[5], 600, "col venta[5]")
+    r0 = frame.row(f, 0)
+    assert_eq(r0["nombre"], "ana", "row0 nombre")
+    assert_eq(r0["activo"], yes,   "row0 activo")
+}
+
+fn test_to_list_roundtrip() {
+    lista = frame.to_list(mk())
+    assert_eq(len(lista), 6, "to_list len")
+    assert_eq(lista[2]["nombre"], "carla", "to_list fila 2")
+    assert(near(lista[2]["precio"], 3.5), "to_list precio fila 2")
+}
+
+fn test_keep_drop_rename() {
+    f = mk()
+    f2 = frame.keep(f, ["region", "venta"])
+    assert_eq(frame.size(f2)["cols"], 2, "keep cols")
+    assert_eq(frame.size(f2)["rows"], 6, "keep rows")
+    f3 = frame.drop(f, ["activo"])
+    assert_eq(frame.size(f3)["cols"], 4, "drop cols")
+    f4 = frame.rename(f, "venta", "importe")
+    assert_eq(frame.col(f4, "importe")[0], 100, "rename conserva datos")
+}
+
+fn test_where_por_tipo() {
+    f = mk()
+    assert_eq(frame.count(frame.where_(f, "venta", 300)), 1, "where int")
+    assert_eq(frame.row(frame.where_(f, "venta", 300), 0)["nombre"], "carla", "where int fila")
+    assert_eq(frame.count(frame.where_(f, "region", "norte")), 2, "where str")
+    assert_eq(frame.count(frame.where_(f, "activo", yes)), 3, "where bool")
+    assert_eq(frame.count(frame.where_(f, "precio", 3.5)), 1, "where float")
+}
+
+fn test_head_tail_sort() {
+    f = mk()
+    h = frame.head(f, 2)
+    assert_eq(frame.count(h), 2, "head count")
+    assert_eq(frame.row(h, 0)["nombre"], "ana", "head primera")
+    t = frame.tail(f, 2)
+    assert_eq(frame.row(t, 1)["nombre"], "fede", "tail última")
+    sd = frame.sort(f, "venta", "desc")
+    assert_eq(frame.row(sd, 0)["nombre"], "fede", "sort desc primera")
+    assert_eq(frame.row(sd, 5)["nombre"], "ana",  "sort desc última")
+    sa = frame.sort(f, "nombre")
+    assert_eq(frame.row(sa, 0)["nombre"], "ana", "sort str asc")
+}
+
+fn test_estadisticas_exactas() {
+    f = mk()
+    assert(near(frame.sum(f, "venta"),  2100.0), "sum venta")
+    assert(near(frame.mean(f, "venta"), 350.0),  "mean venta")
+    assert(near(frame.min(f, "venta"),  100.0),  "min venta")
+    assert(near(frame.max(f, "venta"),  600.0),  "max venta")
+    assert(near(frame.std(f, "venta"),  170.78251276599), "std venta")
+    assert(near(frame.sum(f, "precio"), 24.0),   "sum precio float")
+}
+
+fn test_stats_percentiles_interpolados() {
+    st = frame.stats(mk(), "venta")
+    assert_eq(st["count"], 6, "stats count")
+    assert(near(st["mean"],   350.0), "stats mean")
+    assert(near(st["p25"],    225.0), "stats p25")
+    assert(near(st["median"], 350.0), "stats mediana")
+    assert(near(st["p75"],    475.0), "stats p75")
+}
+
+fn test_group_operaciones() {
+    f = mk()
+    g1 = frame.group(f, "region", "venta", "sum")
+    assert_eq(frame.count(g1), 3, "group filas")
+    regs = frame.col(g1, "region")
+    vals = frame.col(g1, "venta")
+    assert_eq(regs[0], "este",  "group clave orden alfabético")
+    assert(near(vals[0], 1100.0), "group sum este")
+    assert(near(vals[1], 300.0),  "group sum norte")
+    assert(near(vals[2], 700.0),  "group sum sur")
+    assert(near(frame.col(frame.group(f, "region", "venta", "avg"),   "venta")[1], 150.0), "group avg norte")
+    assert(near(frame.col(frame.group(f, "region", "venta", "count"), "venta")[0], 2.0),   "group count este")
+    assert(near(frame.col(frame.group(f, "region", "venta", "min"),   "venta")[2], 300.0), "group min sur")
+    assert(near(frame.col(frame.group(f, "region", "venta", "max"),   "venta")[0], 600.0), "group max este")
+}
+
+fn test_add_col() {
+    f = mk()
+    frame.add_col(f, "doble", [200, 400, 600, 800, 1000, 1200])
+    assert_eq(frame.size(f)["cols"], 6, "add_col añade columna")
+    assert(near(frame.mean(f, "doble"), 700.0), "add_col mean")
+    frame.add_col(f, "tag", ["a", "b", "c", "d", "e", "g"])
+    assert_eq(frame.schema(f)["tag"], "string", "add_col string")
+}
+
+fn test_save_open_csv_roundtrip() {
+    f2 = frame.keep(mk(), ["region", "venta"])
+    frame.save(f2, "tests/output_frame.csv")
+    fr = frame.open("tests/output_frame.csv")
+    assert_eq(frame.count(fr), 6, "roundtrip CSV filas")
+    assert_eq(frame.schema(fr)["venta"], "int", "roundtrip CSV tipo int")
+    assert(near(frame.sum(fr, "venta"), 2100.0), "roundtrip CSV sum")
+    assert_eq(frame.row(fr, 0)["region"], "norte", "roundtrip CSV string sin comillas")
+}
+
+fn test_odf_roundtrip_y_autodeteccion() {
+    frame.save_odf(mk(), "tests/output_frame.odf")
+    fo = frame.load_odf("tests/output_frame.odf")
+    assert_eq(frame.count(fo), 6, "roundtrip ODF filas")
+    assert_eq(frame.schema(fo)["activo"], "bool", "roundtrip ODF bool")
+    assert_eq(frame.schema(fo)["venta"], "int", "roundtrip ODF int")
+    assert(near(frame.sum(fo, "precio"), 24.0), "roundtrip ODF float")
+    assert_eq(frame.row(fo, 4)["nombre"], "eva", "roundtrip ODF string")
+    fo2 = frame.open("tests/output_frame.odf")
+    assert(near(frame.sum(fo2, "venta"), 2100.0), "open autodetecta ODF")
+}
+
+fn test_from_txt_separador() {
+    fs.write("tests/output_frame_sep.txt", "id;monto;ciudad\n1;10.5;lima\n2;20.5;quito\n3;30.0;lima")
+    ft = frame.from_txt("tests/output_frame_sep.txt", ";")
+    assert_eq(frame.count(ft), 3, "from_txt filas")
+    assert_eq(frame.schema(ft)["monto"], "float", "from_txt tipo float")
+    assert(near(frame.sum(ft, "monto"), 61.0), "from_txt sum")
+    assert_eq(frame.row(ft, 1)["ciudad"], "quito", "from_txt string")
+}
+
+fn test_scan_stats_streaming() {
+    frame.save(frame.keep(mk(), ["region", "venta"]), "tests/output_frame.csv")
+    ss = frame.scan_stats("tests/output_frame.csv", "venta")
+    assert_eq(ss["count"], 6, "scan_stats count")
+    assert(near(ss["sum"],  2100.0), "scan_stats sum")
+    assert(near(ss["mean"], 350.0),  "scan_stats mean")
+    assert(near(ss["min"],  100.0),  "scan_stats min")
+    assert(near(ss["max"],  600.0),  "scan_stats max")
+}
+
+fn test_each_chunk() {
+    frame.save(frame.keep(mk(), ["region", "venta"]), "tests/output_frame.csv")
+    chunks = frame.each_chunk("tests/output_frame.csv", 4)
+    assert_eq(len(chunks), 2, "each_chunk bloques")
+    assert_eq(frame.count(chunks[0]), 4, "each_chunk bloque 1")
+    assert_eq(frame.count(chunks[1]), 2, "each_chunk bloque 2")
+    s = frame.sum(chunks[0], "venta") + frame.sum(chunks[1], "venta")
+    assert(near(s, 2100.0), "each_chunk suma por bloques")
+    -- compat: la firma vieja pasaba un 3er argumento (fn/dummy) que se ignora
+    viejos = frame.each_chunk("tests/output_frame.csv", 4, 0)
+    assert_eq(len(viejos), 2, "each_chunk ignora arg extra (compat)")
+}
+
+fn test_free_y_frames() {
+    antes = frame.frames()
+    f = mk()
+    assert_eq(frame.frames(), antes + 1, "frames() cuenta el nuevo")
+    w = frame.where_(f, "region", "norte")
+    assert_eq(frame.frames(), antes + 2, "where_ crea frame en el store")
+    assert_eq(frame.free(w), yes, "free devuelve yes si existía")
+    assert_eq(frame.free(w), no,  "free devuelve no si ya no existe")
+    assert_eq(frame.free(f), yes, "free del original")
+    assert_eq(frame.frames(), antes, "el store vuelve a su tamaño inicial")
+}
+
+fn test_salidas_excel_y_odf_streaming() {
+    frame.save(frame.keep(mk(), ["region", "venta"]), "tests/output_frame.csv")
+    frame.to_excel(frame.keep(mk(), ["region", "venta"]), "tests/output_frame.xlsx")
+    assert(fs.size("tests/output_frame.xlsx") > 100, "to_excel genera archivo")
+    frame.txt_to_odf("tests/output_frame.csv", "tests/output_frame_chunk", ",", 4)
+    fc1 = frame.open("tests/output_frame_chunk_1.odf")
+    fc2 = frame.open("tests/output_frame_chunk_2.odf")
+    assert_eq(frame.count(fc1), 4, "txt_to_odf bloque 1")
+    assert_eq(frame.count(fc2), 2, "txt_to_odf bloque 2")
+    s = frame.sum(fc1, "venta") + frame.sum(fc2, "venta")
+    assert(near(s, 2100.0), "txt_to_odf suma")
+    frame.txt_to_excel("tests/output_frame.csv", "tests/output_frame_xls")
+    assert(fs.size("tests/output_frame_xls_1.xlsx") > 100, "txt_to_excel genera archivo")
+}

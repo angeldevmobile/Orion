@@ -1,0 +1,4 @@
+id;monto;ciudad
+1;10.5;lima
+2;20.5;quito
+3;30.0;lima

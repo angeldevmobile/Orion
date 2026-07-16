@@ -285,6 +285,13 @@ impl Formatter {
                 self.line("}");
             }
 
+            Stmt::With { var, init, body, .. } => {
+                self.ind(); self.push("with "); self.push(var);
+                self.push(" = "); self.push(&fmt_expr(init)); self.push(" {"); self.nl();
+                self.indent += 1; self.write_body(body); self.indent -= 1;
+                self.line("}");
+            }
+
             Stmt::ErrorStmt { msg, .. } => {
                 self.ind(); self.push("error "); self.push(&fmt_expr(msg)); self.nl();
             }
@@ -595,6 +602,7 @@ fn is_block(stmt: &Stmt) -> bool {
     matches!(stmt,
         Stmt::Fn      { .. } | Stmt::AsyncFn { .. } | Stmt::Shape   { .. } |
         Stmt::If      { .. } | Stmt::While   { .. } | Stmt::For     { .. } |
-        Stmt::Match   { .. } | Stmt::Attempt { .. } | Stmt::Serve   { .. }
+        Stmt::Match   { .. } | Stmt::Attempt { .. } | Stmt::Serve   { .. } |
+        Stmt::With    { .. }
     )
 }

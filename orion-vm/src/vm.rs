@@ -317,6 +317,9 @@ impl VM {
             if frame.ip >= frame.instructions.len() {
                 let frame = self.call_stack.pop().unwrap();
                 frame.sync_to_instance();
+                // Igual que en Return: descartar handlers de frames muertos
+                // (un attempt sin EndAttempt alcanzado no debe sobrevivir).
+                self.error_handlers.retain(|h| h.frame_depth <= self.call_stack.len());
                 return Ok(false);
             }
         }
@@ -558,6 +561,11 @@ impl VM {
                 let frame = self.call_stack.pop().ok_or("Return sin frame")?;
                 frame.sync_to_instance();
                 frame.sync_to_closure();
+                // Un return dentro de attempt se salta el EndAttempt → su
+                // handler quedaba huérfano y un error POSTERIOR en el caller
+                // saltaba a una dirección de otra función (corrupción). Los
+                // handlers de frames ya muertos se descartan aquí.
+                self.error_handlers.retain(|h| h.frame_depth <= self.call_stack.len());
                 if self.call_stack.is_empty() {
                     return Ok(true);
                 }

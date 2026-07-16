@@ -520,6 +520,22 @@ fn smoke_frame() {
     assert!(ok("frame", "from_list", vec![rows]), "frame.from_list");
 }
 
+#[test]
+fn smoke_frame_free_y_frames() {
+    // Regresión: las transformaciones acumulaban frames en el store para
+    // siempre (mismo bug que serie antes de serie.free). free(handle) libera
+    // y frames() cuenta los vivos. No se asserta el conteo absoluto: los
+    // tests Rust comparten el store global en paralelo.
+    let rows = EvalValue::List(vec![dict(&[("x", i(10))]), dict(&[("x", i(20))])]);
+    let h = match modules::call("frame", "from_list", vec![rows]) {
+        Ok(EvalValue::Str(h)) => h,
+        other => panic!("from_list debía devolver handle, dio {:?}", other),
+    };
+    assert!(matches!(modules::call("frame", "frames", vec![]), Ok(EvalValue::Int(n)) if n >= 1));
+    assert!(matches!(modules::call("frame", "free", vec![EvalValue::Str(h.clone())]), Ok(EvalValue::Bool(true))), "free existente → yes");
+    assert!(matches!(modules::call("frame", "free", vec![EvalValue::Str(h)]), Ok(EvalValue::Bool(false))), "free repetido → no");
+}
+
 // ── GUI headless: el árbol de widgets se construye sin abrir ventana ─────────
 // (No se llama gui.run — eso abriría eframe. Verificamos que cada widget y el
 // tema despachan vía modules::call.)

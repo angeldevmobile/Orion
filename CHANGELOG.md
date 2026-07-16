@@ -3,6 +3,33 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## 2026-07-15
+
+### Añadido
+- **frame — gestión del store**: `frame.free(handle)` (libera un frame; las
+  transformaciones crean frames nuevos que antes vivían para siempre — la misma
+  fuga que ya se arregló en `serie`) y `frame.frames()` (frames vivos en
+  memoria). Imprescindibles en procesos largos (`serve`).
+- **Tests**: `tests/test_frame.orx` — barrido funcional e2e del motor de datos
+  columnar con valores exactos (17 tests / ~85 checks): inferencia de tipos,
+  keep/drop/rename, where_ por tipo, head/tail/sort, estadísticas (std
+  poblacional, percentiles interpolados), group, add_col, roundtrips CSV y
+  .odf, autodetección de formato, from_txt, scan_stats, each_chunk, salidas
+  Excel/odf streaming, free/frames. +1 test de regresión en modules_smoke.
+
+### Arreglado
+- **frame.each_chunk**: exigía un tercer argumento `fn` que el código nunca
+  llamaba (los scripts pasaban un dummy). Firma real ahora:
+  `each_chunk(ruta, chunk_size = 10_000)` → lista de handles, un frame por
+  bloque; los argumentos extra se ignoran por compatibilidad.
+
+### Validado
+- **GC — ciclos huérfanos**: el fix del 2026-07-11 verificado e2e con el
+  binario release: 200k y 1M de ciclos de listas (`push(a,a)`), closures
+  (env→lista→closure→env) e instancias (`a.next=b, b.next=a`) → RAM pico
+  plana (~11 MB, igual que el control sin ciclos; antes del fix 200k ciclos
+  fugaban ~79 MB).
+
 ## 2026-07-14
 
 ### Añadido

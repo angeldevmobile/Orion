@@ -669,3 +669,173 @@ while i < 700 {
 }"#,
     );
 }
+
+// ── `with` — recursos de módulo con ámbito (liberación garantizada) ──────────
+
+#[test]
+fn test_with_libera_al_salir() {
+    // El frame creado por with debe liberarse al cerrar el bloque:
+    // frames() vuelve a su valor previo. El resultado calculado dentro
+    // sobrevive (las vars son de función, no del bloque).
+    run_ok(
+        r#"use "frame" as frame
+antes = frame.frames()
+with f = frame.from_list([{ "x": 10 }, { "x": 20 }]) {
+    k = frame.count(f)
+}
+if k != 2 { error "count dentro de with esperaba 2" }
+if frame.frames() != antes { error "with no liberó el frame" }"#,
+    );
+}
+
+#[test]
+fn test_with_libera_con_error_y_relanza() {
+    // Si el cuerpo lanza, el recurso se libera IGUAL y el error se re-lanza
+    // (capturable por un attempt exterior).
+    run_ok(
+        r#"use "frame" as frame
+antes = frame.frames()
+capturado = ""
+attempt {
+    with f = frame.from_list([{ "x": 1 }]) {
+        error "boom"
+    }
+} handle e {
+    capturado = e
+}
+if capturado != "boom" { error "el error del cuerpo no se propagó: ${capturado}" }
+if frame.frames() != antes { error "with no liberó el frame en el camino de error" }"#,
+    );
+}
+
+#[test]
+fn test_with_anidado() {
+    run_ok(
+        r#"use "frame" as frame
+antes = frame.frames()
+with a = frame.from_list([{ "x": 1 }]) {
+    with b = frame.from_list([{ "y": 2 }, { "y": 3 }]) {
+        total = frame.count(a) + frame.count(b)
+    }
+}
+if total != 3 { error "anidado esperaba 3, dio ${total}" }
+if frame.frames() != antes { error "with anidado dejó frames vivos" }"#,
+    );
+}
+
+#[test]
+fn test_with_handle_int_quantum() {
+    // Los handles de quantum.circuit son Int, no string: with no depende
+    // del tipo del handle porque conoce el módulo estáticamente.
+    run_ok(
+        r#"use "quantum" as quantum
+with q = quantum.circuit(2) {
+    quantum.h(q, 0)
+    quantum.cnot(q, 0, 1)
+    p = quantum.probs(q)
+}
+if len(p) != 4 { error "probs de 2 qubits esperaba 4 amplitudes" }"#,
+    );
+}
+
+#[test]
+fn test_with_loop_interno_puede_usar_break() {
+    // break dentro de un loop DEL CUERPO es legal (no sale del with).
+    run_ok(
+        r#"use "frame" as frame
+antes = frame.frames()
+with f = frame.from_list([{ "x": 1 }, { "x": 2 }]) {
+    i = 0
+    while i < 100 {
+        if i == 3 { break }
+        i = i + 1
+    }
+}
+if i != 3 { error "el break interno no cortó en 3" }
+if frame.frames() != antes { error "with con loop interno no liberó" }"#,
+    );
+}
+
+#[test]
+fn test_with_rechaza_return_en_el_cuerpo() {
+    // return se saltaría el free → error de parseo con mensaje claro.
+    let tokens = orion_vm::lexer::lex(
+        r#"use "frame" as frame
+fn f() {
+    with h = frame.from_list([{ "x": 1 }]) {
+        return 1
+    }
+}"#,
+    ).unwrap();
+    let err = orion_vm::parser::parse(tokens).expect_err("return dentro de with debe rechazarse");
+    assert!(err.message.contains("liberación"), "mensaje: {}", err.message);
+}
+
+#[test]
+fn test_with_rechaza_break_fuera_de_loop_interno() {
+    let tokens = orion_vm::lexer::lex(
+        r#"use "frame" as frame
+while yes {
+    with h = frame.from_list([{ "x": 1 }]) {
+        break
+    }
+}"#,
+    ).unwrap();
+    let err = orion_vm::parser::parse(tokens).expect_err("break que escapa del with debe rechazarse");
+    assert!(err.message.contains("liberar"), "mensaje: {}", err.message);
+}
+
+#[test]
+fn test_with_rechaza_init_que_no_es_modulo() {
+    let tokens = orion_vm::lexer::lex("with h = 42 { show h }").unwrap();
+    let err = orion_vm::parser::parse(tokens).expect_err("init sin módulo debe rechazarse");
+    assert!(err.message.contains("recurso de módulo"), "mensaje: {}", err.message);
+}
+
+// ── Handlers huérfanos: return dentro de attempt (fix de la VM) ──────────────
+
+#[test]
+fn test_return_dentro_de_attempt_no_deja_handler_huerfano() {
+    // f() retorna DESDE DENTRO de un attempt → su handler debe morir con el
+    // frame. Antes quedaba huérfano y un error posterior sin attempt saltaba
+    // a una dirección de OTRA función (el programa "terminaba" en silencio
+    // en vez de reportar el error).
+    let err = run_err(
+        r#"fn f() {
+    attempt {
+        return 7
+    } handle e {
+        show e
+    }
+    return 0
+}
+a = f()
+if a != 7 { error "f debía retornar 7" }
+error "bang""#,
+    );
+    assert!(err.contains("bang"),
+        "el error posterior debía propagarse limpio, dio: {}", err);
+}
+
+#[test]
+fn test_return_dentro_de_attempt_con_handler_exterior_valido() {
+    // El attempt del CALLER sí debe seguir funcionando tras el return interno.
+    run_ok(
+        r#"fn f() {
+    attempt {
+        return 7
+    } handle e {
+        show e
+    }
+    return 0
+}
+r = ""
+attempt {
+    a = f()
+    error "bang"
+} handle e {
+    r = e
+}
+if r != "bang" { error "el handler exterior no atrapó: ${r}" }"#,
+    );
+}

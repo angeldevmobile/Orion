@@ -269,6 +269,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Columna calculada
         "add_col"    => fn_add_col(args),
         // Chunked (grandes volúmenes sin cargar todo)
+        // each_chunk(ruta, chunk_size?) → lista de handles, un frame por bloque
         "each_chunk" => fn_each_chunk(args),
         "scan_stats" => fn_scan_stats(args),
         // Persistencia
@@ -276,6 +277,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "save_odf"   => fn_save_odf(args),
         "load_odf"   => fn_load_odf(args),
         "txt_to_odf" => fn_txt_to_odf(args),
+        // Memoria del store
+        // free(handle) → libera el frame; yes si existía
+        "free"       => fn_free(args),
+        // frames() → número de frames vivos en memoria
+        "frames"     => Ok(EvalValue::Int(with_frames(|fs| fs.len() as i64))),
         _ => Err(format!("frame.{} no existe", function)),
     }
 }
@@ -994,15 +1000,17 @@ fn fn_add_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 //   chunked — grandes volúmenes sin cargar todo en RAM             
 
-/// frame.each_chunk(ruta, chunk_size, fn(frame_handle) → cualquier_cosa)
-/// Lee el CSV en bloques de chunk_size filas, llama fn por cada bloque.
-/// Nunca tiene más de chunk_size filas en RAM simultáneamente.
+/// frame.each_chunk(ruta, chunk_size = 10_000) → lista de handles
+/// Lee el CSV en bloques de chunk_size filas y devuelve un frame por bloque;
+/// el caller itera la lista. Durante la LECTURA nunca hay más de chunk_size
+/// filas crudas en RAM a la vez; los frames resultantes sí viven en el store,
+/// así que en procesos largos conviene soltarlos con frame.free al usarlos.
+/// (Se ignoran argumentos extra: la firma vieja exigía un fn que nunca se
+/// llamaba y los scripts pasaban un dummy.)
 fn fn_each_chunk(args: Vec<EvalValue>) -> Result<EvalValue, String> {
-    if args.len() < 3 { return Err("frame.each_chunk(ruta, chunk_size, fn)".into()); }
+    if args.is_empty() { return Err("frame.each_chunk(ruta, chunk_size?)".into()); }
     let path       = arg_str(&args, 0, "frame.each_chunk")?;
-    let chunk_size = match &args[1] { EvalValue::Int(n) => *n as usize, _ => 10_000 };
-    // El fn se guarda para llamarlo desde el evaluador — retornamos la lista de handles
-    // (el evaluador debería llamar fn(handle) por cada chunk; aquí devolvemos los handles)
+    let chunk_size = match args.get(1) { Some(EvalValue::Int(n)) if *n > 0 => *n as usize, _ => 10_000 };
     let file = File::open(&path).map_err(|e| format!("frame.each_chunk: {}", e))?;
     let mut reader = BufReader::new(file);
     // leer header
@@ -1080,7 +1088,15 @@ fn fn_scan_stats(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     Ok(EvalValue::Dict(map))
 }
 
-//   persistencia                                
+// free(handle) → libera el frame (cada transformación crea un frame nuevo en
+// el store; en procesos largos conviene soltar los intermedios). Devuelve yes
+// si existía. Mismo contrato que serie.free.
+fn fn_free(args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    let id = arg_handle(&args, 0)?;
+    Ok(EvalValue::Bool(with_frames(|fs| fs.remove(&id).is_some())))
+}
+
+//   persistencia
 
 fn fn_save(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.save(handle, ruta)".into()); }
