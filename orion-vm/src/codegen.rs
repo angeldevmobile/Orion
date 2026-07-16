@@ -39,6 +39,15 @@ pub fn compile(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
 
 //    Compilador principal                                                       
 
+/// Contexto del loop más interno durante la compilación: acumula los `Jump(0)`
+/// de break/continue para parchearlos al cerrar el loop. Sin esto, break y
+/// continue saltaban a la instrucción 0 (= reiniciar el programa/función).
+#[derive(Default)]
+struct LoopCtx {
+    breaks:    Vec<usize>,
+    continues: Vec<usize>,
+}
+
 struct Codegen {
     main_instrs: Vec<Instruction>,
     main_lines:  Vec<u32>,
@@ -49,6 +58,7 @@ struct Codegen {
     current_line: u32,
     for_counter:  usize,
     match_counter: usize,
+    loop_stack:   Vec<LoopCtx>,
 }
 
 impl Codegen {
@@ -63,7 +73,15 @@ impl Codegen {
             current_line:  0,
             for_counter:   0,
             match_counter: 0,
+            loop_stack:    Vec::new(),
         }
+    }
+
+    /// Cierra el loop más interno: parchea sus break → `end` y sus
+    /// continue → `cont` (re-evaluación de condición o paso de incremento).
+    fn close_loop(&mut self, ctx: LoopCtx, end: usize, cont: usize) {
+        for b in ctx.breaks    { self.patch(b, Instruction::Jump(end)); }
+        for c in ctx.continues { self.patch(c, Instruction::Jump(cont)); }
     }
 
     fn emit(&mut self, instr: Instruction) -> usize {
@@ -322,8 +340,20 @@ impl Codegen {
                 }
                 self.emit(Instruction::Return);
             }
-            Stmt::Break { .. }    => { self.emit(Instruction::Jump(0)); } // parchado por el contexto del bucle
-            Stmt::Continue { .. } => { self.emit(Instruction::Jump(0)); }
+            Stmt::Break { line, .. } => {
+                if self.loop_stack.is_empty() {
+                    return Err(CodegenError { message: "break fuera de un loop".into(), line });
+                }
+                let j = self.emit(Instruction::Jump(0));
+                self.loop_stack.last_mut().unwrap().breaks.push(j);
+            }
+            Stmt::Continue { line, .. } => {
+                if self.loop_stack.is_empty() {
+                    return Err(CodegenError { message: "continue fuera de un loop".into(), line });
+                }
+                let j = self.emit(Instruction::Jump(0));
+                self.loop_stack.last_mut().unwrap().continues.push(j);
+            }
 
             Stmt::If { cond, then_body, else_body, line, .. } => {
                 self.current_line = line;
@@ -348,10 +378,14 @@ impl Codegen {
                 let loop_start = self.addr();
                 self.compile_expr_main(&cond)?;
                 let jf = self.emit(Instruction::JumpIfFalse(0));
+                self.loop_stack.push(LoopCtx::default());
                 for s in body { self.compile_stmt(s)?; }
+                let ctx = self.loop_stack.pop().unwrap();
                 self.emit(Instruction::Jump(loop_start));
                 let end = self.addr();
                 self.patch(jf, Instruction::JumpIfFalse(end));
+                // continue re-evalúa la condición; break sale del loop
+                self.close_loop(ctx, end, loop_start);
             }
 
             Stmt::For { var, iter, body, line, .. } => {
@@ -375,7 +409,10 @@ impl Codegen {
                         let jf = self.emit(Instruction::JumpIfFalse(0));
                         self.emit(Instruction::LoadVar(cur_var.clone()));
                         self.emit(Instruction::StoreVar(var));
+                        self.loop_stack.push(LoopCtx::default());
                         for s in body { self.compile_stmt(s)?; }
+                        let ctx = self.loop_stack.pop().unwrap();
+                        let cont = self.addr(); // continue salta al incremento
                         self.emit(Instruction::LoadVar(cur_var.clone()));
                         self.emit(Instruction::LoadInt(1));
                         self.emit(Instruction::Add);
@@ -383,6 +420,7 @@ impl Codegen {
                         self.emit(Instruction::Jump(loop_start));
                         let end = self.addr();
                         self.patch(jf, Instruction::JumpIfFalse(end));
+                        self.close_loop(ctx, end, cont);
                         return Ok(());
                     }
                 }
@@ -410,8 +448,11 @@ impl Codegen {
                 self.emit(Instruction::GetIndex);
                 self.emit(Instruction::StoreVar(var));
 
+                self.loop_stack.push(LoopCtx::default());
                 for s in body { self.compile_stmt(s)?; }
+                let ctx = self.loop_stack.pop().unwrap();
 
+                let cont = self.addr(); // continue salta al incremento
                 self.emit(Instruction::LoadVar(idx_var.clone()));
                 self.emit(Instruction::LoadInt(1));
                 self.emit(Instruction::Add);
@@ -419,6 +460,7 @@ impl Codegen {
                 self.emit(Instruction::Jump(loop_start));
                 let end = self.addr();
                 self.patch(jf, Instruction::JumpIfFalse(end));
+                self.close_loop(ctx, end, cont);
             }
 
             Stmt::Match { expr, arms, line, .. } => {
@@ -630,11 +672,18 @@ struct FnCompiler {
     for_counter:  usize,
     match_counter: usize,
     pending_lambdas: Vec<(String, FunctionDef)>,
+    loop_stack: Vec<LoopCtx>,
 }
 
 impl FnCompiler {
     fn new() -> Self {
-        FnCompiler { instrs: Vec::new(), lines: Vec::new(), current_line: 0, for_counter: 0, match_counter: 0, pending_lambdas: Vec::new() }
+        FnCompiler { instrs: Vec::new(), lines: Vec::new(), current_line: 0, for_counter: 0, match_counter: 0, pending_lambdas: Vec::new(), loop_stack: Vec::new() }
+    }
+
+    /// Igual que Codegen::close_loop: parchea break → end, continue → cont.
+    fn close_loop(&mut self, ctx: LoopCtx, end: usize, cont: usize) {
+        for b in ctx.breaks    { self.patch(b, Instruction::Jump(end)); }
+        for c in ctx.continues { self.patch(c, Instruction::Jump(cont)); }
     }
 
     fn emit(&mut self, instr: Instruction) -> usize {
@@ -713,8 +762,20 @@ impl FnCompiler {
                 }
                 self.emit(Instruction::Return);
             }
-            Stmt::Break { .. }    => { self.emit(Instruction::Jump(0)); }
-            Stmt::Continue { .. } => { self.emit(Instruction::Jump(0)); }
+            Stmt::Break { line, .. } => {
+                if self.loop_stack.is_empty() {
+                    return Err(CodegenError { message: "break fuera de un loop".into(), line: *line });
+                }
+                let j = self.emit(Instruction::Jump(0));
+                self.loop_stack.last_mut().unwrap().breaks.push(j);
+            }
+            Stmt::Continue { line, .. } => {
+                if self.loop_stack.is_empty() {
+                    return Err(CodegenError { message: "continue fuera de un loop".into(), line: *line });
+                }
+                let j = self.emit(Instruction::Jump(0));
+                self.loop_stack.last_mut().unwrap().continues.push(j);
+            }
 
             Stmt::If { cond, then_body, else_body, line, .. } => {
                 self.current_line = *line;
@@ -739,10 +800,13 @@ impl FnCompiler {
                 let loop_start = self.addr();
                 self.compile_expr(cond, async_fns)?;
                 let jf = self.emit(Instruction::JumpIfFalse(0));
+                self.loop_stack.push(LoopCtx::default());
                 for s in body { self.compile_stmt(s, async_fns)?; }
+                let ctx = self.loop_stack.pop().unwrap();
                 self.emit(Instruction::Jump(loop_start));
                 let end = self.addr();
                 self.patch(jf, Instruction::JumpIfFalse(end));
+                self.close_loop(ctx, end, loop_start);
             }
 
             Stmt::For { var, iter, body, line, .. } => {
@@ -766,7 +830,10 @@ impl FnCompiler {
                         let jf = self.emit(Instruction::JumpIfFalse(0));
                         self.emit(Instruction::LoadVar(cur_var.clone()));
                         self.emit(Instruction::StoreVar(var.clone()));
+                        self.loop_stack.push(LoopCtx::default());
                         for s in body { self.compile_stmt(s, async_fns)?; }
+                        let ctx = self.loop_stack.pop().unwrap();
+                        let cont = self.addr(); // continue salta al incremento
                         self.emit(Instruction::LoadVar(cur_var.clone()));
                         self.emit(Instruction::LoadInt(1));
                         self.emit(Instruction::Add);
@@ -774,6 +841,7 @@ impl FnCompiler {
                         self.emit(Instruction::Jump(loop_start));
                         let end = self.addr();
                         self.patch(jf, Instruction::JumpIfFalse(end));
+                        self.close_loop(ctx, end, cont);
                         return Ok(());
                     }
                 }
@@ -801,8 +869,11 @@ impl FnCompiler {
                 self.emit(Instruction::GetIndex);
                 self.emit(Instruction::StoreVar(var.clone()));
 
+                self.loop_stack.push(LoopCtx::default());
                 for s in body { self.compile_stmt(s, async_fns)?; }
+                let ctx = self.loop_stack.pop().unwrap();
 
+                let cont = self.addr(); // continue salta al incremento
                 self.emit(Instruction::LoadVar(idx_var.clone()));
                 self.emit(Instruction::LoadInt(1));
                 self.emit(Instruction::Add);
@@ -810,6 +881,7 @@ impl FnCompiler {
                 self.emit(Instruction::Jump(loop_start));
                 let end = self.addr();
                 self.patch(jf, Instruction::JumpIfFalse(end));
+                self.close_loop(ctx, end, cont);
             }
 
             Stmt::Match { expr, arms, line, .. } => {

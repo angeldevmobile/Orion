@@ -6,6 +6,19 @@ formato AAAA-MM-DD.
 ## 2026-07-15
 
 ### Añadido
+- **Lenguaje — `with` (recursos con ámbito)**: nueva sintaxis
+  `with h = modulo.abrir(...) { ... }` que garantiza `modulo.free(h)` al salir
+  del bloque, **también si el cuerpo lanza un error** (se libera y el error se
+  re-lanza, capturable por un `attempt` exterior). Funciona con cualquier
+  módulo que tenga `free` (frame, serie, quantum…) y con handles string o int
+  (conoce el módulo estáticamente, no adivina por el handle). Reglas del
+  parser: el inicializador debe ser `modulo.fn(...)`, y `return`/`break`/
+  `continue` que escaparían del bloque sin liberar se rechazan en compilación
+  con un mensaje claro (los loops internos del cuerpo sí pueden usar break).
+  Implementado por desugar a `attempt/handle` en codegen — el JIT hereda la
+  semántica sin cambios porque compila desde el mismo bytecode. Soporte
+  completo en typechecker (sin falsos positivos), `orion fmt` y resaltado de
+  la extensión VSCode.
 - **frame — gestión del store**: `frame.free(handle)` (libera un frame; las
   transformaciones crean frames nuevos que antes vivían para siempre — la misma
   fuga que ya se arregló en `serie`) y `frame.frames()` (frames vivos en
@@ -18,6 +31,19 @@ formato AAAA-MM-DD.
   Excel/odf streaming, free/frames. +1 test de regresión en modules_smoke.
 
 ### Arreglado
+- **break/continue (P0)**: estaban rotos en TODO el lenguaje — codegen emitía
+  `Jump(0)` que nunca se parcheaba, así que `break` y `continue` saltaban a la
+  instrucción 0 (reinicio del programa o de la función) y el loop se volvía
+  infinito. Ningún test los ejercitaba; lo destapó el barrido de `with`. Ahora
+  codegen mantiene una pila de contextos de loop y parchea break → fin del
+  loop y continue → re-evaluación de condición (while) o paso de incremento
+  (for). `break`/`continue` fuera de un loop son error de compilación con
+  mensaje claro. +9 tests de regresión y +3 diferenciales VM/JIT.
+- **VM — handlers huérfanos**: un `return` dentro de `attempt` se saltaba el
+  `EndAttempt` y su handler quedaba vivo en la pila de errores; un error
+  posterior en el caller saltaba a una dirección de otra función (el programa
+  podía "terminar" en silencio en vez de reportar). Al morir un frame se
+  descartan ahora sus handlers pendientes. +2 tests de regresión.
 - **frame.each_chunk**: exigía un tercer argumento `fn` que el código nunca
   llamaba (los scripts pasaban un dummy). Firma real ahora:
   `each_chunk(ruta, chunk_size = 10_000)` → lista de handles, un frame por

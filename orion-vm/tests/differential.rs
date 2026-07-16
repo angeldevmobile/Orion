@@ -580,3 +580,46 @@ fn diff_named_args_salta_opcional() {
          show str(con(\"a\", puerto = 100))",
     );
 }
+
+// ── break / continue (fix 2026-07-15: Jump(0) sin parchear = bucle infinito) ─
+
+#[test]
+fn diff_break_en_while() {
+    assert_vm_jit_match(
+        r#"i = 0
+while i < 100 {
+    if i == 3 { break }
+    i = i + 1
+}
+show i"#,
+    );
+}
+
+#[test]
+fn diff_continue_en_while() {
+    assert_vm_jit_match(
+        r#"i = 0
+pares = 0
+while i < 10 {
+    i = i + 1
+    if i % 2 != 0 { continue }
+    pares = pares + 1
+}
+show pares"#,
+    );
+}
+
+#[test]
+fn diff_break_dentro_de_fn() {
+    assert_vm_jit_match(
+        r#"fn corta(n) {
+    i = 0
+    while i < n {
+        if i * i > 20 { break }
+        i = i + 1
+    }
+    return i
+}
+show corta(100)"#,
+    );
+}

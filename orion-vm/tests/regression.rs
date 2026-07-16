@@ -674,17 +674,17 @@ while i < 700 {
 
 #[test]
 fn test_with_libera_al_salir() {
-    // El frame creado por with debe liberarse al cerrar el bloque:
-    // frames() vuelve a su valor previo. El resultado calculado dentro
-    // sobrevive (las vars son de función, no del bloque).
+    // El frame creado por with debe liberarse al cerrar el bloque. NO se
+    // asserta frames() == antes: los tests Rust comparten el store global en
+    // paralelo. En su lugar, free(f) tras el bloque debe dar `no` (ya no
+    // existe). El resultado calculado dentro sobrevive (vars de función).
     run_ok(
         r#"use "frame" as frame
-antes = frame.frames()
 with f = frame.from_list([{ "x": 10 }, { "x": 20 }]) {
     k = frame.count(f)
 }
 if k != 2 { error "count dentro de with esperaba 2" }
-if frame.frames() != antes { error "with no liberó el frame" }"#,
+if frame.free(f) != no { error "with no liberó el frame (free devolvió yes)" }"#,
     );
 }
 
@@ -694,7 +694,6 @@ fn test_with_libera_con_error_y_relanza() {
     // (capturable por un attempt exterior).
     run_ok(
         r#"use "frame" as frame
-antes = frame.frames()
 capturado = ""
 attempt {
     with f = frame.from_list([{ "x": 1 }]) {
@@ -704,7 +703,7 @@ attempt {
     capturado = e
 }
 if capturado != "boom" { error "el error del cuerpo no se propagó: ${capturado}" }
-if frame.frames() != antes { error "with no liberó el frame en el camino de error" }"#,
+if frame.free(f) != no { error "with no liberó el frame en el camino de error" }"#,
     );
 }
 
@@ -712,14 +711,14 @@ if frame.frames() != antes { error "with no liberó el frame en el camino de err
 fn test_with_anidado() {
     run_ok(
         r#"use "frame" as frame
-antes = frame.frames()
 with a = frame.from_list([{ "x": 1 }]) {
     with b = frame.from_list([{ "y": 2 }, { "y": 3 }]) {
         total = frame.count(a) + frame.count(b)
     }
 }
 if total != 3 { error "anidado esperaba 3, dio ${total}" }
-if frame.frames() != antes { error "with anidado dejó frames vivos" }"#,
+if frame.free(a) != no { error "with anidado no liberó a" }
+if frame.free(b) != no { error "with anidado no liberó b" }"#,
     );
 }
 
@@ -727,6 +726,8 @@ if frame.frames() != antes { error "with anidado dejó frames vivos" }"#,
 fn test_with_handle_int_quantum() {
     // Los handles de quantum.circuit son Int, no string: with no depende
     // del tipo del handle porque conoce el módulo estáticamente.
+    // probs devuelve un dict SOLO con estados de probabilidad no nula:
+    // el estado de Bell tiene exactamente 2 ("00" y "11", 0.5 cada uno).
     run_ok(
         r#"use "quantum" as quantum
 with q = quantum.circuit(2) {
@@ -734,7 +735,9 @@ with q = quantum.circuit(2) {
     quantum.cnot(q, 0, 1)
     p = quantum.probs(q)
 }
-if len(p) != 4 { error "probs de 2 qubits esperaba 4 amplitudes" }"#,
+if len(p) != 2 { error "Bell esperaba 2 estados con probabilidad, dio ${len(p)}" }
+if p["00"] != 0.5 { error "P(00) esperaba 0.5" }
+if p["11"] != 0.5 { error "P(11) esperaba 0.5" }"#,
     );
 }
 
@@ -743,7 +746,6 @@ fn test_with_loop_interno_puede_usar_break() {
     // break dentro de un loop DEL CUERPO es legal (no sale del with).
     run_ok(
         r#"use "frame" as frame
-antes = frame.frames()
 with f = frame.from_list([{ "x": 1 }, { "x": 2 }]) {
     i = 0
     while i < 100 {
@@ -752,7 +754,7 @@ with f = frame.from_list([{ "x": 1 }, { "x": 2 }]) {
     }
 }
 if i != 3 { error "el break interno no cortó en 3" }
-if frame.frames() != antes { error "with con loop interno no liberó" }"#,
+if frame.free(f) != no { error "with con loop interno no liberó" }"#,
     );
 }
 
@@ -838,4 +840,129 @@ attempt {
 }
 if r != "bang" { error "el handler exterior no atrapó: ${r}" }"#,
     );
+}
+
+// ── break / continue — parcheo real de saltos (bug P0 destapado por with) ────
+// Antes de este fix, break y continue emitían Jump(0) que NUNCA se parcheaba:
+// saltaban a la instrucción 0 (reinicio del programa/función) → bucle infinito.
+// Ningún test los ejercitaba; el barrido de `with` lo destapó.
+
+#[test]
+fn test_break_en_while() {
+    run_ok(
+        r#"i = 0
+while i < 100 {
+    if i == 3 { break }
+    i = i + 1
+}
+if i != 3 { error "break no cortó en 3, i=${i}" }"#,
+    );
+}
+
+#[test]
+fn test_continue_en_while() {
+    run_ok(
+        r#"i = 0
+pares = 0
+while i < 10 {
+    i = i + 1
+    if i % 2 != 0 { continue }
+    pares = pares + 1
+}
+if pares != 5 { error "continue: esperaba 5 pares, dio ${pares}" }"#,
+    );
+}
+
+#[test]
+fn test_break_en_for_rango() {
+    run_ok(
+        r#"total = 0
+for j in 0..10 {
+    if j == 4 { break }
+    total = total + 1
+}
+if total != 4 { error "break en for..rango esperaba 4, dio ${total}" }"#,
+    );
+}
+
+#[test]
+fn test_continue_en_for_rango() {
+    // continue debe saltar al INCREMENTO (no a la condición): si saltara a la
+    // condición sin incrementar, el loop sería infinito.
+    run_ok(
+        r#"suma = 0
+for j in 0..6 {
+    if j == 2 { continue }
+    suma = suma + j
+}
+if suma != 13 { error "continue en for esperaba 13 (0+1+3+4+5), dio ${suma}" }"#,
+    );
+}
+
+#[test]
+fn test_break_en_for_lista() {
+    run_ok(
+        r#"vistos = 0
+for x in [10, 20, 30, 40] {
+    if x == 30 { break }
+    vistos = vistos + 1
+}
+if vistos != 2 { error "break en for..lista esperaba 2, dio ${vistos}" }"#,
+    );
+}
+
+#[test]
+fn test_continue_en_for_lista() {
+    run_ok(
+        r#"suma = 0
+for x in [1, 2, 3, 4] {
+    if x == 2 { continue }
+    suma = suma + x
+}
+if suma != 8 { error "continue en for..lista esperaba 8, dio ${suma}" }"#,
+    );
+}
+
+#[test]
+fn test_break_anidado_solo_corta_el_interno() {
+    run_ok(
+        r#"filas = 0
+celdas = 0
+for i in 0..3 {
+    filas = filas + 1
+    for j in 0..10 {
+        if j == 2 { break }
+        celdas = celdas + 1
+    }
+}
+if filas != 3 { error "el break interno no debía cortar el loop exterior" }
+if celdas != 6 { error "esperaba 2 celdas x 3 filas = 6, dio ${celdas}" }"#,
+    );
+}
+
+#[test]
+fn test_break_dentro_de_fn() {
+    // El mismo parcheo en FnCompiler (las funciones compilan aparte).
+    run_ok(
+        r#"fn primera_par(xs) {
+    encontrada = 0 - 1
+    for x in xs {
+        if x % 2 == 0 {
+            encontrada = x
+            break
+        }
+    }
+    return encontrada
+}
+r = primera_par([3, 5, 8, 10])
+if r != 8 { error "esperaba 8, dio ${r}" }"#,
+    );
+}
+
+#[test]
+fn test_break_fuera_de_loop_es_error_de_compilacion() {
+    let tokens = orion_vm::lexer::lex("break").unwrap();
+    let stmts = orion_vm::parser::parse(tokens).unwrap();
+    let err = orion_vm::codegen::compile(stmts).expect_err("break suelto debe rechazarse");
+    assert!(err.message.contains("fuera de un loop"), "mensaje: {}", err.message);
 }
