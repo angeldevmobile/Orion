@@ -1,92 +1,485 @@
+-- Barrido funcional e2e del módulo table (tablas como listas de dicts) con
+-- valores exactos. Ejecutar desde la raíz del repo: orion test tests
 use "table" as tbl
+use "fs" as fs
 
-show "=== TEST MÓDULO TABLE ==="
-show ""
+fn near(a, b) {
+    d = a - b
+    if d < 0 { d = 0 - d }
+    return d < 0.000001
+}
 
-show "--- 1. Cargar datos ---"
-t = tbl.load("tests/datos_ventas.csv")
-tbl.peek(t)
+fn mk() {
+    filas = [
+        { "nombre": "ana",   "region": "norte", "venta": 100, "precio": 1.5, "activo": yes, "meta": 150 },
+        { "nombre": "beto",  "region": "norte", "venta": 200, "precio": 2.5, "activo": no,  "meta": 150 },
+        { "nombre": "carla", "region": "sur",   "venta": 300, "precio": 3.5, "activo": yes, "meta": 250 },
+        { "nombre": "dan",   "region": "sur",   "venta": 400, "precio": 4.5, "activo": no,  "meta": 500 },
+        { "nombre": "eva",   "region": "este",  "venta": 500, "precio": 5.5, "activo": yes, "meta": 450 },
+        { "nombre": "fede",  "region": "este",  "venta": 600, "precio": 6.5, "activo": no,  "meta": 700 }
+    ]
+    return tbl.from(filas)
+}
 
-show "--- 2. Size (dimensiones) ---"
-s = tbl.size(t)
-show "Filas: ${s.rows}   Columnas: ${s.cols}"
-show ""
+fn test_from_rows_size_count() {
+    t = mk()
+    s = tbl.size(t)
+    assert_eq(s["rows"], 6, "size rows")
+    assert_eq(s["cols"], 6, "size cols")
+    assert_eq(tbl.count(t), 6, "count total")
+    filas = tbl.rows(t)
+    assert_eq(len(filas), 6, "rows len")
+    assert_eq(filas[2]["nombre"], "carla", "rows fila 2")
+}
 
-show "--- 3. Schema de columnas ---"
-tbl.schema(t)
+fn test_column_keep_drop_rename() {
+    t = mk()
+    ventas = tbl.column(t, "venta")
+    assert_eq(len(ventas), 6, "column len")
+    assert_eq(ventas[0], 100, "column [0]")
+    assert_eq(ventas[5], 600, "column [5]")
 
-show "--- 4. Filtros ---"
-norte = tbl.where(t, "region == 'Norte'")
-show "Vendedores en Norte: ${tbl.count(norte)}"
+    t2 = tbl.keep(t, ["nombre", "venta"])
+    assert_eq(tbl.size(t2)["cols"], 2, "keep cols")
+    assert_eq(tbl.size(t2)["rows"], 6, "keep rows")
 
-top_ventas = tbl.where(t, "venta > 10000 && activo == true")
-show "Ventas mayor a 10000 y activo: ${tbl.count(top_ventas)}"
+    t3 = tbl.drop(t, ["activo", "meta"])
+    assert_eq(tbl.size(t3)["cols"], 4, "drop cols")
 
-show ""
-show "--- 5. Columna calculada ---"
-t2 = tbl.add(t, "iva", "venta * 0.19")
-t2 = tbl.add(t2, "total_con_iva", "round(venta * 1.19, 2)")
-tbl.peek(tbl.keep(t2, ["nombre", "venta", "iva", "total_con_iva"]), 5)
+    t4 = tbl.rename(t, "venta", "importe")
+    assert_eq(tbl.column(t4, "importe")[0], 100, "rename conserva datos")
+    assert_eq(tbl.size(t4)["cols"], 6, "rename no cambia cols")
+}
 
-show "--- 6. Top 3 vendedores ---"
-top3 = tbl.top(t, "venta", 3)
-tbl.peek(tbl.keep(top3, ["nombre", "region", "venta"]), 3)
+fn test_cast() {
+    t = mk()
+    ts = tbl.cast(t, "venta", "string")
+    assert_eq(tbl.rows(ts)[0]["venta"], "100", "cast int->string")
 
-show "--- 7. Bottom 3 ---"
-bot3 = tbl.bottom(t, "venta", 3)
-tbl.peek(tbl.keep(bot3, ["nombre", "region", "venta"]), 3)
+    tf = tbl.cast(t, "venta", "float")
+    assert(near(tbl.rows(tf)[0]["venta"], 100.0), "cast int->float")
 
-show "--- 8. Stats de ventas ---"
-stats = tbl.stats(t, "venta")
-show "Min:    ${stats.min}"
-show "Max:    ${stats.max}"
-show "Avg:    ${stats.avg}"
-show "Std:    ${stats.std}"
-show "P25:    ${stats.p25}"
-show "Median: ${stats.median}"
-show "P75:    ${stats.p75}"
-show ""
+    ti = tbl.cast(ts, "venta", "int")
+    assert_eq(tbl.rows(ti)[0]["venta"], 100, "cast string->int roundtrip")
 
-show "--- 9. Ventas por región (sum) ---"
-por_region = tbl.group(t, "region", "venta", "sum")
-tbl.peek(tbl.sort(por_region, "venta", "desc"))
+    tb = tbl.cast(tbl.cast(t, "activo", "string"), "activo", "bool")
+    assert_eq(tbl.rows(tb)[0]["activo"], yes, "cast bool roundtrip yes")
+    assert_eq(tbl.rows(tb)[1]["activo"], no,  "cast bool roundtrip no")
+}
 
-show "--- 10. Forecast (proximas 5 ventas proyectadas) ---"
-sorted_t = tbl.sort(t, "venta")
-pred = tbl.forecast(sorted_t, "venta", 5)
-show "Proyeccion: ${pred}"
-show ""
+fn test_where_basico() {
+    t = mk()
+    assert_eq(tbl.count(tbl.where(t, "venta > 300")),  3, "where >")
+    assert_eq(tbl.count(tbl.where(t, "venta >= 300")), 4, "where >=")
+    assert_eq(tbl.count(tbl.where(t, "venta < 300")),  2, "where <")
+    assert_eq(tbl.count(tbl.where(t, "venta <= 300")), 3, "where <=")
+    assert_eq(tbl.count(tbl.where(t, "region == 'norte'")), 2, "where == str")
+    assert_eq(tbl.count(tbl.where(t, "region != 'norte'")), 4, "where != str")
+    assert_eq(tbl.count(tbl.where(t, "activo == true")), 3, "where bool true")
+    assert_eq(tbl.count(tbl.where(t, "venta > 100 && venta < 600")), 4, "where &&")
+    assert_eq(tbl.count(tbl.where(t, "region == 'norte' || region == 'sur'")), 4, "where ||")
+    assert_eq(tbl.count(tbl.where(t, "nombre contains 'an'")),    2, "where contains")
+    assert_eq(tbl.count(tbl.where(t, "nombre starts_with 'd'")),  1, "where starts_with")
+    assert_eq(tbl.count(tbl.where(t, "nombre ends_with 'a'")),    3, "where ends_with")
+    assert_eq(tbl.count(tbl.where(t, "precio == 3.5")), 1, "where == float")
+}
 
-show "--- 11. Anomalias en ventas (IQR) ---"
-anomalias = tbl.anomalies(t, "venta")
-show "Filas anomalas detectadas: ${tbl.count(anomalias)}"
-tbl.peek(tbl.keep(anomalias, ["nombre", "region", "venta"]))
+fn test_where_avanzado() {
+    t = mk()
+    -- comparar columna contra columna
+    assert_eq(tbl.count(tbl.where(t, "venta > meta")), 3, "where col vs col")
+    -- paréntesis en condiciones
+    assert_eq(tbl.count(tbl.where(t, "(region == 'norte' || region == 'sur') && venta > 150")), 3, "where parens")
+    -- aritmética dentro de la condición
+    assert_eq(tbl.count(tbl.where(t, "venta * 2 >= 1000")), 2, "where aritmética")
+    assert_eq(tbl.count(tbl.where(t, "precio + 0.5 > 4")),  3, "where aritmética float")
+    -- negación y truthiness directa
+    assert_eq(tbl.count(tbl.where(t, "activo")),  3, "where truthy col")
+    assert_eq(tbl.count(tbl.where(t, "!activo")), 3, "where negación")
+    -- comparación con null
+    assert_eq(tbl.count(tbl.where(t, "venta != null")), 6, "where != null")
+    assert_eq(tbl.count(tbl.where(t, "venta == null")), 0, "where == null")
+    -- operadores dentro de literales de texto no rompen el parser
+    assert_eq(tbl.count(tbl.where(t, "nombre contains '<x>'")), 0, "where op dentro de literal")
+}
 
-show "--- 12. Correlacion edad y venta ---"
-corr = tbl.correlate(t, "edad", "venta")
-show "Pearson(edad, venta) = ${corr}"
-show ""
+fn test_sort_top_bottom() {
+    t = mk()
+    asc = tbl.sort(t, "venta")
+    assert_eq(tbl.rows(asc)[0]["nombre"], "ana", "sort asc primera")
+    desc = tbl.sort(t, "venta", "desc")
+    assert_eq(tbl.rows(desc)[0]["nombre"], "fede", "sort desc primera")
+    alfa = tbl.sort(t, "nombre", "desc")
+    assert_eq(tbl.rows(alfa)[0]["nombre"], "fede", "sort str desc")
 
-show "--- 13. Ranking por venta ---"
-ranked = tbl.rank(t, "venta")
-top_ranked = tbl.sort(ranked, "_rank")
-tbl.peek(tbl.keep(top_ranked, ["nombre", "venta", "_rank", "_pct"]), 5)
+    top2 = tbl.top(t, "venta", 2)
+    assert_eq(tbl.count(top2), 2, "top n")
+    assert_eq(tbl.rows(top2)[0]["nombre"], "fede", "top primera")
+    assert_eq(tbl.rows(top2)[1]["nombre"], "eva",  "top segunda")
 
-show "--- 14. Media movil de 3 periodos ---"
-sorted_ventas = tbl.sort(t, "nombre")
-con_mavg = tbl.moving_avg(sorted_ventas, "venta", 3)
-tbl.peek(tbl.keep(con_mavg, ["nombre", "venta", "_mavg"]), 6)
+    bot2 = tbl.bottom(t, "venta", 2)
+    assert_eq(tbl.rows(bot2)[0]["nombre"], "ana",  "bottom primera")
+    assert_eq(tbl.rows(bot2)[1]["nombre"], "beto", "bottom segunda")
+}
 
-show "--- 15. Normalizacion min-max ---"
-normalizado = tbl.normalize(t, "venta")
-top_norm = tbl.sort(normalizado, "venta", "desc")
-tbl.peek(tbl.keep(top_norm, ["nombre", "venta", "_norm"]), 5)
+fn test_dedupe_sample() {
+    t = mk()
+    d = tbl.dedupe(t, "region")
+    assert_eq(tbl.count(d), 3, "dedupe count")
+    assert_eq(tbl.rows(d)[0]["region"], "norte", "dedupe conserva primera aparición")
 
-show "--- 16. Guardar resultados ---"
-tbl.save(por_region, "tests/output_regiones.csv")
-show "Guardado: tests/output_regiones.csv"
-tbl.save(por_region, "tests/output_regiones.json")
-show "Guardado: tests/output_regiones.json"
+    s3 = tbl.sample(t, 3)
+    assert_eq(tbl.count(s3), 3, "sample n")
+    s100 = tbl.sample(t, 100)
+    assert_eq(tbl.count(s100), 6, "sample mayor que tabla")
+}
 
-show ""
-show "=== TEST COMPLETADO ==="
+fn test_add_aritmetica() {
+    t = mk()
+    r = tbl.rows(tbl.add(t, "x", "venta * 1.5"))
+    assert(near(r[0]["x"], 150.0), "add mul float")
+
+    r = tbl.rows(tbl.add(t, "x", "venta + meta"))
+    assert_eq(r[0]["x"], 250, "add col + col (int exacto)")
+
+    r = tbl.rows(tbl.add(t, "x", "venta * -1"))
+    assert_eq(r[0]["x"], -100, "add negativo")
+
+    r = tbl.rows(tbl.add(t, "x", "(venta + 100) * 2"))
+    assert_eq(r[0]["x"], 400, "add paréntesis")
+
+    r = tbl.rows(tbl.add(t, "x", "venta % 3"))
+    assert_eq(r[0]["x"], 1, "add módulo")
+
+    r = tbl.rows(tbl.add(t, "x", "venta - meta - 10"))
+    assert_eq(r[0]["x"], -60, "add resta asociativa izquierda")
+
+    r = tbl.rows(tbl.add(t, "x", "venta + meta * 2"))
+    assert_eq(r[0]["x"], 400, "add precedencia * sobre +")
+
+    r = tbl.rows(tbl.add(t, "x", "venta / 4"))
+    assert(near(r[0]["x"], 25.0), "add división")
+}
+
+fn test_add_funciones() {
+    t = mk()
+    r = tbl.rows(tbl.add(t, "x", "upper(nombre)"))
+    assert_eq(r[0]["x"], "ANA", "add upper")
+
+    r = tbl.rows(tbl.add(t, "x", "lower(upper(nombre))"))
+    assert_eq(r[0]["x"], "ana", "add funciones anidadas")
+
+    r = tbl.rows(tbl.add(t, "x", "round(venta / 3, 2)"))
+    assert(near(r[0]["x"], 33.33), "add round 2 decimales")
+
+    r = tbl.rows(tbl.add(t, "x", "round(precio)"))
+    assert(near(r[0]["x"], 2.0), "add round sin decimales")
+
+    r = tbl.rows(tbl.add(t, "x", "abs(venta - meta)"))
+    assert_eq(r[0]["x"], 50, "add abs")
+
+    r = tbl.rows(tbl.add(t, "x", "min(venta, meta)"))
+    assert_eq(r[0]["x"], 100, "add min")
+
+    r = tbl.rows(tbl.add(t, "x", "max(venta, meta)"))
+    assert_eq(r[0]["x"], 150, "add max")
+
+    r = tbl.rows(tbl.add(t, "x", "len(nombre)"))
+    assert_eq(r[0]["x"], 3, "add len")
+
+    r = tbl.rows(tbl.add(t, "x", "sqrt(venta)"))
+    assert(near(r[0]["x"], 10.0), "add sqrt")
+
+    r = tbl.rows(tbl.add(t, "x", "trim('  hola  ')"))
+    assert_eq(r[0]["x"], "hola", "add trim")
+
+    r = tbl.rows(tbl.add(t, "x", "floor(precio)"))
+    assert(near(r[0]["x"], 1.0), "add floor")
+
+    r = tbl.rows(tbl.add(t, "x", "ceil(precio)"))
+    assert(near(r[0]["x"], 2.0), "add ceil")
+}
+
+fn test_add_strings_y_bool() {
+    t = mk()
+    r = tbl.rows(tbl.add(t, "x", "nombre + '_x'"))
+    assert_eq(r[0]["x"], "ana_x", "add concat sufijo")
+
+    r = tbl.rows(tbl.add(t, "x", "'sr. ' + nombre"))
+    assert_eq(r[0]["x"], "sr. ana", "add concat prefijo")
+
+    r = tbl.rows(tbl.add(t, "x", "nombre + '-' + region"))
+    assert_eq(r[0]["x"], "ana-norte", "add concat múltiple")
+
+    -- una condición como expresión produce columna booleana
+    r = tbl.rows(tbl.add(t, "ok", "venta > meta"))
+    assert_eq(r[0]["ok"], no,  "add bool false")
+    assert_eq(r[1]["ok"], yes, "add bool true")
+}
+
+fn test_group() {
+    t = mk()
+    g = tbl.rows(tbl.group(t, "region", "venta", "sum"))
+    assert_eq(len(g), 3, "group buckets")
+    assert_eq(g[0]["region"], "norte", "group orden primera aparición")
+    assert_eq(g[0]["venta"], 300,  "group sum norte")
+    assert_eq(g[1]["venta"], 700,  "group sum sur")
+    assert_eq(g[2]["venta"], 1100, "group sum este")
+
+    g = tbl.rows(tbl.group(t, "region", "venta", "avg"))
+    assert_eq(g[0]["venta"], 150, "group avg norte")
+
+    g = tbl.rows(tbl.group(t, "region", "venta", "count"))
+    assert_eq(g[0]["venta"], 2, "group count")
+
+    g = tbl.rows(tbl.group(t, "region", "venta", "min"))
+    assert_eq(g[0]["venta"], 100, "group min")
+
+    g = tbl.rows(tbl.group(t, "region", "venta", "max"))
+    assert_eq(g[0]["venta"], 200, "group max")
+}
+
+fn test_agg() {
+    t = mk()
+    assert_eq(tbl.agg(t, "venta", "sum"),   2100, "agg sum")
+    assert_eq(tbl.agg(t, "venta", "avg"),   350,  "agg avg")
+    assert_eq(tbl.agg(t, "venta", "min"),   100,  "agg min")
+    assert_eq(tbl.agg(t, "venta", "max"),   600,  "agg max")
+    assert_eq(tbl.agg(t, "venta", "count"), 6,    "agg count")
+    -- count también cuenta columnas de texto (valores no nulos)
+    assert_eq(tbl.agg(t, "nombre", "count"), 6, "agg count texto")
+    -- agg sobre tabla vacía devuelve null
+    vacia = tbl.where(t, "venta > 9999")
+    assert_eq(tbl.agg(vacia, "venta", "sum"), null, "agg tabla vacía")
+}
+
+fn test_stats_percentiles() {
+    t = mk()
+    s = tbl.stats(t, "venta")
+    assert_eq(s["count"], 6, "stats count")
+    assert_eq(s["nulls"], 0, "stats nulls")
+    assert(near(s["min"], 100.0), "stats min")
+    assert(near(s["max"], 600.0), "stats max")
+    assert(near(s["avg"], 350.0), "stats avg")
+    assert(near(s["std"], 170.7825127659933), "stats std")
+    -- percentiles con interpolación lineal (paridad con frame.stats)
+    assert(near(s["p25"],    225.0), "stats p25 interpolado")
+    assert(near(s["median"], 350.0), "stats median interpolado")
+    assert(near(s["p75"],    475.0), "stats p75 interpolado")
+}
+
+fn test_join_concat() {
+    t = mk()
+    bonos = tbl.from([
+        { "region": "norte", "bono": 10 },
+        { "region": "sur",   "bono": 20 }
+    ])
+    inner = tbl.join(t, bonos, "region")
+    assert_eq(tbl.count(inner), 4, "join inner descarta sin match")
+    assert_eq(tbl.rows(inner)[0]["bono"], 10, "join inner trae columna")
+
+    izq = tbl.join(t, bonos, "region", "left")
+    assert_eq(tbl.count(izq), 6, "join left conserva todas")
+    assert_eq(tbl.count(tbl.where(izq, "bono == null")), 2, "join left rellena null")
+
+    todo = tbl.concat(t, bonos)
+    assert_eq(tbl.count(todo), 8, "concat apila")
+}
+
+fn test_forecast_correlate() {
+    t = mk()
+    pred = tbl.forecast(t, "venta", 3)
+    assert_eq(len(pred), 3, "forecast n valores")
+    assert(near(pred[0], 700.0), "forecast t+1")
+    assert(near(pred[1], 800.0), "forecast t+2")
+    assert(near(pred[2], 900.0), "forecast t+3")
+
+    r = tbl.correlate(t, "venta", "precio")
+    assert(near(r, 1.0), "correlate lineal perfecta")
+}
+
+fn test_anomalies() {
+    datos = tbl.from([
+        { "v": 10 }, { "v": 12 }, { "v": 11 }, { "v": 13 },
+        { "v": 12 }, { "v": 11 }, { "v": 100 }
+    ])
+    an = tbl.anomalies(datos, "v")
+    assert_eq(tbl.count(an), 1, "anomalies detecta outlier")
+    assert_eq(tbl.rows(an)[0]["v"], 100, "anomalies valor correcto")
+
+    marcada = tbl.anomalies_mark(datos, "v")
+    assert_eq(tbl.count(marcada), 7, "anomalies_mark conserva filas")
+    assert_eq(tbl.count(tbl.where(marcada, "_anomaly == true")), 1, "anomalies_mark marca 1")
+}
+
+fn test_rank_moving_normalize() {
+    t = mk()
+    r = tbl.rows(tbl.rank(t, "venta"))
+    assert_eq(r[5]["_rank"], 1, "rank mayor = 1")
+    assert_eq(r[0]["_rank"], 6, "rank menor = n")
+    assert(near(r[5]["_pct"], 1.0), "rank pct mayor")
+    assert(near(r[0]["_pct"], 0.0), "rank pct menor")
+
+    m = tbl.rows(tbl.moving_avg(t, "venta", 3))
+    assert_eq(m[0]["_mavg"], null, "moving_avg incompleta null")
+    assert(near(m[2]["_mavg"], 200.0), "moving_avg ventana 3")
+    assert(near(m[5]["_mavg"], 500.0), "moving_avg última")
+
+    n = tbl.rows(tbl.normalize(t, "venta"))
+    assert(near(n[0]["_norm"], 0.0), "normalize min")
+    assert(near(n[5]["_norm"], 1.0), "normalize max")
+    assert(near(n[2]["_norm"], 0.4), "normalize intermedio")
+}
+
+fn test_profile() {
+    t = mk()
+    p = tbl.profile(t)
+    assert_eq(p["venta"]["type"], "number", "profile tipo número")
+    assert_eq(p["venta"]["nulls"], 0, "profile nulls")
+    assert(near(p["venta"]["min"], 100.0), "profile min")
+    assert_eq(p["nombre"]["type"], "string", "profile tipo texto")
+    assert_eq(p["nombre"]["unique"], 6, "profile únicos")
+    assert_eq(p["activo"]["type"], "bool", "profile tipo bool")
+}
+
+fn test_count_condicion() {
+    t = mk()
+    assert_eq(tbl.count(t, "venta > 300"), 3, "count con condición")
+    assert_eq(tbl.count(t, "region == 'este' && activo"), 1, "count condición compuesta")
+}
+
+fn test_csv_roundtrip() {
+    t = mk()
+    tbl.save(t, "tests/output_table_rt.csv")
+    t2 = tbl.load("tests/output_table_rt.csv")
+    assert_eq(tbl.count(t2), 6, "csv roundtrip filas")
+    r = tbl.rows(t2)
+    assert_eq(r[0]["nombre"], "ana",  "csv roundtrip str")
+    assert_eq(r[0]["venta"], 100,     "csv roundtrip int")
+    assert(near(r[0]["precio"], 1.5), "csv roundtrip float")
+    assert_eq(r[0]["activo"], yes,    "csv roundtrip bool")
+    assert_eq(tbl.size(t2)["cols"], 6, "csv roundtrip cols")
+}
+
+fn test_json_roundtrip() {
+    t = mk()
+    tbl.save(t, "tests/output_table_rt.json")
+    t2 = tbl.load("tests/output_table_rt.json")
+    assert_eq(tbl.count(t2), 6, "json roundtrip filas")
+    r = tbl.rows(t2)
+    assert_eq(r[2]["nombre"], "carla", "json roundtrip str")
+    assert_eq(r[2]["venta"], 300,      "json roundtrip int")
+    assert(near(r[2]["precio"], 3.5),  "json roundtrip float")
+    assert_eq(r[2]["activo"], yes,     "json roundtrip bool")
+}
+
+fn test_excel_roundtrip() {
+    t = mk()
+    tbl.save(t, "tests/output_table_rt.xlsx")
+    t2 = tbl.load("tests/output_table_rt.xlsx")
+    assert_eq(tbl.count(t2), 6, "xlsx roundtrip filas")
+    r = tbl.rows(t2)
+    assert_eq(r[0]["nombre"], "ana", "xlsx roundtrip str")
+    assert(near(r[0]["venta"], 100), "xlsx roundtrip número")
+    assert_eq(r[0]["activo"], yes,   "xlsx roundtrip bool")
+
+    t3 = tbl.load_sheet("tests/output_table_rt.xlsx", "Sheet1")
+    assert_eq(tbl.count(t3), 6, "load_sheet por nombre")
+}
+
+fn test_load_datos_ventas() {
+    t = tbl.load("tests/datos_ventas.csv")
+    assert_eq(tbl.count(t), 15, "csv real filas")
+    assert_eq(tbl.size(t)["cols"], 5, "csv real cols")
+    assert_eq(tbl.agg(t, "venta", "sum"), 180150, "csv real suma exacta")
+    assert_eq(tbl.count(t, "region == 'Norte'"), 6, "csv real filtro")
+}
+
+fn test_delimitadores() {
+    fs.write("tests/output_table_semi.csv", "a;b\n1;x\n3;y\n")
+    t = tbl.load("tests/output_table_semi.csv")
+    assert_eq(tbl.count(t), 2, "csv punto y coma filas")
+    assert_eq(tbl.rows(t)[0]["a"], 1,   "csv punto y coma valor")
+    assert_eq(tbl.rows(t)[1]["b"], "y", "csv punto y coma str")
+
+    fs.write("tests/output_table_tab.txt", "a\tb\n5\tz\n")
+    t2 = tbl.load("tests/output_table_tab.txt")
+    assert_eq(tbl.count(t2), 1, "tsv filas")
+    assert_eq(tbl.rows(t2)[0]["a"], 5, "tsv valor")
+}
+
+fn test_stream() {
+    grandes = tbl.stream("tests/datos_ventas.csv", "venta > 20000")
+    assert_eq(tbl.count(grandes), 3, "stream filtra")
+    lim = tbl.stream("tests/datos_ventas.csv", "venta > 0", 4)
+    assert_eq(tbl.count(lim), 4, "stream con límite")
+    -- stream también auto-detecta delimitador
+    semis = tbl.stream("tests/output_table_semi.csv", "a > 1")
+    assert_eq(tbl.count(semis), 1, "stream punto y coma")
+}
+
+fn test_errores() {
+    t = mk()
+    ok = no
+    attempt {
+        tbl.load("tests/inexistente.xyz")
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "load formato desconocido lanza error")
+
+    ok = no
+    attempt {
+        tbl.stats(t, "nombre")
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "stats columna texto lanza error")
+
+    ok = no
+    attempt {
+        tbl.from([1, 2, 3])
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "from elemento no-dict lanza error")
+
+    ok = no
+    attempt {
+        tbl.forecast(tbl.from([{ "v": 1 }]), "v", 3)
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "forecast con 1 valor lanza error")
+
+    ok = no
+    attempt {
+        tbl.where(t, "venta +* 2")
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "where expresión inválida lanza error")
+
+    ok = no
+    attempt {
+        tbl.group(t, "region", "venta", "mediana")
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "group operación desconocida lanza error")
+
+    ok = no
+    attempt {
+        tbl.add(t, "x", "foo(venta)")
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "add función desconocida lanza error")
+}
+
+fn test_peek_schema_no_crash() {
+    t = mk()
+    tbl.peek(t, 3)
+    tbl.schema(t)
+    assert(yes, "peek y schema no crashean")
+}

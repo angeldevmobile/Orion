@@ -45,7 +45,7 @@ Probados con aserciones reales sobre su salida:
 | `pdf` | create (genera archivo .pdf) |
 | `watch` | stat de archivo |
 | `cosmos` | star, universe (simulación) |
-| `table` | from (lista de dicts) |
+| `table` | barrido e2e completo (2026-07-16, `tests/test_table.orx`, 27 tests / ~110 checks exactos): from/rows/size/count/column, keep/drop/rename/cast (bool inteligente), where con motor de expresiones real (parser con precedencia: && \|\| !, paréntesis, aritmética, columna vs columna, contains/starts_with/ends_with, null), add con funciones (upper/lower/trim/len/abs/round/floor/ceil/sqrt/min/max/pow, negativos, concat), sort/top/bottom/dedupe/sample, group/agg (count no-nulos, op inválida = error), stats con percentiles interpolados (paridad frame), join inner+left/concat, forecast/correlate/anomalies/rank/moving_avg/normalize, profile (detecta bool), save→load CSV/JSON/XLSX + load_sheet, delimitadores auto (`,` `;` tab) leyendo solo 1ª línea, stream con límite y delimitador auto, errores limpios vía attempt |
 | `serie` | new (serie temporal) |
 | `frame` | barrido e2e completo (2026-07-15, `tests/test_frame.orx`, 16 tests / ~80 checks exactos): from_list/schema/size/col/row/to_list, keep/drop/rename, where_ por tipo, head/tail/sort, sum/mean/min/max/std, stats con percentiles interpolados, group (sum/avg/count/min/max), add_col, save→open CSV, save_odf→load_odf + autodetección, from_txt con separador, scan_stats, each_chunk, to_excel/txt_to_odf/txt_to_excel, free/frames (gestión del store) |
 | `timewarp` | timestamp |

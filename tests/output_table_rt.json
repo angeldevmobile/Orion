@@ -1,0 +1,50 @@
+[
+  {
+    "activo": true,
+    "meta": 150,
+    "nombre": "ana",
+    "precio": 1.5,
+    "region": "norte",
+    "venta": 100
+  },
+  {
+    "activo": false,
+    "meta": 150,
+    "nombre": "beto",
+    "precio": 2.5,
+    "region": "norte",
+    "venta": 200
+  },
+  {
+    "activo": true,
+    "meta": 250,
+    "nombre": "carla",
+    "precio": 3.5,
+    "region": "sur",
+    "venta": 300
+  },
+  {
+    "activo": false,
+    "meta": 500,
+    "nombre": "dan",
+    "precio": 4.5,
+    "region": "sur",
+    "venta": 400
+  },
+  {
+    "activo": true,
+    "meta": 450,
+    "nombre": "eva",
+    "precio": 5.5,
+    "region": "este",
+    "venta": 500
+  },
+  {
+    "activo": false,
+    "meta": 700,
+    "nombre": "fede",
+    "precio": 6.5,
+    "region": "este",
+    "venta": 600
+  }
+]

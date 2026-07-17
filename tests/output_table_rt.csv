@@ -1,0 +1,7 @@
+activo,meta,nombre,precio,region,venta
+true,150,ana,1.5,norte,100
+false,150,beto,2.5,norte,200
+true,250,carla,3.5,sur,300
+false,500,dan,4.5,sur,400
+true,450,eva,5.5,este,500
+false,700,fede,6.5,este,600

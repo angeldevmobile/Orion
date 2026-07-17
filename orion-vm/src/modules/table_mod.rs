@@ -89,8 +89,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 info.insert("nulls".into(),  EvalValue::Int(nulls as i64));
                 info.insert("filled".into(), EvalValue::Int((vals.len() - nulls) as i64));
 
+                let non_null: Vec<&EvalValue> =
+                    vals.iter().filter(|v| !matches!(v, EvalValue::Null)).collect();
                 let nums: Vec<f64> = vals.iter().filter_map(|v| v.to_f64().ok()).collect();
-                if !nums.is_empty() {
+                if !non_null.is_empty() && non_null.iter().all(|v| matches!(v, EvalValue::Bool(_))) {
+                    let trues = non_null.iter().filter(|v| matches!(v, EvalValue::Bool(true))).count();
+                    info.insert("type".into(),   EvalValue::Str("bool".into()));
+                    info.insert("trues".into(),  EvalValue::Int(trues as i64));
+                    info.insert("falses".into(), EvalValue::Int((non_null.len() - trues) as i64));
+                } else if !nums.is_empty() {
                     let stats = compute_stats(&nums);
                     info.insert("type".into(),    EvalValue::Str("number".into()));
                     info.insert("min".into(),     EvalValue::Float(stats.min));
@@ -174,15 +181,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //    Filtros y ordenación                                              
 
-        // where(table, "col > 100 && region == 'Norte'") → table filtrada
+        // where(table, condicion) → table filtrada
+        // Soporta: comparadores (== != > >= < <= contains starts_with ends_with),
+        // lógica (&& || !), paréntesis, aritmética, columna vs columna y funciones.
+        // Ej: "(region == 'Norte' || region == 'Sur') && venta * 1.19 > meta"
         "where" => {
             if args.len() < 2 { return Err("table.where requiere (tabla, condicion)".into()); }
             let rows = list_arg("where", &args, 0)?;
             let cond = str_arg("where", &args, 1)?;
+            let ast = parse_table_expr(&cond).map_err(|e| format!("table.where: {}", e))?;
             let result: Vec<EvalValue> = rows.into_iter()
                 .filter(|row| {
                     if let EvalValue::Dict(m) = row {
-                        eval_condition(m, &cond)
+                        eval_texpr(m, &ast).is_truthy()
                     } else { false }
                 })
                 .collect();
@@ -211,7 +222,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if args.len() < 3 { return Err("table.top requiere (tabla, columna, n)".into()); }
             let mut rows = list_arg("top", &args, 0)?;
             let col = str_arg("top", &args, 1)?;
-            let n   = int_arg("top", &args, 2)? as usize;
+            let n   = int_arg("top", &args, 2)?.max(0) as usize;
             rows.sort_by(|a, b| eval_ord(&dict_get_val(b, &col), &dict_get_val(a, &col)));
             Ok(EvalValue::List(rows.into_iter().take(n).collect()))
         }
@@ -221,7 +232,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if args.len() < 3 { return Err("table.bottom requiere (tabla, columna, n)".into()); }
             let mut rows = list_arg("bottom", &args, 0)?;
             let col = str_arg("bottom", &args, 1)?;
-            let n   = int_arg("bottom", &args, 2)? as usize;
+            let n   = int_arg("bottom", &args, 2)?.max(0) as usize;
             rows.sort_by(|a, b| eval_ord(&dict_get_val(a, &col), &dict_get_val(b, &col)));
             Ok(EvalValue::List(rows.into_iter().take(n).collect()))
         }
@@ -230,7 +241,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "sample" => {
             if args.len() < 2 { return Err("table.sample requiere (tabla, n)".into()); }
             let mut rows = list_arg("sample", &args, 0)?;
-            let n = (int_arg("sample", &args, 1)? as usize).min(rows.len());
+            let n = (int_arg("sample", &args, 1)?.max(0) as usize).min(rows.len());
             // Fisher-Yates parcial
             use rand::Rng;
             let mut rng = rand::thread_rng();
@@ -259,16 +270,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //    Transformación                                                    
 
         // add(table, "nueva_col", "expresion") → table con columna calculada
-        // Expresiones soportadas: "precio * 1.19", "nombre + ' extra'",
-        //   "col1 + col2", "round(precio, 2)", "upper(nombre)", "lower(nombre)"
+        // Aritmética completa (+ - * / % con precedencia, paréntesis, negativos),
+        // concatenación de texto con +, comparadores (producen columna booleana)
+        // y funciones: upper lower trim len abs round floor ceil sqrt min max pow.
+        // Ej: "round((venta - costo) / venta * 100, 2)", "upper(nombre) + ' (' + region + ')'"
         "add" => {
             if args.len() < 3 { return Err("table.add requiere (tabla, nombre_col, expresion)".into()); }
             let rows = list_arg("add", &args, 0)?;
             let col  = str_arg("add", &args, 1)?;
             let expr = str_arg("add", &args, 2)?;
+            let ast = parse_table_expr(&expr).map_err(|e| format!("table.add: {}", e))?;
             let result = rows.into_iter().map(|row| {
                 if let EvalValue::Dict(mut m) = row {
-                    let val = eval_expr(&m, &expr);
+                    let val = eval_texpr(&m, &ast);
                     m.insert(col.clone(), val);
                     EvalValue::Dict(m)
                 } else { row }
@@ -286,6 +300,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let by    = str_arg("group", &args, 1)?;
             let val   = str_arg("group", &args, 2)?;
             let op    = str_arg("group", &args, 3)?;
+            if !matches!(op.as_str(), "sum" | "avg" | "count" | "min" | "max") {
+                return Err(format!("table.group: operación '{}' desconocida (usa sum|avg|count|min|max)", op));
+            }
 
             let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
             let mut key_order: Vec<String> = Vec::new();
@@ -306,12 +323,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     "avg"   => nums.iter().sum::<f64>() / nums.len() as f64,
                     "count" => nums.len() as f64,
                     "min"   => nums.iter().cloned().fold(f64::INFINITY, f64::min),
-                    "max"   => nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
-                    _       => nums.iter().sum(),
+                    _       => nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
                 };
                 let mut m = HashMap::new();
                 m.insert(by.clone(),  EvalValue::Str(k.clone()));
-                m.insert(val.clone(), EvalValue::Float(agg_val));
+                m.insert(val.clone(), smart_num(agg_val));
                 EvalValue::Dict(m)
             }).collect();
 
@@ -319,11 +335,20 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
 
         // agg(table, "col", "sum"|"avg"|"count"|"min"|"max") → número
+        // count cuenta valores no nulos de cualquier tipo; el resto opera sobre números.
         "agg" => {
             if args.len() < 3 { return Err("table.agg requiere (tabla, columna, operacion)".into()); }
             let rows = list_arg("agg", &args, 0)?;
             let col  = str_arg("agg", &args, 1)?;
             let op   = str_arg("agg", &args, 2)?;
+            if op == "count" {
+                let n = rows.iter().filter(|r| {
+                    if let EvalValue::Dict(m) = r {
+                        !matches!(m.get(&col).unwrap_or(&EvalValue::Null), EvalValue::Null)
+                    } else { false }
+                }).count();
+                return Ok(EvalValue::Int(n as i64));
+            }
             let nums: Vec<f64> = rows.iter()
                 .filter_map(|r| if let EvalValue::Dict(m) = r { m.get(&col)?.to_f64().ok() } else { None })
                 .collect();
@@ -331,12 +356,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let result = match op.as_str() {
                 "sum"   => nums.iter().sum(),
                 "avg"   => nums.iter().sum::<f64>() / nums.len() as f64,
-                "count" => nums.len() as f64,
                 "min"   => nums.iter().cloned().fold(f64::INFINITY, f64::min),
                 "max"   => nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
-                _ => return Err(format!("table.agg: operación '{}' desconocida", op)),
+                _ => return Err(format!("table.agg: operación '{}' desconocida (usa sum|avg|count|min|max)", op)),
             };
-            Ok(EvalValue::Float(result))
+            Ok(smart_num(result))
         }
 
         // stats(table, "col") → dict completo: min/max/avg/std/p25/median/p75/count/nulls
@@ -377,8 +401,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let rows = list_arg("count", &args, 0)?;
             if let Some(cond_arg) = args.get(1) {
                 let cond = cond_arg.to_string();
+                let ast = parse_table_expr(&cond).map_err(|e| format!("table.count: {}", e))?;
                 let n = rows.iter().filter(|row| {
-                    if let EvalValue::Dict(m) = row { eval_condition(m, &cond) } else { false }
+                    if let EvalValue::Dict(m) = row { eval_texpr(m, &ast).is_truthy() } else { false }
                 }).count();
                 Ok(EvalValue::Int(n as i64))
             } else {
@@ -389,11 +414,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //    Combinación                                                       
 
         // join(table1, table2, "key_col") → inner join por columna clave
+        // join(table1, table2, "key_col", "left") → conserva todas las filas de
+        // table1 y rellena con null las columnas del lado derecho sin match.
         "join" => {
             if args.len() < 3 { return Err("table.join requiere (tabla1, tabla2, clave)".into()); }
             let left  = list_arg("join", &args, 0)?;
             let right = list_arg("join", &args, 1)?;
             let key   = str_arg("join", &args, 2)?;
+            let mode  = args.get(3).map(|v| v.to_string()).unwrap_or_else(|| "inner".to_string());
+            if mode != "inner" && mode != "left" {
+                return Err(format!("table.join: modo '{}' desconocido (usa inner|left)", mode));
+            }
+            let right_cols: Vec<String> = infer_headers(&right)
+                .into_iter().filter(|c| c != &key).collect();
 
             // Índice del lado derecho
             let mut right_index: HashMap<String, Vec<HashMap<String, EvalValue>>> = HashMap::new();
@@ -416,6 +449,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                             }
                             result.push(EvalValue::Dict(merged));
                         }
+                    } else if mode == "left" {
+                        let mut merged = lm.clone();
+                        for rc in &right_cols {
+                            merged.entry(rc.clone()).or_insert(EvalValue::Null);
+                        }
+                        result.push(EvalValue::Dict(merged));
                     }
                 }
             }
@@ -602,14 +641,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //    Streaming para archivos enormes                                   
 
-        // stream(path, condicion) → filas que cumplen la condición, sin cargar todo en RAM
+        // stream(path, condicion) o stream(path, condicion, limite)
+        // → filas que cumplen la condición, sin cargar todo en RAM.
+        // Auto-detecta el delimitador (coma, punto y coma o tab) igual que load.
         "stream" => {
             if args.len() < 2 { return Err("table.stream requiere (path, condicion)".into()); }
             let path = str_arg("stream", &args, 0)?;
             let cond = str_arg("stream", &args, 1)?;
             let limit = args.get(2).and_then(|v| v.to_i64().ok()).unwrap_or(i64::MAX) as usize;
+            let ast = parse_table_expr(&cond).map_err(|e| format!("table.stream: {}", e))?;
+            let delimiter = detect_delimiter(&path).map_err(|e| format!("table.stream: {}", e))?;
 
             let mut rdr = csv::ReaderBuilder::new()
+                .delimiter(delimiter)
                 .has_headers(true)
                 .flexible(true)
                 .from_path(&path)
@@ -628,7 +672,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     let key = headers.get(i).cloned().unwrap_or_else(|| format!("col_{}", i));
                     m.insert(key, infer_csv_value(field.trim()));
                 }
-                if eval_condition(&m, &cond) {
+                if eval_texpr(&m, &ast).is_truthy() {
                     result.push(EvalValue::Dict(m));
                 }
             }
@@ -712,14 +756,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 //    Loaders                                                                   
 
+// Lee SOLO la primera línea para detectar el separador (no carga el archivo entero)
+fn detect_delimiter(path: &str) -> Result<u8, String> {
+    use std::io::BufRead;
+    let f = std::fs::File::open(path)
+        .map_err(|e| format!("no se pudo abrir '{}': {}", path, e))?;
+    let mut first = String::new();
+    std::io::BufReader::new(f).read_line(&mut first)
+        .map_err(|e| format!("no se pudo leer '{}': {}", path, e))?;
+    Ok(if first.contains('\t') { b'\t' }
+       else if first.contains(';') { b';' }
+       else { b',' })
+}
+
 fn load_csv(path: &str) -> Result<EvalValue, String> {
-    // Auto-detect delimiter
-    let sample = std::fs::read_to_string(path)
-        .map_err(|e| format!("table.load: {}", e))?;
-    let first_line = sample.lines().next().unwrap_or("");
-    let delimiter = if first_line.contains('\t') { b'\t' }
-                    else if first_line.contains(';') { b';' }
-                    else { b',' };
+    let delimiter = detect_delimiter(path).map_err(|e| format!("table.load: {}", e))?;
 
     let mut rdr = csv::ReaderBuilder::new()
         .delimiter(delimiter)
@@ -933,8 +984,13 @@ fn print_schema(rows: &[EvalValue]) {
         let uniq: std::collections::HashSet<String> =
             vals.iter().filter(|v| !matches!(v, EvalValue::Null))
                 .map(|v| v.to_string()).collect();
+        let non_null_count = vals.len() - nulls;
+        let all_bool = non_null_count > 0 &&
+            vals.iter().all(|v| matches!(v, EvalValue::Bool(_) | EvalValue::Null));
         let nums: Vec<f64> = vals.iter().filter_map(|v| v.to_f64().ok()).collect();
-        let tipo = if nums.len() > vals.len() / 2 { "number" } else { "string" };
+        let tipo = if all_bool { "bool" }
+                   else if nums.len() > vals.len() / 2 { "number" }
+                   else { "string" };
         let sample: String = vals.iter()
             .filter(|v| !matches!(v, EvalValue::Null))
             .take(3)
@@ -951,164 +1007,404 @@ fn print_schema(rows: &[EvalValue]) {
     println!();
 }
 
-//    Evaluador de condiciones                                                   
+//    Motor de expresiones (where / add / count / stream)
+//
+//    Gramática única para condiciones y columnas calculadas; se parsea UNA vez
+//    por llamada y se evalúa por fila. Precedencia de menor a mayor:
+//      or      := and ('||' and)*
+//      and     := not ('&&' not)*
+//      not     := '!' not | cmp
+//      cmp     := sum (('=='|'!='|'>='|'<='|'>'|'<'|contains|starts_with|ends_with) sum)?
+//      sum     := term (('+'|'-') term)*
+//      term    := factor (('*'|'/'|'%') factor)*
+//      factor  := '-' factor | primary
+//      primary := número | 'texto' | true/yes | false/no | null | columna
+//              | función '(' expr (',' expr)* ')' | '(' or ')'
 
-fn eval_condition(row: &HashMap<String, EvalValue>, expr: &str) -> bool {
-    let expr = expr.trim();
-
-    // OR primero (menor precedencia)
-    if let Some(idx) = split_logical(expr, "||") {
-        return eval_condition(row, &expr[..idx]) || eval_condition(row, &expr[idx+2..]);
-    }
-    // AND
-    if let Some(idx) = split_logical(expr, "&&") {
-        return eval_condition(row, &expr[..idx]) && eval_condition(row, &expr[idx+2..]);
-    }
-
-    // Operadores en orden de longitud descendente para evitar ambigüedad
-    for op in &["!=", ">=", "<=", "==", ">", "<", " contains ", " starts_with ", " ends_with "] {
-        if let Some(pos) = expr.find(op) {
-            let col_part = expr[..pos].trim();
-            let val_part = expr[pos + op.len()..].trim();
-            let col_val  = row.get(col_part).cloned().unwrap_or(EvalValue::Null);
-            let cmp_val  = parse_literal(val_part);
-            return match op.trim() {
-                "==" => eval_eq(&col_val, &cmp_val),
-                "!=" => !eval_eq(&col_val, &cmp_val),
-                ">"  => eval_gt(&col_val, &cmp_val),
-                ">=" => !eval_lt(&col_val, &cmp_val),
-                "<"  => eval_lt(&col_val, &cmp_val),
-                "<=" => !eval_gt(&col_val, &cmp_val),
-                "contains"    => match (&col_val, &cmp_val) {
-                    (EvalValue::Str(a), EvalValue::Str(b)) => a.contains(b.as_str()),
-                    _ => false,
-                },
-                "starts_with" => match (&col_val, &cmp_val) {
-                    (EvalValue::Str(a), EvalValue::Str(b)) => a.starts_with(b.as_str()),
-                    _ => false,
-                },
-                "ends_with"   => match (&col_val, &cmp_val) {
-                    (EvalValue::Str(a), EvalValue::Str(b)) => a.ends_with(b.as_str()),
-                    _ => false,
-                },
-                _ => false,
-            };
-        }
-    }
-    false
+#[derive(Debug, Clone)]
+enum Tok {
+    Int(i64),
+    Float(f64),
+    Str(String),
+    Ident(String),
+    Sym(&'static str),
 }
 
-fn split_logical(expr: &str, op: &str) -> Option<usize> {
-    let bytes = expr.as_bytes();
-    let mut in_str = false;
+// (nombre, mínimo de argumentos, máximo de argumentos)
+const EXPR_FNS: &[(&str, usize, usize)] = &[
+    ("upper", 1, 1), ("lower", 1, 1), ("trim", 1, 1), ("len", 1, 1),
+    ("abs", 1, 1), ("round", 1, 2), ("floor", 1, 1), ("ceil", 1, 1),
+    ("sqrt", 1, 1), ("min", 1, usize::MAX), ("max", 1, usize::MAX), ("pow", 2, 2),
+];
+
+fn tokenize_expr(src: &str) -> Result<Vec<Tok>, String> {
+    let chars: Vec<char> = src.chars().collect();
+    let mut toks = Vec::new();
     let mut i = 0;
-    while i + op.len() <= bytes.len() {
-        if bytes[i] == b'\'' || bytes[i] == b'"' { in_str = !in_str; }
-        if !in_str && &expr[i..i+op.len()] == op { return Some(i); }
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() { i += 1; continue; }
+        if c == '\'' || c == '"' {
+            let quote = c;
+            let mut s = String::new();
+            i += 1;
+            while i < chars.len() && chars[i] != quote { s.push(chars[i]); i += 1; }
+            if i >= chars.len() { return Err(format!("literal de texto sin cerrar: {}{}", quote, s)); }
+            i += 1;
+            toks.push(Tok::Str(s));
+            continue;
+        }
+        if c.is_ascii_digit() {
+            let start = i;
+            let mut is_float = false;
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                if chars[i] == '.' {
+                    if is_float { break; }
+                    is_float = true;
+                }
+                i += 1;
+            }
+            let text: String = chars[start..i].iter().collect();
+            if is_float {
+                let f = text.parse::<f64>().map_err(|_| format!("número inválido '{}'", text))?;
+                toks.push(Tok::Float(f));
+            } else {
+                let n = text.parse::<i64>().map_err(|_| format!("número inválido '{}'", text))?;
+                toks.push(Tok::Int(n));
+            }
+            continue;
+        }
+        if c.is_alphabetic() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') { i += 1; }
+            toks.push(Tok::Ident(chars[start..i].iter().collect()));
+            continue;
+        }
+        if i + 1 < chars.len() {
+            let two: String = chars[i..i+2].iter().collect();
+            let sym2 = match two.as_str() {
+                "&&" => Some("&&"), "||" => Some("||"), "==" => Some("=="),
+                "!=" => Some("!="), ">=" => Some(">="), "<=" => Some("<="),
+                _ => None,
+            };
+            if let Some(s) = sym2 { toks.push(Tok::Sym(s)); i += 2; continue; }
+        }
+        let sym1 = match c {
+            '>' => ">", '<' => "<", '!' => "!", '+' => "+", '-' => "-",
+            '*' => "*", '/' => "/", '%' => "%", '(' => "(", ')' => ")", ',' => ",",
+            _ => return Err(format!("carácter inesperado '{}'", c)),
+        };
+        toks.push(Tok::Sym(sym1));
         i += 1;
     }
-    None
+    Ok(toks)
 }
 
-fn parse_literal(s: &str) -> EvalValue {
-    let s = s.trim();
-    if s.starts_with('\'') && s.ends_with('\'') {
-        return EvalValue::Str(s[1..s.len()-1].to_string());
-    }
-    if s.starts_with('"') && s.ends_with('"') {
-        return EvalValue::Str(s[1..s.len()-1].to_string());
-    }
-    if let Ok(n) = s.parse::<i64>()   { return EvalValue::Int(n); }
-    if let Ok(f) = s.parse::<f64>()   { return EvalValue::Float(f); }
-    if s == "yes" || s == "true"       { return EvalValue::Bool(true); }
-    if s == "no"  || s == "false"      { return EvalValue::Bool(false); }
-    if s == "null"                     { return EvalValue::Null; }
-    EvalValue::Str(s.to_string())
+#[derive(Debug, Clone)]
+enum TExpr {
+    Lit(EvalValue),
+    Col(String),
+    Neg(Box<TExpr>),
+    Not(Box<TExpr>),
+    Bin(&'static str, Box<TExpr>, Box<TExpr>),
+    Call(&'static str, Vec<TExpr>),
 }
 
-//    Evaluador de expresiones de columna                                       
+struct ExprParser { toks: Vec<Tok>, pos: usize }
 
-fn eval_expr(row: &HashMap<String, EvalValue>, expr: &str) -> EvalValue {
-    let expr = expr.trim();
+impl ExprParser {
+    fn peek(&self) -> Option<&Tok> { self.toks.get(self.pos) }
 
-    // Funciones especiales
-    if expr.starts_with("upper(") && expr.ends_with(')') {
-        let inner = &expr[6..expr.len()-1];
-        return match eval_expr(row, inner) {
-            EvalValue::Str(s) => EvalValue::Str(s.to_uppercase()),
-            other => other,
-        };
+    fn eat_sym(&mut self, s: &str) -> bool {
+        if matches!(self.peek(), Some(Tok::Sym(x)) if *x == s) { self.pos += 1; true } else { false }
     }
-    if expr.starts_with("lower(") && expr.ends_with(')') {
-        let inner = &expr[6..expr.len()-1];
-        return match eval_expr(row, inner) {
-            EvalValue::Str(s) => EvalValue::Str(s.to_lowercase()),
-            other => other,
-        };
-    }
-    if expr.starts_with("round(") && expr.ends_with(')') {
-        let inner = &expr[6..expr.len()-1];
-        let parts: Vec<&str> = inner.splitn(2, ',').collect();
-        let val = eval_expr(row, parts[0].trim());
-        let dec = parts.get(1).and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(0);
-        if let Ok(f) = val.to_f64() {
-            let factor = 10f64.powi(dec);
-            return EvalValue::Float((f * factor).round() / factor);
+
+    fn parse_or(&mut self) -> Result<TExpr, String> {
+        let mut left = self.parse_and()?;
+        while self.eat_sym("||") {
+            let right = self.parse_and()?;
+            left = TExpr::Bin("||", Box::new(left), Box::new(right));
         }
-        return val;
-    }
-    if expr.starts_with("abs(") && expr.ends_with(')') {
-        let inner = &expr[4..expr.len()-1];
-        if let Ok(f) = eval_expr(row, inner).to_f64() {
-            return EvalValue::Float(f.abs());
-        }
+        Ok(left)
     }
 
-    // Operadores aritméticos: busca el último operador fuera de paréntesis
-    for op in &['+', '-', '*', '/'] {
-        if let Some(pos) = find_op_outside_parens(expr, *op) {
-            let left  = eval_expr(row, &expr[..pos]);
-            let right = eval_expr(row, &expr[pos+1..]);
-            return match op {
-                '+' => match (&left, &right) {
-                    (EvalValue::Str(a), EvalValue::Str(b)) =>
-                        EvalValue::Str(format!("{}{}", a, b)),
-                    _ => match (left.to_f64(), right.to_f64()) {
-                        (Ok(a), Ok(b)) => smart_num(a + b),
-                        _ => EvalValue::Null,
+    fn parse_and(&mut self) -> Result<TExpr, String> {
+        let mut left = self.parse_not()?;
+        while self.eat_sym("&&") {
+            let right = self.parse_not()?;
+            left = TExpr::Bin("&&", Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_not(&mut self) -> Result<TExpr, String> {
+        if self.eat_sym("!") {
+            return Ok(TExpr::Not(Box::new(self.parse_not()?)));
+        }
+        self.parse_cmp()
+    }
+
+    fn parse_cmp(&mut self) -> Result<TExpr, String> {
+        let left = self.parse_sum()?;
+        let op: Option<&'static str> = match self.peek() {
+            Some(Tok::Sym(s)) if ["==", "!=", ">=", "<=", ">", "<"].contains(s) => Some(*s),
+            Some(Tok::Ident(w)) if w.as_str() == "contains"    => Some("contains"),
+            Some(Tok::Ident(w)) if w.as_str() == "starts_with" => Some("starts_with"),
+            Some(Tok::Ident(w)) if w.as_str() == "ends_with"   => Some("ends_with"),
+            _ => None,
+        };
+        if let Some(op) = op {
+            self.pos += 1;
+            let right = self.parse_sum()?;
+            return Ok(TExpr::Bin(op, Box::new(left), Box::new(right)));
+        }
+        Ok(left)
+    }
+
+    fn parse_sum(&mut self) -> Result<TExpr, String> {
+        let mut left = self.parse_term()?;
+        loop {
+            let op = if self.eat_sym("+") { "+" }
+                     else if self.eat_sym("-") { "-" }
+                     else { break };
+            let right = self.parse_term()?;
+            left = TExpr::Bin(op, Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_term(&mut self) -> Result<TExpr, String> {
+        let mut left = self.parse_factor()?;
+        loop {
+            let op = if self.eat_sym("*") { "*" }
+                     else if self.eat_sym("/") { "/" }
+                     else if self.eat_sym("%") { "%" }
+                     else { break };
+            let right = self.parse_factor()?;
+            left = TExpr::Bin(op, Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_factor(&mut self) -> Result<TExpr, String> {
+        if self.eat_sym("-") {
+            return Ok(TExpr::Neg(Box::new(self.parse_factor()?)));
+        }
+        self.parse_primary()
+    }
+
+    fn parse_primary(&mut self) -> Result<TExpr, String> {
+        match self.toks.get(self.pos).cloned() {
+            Some(Tok::Int(n))   => { self.pos += 1; Ok(TExpr::Lit(EvalValue::Int(n))) }
+            Some(Tok::Float(f)) => { self.pos += 1; Ok(TExpr::Lit(EvalValue::Float(f))) }
+            Some(Tok::Str(s))   => { self.pos += 1; Ok(TExpr::Lit(EvalValue::Str(s))) }
+            Some(Tok::Sym("(")) => {
+                self.pos += 1;
+                let e = self.parse_or()?;
+                if !self.eat_sym(")") { return Err("falta ')' de cierre".into()); }
+                Ok(e)
+            }
+            Some(Tok::Ident(w)) => {
+                self.pos += 1;
+                match w.as_str() {
+                    "true" | "yes" => return Ok(TExpr::Lit(EvalValue::Bool(true))),
+                    "false" | "no" => return Ok(TExpr::Lit(EvalValue::Bool(false))),
+                    "null"         => return Ok(TExpr::Lit(EvalValue::Null)),
+                    _ => {}
+                }
+                if self.eat_sym("(") {
+                    let spec = EXPR_FNS.iter().find(|(name, _, _)| *name == w.as_str());
+                    let (name, min_a, max_a) = match spec {
+                        Some(s) => *s,
+                        None => return Err(format!(
+                            "función desconocida '{}'. Disponibles: {}",
+                            w, EXPR_FNS.iter().map(|(n, _, _)| *n).collect::<Vec<_>>().join(", ")
+                        )),
+                    };
+                    let mut fn_args = Vec::new();
+                    if !self.eat_sym(")") {
+                        loop {
+                            fn_args.push(self.parse_or()?);
+                            if self.eat_sym(",") { continue; }
+                            if self.eat_sym(")") { break; }
+                            return Err(format!("falta ')' en la llamada a {}", name));
+                        }
                     }
-                },
-                '-' => match (left.to_f64(), right.to_f64()) {
-                    (Ok(a), Ok(b)) => smart_num(a - b),
-                    _ => EvalValue::Null,
-                },
-                '*' => match (left.to_f64(), right.to_f64()) {
-                    (Ok(a), Ok(b)) => smart_num(a * b),
-                    _ => EvalValue::Null,
-                },
-                '/' => match (left.to_f64(), right.to_f64()) {
-                    (Ok(a), Ok(b)) if b != 0.0 => EvalValue::Float(a / b),
-                    _ => EvalValue::Null,
-                },
-                _ => EvalValue::Null,
-            };
+                    if fn_args.len() < min_a || fn_args.len() > max_a {
+                        return Err(format!("{}: número de argumentos inválido ({})", name, fn_args.len()));
+                    }
+                    return Ok(TExpr::Call(name, fn_args));
+                }
+                Ok(TExpr::Col(w))
+            }
+            Some(other) => Err(format!("token inesperado: {:?}", other)),
+            None => Err("expresión incompleta".into()),
         }
     }
-
-    // Literal o nombre de columna
-    if let Some(v) = row.get(expr) { return v.clone(); }
-    parse_literal(expr)
 }
 
-fn find_op_outside_parens(expr: &str, op: char) -> Option<usize> {
-    let mut depth = 0i32;
-    let mut last = None;
-    for (i, c) in expr.char_indices() {
-        if c == '(' { depth += 1; }
-        if c == ')' { depth -= 1; }
-        if c == op && depth == 0 { last = Some(i); }
+fn parse_table_expr(src: &str) -> Result<TExpr, String> {
+    let toks = tokenize_expr(src)?;
+    if toks.is_empty() { return Err("expresión vacía".into()); }
+    let mut p = ExprParser { toks, pos: 0 };
+    let e = p.parse_or()?;
+    if p.pos < p.toks.len() {
+        return Err(format!("expresión inválida cerca de {:?}", p.toks[p.pos]));
     }
-    last
+    Ok(e)
+}
+
+fn eval_texpr(row: &HashMap<String, EvalValue>, e: &TExpr) -> EvalValue {
+    match e {
+        TExpr::Lit(v) => v.clone(),
+        TExpr::Col(name) => row.get(name).cloned().unwrap_or(EvalValue::Null),
+        TExpr::Neg(x) => match eval_texpr(row, x) {
+            EvalValue::Int(n)   => EvalValue::Int(-n),
+            EvalValue::Float(f) => EvalValue::Float(-f),
+            other => match other.to_f64() {
+                Ok(f) => EvalValue::Float(-f),
+                Err(_) => EvalValue::Null,
+            },
+        },
+        TExpr::Not(x) => EvalValue::Bool(!eval_texpr(row, x).is_truthy()),
+        TExpr::Bin("&&", l, r) => {
+            if !eval_texpr(row, l).is_truthy() { return EvalValue::Bool(false); }
+            EvalValue::Bool(eval_texpr(row, r).is_truthy())
+        }
+        TExpr::Bin("||", l, r) => {
+            if eval_texpr(row, l).is_truthy() { return EvalValue::Bool(true); }
+            EvalValue::Bool(eval_texpr(row, r).is_truthy())
+        }
+        TExpr::Bin(op, l, r) => {
+            let lv = eval_texpr(row, l);
+            let rv = eval_texpr(row, r);
+            eval_binop(op, &lv, &rv)
+        }
+        TExpr::Call(name, args) => {
+            let vals: Vec<EvalValue> = args.iter().map(|a| eval_texpr(row, a)).collect();
+            eval_expr_fn(name, &vals)
+        }
+    }
+}
+
+fn eval_binop(op: &str, l: &EvalValue, r: &EvalValue) -> EvalValue {
+    match op {
+        "+" => {
+            if matches!(l, EvalValue::Str(_)) || matches!(r, EvalValue::Str(_)) {
+                return EvalValue::Str(format!("{}{}", eval_to_str(l), eval_to_str(r)));
+            }
+            num_binop(l, r, i64::checked_add, |a, b| a + b)
+        }
+        "-" => num_binop(l, r, i64::checked_sub, |a, b| a - b),
+        "*" => num_binop(l, r, i64::checked_mul, |a, b| a * b),
+        "/" => match (l.to_f64(), r.to_f64()) {
+            (Ok(a), Ok(b)) if b != 0.0 => EvalValue::Float(a / b),
+            _ => EvalValue::Null,
+        },
+        "%" => match (l, r) {
+            (EvalValue::Int(a), EvalValue::Int(b)) if *b != 0 => EvalValue::Int(a % b),
+            _ => match (l.to_f64(), r.to_f64()) {
+                (Ok(a), Ok(b)) if b != 0.0 => EvalValue::Float(a % b),
+                _ => EvalValue::Null,
+            },
+        },
+        "==" => EvalValue::Bool(eval_eq(l, r)),
+        "!=" => EvalValue::Bool(!eval_eq(l, r)),
+        ">" | ">=" | "<" | "<=" => {
+            if matches!(l, EvalValue::Null) || matches!(r, EvalValue::Null) {
+                return EvalValue::Bool(false);
+            }
+            EvalValue::Bool(match op {
+                ">"  => eval_gt(l, r),
+                ">=" => !eval_lt(l, r),
+                "<"  => eval_lt(l, r),
+                _    => !eval_gt(l, r),
+            })
+        }
+        "contains" | "starts_with" | "ends_with" => match (l, r) {
+            (EvalValue::Str(a), EvalValue::Str(b)) => EvalValue::Bool(match op {
+                "contains"    => a.contains(b.as_str()),
+                "starts_with" => a.starts_with(b.as_str()),
+                _             => a.ends_with(b.as_str()),
+            }),
+            _ => EvalValue::Bool(false),
+        },
+        _ => EvalValue::Null,
+    }
+}
+
+// Int⊕Int se mantiene entero (con chequeo de overflow); si algo es float,
+// o el entero desborda, se pasa a f64.
+fn num_binop(
+    l: &EvalValue, r: &EvalValue,
+    int_op: fn(i64, i64) -> Option<i64>,
+    f_op: fn(f64, f64) -> f64,
+) -> EvalValue {
+    if let (EvalValue::Int(a), EvalValue::Int(b)) = (l, r) {
+        if let Some(n) = int_op(*a, *b) { return EvalValue::Int(n); }
+    }
+    match (l.to_f64(), r.to_f64()) {
+        (Ok(a), Ok(b)) => EvalValue::Float(f_op(a, b)),
+        _ => EvalValue::Null,
+    }
+}
+
+fn eval_expr_fn(name: &str, args: &[EvalValue]) -> EvalValue {
+    match name {
+        "upper" | "lower" | "trim" => match &args[0] {
+            EvalValue::Null => EvalValue::Null,
+            v => {
+                let s = match v { EvalValue::Str(s) => s.clone(), other => other.to_string() };
+                EvalValue::Str(match name {
+                    "upper" => s.to_uppercase(),
+                    "lower" => s.to_lowercase(),
+                    _       => s.trim().to_string(),
+                })
+            }
+        },
+        "len" => match &args[0] {
+            EvalValue::Str(s)  => EvalValue::Int(s.chars().count() as i64),
+            EvalValue::List(v) => EvalValue::Int(v.len() as i64),
+            EvalValue::Dict(m) => EvalValue::Int(m.len() as i64),
+            _ => EvalValue::Null,
+        },
+        "abs" => match &args[0] {
+            EvalValue::Int(n) => EvalValue::Int(n.abs()),
+            v => v.to_f64().map(|f| EvalValue::Float(f.abs())).unwrap_or(EvalValue::Null),
+        },
+        "round" => {
+            let dec = args.get(1).and_then(|v| v.to_i64().ok()).unwrap_or(0) as i32;
+            match args[0].to_f64() {
+                Ok(f) => {
+                    let factor = 10f64.powi(dec);
+                    EvalValue::Float((f * factor).round() / factor)
+                }
+                Err(_) => EvalValue::Null,
+            }
+        }
+        "floor" => args[0].to_f64().map(|f| EvalValue::Float(f.floor())).unwrap_or(EvalValue::Null),
+        "ceil"  => args[0].to_f64().map(|f| EvalValue::Float(f.ceil())).unwrap_or(EvalValue::Null),
+        "sqrt"  => match args[0].to_f64() {
+            Ok(f) if f >= 0.0 => EvalValue::Float(f.sqrt()),
+            _ => EvalValue::Null,
+        },
+        "min" | "max" => {
+            let all_int = args.iter().all(|v| matches!(v, EvalValue::Int(_)));
+            let nums: Vec<f64> = args.iter().filter_map(|v| v.to_f64().ok()).collect();
+            if nums.len() != args.len() { return EvalValue::Null; }
+            let best = if name == "min" {
+                nums.iter().cloned().fold(f64::INFINITY, f64::min)
+            } else {
+                nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+            };
+            if all_int { EvalValue::Int(best as i64) } else { EvalValue::Float(best) }
+        }
+        "pow" => match (args[0].to_f64(), args[1].to_f64()) {
+            (Ok(a), Ok(b)) => EvalValue::Float(a.powf(b)),
+            _ => EvalValue::Null,
+        },
+        _ => EvalValue::Null,
+    }
 }
 
 fn smart_num(f: f64) -> EvalValue {
@@ -1130,9 +1426,14 @@ fn compute_stats(nums: &[f64]) -> Stats {
     let avg = sum / n as f64;
     let variance = sorted.iter().map(|x| (x - avg).powi(2)).sum::<f64>() / n as f64;
     let std = variance.sqrt();
+    // Percentil con interpolación lineal (paridad con frame.stats)
     let percentile = |p: f64| -> f64 {
-        let idx = (p / 100.0 * (n - 1) as f64) as usize;
-        sorted[idx.min(n - 1)]
+        if n == 1 { return sorted[0]; }
+        let idx = p / 100.0 * (n - 1) as f64;
+        let lo = idx.floor() as usize;
+        let hi = (lo + 1).min(n - 1);
+        let frac = idx - lo as f64;
+        sorted[lo] + (sorted[hi] - sorted[lo]) * frac
     };
     Stats { min, max, avg, std, p25: percentile(25.0), median: percentile(50.0), p75: percentile(75.0) }
 }
@@ -1255,15 +1556,20 @@ fn ai_call(prompt: &str) -> Result<EvalValue, String> {
 
 //    Helpers generales                                                         
 
+// Unión de las claves de TODAS las filas (no solo la primera), para que las
+// tablas heterogéneas no pierdan columnas al guardar/imprimir.
 fn infer_headers(rows: &[EvalValue]) -> Vec<String> {
-    match rows.first() {
-        Some(EvalValue::Dict(m)) => {
-            let mut h: Vec<String> = m.keys().cloned().collect();
-            h.sort();
-            h
+    let mut seen = std::collections::HashSet::new();
+    let mut headers = Vec::new();
+    for row in rows {
+        if let EvalValue::Dict(m) = row {
+            for k in m.keys() {
+                if seen.insert(k.clone()) { headers.push(k.clone()); }
+            }
         }
-        _ => vec![],
     }
+    headers.sort();
+    headers
 }
 
 fn column_values(rows: &[EvalValue], col: &str) -> Vec<EvalValue> {
@@ -1352,6 +1658,7 @@ fn eval_eq(a: &EvalValue, b: &EvalValue) -> bool {
         (EvalValue::Str(x),   EvalValue::Str(y))   => x == y,
         (EvalValue::Bool(x),  EvalValue::Bool(y))  => x == y,
         (EvalValue::Null,     EvalValue::Null)      => true,
+        (EvalValue::Null, _) | (_, EvalValue::Null) => false,
         _ => a.to_string() == b.to_string(),
     }
 }
@@ -1387,7 +1694,18 @@ fn cast_value(v: EvalValue, to: &str) -> EvalValue {
         "int"    => v.to_i64().map(EvalValue::Int).unwrap_or(EvalValue::Null),
         "float"  => v.to_f64().map(EvalValue::Float).unwrap_or(EvalValue::Null),
         "string" => EvalValue::Str(v.to_string()),
-        "bool"   => EvalValue::Bool(v.is_truthy()),
+        // "true"/"yes"/"false"/"no" se reconocen como texto; el resto por truthiness
+        "bool"   => match &v {
+            EvalValue::Bool(_) => v,
+            EvalValue::Null    => EvalValue::Null,
+            EvalValue::Str(s)  => {
+                let t = s.trim().to_lowercase();
+                if t == "true" || t == "yes" { EvalValue::Bool(true) }
+                else if t == "false" || t == "no" { EvalValue::Bool(false) }
+                else { EvalValue::Bool(!t.is_empty()) }
+            }
+            other => EvalValue::Bool(other.is_truthy()),
+        },
         _ => v,
     }
 }
