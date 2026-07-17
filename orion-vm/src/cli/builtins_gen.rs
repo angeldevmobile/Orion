@@ -417,14 +417,17 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("table", "load_sheet", "table.load_sheet(path, sheet)", "Table   hoja específica de Excel"));
     v.push(f("table", "from", "table.from(list_of_dicts)", "Table   convierte lista existente en tabla"));
     v.push(f("table", "rows", "table.rows(table)", "List_of_dicts   extrae las filas"));
-    v.push(f("table", "peek", "table.peek(table) o peek(table, n)", "Null  imprime tabla bonita en consola"));
+    v.push(f("table", "peek", "table.peek(table), peek(table, n), peek(table, [\"cols\"]) o peek(table, n, [\"cols\"])", "Null  imprime tabla bonita; la lista define qué columnas mostrar y en qué orden"));
+    v.push(f("table", "headers", "table.headers(table)", "List con los nombres de columna (unión, orden alfabético)"));
+    v.push(f("table", "clean_headers", "table.clean_headers(table)", "Nombres de columna sin espacios sobrantes y con '_' interno clean_headers(table, \"snake\") → además en minúsculas"));
+    v.push(f("table", "clean", "table.clean(table)", "Recorta espacios de todos los valores de texto (y de las claves)"));
     v.push(f("table", "size", "table.size(table)", "Dict { rows, cols }"));
     v.push(f("table", "schema", "table.schema(table)", "Null  imprime tipos + estadísticas por columna"));
     v.push(f("table", "profile", "table.profile(table)", "Dict  estadísticas completas por columna (retorna valor)"));
     v.push(f("table", "keep", "table.keep(table, [\"col1\", \"col2\"])", "Table con solo esas columnas"));
     v.push(f("table", "drop", "table.drop(table, [\"col1\", \"col2\"])", "Table sin esas columnas"));
     v.push(f("table", "rename", "table.rename(table, \"viejo\", \"nuevo\")", "Table con columna renombrada"));
-    v.push(f("table", "cast", "table.cast(table, \"col\", \"int\"|\"float\"|\"string\"|\"bool\")", "Tabla con columna convertida"));
+    v.push(f("table", "cast", "table.cast(table, \"col\", \"int\"|\"float\"|\"string\"|\"bool\"|\"date\")", "Tabla con columna convertida \"date\" normaliza a ISO \"YYYY-MM-DD\" (ordena/filtra cronológicamente); acepta 4º arg con formato chrono explícito: cast(t, \"f\", \"date\", \"%m/%d/%Y\")"));
     v.push(f("table", "where", "table.where(table, condicion)", "Table filtrada Soporta: comparadores (== != > >= < <= contains starts_with ends_with), lógica (&& || !), paréntesis, aritmética, columna vs columna y funciones. Ej: \"(region == 'Norte' || region == 'Sur') && venta * 1.19 > meta\""));
     v.push(f("table", "sort", "table.sort(table, \"col\") o sort(table, \"col\", \"desc\")", "Table ordenada"));
     v.push(f("table", "top", "table.top(table, \"col\", n)", "Las n filas con mayor valor en col"));
@@ -432,12 +435,12 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("table", "sample", "table.sample(table, n)", "N filas aleatorias sin reemplazo"));
     v.push(f("table", "dedupe", "table.dedupe(table, \"col\")", "Sin duplicados por columna"));
     v.push(f("table", "add", "table.add(table, \"nueva_col\", \"expresion\")", "Table con columna calculada Aritmética completa (+ - * / % con precedencia, paréntesis, negativos), concatenación de texto con +, comparadores (producen columna booleana) y funciones: upper lower trim len abs round floor ceil sqrt min max pow. Ej: \"round((venta - costo) / venta * 100, 2)\", \"upper(nombre) + ' (' + region + ')'\""));
-    v.push(f("table", "group", "table.group(table, \"por_col\", \"valor_col\", \"sum\"|\"avg\"|\"count\"|\"min\"|\"max\")", "List of dicts {by_col, result}"));
+    v.push(f("table", "group", "table.group(table, \"por\" | [\"c1\",\"c2\"], \"valor\", \"sum\"|\"avg\"|\"count\"|\"min\"|\"max\")", "Tabla con las columnas clave (conservan su tipo original) + el agregado"));
     v.push(f("table", "agg", "table.agg(table, \"col\", \"sum\"|\"avg\"|\"count\"|\"min\"|\"max\")", "Número count cuenta valores no nulos de cualquier tipo; el resto opera sobre números."));
     v.push(f("table", "stats", "table.stats(table, \"col\")", "Dict completo: min/max/avg/std/p25/median/p75/count/nulls"));
     v.push(f("table", "column", "table.column(table, \"col\")", "List de valores de esa columna"));
     v.push(f("table", "count", "table.count(table) o count(table, \"condicion\")", "Int"));
-    v.push(f("table", "join", "table.join(table1, table2, \"key_col\")", "Inner join por columna clave join(table1, table2, \"key_col\", \"left\") → conserva todas las filas de table1 y rellena con null las columnas del lado derecho sin match."));
+    v.push(f("table", "join", "table.join(t1, t2, \"clave\" | [\"c1\",\"c2\"])", "Inner join (multi-clave soportada) join(..., \"left\") → conserva todas las filas de t1 y rellena con null. Colisión de nombre (columna no-clave en ambos lados): la derecha entra como col_2, col_3… — nada se pisa en silencio."));
     v.push(f("table", "concat", "table.concat(table1, table2)", "Apila las filas"));
     v.push(f("table", "forecast", "table.forecast(table, \"col\", n)", "List de n valores futuros (regresión lineal)"));
     v.push(f("table", "anomalies", "table.anomalies(table, \"col\")", "List de dicts de las filas anómalas (IQR)"));
@@ -450,7 +453,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("table", "describe_ai", "table.describe_ai(table)", "String descripción en lenguaje natural"));
     v.push(f("table", "ask", "table.ask(table, \"pregunta\")", "String respuesta IA sobre los datos"));
     v.push(f("table", "suggest", "table.suggest(table)", "List de strings con sugerencias de análisis"));
-    v.push(f("table", "save", "table.save(table, path)", "Null   auto-detecta formato por extensión"));
+    v.push(f("table", "save", "table.save(table, path)", "Null   auto-detecta formato por extensión save(table, path, [\"col1\", \"col2\"]) → guarda SOLO esas columnas y EN ESE ORDEN (sin lista: unión de columnas en orden alfabético)"));
     // stat (stat_mod.rs)
     v.push(f("stat", "mean", "stat.mean(…)", "Función del módulo stat."));
     v.push(f("stat", "median", "stat.median(…)", "Función del módulo stat."));

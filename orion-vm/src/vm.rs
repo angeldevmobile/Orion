@@ -2897,7 +2897,8 @@ pub fn value_to_eval(v: Value) -> crate::eval_value::EvalValue {
         Value::Module(m) => E::Module(m),
         Value::List(items) => E::List(items.borrow().iter().cloned().map(value_to_eval).collect()),
         Value::Dict(map)   => {
-            let mut m = std::collections::HashMap::new();
+            // pre-reservar evita re-hashes en tablas grandes (miles de filas/dicts)
+            let mut m = std::collections::HashMap::with_capacity(map.len());
             for (k, v) in map { m.insert(k, value_to_eval(v)); }
             E::Dict(m)
         }
@@ -2916,7 +2917,7 @@ pub fn eval_to_value(e: crate::eval_value::EvalValue) -> Value {
         E::Module(m) => Value::Module(m),
         E::List(items) => Value::list(items.into_iter().map(eval_to_value).collect()),
         E::Dict(map)   => {
-            let mut m = indexmap::IndexMap::new();
+            let mut m = indexmap::IndexMap::with_capacity(map.len());
             for (k, v) in map { m.insert(k, eval_to_value(v)); }
             Value::Dict(m)
         }

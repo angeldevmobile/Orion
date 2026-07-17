@@ -2,6 +2,7 @@
 -- valores exactos. Ejecutar desde la raíz del repo: orion test tests
 use "table" as tbl
 use "fs" as fs
+use "strings" as st
 
 fn near(a, b) {
     d = a - b
@@ -481,5 +482,152 @@ fn test_peek_schema_no_crash() {
     t = mk()
     tbl.peek(t, 3)
     tbl.schema(t)
+    tbl.peek(t, 2, ["nombre", "venta"])
     assert(yes, "peek y schema no crashean")
+}
+
+fn test_orden_columnas() {
+    t = mk()
+    hs = tbl.headers(t)
+    assert_eq(len(hs), 6, "headers len")
+    assert_eq(hs[0], "activo", "headers orden alfabético por defecto")
+
+    -- el dev decide el orden (y la selección) al guardar
+    tbl.save(t, "tests/output_table_orden.csv", ["nombre", "venta", "region"])
+    raw = fs.read("tests/output_table_orden.csv")
+    primera = st.split(raw, "\n")[0]
+    assert_eq(primera, "nombre,venta,region", "save respeta orden del dev")
+
+    t2 = tbl.load("tests/output_table_orden.csv")
+    assert_eq(tbl.size(t2)["cols"], 3, "save con lista también selecciona")
+    assert_eq(tbl.count(t2), 6, "save ordenado conserva filas")
+
+    -- columna inexistente en la lista → error claro
+    ok = no
+    attempt {
+        tbl.save(t, "tests/output_table_err.csv", ["nombre", "no_existe"])
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "save con columna inexistente lanza error")
+}
+
+fn test_clean_headers_y_valores() {
+    sucia = tbl.from([
+        { " Nombre Completo ": " ana ",  "Venta  Total": 100 },
+        { " Nombre Completo ": " beto ", "Venta  Total": 200 }
+    ])
+    limpia = tbl.clean_headers(sucia)
+    hs = tbl.headers(limpia)
+    assert_eq(hs[0], "Nombre_Completo", "clean_headers guiones bajos")
+    assert_eq(hs[1], "Venta_Total", "clean_headers colapsa espacios internos")
+    -- ya usable en expresiones
+    assert_eq(tbl.count(limpia, "Venta_Total > 150"), 1, "columna limpia usable en where")
+
+    snake = tbl.clean_headers(sucia, "snake")
+    assert_eq(tbl.headers(snake)[0], "nombre_completo", "clean_headers snake")
+
+    v = tbl.rows(tbl.clean(limpia))
+    assert_eq(v[0]["Nombre_Completo"], "ana", "clean recorta valores")
+}
+
+fn test_backtick_columnas() {
+    t = tbl.from([
+        { "venta total": 100 },
+        { "venta total": 300 }
+    ])
+    assert_eq(tbl.count(t, "`venta total` > 200"), 1, "backtick en where")
+    r = tbl.rows(tbl.add(t, "doble", "`venta total` * 2"))
+    assert_eq(r[0]["doble"], 200, "backtick en add")
+}
+
+fn test_fechas() {
+    t = tbl.from([
+        { "id": 1, "fecha": "15/03/2026" },
+        { "id": 2, "fecha": "2026-01-10" },
+        { "id": 3, "fecha": "01/07/2026" }
+    ])
+    tf = tbl.cast(t, "fecha", "date")
+    r = tbl.rows(tf)
+    assert_eq(r[0]["fecha"], "2026-03-15", "cast date dd/mm/yyyy")
+    assert_eq(r[1]["fecha"], "2026-01-10", "cast date iso pasa igual")
+    assert_eq(r[2]["fecha"], "2026-07-01", "cast date día-primero en ambiguos")
+
+    -- ISO ordena cronológicamente con sort normal
+    o = tbl.sort(tf, "fecha")
+    assert_eq(tbl.rows(o)[0]["id"], 2, "sort por fecha")
+    assert_eq(tbl.rows(o)[2]["id"], 3, "sort por fecha última")
+
+    -- filtro por rango de fechas
+    assert_eq(tbl.count(tf, "fecha >= '2026-03-01' && fecha < '2026-08-01'"), 2, "filtro rango fechas")
+
+    -- funciones de fecha en expresiones
+    r = tbl.rows(tbl.add(tf, "anio", "year(fecha)"))
+    assert_eq(r[0]["anio"], 2026, "year()")
+    r = tbl.rows(tbl.add(tf, "mes", "month(fecha)"))
+    assert_eq(r[0]["mes"], 3, "month()")
+    r = tbl.rows(tbl.add(tf, "dia", "day(fecha)"))
+    assert_eq(r[0]["dia"], 15, "day()")
+    r = tbl.rows(tbl.add(tf, "dias", "date_diff(fecha, '2026-01-01')"))
+    assert_eq(r[1]["dias"], 9, "date_diff en días")
+    r = tbl.rows(tbl.add(tf, "sig", "date_add(fecha, 30)"))
+    assert_eq(r[1]["sig"], "2026-02-09", "date_add")
+
+    -- formato explícito cuando el dev quiere mes-primero
+    tus = tbl.from([{ "f": "03/15/2026" }])
+    r = tbl.rows(tbl.cast(tus, "f", "date", "%m/%d/%Y"))
+    assert_eq(r[0]["f"], "2026-03-15", "cast date con formato explícito")
+
+    -- fecha inválida → null (no revienta la tabla)
+    tb = tbl.from([{ "f": "no es fecha" }])
+    r = tbl.rows(tbl.cast(tb, "f", "date"))
+    assert_eq(r[0]["f"], null, "fecha inválida da null")
+}
+
+fn test_expresiones_extra() {
+    t = mk()
+    -- notación científica
+    r = tbl.rows(tbl.add(t, "x", "venta * 1e2"))
+    assert(near(r[0]["x"], 10000.0), "notación científica")
+    r = tbl.rows(tbl.add(t, "x", "2.5e-1 * venta"))
+    assert(near(r[0]["x"], 25.0), "científica con exponente negativo")
+
+    -- escapes dentro de literales de expresión: \n y \t se vuelven caracteres reales
+    r = tbl.rows(tbl.add(t, "x", "'a' + '\\n' + nombre"))
+    assert_eq(r[0]["x"], "a\nana", "escape n en literal de expresión")
+    r = tbl.rows(tbl.add(t, "x", "'a\\tb'"))
+    assert_eq(r[0]["x"], "a\tb", "escape t en literal de expresión")
+
+    -- contains sobre números (coerción a texto)
+    assert_eq(tbl.count(t, "venta contains '00'"), 6, "contains numérico")
+    assert_eq(tbl.count(t, "venta starts_with '1'"), 1, "starts_with numérico")
+}
+
+fn test_group_multi() {
+    t = mk()
+    g = tbl.rows(tbl.group(t, ["region", "activo"], "venta", "sum"))
+    assert_eq(len(g), 6, "group multi buckets")
+    assert_eq(g[0]["region"], "norte", "group multi clave 1")
+    assert_eq(g[0]["activo"], yes, "group multi clave 2 conserva tipo bool")
+    assert_eq(g[0]["venta"], 100, "group multi sum")
+
+    -- una sola columna sigue funcionando igual
+    g1 = tbl.rows(tbl.group(t, "region", "venta", "sum"))
+    assert_eq(len(g1), 3, "group single sigue igual")
+}
+
+fn test_join_multi_colision() {
+    izq = tbl.from([
+        { "region": "norte", "tipo": "a", "valor": 1 },
+        { "region": "norte", "tipo": "b", "valor": 2 }
+    ])
+    der = tbl.from([
+        { "region": "norte", "tipo": "a", "valor": 99, "extra": 5 }
+    ])
+    j = tbl.join(izq, der, ["region", "tipo"])
+    assert_eq(tbl.count(j), 1, "join multi-clave matchea exacto")
+    r = tbl.rows(j)[0]
+    assert_eq(r["valor"], 1, "join conserva columna izquierda")
+    assert_eq(r["valor_2"], 99, "join colisión entra con sufijo _2")
+    assert_eq(r["extra"], 5, "join columna sin colisión entra normal")
 }

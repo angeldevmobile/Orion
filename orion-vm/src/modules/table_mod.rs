@@ -2,6 +2,7 @@ use crate::eval_value::EvalValue;
 use std::collections::HashMap;
 use calamine::{Reader, open_workbook_auto, Data};
 use rust_xlsxwriter::{Workbook, Format, Color};
+use chrono::{Datelike, Local, NaiveDate, NaiveDateTime};
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
@@ -51,12 +52,63 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //    Exploración                                                       
 
-        // peek(table) o peek(table, n) → null  imprime tabla bonita en consola
+        // peek(table), peek(table, n), peek(table, ["cols"]) o peek(table, n, ["cols"])
+        // → null  imprime tabla bonita; la lista define qué columnas mostrar y en qué orden
         "peek" => {
             let rows = list_arg("peek", &args, 0)?;
-            let n = args.get(1).and_then(|v| v.to_i64().ok()).unwrap_or(10) as usize;
-            pretty_print(&rows, n);
+            let mut n = 10usize;
+            let mut cols: Option<Vec<String>> = None;
+            for a in args.iter().skip(1) {
+                match a {
+                    EvalValue::List(_) => { cols = Some(resolve_columns("peek", &rows, Some(a))?); }
+                    v => { if let Ok(i) = v.to_i64() { n = i.max(0) as usize; } }
+                }
+            }
+            let headers = match cols { Some(c) => c, None => infer_headers(&rows) };
+            pretty_print(&rows, n, &headers);
             Ok(EvalValue::Null)
+        }
+
+        // headers(table) → list con los nombres de columna (unión, orden alfabético)
+        "headers" => {
+            let rows = list_arg("headers", &args, 0)?;
+            Ok(EvalValue::List(infer_headers(&rows).into_iter().map(EvalValue::Str).collect()))
+        }
+
+        // clean_headers(table) → nombres de columna sin espacios sobrantes y con '_' interno
+        // clean_headers(table, "snake") → además en minúsculas
+        "clean_headers" => {
+            let rows = list_arg("clean_headers", &args, 0)?;
+            let snake = matches!(args.get(1), Some(EvalValue::Str(s)) if s == "snake");
+            let result = rows.into_iter().map(|row| {
+                if let EvalValue::Dict(m) = row {
+                    let new: HashMap<String, EvalValue> = m.into_iter().map(|(k, v)| {
+                        let mut clean = k.trim().split_whitespace().collect::<Vec<_>>().join("_");
+                        if snake { clean = clean.to_lowercase(); }
+                        (clean, v)
+                    }).collect();
+                    EvalValue::Dict(new)
+                } else { row }
+            }).collect();
+            Ok(EvalValue::List(result))
+        }
+
+        // clean(table) → recorta espacios de todos los valores de texto (y de las claves)
+        "clean" => {
+            let rows = list_arg("clean", &args, 0)?;
+            let result = rows.into_iter().map(|row| {
+                if let EvalValue::Dict(m) = row {
+                    let new: HashMap<String, EvalValue> = m.into_iter().map(|(k, v)| {
+                        let v = match v {
+                            EvalValue::Str(s) => EvalValue::Str(s.trim().to_string()),
+                            other => other,
+                        };
+                        (k.trim().to_string(), v)
+                    }).collect();
+                    EvalValue::Dict(new)
+                } else { row }
+            }).collect();
+            Ok(EvalValue::List(result))
         }
 
         // size(table) → dict { rows, cols }
@@ -162,16 +214,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // cast(table, "col", "int"|"float"|"string"|"bool") → tabla con columna convertida
+        // cast(table, "col", "int"|"float"|"string"|"bool"|"date") → tabla con columna convertida
+        // "date" normaliza a ISO "YYYY-MM-DD" (ordena/filtra cronológicamente);
+        // acepta 4º arg con formato chrono explícito: cast(t, "f", "date", "%m/%d/%Y")
         "cast" => {
             if args.len() < 3 { return Err("table.cast requiere (tabla, columna, tipo)".into()); }
             let rows  = list_arg("cast", &args, 0)?;
             let col   = str_arg("cast", &args, 1)?;
             let to    = str_arg("cast", &args, 2)?;
+            let fmt   = args.get(3).and_then(|v| if let EvalValue::Str(s) = v { Some(s.clone()) } else { None });
             let result = rows.into_iter().map(|row| {
                 if let EvalValue::Dict(mut m) = row {
                     if let Some(v) = m.get(&col).cloned() {
-                        m.insert(col.clone(), cast_value(v, &to));
+                        m.insert(col.clone(), cast_value(v, &to, fmt.as_deref()));
                     }
                     EvalValue::Dict(m)
                 } else { row }
@@ -292,12 +347,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //    Agregación                                                        
 
-        // group(table, "por_col", "valor_col", "sum"|"avg"|"count"|"min"|"max")
-        // → list of dicts {by_col, result}
+        // group(table, "por" | ["c1","c2"], "valor", "sum"|"avg"|"count"|"min"|"max")
+        // → tabla con las columnas clave (conservan su tipo original) + el agregado
         "group" => {
             if args.len() < 4 { return Err("table.group requiere (tabla, por, valor, operacion)".into()); }
             let rows  = list_arg("group", &args, 0)?;
-            let by    = str_arg("group", &args, 1)?;
+            let by_cols: Vec<String> = match &args[1] {
+                EvalValue::List(v) => v.iter().map(|x| x.to_string()).collect(),
+                other => vec![other.to_string()],
+            };
             let val   = str_arg("group", &args, 2)?;
             let op    = str_arg("group", &args, 3)?;
             if !matches!(op.as_str(), "sum" | "avg" | "count" | "min" | "max") {
@@ -305,13 +363,20 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
 
             let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
+            let mut key_vals: HashMap<String, Vec<EvalValue>> = HashMap::new();
             let mut key_order: Vec<String> = Vec::new();
 
             for row in &rows {
                 if let EvalValue::Dict(m) = row {
-                    let key = m.get(&by).map(|v| v.to_string()).unwrap_or_default();
+                    let kvals: Vec<EvalValue> = by_cols.iter()
+                        .map(|c| m.get(c).cloned().unwrap_or(EvalValue::Null))
+                        .collect();
+                    let key = kvals.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("\u{1}");
                     let num = m.get(&val).and_then(|v| v.to_f64().ok()).unwrap_or(0.0);
-                    if !buckets.contains_key(&key) { key_order.push(key.clone()); }
+                    if !buckets.contains_key(&key) {
+                        key_order.push(key.clone());
+                        key_vals.insert(key.clone(), kvals);
+                    }
                     buckets.entry(key).or_default().push(num);
                 }
             }
@@ -326,7 +391,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     _       => nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
                 };
                 let mut m = HashMap::new();
-                m.insert(by.clone(),  EvalValue::Str(k.clone()));
+                for (c, v) in by_cols.iter().zip(&key_vals[k]) {
+                    m.insert(c.clone(), v.clone());
+                }
                 m.insert(val.clone(), smart_num(agg_val));
                 EvalValue::Dict(m)
             }).collect();
@@ -413,46 +480,69 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //    Combinación                                                       
 
-        // join(table1, table2, "key_col") → inner join por columna clave
-        // join(table1, table2, "key_col", "left") → conserva todas las filas de
-        // table1 y rellena con null las columnas del lado derecho sin match.
+        // join(t1, t2, "clave" | ["c1","c2"]) → inner join (multi-clave soportada)
+        // join(..., "left") → conserva todas las filas de t1 y rellena con null.
+        // Colisión de nombre (columna no-clave en ambos lados): la derecha entra
+        // como col_2, col_3… — nada se pisa en silencio.
         "join" => {
             if args.len() < 3 { return Err("table.join requiere (tabla1, tabla2, clave)".into()); }
             let left  = list_arg("join", &args, 0)?;
             let right = list_arg("join", &args, 1)?;
-            let key   = str_arg("join", &args, 2)?;
-            let mode  = args.get(3).map(|v| v.to_string()).unwrap_or_else(|| "inner".to_string());
+            let key_cols: Vec<String> = match &args[2] {
+                EvalValue::List(v) => v.iter().map(|x| x.to_string()).collect(),
+                other => vec![other.to_string()],
+            };
+            let mode = args.get(3).map(|v| v.to_string()).unwrap_or_else(|| "inner".to_string());
             if mode != "inner" && mode != "left" {
                 return Err(format!("table.join: modo '{}' desconocido (usa inner|left)", mode));
             }
             let right_cols: Vec<String> = infer_headers(&right)
-                .into_iter().filter(|c| c != &key).collect();
+                .into_iter().filter(|c| !key_cols.contains(c)).collect();
+
+            let composite = |m: &HashMap<String, EvalValue>| -> String {
+                key_cols.iter()
+                    .map(|c| m.get(c).map(|v| v.to_string()).unwrap_or_default())
+                    .collect::<Vec<_>>().join("\u{1}")
+            };
 
             // Índice del lado derecho
             let mut right_index: HashMap<String, Vec<HashMap<String, EvalValue>>> = HashMap::new();
             for row in &right {
                 if let EvalValue::Dict(m) = row {
-                    let k = m.get(&key).map(|v| v.to_string()).unwrap_or_default();
-                    right_index.entry(k).or_default().push(m.clone());
+                    right_index.entry(composite(m)).or_default().push(m.clone());
                 }
             }
+
+            let free_name = |merged: &HashMap<String, EvalValue>, name: &str| -> String {
+                if !merged.contains_key(name) { return name.to_string(); }
+                let mut n = 2;
+                loop {
+                    let cand = format!("{}_{}", name, n);
+                    if !merged.contains_key(&cand) { return cand; }
+                    n += 1;
+                }
+            };
 
             let mut result = Vec::new();
             for row in &left {
                 if let EvalValue::Dict(lm) = row {
-                    let k = lm.get(&key).map(|v| v.to_string()).unwrap_or_default();
+                    let k = composite(lm);
                     if let Some(right_rows) = right_index.get(&k) {
                         for rm in right_rows {
                             let mut merged = lm.clone();
-                            for (rk, rv) in rm {
-                                if rk != &key { merged.insert(rk.clone(), rv.clone()); }
+                            for rc in &right_cols {
+                                if let Some(rv) = rm.get(rc) {
+                                    let dest = free_name(&merged, rc);
+                                    merged.insert(dest, rv.clone());
+                                }
                             }
                             result.push(EvalValue::Dict(merged));
                         }
                     } else if mode == "left" {
                         let mut merged = lm.clone();
                         for rc in &right_cols {
-                            merged.entry(rc.clone()).or_insert(EvalValue::Null);
+                            let dest = free_name(&merged, rc);
+                            merged.insert(dest, EvalValue::Null);
                         }
                         result.push(EvalValue::Dict(merged));
                     }
@@ -733,19 +823,22 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //    Exportación                                                       
 
         // save(table, path) → null   auto-detecta formato por extensión
+        // save(table, path, ["col1", "col2"]) → guarda SOLO esas columnas y EN ESE ORDEN
+        // (sin lista: unión de columnas en orden alfabético)
         "save" => {
             if args.len() < 2 { return Err("table.save requiere (tabla, path)".into()); }
             let rows = list_arg("save", &args, 0)?;
             let path = str_arg("save", &args, 1)?;
+            let headers = resolve_columns("save", &rows, args.get(2))?;
             let ext  = std::path::Path::new(&path)
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_lowercase();
             match ext.as_str() {
-                "csv" | "tsv" => save_csv(&rows, &path),
-                "xlsx"        => save_excel(&rows, &path),
-                "json"        => save_json(&rows, &path),
+                "csv" | "tsv" => save_csv(&rows, &path, &headers),
+                "xlsx"        => save_excel(&rows, &path, &headers),
+                "json"        => save_json(&rows, &path, &headers),
                 _ => Err(format!("table.save: formato '{}' no soportado", ext)),
             }
         }
@@ -843,13 +936,33 @@ fn load_json(path: &str) -> Result<EvalValue, String> {
 
 //    Savers                                                                    
 
-fn save_csv(rows: &[EvalValue], path: &str) -> Result<EvalValue, String> {
-    let headers = infer_headers(rows);
+// Sin lista de columnas → unión alfabética; con lista → valida contra la tabla
+// y respeta el orden que pidió el dev (la lista también SELECCIONA columnas).
+fn resolve_columns(fn_name: &str, rows: &[EvalValue], arg: Option<&EvalValue>) -> Result<Vec<String>, String> {
+    match arg {
+        Some(EvalValue::List(v)) => {
+            let cols: Vec<String> = v.iter().map(|x| x.to_string()).collect();
+            let known = infer_headers(rows);
+            for c in &cols {
+                if !known.contains(c) {
+                    return Err(format!("table.{}: la columna '{}' no existe (hay: {})",
+                        fn_name, c, known.join(", ")));
+                }
+            }
+            Ok(cols)
+        }
+        Some(other) => Err(format!("table.{}: se esperaba lista de columnas, se recibió {}",
+            fn_name, other.type_name())),
+        None => Ok(infer_headers(rows)),
+    }
+}
+
+fn save_csv(rows: &[EvalValue], path: &str, headers: &[String]) -> Result<EvalValue, String> {
     let mut wtr = csv::WriterBuilder::new()
         .from_path(path)
         .map_err(|e| format!("table.save: {}", e))?;
     if !headers.is_empty() {
-        wtr.write_record(&headers).map_err(|e| format!("table.save: {}", e))?;
+        wtr.write_record(headers).map_err(|e| format!("table.save: {}", e))?;
     }
     for row in rows {
         if let EvalValue::Dict(m) = row {
@@ -863,8 +976,7 @@ fn save_csv(rows: &[EvalValue], path: &str) -> Result<EvalValue, String> {
     Ok(EvalValue::Null)
 }
 
-fn save_excel(rows: &[EvalValue], path: &str) -> Result<EvalValue, String> {
-    let headers = infer_headers(rows);
+fn save_excel(rows: &[EvalValue], path: &str, headers: &[String]) -> Result<EvalValue, String> {
     let mut wb = Workbook::new();
     {
         let ws = wb.add_worksheet();
@@ -897,8 +1009,18 @@ fn save_excel(rows: &[EvalValue], path: &str) -> Result<EvalValue, String> {
     Ok(EvalValue::Null)
 }
 
-fn save_json(rows: &[EvalValue], path: &str) -> Result<EvalValue, String> {
-    let json: Vec<serde_json::Value> = rows.iter().map(eval_to_json).collect();
+// La lista de headers SELECCIONA qué claves se guardan (el orden dentro del
+// objeto JSON lo normaliza serde alfabéticamente; en JSON las claves tienen nombre,
+// el orden no es semántico).
+fn save_json(rows: &[EvalValue], path: &str, headers: &[String]) -> Result<EvalValue, String> {
+    let json: Vec<serde_json::Value> = rows.iter().map(|row| {
+        if let EvalValue::Dict(m) = row {
+            let obj: serde_json::Map<String, serde_json::Value> = headers.iter()
+                .filter_map(|k| m.get(k).map(|v| (k.clone(), eval_to_json(v))))
+                .collect();
+            serde_json::Value::Object(obj)
+        } else { eval_to_json(row) }
+    }).collect();
     let s = serde_json::to_string_pretty(&json)
         .map_err(|e| format!("table.save: {}", e))?;
     std::fs::write(path, s).map_err(|e| format!("table.save: {}", e))?;
@@ -907,9 +1029,8 @@ fn save_json(rows: &[EvalValue], path: &str) -> Result<EvalValue, String> {
 
 //    Display bonito                                                             
 
-fn pretty_print(rows: &[EvalValue], n: usize) {
+fn pretty_print(rows: &[EvalValue], n: usize, headers: &[String]) {
     if rows.is_empty() { println!("  tabla vacía"); return; }
-    let headers = infer_headers(rows);
     let show = rows.iter().take(n).collect::<Vec<_>>();
 
     // Calcular anchos de columna
@@ -1027,6 +1148,7 @@ enum Tok {
     Float(f64),
     Str(String),
     Ident(String),
+    ColName(String),   // `columna con espacios`
     Sym(&'static str),
 }
 
@@ -1035,6 +1157,8 @@ const EXPR_FNS: &[(&str, usize, usize)] = &[
     ("upper", 1, 1), ("lower", 1, 1), ("trim", 1, 1), ("len", 1, 1),
     ("abs", 1, 1), ("round", 1, 2), ("floor", 1, 1), ("ceil", 1, 1),
     ("sqrt", 1, 1), ("min", 1, usize::MAX), ("max", 1, usize::MAX), ("pow", 2, 2),
+    ("date", 1, 2), ("year", 1, 1), ("month", 1, 1), ("day", 1, 1),
+    ("date_diff", 2, 2), ("date_add", 2, 2), ("today", 0, 0),
 ];
 
 fn tokenize_expr(src: &str) -> Result<Vec<Tok>, String> {
@@ -1048,10 +1172,36 @@ fn tokenize_expr(src: &str) -> Result<Vec<Tok>, String> {
             let quote = c;
             let mut s = String::new();
             i += 1;
-            while i < chars.len() && chars[i] != quote { s.push(chars[i]); i += 1; }
+            while i < chars.len() && chars[i] != quote {
+                // escapes dentro del literal: \' \" \\ \` \n \t \r
+                if chars[i] == '\\' && i + 1 < chars.len() {
+                    let esc = chars[i + 1];
+                    match esc {
+                        '\'' | '"' | '\\' | '`' => s.push(esc),
+                        'n' => s.push('\n'),
+                        't' => s.push('\t'),
+                        'r' => s.push('\r'),
+                        other => { s.push('\\'); s.push(other); }
+                    }
+                    i += 2;
+                    continue;
+                }
+                s.push(chars[i]);
+                i += 1;
+            }
             if i >= chars.len() { return Err(format!("literal de texto sin cerrar: {}{}", quote, s)); }
             i += 1;
             toks.push(Tok::Str(s));
+            continue;
+        }
+        // `columna con espacios` — referencia explícita a columna
+        if c == '`' {
+            let mut s = String::new();
+            i += 1;
+            while i < chars.len() && chars[i] != '`' { s.push(chars[i]); i += 1; }
+            if i >= chars.len() { return Err(format!("referencia de columna sin cerrar: `{}", s)); }
+            i += 1;
+            toks.push(Tok::ColName(s));
             continue;
         }
         if c.is_ascii_digit() {
@@ -1063,6 +1213,16 @@ fn tokenize_expr(src: &str) -> Result<Vec<Tok>, String> {
                     is_float = true;
                 }
                 i += 1;
+            }
+            // notación científica: 1e5, 2.5e-3
+            if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
+                let mut j = i + 1;
+                if j < chars.len() && (chars[j] == '+' || chars[j] == '-') { j += 1; }
+                if j < chars.len() && chars[j].is_ascii_digit() {
+                    while j < chars.len() && chars[j].is_ascii_digit() { j += 1; }
+                    i = j;
+                    is_float = true;
+                }
             }
             let text: String = chars[start..i].iter().collect();
             if is_float {
@@ -1198,6 +1358,7 @@ impl ExprParser {
             Some(Tok::Int(n))   => { self.pos += 1; Ok(TExpr::Lit(EvalValue::Int(n))) }
             Some(Tok::Float(f)) => { self.pos += 1; Ok(TExpr::Lit(EvalValue::Float(f))) }
             Some(Tok::Str(s))   => { self.pos += 1; Ok(TExpr::Lit(EvalValue::Str(s))) }
+            Some(Tok::ColName(s)) => { self.pos += 1; Ok(TExpr::Col(s)) }
             Some(Tok::Sym("(")) => {
                 self.pos += 1;
                 let e = self.parse_or()?;
@@ -1321,14 +1482,19 @@ fn eval_binop(op: &str, l: &EvalValue, r: &EvalValue) -> EvalValue {
                 _    => !eval_gt(l, r),
             })
         }
-        "contains" | "starts_with" | "ends_with" => match (l, r) {
-            (EvalValue::Str(a), EvalValue::Str(b)) => EvalValue::Bool(match op {
-                "contains"    => a.contains(b.as_str()),
-                "starts_with" => a.starts_with(b.as_str()),
-                _             => a.ends_with(b.as_str()),
-            }),
-            _ => EvalValue::Bool(false),
-        },
+        // coercionan a texto (venta contains '00' funciona con números); null → false
+        "contains" | "starts_with" | "ends_with" => {
+            if matches!(l, EvalValue::Null) || matches!(r, EvalValue::Null) {
+                return EvalValue::Bool(false);
+            }
+            let a = eval_to_str(l);
+            let b = eval_to_str(r);
+            EvalValue::Bool(match op {
+                "contains"    => a.contains(&b),
+                "starts_with" => a.starts_with(&b),
+                _             => a.ends_with(&b),
+            })
+        }
         _ => EvalValue::Null,
     }
 }
@@ -1403,8 +1569,67 @@ fn eval_expr_fn(name: &str, args: &[EvalValue]) -> EvalValue {
             (Ok(a), Ok(b)) => EvalValue::Float(a.powf(b)),
             _ => EvalValue::Null,
         },
+        "date" => {
+            let fmt = args.get(1).and_then(|v| if let EvalValue::Str(s) = v { Some(s.clone()) } else { None });
+            match parse_date_value(&args[0], fmt.as_deref()) {
+                Some(d) => EvalValue::Str(d.format("%Y-%m-%d").to_string()),
+                None => EvalValue::Null,
+            }
+        }
+        "year" | "month" | "day" => match parse_date_value(&args[0], None) {
+            Some(d) => EvalValue::Int(match name {
+                "year"  => d.year() as i64,
+                "month" => d.month() as i64,
+                _       => d.day() as i64,
+            }),
+            None => EvalValue::Null,
+        },
+        "date_diff" => match (parse_date_value(&args[0], None), parse_date_value(&args[1], None)) {
+            (Some(a), Some(b)) => EvalValue::Int((a - b).num_days()),
+            _ => EvalValue::Null,
+        },
+        "date_add" => match (parse_date_value(&args[0], None), args[1].to_i64()) {
+            (Some(d), Ok(days)) => EvalValue::Str(
+                (d + chrono::Duration::days(days)).format("%Y-%m-%d").to_string()
+            ),
+            _ => EvalValue::Null,
+        },
+        "today" => EvalValue::Str(Local::now().date_naive().format("%Y-%m-%d").to_string()),
         _ => EvalValue::Null,
     }
+}
+
+//    Fechas: se normalizan a texto ISO "YYYY-MM-DD", que ordena y compara
+//    cronológicamente con los comparadores normales de texto.
+
+const DATE_FMTS: &[&str] = &[
+    "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%d.%m.%Y", "%m/%d/%Y",
+];
+const DATETIME_FMTS: &[&str] = &[
+    "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%.f",
+    "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M",
+];
+
+// En formatos ambiguos (01/02/2026) gana día-primero (%d/%m/%Y se prueba antes
+// que %m/%d/%Y); para control total el dev pasa un formato chrono explícito.
+fn parse_date_value(v: &EvalValue, fmt: Option<&str>) -> Option<NaiveDate> {
+    let s = match v {
+        EvalValue::Str(s) => s.trim().to_string(),
+        EvalValue::Null => return None,
+        other => other.to_string(),
+    };
+    if let Some(f) = fmt {
+        if let Ok(d) = NaiveDate::parse_from_str(&s, f) { return Some(d); }
+        if let Ok(dt) = NaiveDateTime::parse_from_str(&s, f) { return Some(dt.date()); }
+        return None;
+    }
+    for f in DATE_FMTS {
+        if let Ok(d) = NaiveDate::parse_from_str(&s, f) { return Some(d); }
+    }
+    for f in DATETIME_FMTS {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(&s, f) { return Some(dt.date()); }
+    }
+    None
 }
 
 fn smart_num(f: f64) -> EvalValue {
@@ -1458,8 +1683,15 @@ fn detect_anomalies_iqr(values: &[f64]) -> Vec<bool> {
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = sorted.len();
-    let q1 = sorted[n / 4];
-    let q3 = sorted[3 * n / 4];
+    // cuartiles con interpolación lineal (consistente con stats)
+    let q = |p: f64| -> f64 {
+        let idx = p * (n - 1) as f64;
+        let lo = idx.floor() as usize;
+        let hi = (lo + 1).min(n - 1);
+        sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo as f64)
+    };
+    let q1 = q(0.25);
+    let q3 = q(0.75);
     let iqr = q3 - q1;
     let lower = q1 - 1.5 * iqr;
     let upper = q3 + 1.5 * iqr;
@@ -1689,11 +1921,15 @@ fn dict_get_val(row: &EvalValue, col: &str) -> EvalValue {
     else { EvalValue::Null }
 }
 
-fn cast_value(v: EvalValue, to: &str) -> EvalValue {
+fn cast_value(v: EvalValue, to: &str, fmt: Option<&str>) -> EvalValue {
     match to {
         "int"    => v.to_i64().map(EvalValue::Int).unwrap_or(EvalValue::Null),
         "float"  => v.to_f64().map(EvalValue::Float).unwrap_or(EvalValue::Null),
         "string" => EvalValue::Str(v.to_string()),
+        "date"   => match parse_date_value(&v, fmt) {
+            Some(d) => EvalValue::Str(d.format("%Y-%m-%d").to_string()),
+            None => EvalValue::Null,
+        },
         // "true"/"yes"/"false"/"no" se reconocen como texto; el resto por truthiness
         "bool"   => match &v {
             EvalValue::Bool(_) => v,
