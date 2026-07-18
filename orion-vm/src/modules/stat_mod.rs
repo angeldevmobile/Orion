@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {

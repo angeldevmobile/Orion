@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
 
@@ -61,7 +61,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // dejar(path) → Bool  — deja de rastrear el archivo
         "dejar" | "unwatch" => {
             let path = one_str("watch.dejar", &args)?;
-            watched().lock().unwrap().remove(&path);
+            watched().lock().unwrap().shift_remove(&path);
             Ok(EvalValue::Bool(true))
         }
         // lista() → List<Str> de paths observados

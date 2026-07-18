@@ -1,7 +1,7 @@
 use crate::eval_value::EvalValue;
 use lopdf::{Document, Object, Dictionary, Stream, content::{Content, Operation}};
 use printpdf::{PdfDocument, Mm, BuiltinFont};
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::fs::File;
 use std::io::BufWriter;
 

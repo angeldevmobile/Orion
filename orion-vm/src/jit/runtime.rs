@@ -4,7 +4,7 @@
 //! Todas las funciones de runtime reciben y devuelven punteros como i64.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::io::{self, BufRead, Write as IoWrite};
 use std::sync::{Arc, Mutex, OnceLock};
 

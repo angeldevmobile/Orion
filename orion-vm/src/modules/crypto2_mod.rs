@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 
 // AES-256-GCM
 use aes_gcm::{Aes256Gcm, Key, Nonce, aead::{Aead, KeyInit}};

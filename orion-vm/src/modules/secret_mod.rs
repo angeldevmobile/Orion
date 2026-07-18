@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::Mutex;
 
 static SECRETS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);

@@ -1,7 +1,7 @@
 pub mod runner;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use crate::eval_value::EvalValue;
 use ratatui::style::Color;
 

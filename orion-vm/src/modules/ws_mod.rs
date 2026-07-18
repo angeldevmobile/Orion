@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tungstenite::{connect, Message, WebSocket, stream::MaybeTlsStream};
@@ -54,7 +54,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // cerrar(id) → Bool
         "cerrar" | "close" => {
             let id = to_u64(args.first().ok_or("ws.cerrar requiere (id)")?)?;
-            if let Some(mut conn) = conns().lock().unwrap().remove(&id) {
+            if let Some(mut conn) = conns().lock().unwrap().shift_remove(&id) {
                 let _ = conn.close(None);
             }
             Ok(EvalValue::Bool(true))

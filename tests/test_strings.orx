@@ -8,6 +8,14 @@ fn test_longitud() {
     assert_eq(len(""), 0, "len de string vacio")
 }
 
-fn test_falla_intencional() {
-    assert_eq(1, 2, "este test debe fallar")
+-- que el runner detecta fallos se verifica sin ensuciar la suite:
+-- un assert que FALLA dentro de attempt debe lanzar error atrapable
+fn test_runner_detecta_fallos() {
+    atrapado = no
+    attempt {
+        assert_eq(1, 2, "fallo esperado")
+    } handle err {
+        atrapado = yes
+    }
+    assert(atrapado, "assert_eq fallido lanza error atrapable")
 }

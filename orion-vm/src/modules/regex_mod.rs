@@ -112,7 +112,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             match re.captures(&text) {
                 None => Ok(EvalValue::Null),
                 Some(caps) => {
-                    let mut map = std::collections::HashMap::new();
+                    let mut map = indexmap::IndexMap::new();
                     for name in re.capture_names().flatten() {
                         let v = caps.name(name)
                             .map(|m| EvalValue::Str(m.as_str().to_string()))

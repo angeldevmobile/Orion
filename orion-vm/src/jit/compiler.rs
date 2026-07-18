@@ -5,7 +5,8 @@
 //! JIT-4: ReadInput, ReadFile, WriteFile, ReadEnv, UseModule.
 //! Fase JIT-5 añadirá DefineShape, CallMethod, IsInstance, PushSelf, GetAttr, SetAttr.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+use indexmap::IndexMap as HashMap;
 
 use cranelift_codegen::ir::{types, AbiParam, InstBuilder};
 use cranelift_codegen::settings;

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::fmt;
 use std::sync::{Arc, Condvar, Mutex};
 use serde_json::Value as Json;

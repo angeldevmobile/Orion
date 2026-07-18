@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -66,7 +66,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let lim = store.get_mut(&id)
                 .ok_or_else(|| format!("middleware: limiter {} no existe", id))?;
             if args.len() > 1 {
-                lim.clients.remove(&to_str(&args[1]));
+                lim.clients.shift_remove(&to_str(&args[1]));
             } else {
                 lim.clients.clear();
             }
@@ -113,7 +113,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // drop_rate(limiter_id) → Bool
         "drop_rate" => {
             if args.is_empty() { return Err("middleware.drop_rate requiere (limiter_id)".into()); }
-            limiters().lock().unwrap().remove(&to_u64(&args[0])?);
+            limiters().lock().unwrap().shift_remove(&to_u64(&args[0])?);
             Ok(EvalValue::Bool(true))
         }
 

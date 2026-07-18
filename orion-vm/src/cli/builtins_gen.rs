@@ -418,7 +418,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("table", "from", "table.from(list_of_dicts)", "Table   convierte lista existente en tabla"));
     v.push(f("table", "rows", "table.rows(table)", "List_of_dicts   extrae las filas"));
     v.push(f("table", "peek", "table.peek(table), peek(table, n), peek(table, [\"cols\"]) o peek(table, n, [\"cols\"])", "Null  imprime tabla bonita; la lista define qué columnas mostrar y en qué orden"));
-    v.push(f("table", "headers", "table.headers(table)", "List con los nombres de columna (unión, orden alfabético)"));
+    v.push(f("table", "headers", "table.headers(table)", "List con los nombres de columna en su orden original"));
     v.push(f("table", "clean_headers", "table.clean_headers(table)", "Nombres de columna sin espacios sobrantes y con '_' interno clean_headers(table, \"snake\") → además en minúsculas"));
     v.push(f("table", "clean", "table.clean(table)", "Recorta espacios de todos los valores de texto (y de las claves)"));
     v.push(f("table", "size", "table.size(table)", "Dict { rows, cols }"));
@@ -453,7 +453,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("table", "describe_ai", "table.describe_ai(table)", "String descripción en lenguaje natural"));
     v.push(f("table", "ask", "table.ask(table, \"pregunta\")", "String respuesta IA sobre los datos"));
     v.push(f("table", "suggest", "table.suggest(table)", "List de strings con sugerencias de análisis"));
-    v.push(f("table", "save", "table.save(table, path)", "Null   auto-detecta formato por extensión save(table, path, [\"col1\", \"col2\"]) → guarda SOLO esas columnas y EN ESE ORDEN (sin lista: unión de columnas en orden alfabético)"));
+    v.push(f("table", "save", "table.save(table, path)", "Null   auto-detecta formato por extensión; las columnas conservan su orden original (CSV/Excel/literal) save(table, path, [\"col1\", \"col2\"]) → guarda SOLO esas columnas y EN ESE ORDEN"));
     // stat (stat_mod.rs)
     v.push(f("stat", "mean", "stat.mean(…)", "Función del módulo stat."));
     v.push(f("stat", "median", "stat.median(…)", "Función del módulo stat."));

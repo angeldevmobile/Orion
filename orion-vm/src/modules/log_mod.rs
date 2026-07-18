@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::io::Write;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;

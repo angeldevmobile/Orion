@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use chrono::{Datelike, NaiveDate};
 use calamine::{Reader, open_workbook_auto, Data};
 use rust_xlsxwriter::{Workbook, Format, Color, Formula,
@@ -578,7 +578,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let nuevo = str_arg("renombrar_col", &args, 2)?;
             let result: Vec<EvalValue> = rows.into_iter().map(|row| {
                 if let EvalValue::Dict(mut m) = row {
-                    if let Some(v) = m.remove(&viejo) {
+                    if let Some(v) = m.shift_remove(&viejo) {
                         m.insert(nuevo.clone(), v);
                     }
                     EvalValue::Dict(m)

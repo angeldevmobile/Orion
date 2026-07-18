@@ -4,7 +4,7 @@
 //! Los acts compilados se registran en METHOD_TABLE y se llaman via dispatch de puntero.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 
 use super::runtime::{
     alloc_val, cstr_to_str, string_to_cptr, val_to_display, val_ref,

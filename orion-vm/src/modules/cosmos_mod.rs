@@ -1,7 +1,7 @@
 /// Orion Cosmos — simulación gravitacional en Rust puro.
 /// Cuerpos como Dicts, universo como Dict con lista de cuerpos.
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use rand::Rng;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {

@@ -1,5 +1,6 @@
 use crate::eval_value::EvalValue;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
+use indexmap::IndexMap as HashMap;
 use std::sync::{Mutex, OnceLock};
 
 // Los valores se serializan a JSON para evitar restricciones de Send sobre EvalValue.
@@ -61,7 +62,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // eliminar(nombre) → Bool  — elimina la cola entera
         "eliminar" | "delete" => {
             let name = one_str("cola.eliminar", &args)?;
-            queues().lock().unwrap().remove(&name);
+            queues().lock().unwrap().shift_remove(&name);
             Ok(EvalValue::Bool(true))
         }
         // lista() → List<Str> de nombres de colas existentes

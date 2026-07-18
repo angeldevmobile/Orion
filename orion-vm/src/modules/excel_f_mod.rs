@@ -17,7 +17,7 @@
 // convierte en fórmulas Excel vivas (se recalculan al abrir el archivo).
 
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     macro_rules! str_a {

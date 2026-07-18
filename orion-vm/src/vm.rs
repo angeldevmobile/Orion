@@ -1,4 +1,5 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
+use indexmap::IndexMap as HashMap;
 use indexmap::IndexMap;
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -1057,13 +1058,19 @@ impl VM {
                 self.value_stack.push(Value::list(items));
             }
             Instruction::MakeDict(n) => {
-                let mut map = IndexMap::new();
+                // los pares salen de la pila en orden inverso al del literal;
+                // se voltean para que el dict conserve el orden escrito por el dev
+                let mut pairs = Vec::with_capacity(n as usize);
                 for _ in 0..n {
                     let val = self.pop()?;
                     let key = match self.pop()? {
                         Value::Str(s) => s,
                         other => other.to_string(),
                     };
+                    pairs.push((key, val));
+                }
+                let mut map = IndexMap::with_capacity(n as usize);
+                for (key, val) in pairs.into_iter().rev() {
                     map.insert(key, val);
                 }
                 self.value_stack.push(Value::Dict(map));
@@ -2897,8 +2904,9 @@ pub fn value_to_eval(v: Value) -> crate::eval_value::EvalValue {
         Value::Module(m) => E::Module(m),
         Value::List(items) => E::List(items.borrow().iter().cloned().map(value_to_eval).collect()),
         Value::Dict(map)   => {
-            // pre-reservar evita re-hashes en tablas grandes (miles de filas/dicts)
-            let mut m = std::collections::HashMap::with_capacity(map.len());
+            // pre-reservar evita re-hashes en tablas grandes; IndexMap→IndexMap
+            // preserva el ORDEN de inserción de las claves end-to-end
+            let mut m = indexmap::IndexMap::with_capacity(map.len());
             for (k, v) in map { m.insert(k, value_to_eval(v)); }
             E::Dict(m)
         }

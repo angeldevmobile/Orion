@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::{Mutex, OnceLock};
 use ssh2::Session;
 use std::net::TcpStream;
@@ -254,7 +254,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 return Err("ssh.close requiere (session_id)".into());
             }
             let id = to_str(&args[0]);
-            sessions().lock().unwrap().remove(&id);
+            sessions().lock().unwrap().shift_remove(&id);
             Ok(EvalValue::Null)
         }
 

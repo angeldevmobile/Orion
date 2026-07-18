@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::Mutex;
 
 static DOCKER_HOST: Mutex<String> = Mutex::new(String::new());

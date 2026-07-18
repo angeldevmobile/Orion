@@ -1,6 +1,6 @@
 /// Orion Insight — análisis de documentos/imágenes con visión computacional + AI.
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use image::{ImageReader, DynamicImage, GenericImageView};
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {

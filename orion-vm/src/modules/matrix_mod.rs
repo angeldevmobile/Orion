@@ -215,7 +215,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let vt = svd.v_t.ok_or("matrix.svd: no se pudo calcular Vt")?;
             let s: Vec<EvalValue> = svd.singular_values.iter()
                 .map(|&x| EvalValue::Float(round12(x))).collect();
-            let mut m = std::collections::HashMap::new();
+            let mut m = indexmap::IndexMap::new();
             m.insert("u".to_string(),  mat_to_eval(from_dmatrix(&u)));
             m.insert("s".to_string(),  EvalValue::List(s));
             m.insert("vt".to_string(), mat_to_eval(from_dmatrix(&vt)));

@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use rusqlite::{Connection, types::Value as SqlValue};
 use base64::Engine as _;
 
@@ -58,7 +58,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             )?;
             if let EvalValue::List(list) = rows {
                 Ok(EvalValue::List(list.into_iter().filter_map(|r| {
-                    if let EvalValue::Dict(mut m) = r { m.remove("name") } else { None }
+                    if let EvalValue::Dict(mut m) = r { m.shift_remove("name") } else { None }
                 }).collect()))
             } else {
                 Ok(EvalValue::List(vec![]))

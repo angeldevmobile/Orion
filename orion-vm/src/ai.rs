@@ -2,7 +2,7 @@
 /// Usa ureq (ya en Cargo.toml) para llamar a Anthropic o OpenAI.
 /// Lee API keys desde variables de entorno y/o archivo .env.
 
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::Mutex;
 
 //     Memoria de sesión (persistente durante la ejecución del programa)        

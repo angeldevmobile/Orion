@@ -490,7 +490,19 @@ fn test_orden_columnas() {
     t = mk()
     hs = tbl.headers(t)
     assert_eq(len(hs), 6, "headers len")
-    assert_eq(hs[0], "activo", "headers orden alfabético por defecto")
+    -- el orden original del literal se preserva end-to-end (dicts ordenados)
+    assert_eq(hs[0], "nombre", "headers conservan orden original")
+    assert_eq(hs[5], "meta",   "headers última en orden original")
+
+    -- sin lista: save conserva el orden ORIGINAL de las columnas
+    tbl.save(t, "tests/output_table_orden_def.csv")
+    raw0 = fs.read("tests/output_table_orden_def.csv")
+    assert_eq(st.split(raw0, "\n")[0], "nombre,region,venta,precio,activo,meta", "save default en orden original")
+
+    -- y un CSV cargado de disco conserva el orden del archivo
+    tv = tbl.load("tests/datos_ventas.csv")
+    assert_eq(tbl.headers(tv)[0], "nombre", "load conserva orden del archivo")
+    assert_eq(tbl.headers(tv)[3], "edad",   "load orden intermedio del archivo")
 
     -- el dev decide el orden (y la selección) al guardar
     tbl.save(t, "tests/output_table_orden.csv", ["nombre", "venta", "region"])

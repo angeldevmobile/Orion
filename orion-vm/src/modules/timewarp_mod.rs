@@ -1,6 +1,6 @@
 /// Orion Timewarp — manipulación del tiempo en Rust.
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::time::{SystemTime, UNIX_EPOCH, Instant};
 use chrono::Local;
 

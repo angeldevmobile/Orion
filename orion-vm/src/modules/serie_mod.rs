@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -139,7 +139,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 // en procesos largos conviene soltar las intermedias). Devuelve yes si existía.
 fn fn_free(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
-    Ok(EvalValue::Bool(with_series(|s| s.remove(&id).is_some())))
+    Ok(EvalValue::Bool(with_series(|s| s.shift_remove(&id).is_some())))
 }
 
 // ── construcción ─────────────────────────────────────────────────────────────

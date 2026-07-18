@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
@@ -334,7 +334,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let result: Vec<EvalValue> = rows.into_iter()
                 .map(|row| {
                     if let EvalValue::Dict(mut m) = row {
-                        if let Some(v) = m.remove(&old_col) {
+                        if let Some(v) = m.shift_remove(&old_col) {
                             m.insert(new_col.clone(), v);
                         }
                         EvalValue::Dict(m)

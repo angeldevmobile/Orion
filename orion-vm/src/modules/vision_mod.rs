@@ -2,7 +2,7 @@
 /// Las imágenes se pasan como rutas de archivo.
 /// Operaciones en memoria retornan base64 o escriben a nuevos archivos.
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use image::{DynamicImage, ImageReader, imageops};
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {

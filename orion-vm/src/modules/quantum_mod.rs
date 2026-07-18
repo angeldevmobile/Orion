@@ -2,7 +2,7 @@
 /// Qubits representados como Vec de pares (re, im) = amplitudes complejas.
 /// EvalValue: un estado N-qubit es List([List([re, im]), ...]) con 2^N elementos.
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -334,7 +334,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // free(id) → libera el circuito; yes si existía
         "free" => {
             let id = circuit_id(&args)?;
-            Ok(EvalValue::Bool(with_circuits(|cs| cs.remove(&id).is_some())))
+            Ok(EvalValue::Bool(with_circuits(|cs| cs.shift_remove(&id).is_some())))
         }
 
         f => Err(format!("quantum.{}() no existe", f)),

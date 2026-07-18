@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use super::components::Component;
 use crate::eval_value::EvalValue;

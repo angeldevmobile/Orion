@@ -8,7 +8,7 @@
 
 use orion_vm::eval_value::EvalValue;
 use orion_vm::modules;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 
 fn call(m: &str, f: &str, args: Vec<EvalValue>) -> EvalValue {
     modules::call(m, f, args).unwrap_or_else(|e| panic!("{m}.{f} falló: {e}"))

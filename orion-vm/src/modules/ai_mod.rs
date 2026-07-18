@@ -1,6 +1,6 @@
 use crate::eval_value::EvalValue;
 use crate::ai;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::Mutex;
 
 // Historial de chat de sesión (para chat sessions)

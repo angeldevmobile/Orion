@@ -60,7 +60,6 @@ pub enum TokenKind {
     Ask,
     Read,
     Write,
-    Env,
     Append,
 
     // Keywords – server/net
@@ -162,7 +161,7 @@ impl TokenKind {
             Shape => "shape", Act => "act", Using => "using", Is => "is",
             OnCreate => "on_create", OnError => "on_error", Me => "me", Super => "super",
             Spawn => "spawn", Async => "async", Await => "await",
-            Ask => "ask", Read => "read", Write => "write", Env => "env", Append => "append",
+            Ask => "ask", Read => "read", Write => "write", Append => "append",
             Serve => "serve", With => "with", Choices => "choices",
             Think => "think", Learn => "learn", Sense => "sense",
             _ => return None,

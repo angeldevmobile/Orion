@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {

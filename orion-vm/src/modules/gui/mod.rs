@@ -631,7 +631,7 @@ fn text_style_args(args: &[EvalValue], idx: usize) -> Style {
 }
 
 /// Parsea un dict de estilo completo. Acepta sinónimos para ser amable con el dev.
-fn parse_style_dict(m: &std::collections::HashMap<String, EvalValue>) -> Style {
+fn parse_style_dict(m: &indexmap::IndexMap<String, EvalValue>) -> Style {
     let cfg = Some(m.clone());
     Style {
         bg:       cfg_color(&cfg, "bg").or_else(|| cfg_color(&cfg, "fill")),
@@ -663,7 +663,7 @@ fn parse_rgb_tag(s: &str) -> Option<[u8; 3]> {
 
 // ── Helpers para gui.table / gui.chart ──────────────────────────────────────
 
-type CfgMap = Option<std::collections::HashMap<String, EvalValue>>;
+type CfgMap = Option<indexmap::IndexMap<String, EvalValue>>;
 
 fn dict_opt(args: &[EvalValue], i: usize) -> CfgMap {
     match args.get(i) {

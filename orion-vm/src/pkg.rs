@@ -10,7 +10,7 @@
 //! Esquema orion.json (manifiesto de publicación):
 //!   { "name", "version", "description", "author", "tags", "file", "license" }
 
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
@@ -252,7 +252,7 @@ pub fn remove_package(name: &str) {
     let source = installed[name]["source"].as_str().unwrap_or("").to_string();
     let file   = installed[name]["file"].as_str().unwrap_or("").to_string();
 
-    installed.remove(name);
+    installed.shift_remove(name);
     if let Err(e) = save_installed(&installed) {
         eprintln!("[orion pkg] {}", e);
         std::process::exit(1);

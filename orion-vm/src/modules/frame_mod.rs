@@ -7,7 +7,7 @@
 ///   - Handle-based como vector_mod (lazy: open() solo lee el header)
 
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, IsTerminal, Write};
 use std::sync::Mutex;
@@ -1093,7 +1093,7 @@ fn fn_scan_stats(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 // si existía. Mismo contrato que serie.free.
 fn fn_free(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
-    Ok(EvalValue::Bool(with_frames(|fs| fs.remove(&id).is_some())))
+    Ok(EvalValue::Bool(with_frames(|fs| fs.shift_remove(&id).is_some())))
 }
 
 //   persistencia

@@ -1,5 +1,5 @@
 use eframe::egui;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::Ordering;

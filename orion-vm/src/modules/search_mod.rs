@@ -4,7 +4,7 @@
 /// calamine para Excel. Regex via crate `regex`. Nunca > chunk de líneas en RAM.
 
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::Path;

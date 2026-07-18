@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -155,7 +155,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "drop" => {
             if args.is_empty() { return Err("router.drop requiere (id)".into()); }
             let id = to_u64(&args[0])?;
-            store().lock().unwrap().remove(&id);
+            store().lock().unwrap().shift_remove(&id);
             // Desactivar si era el activo
             let mut act = active_id().lock().unwrap();
             if *act == Some(id) { *act = None; }

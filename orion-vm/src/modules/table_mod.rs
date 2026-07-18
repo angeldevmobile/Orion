@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use calamine::{Reader, open_workbook_auto, Data};
 use rust_xlsxwriter::{Workbook, Format, Color};
 use chrono::{Datelike, Local, NaiveDate, NaiveDateTime};
@@ -69,7 +69,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        // headers(table) → list con los nombres de columna (unión, orden alfabético)
+        // headers(table) → list con los nombres de columna en su orden original
         "headers" => {
             let rows = list_arg("headers", &args, 0)?;
             Ok(EvalValue::List(infer_headers(&rows).into_iter().map(EvalValue::Str).collect()))
@@ -192,7 +192,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let cols = str_list_arg("drop", &args, 1)?;
             let result = rows.into_iter().map(|row| {
                 if let EvalValue::Dict(mut m) = row {
-                    for c in &cols { m.remove(c); }
+                    for c in &cols { m.shift_remove(c); }
                     EvalValue::Dict(m)
                 } else { row }
             }).collect();
@@ -207,7 +207,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let new   = str_arg("rename", &args, 2)?;
             let result = rows.into_iter().map(|row| {
                 if let EvalValue::Dict(mut m) = row {
-                    if let Some(v) = m.remove(&old) { m.insert(new.clone(), v); }
+                    if let Some(v) = m.shift_remove(&old) { m.insert(new.clone(), v); }
                     EvalValue::Dict(m)
                 } else { row }
             }).collect();
@@ -822,9 +822,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //    Exportación                                                       
 
-        // save(table, path) → null   auto-detecta formato por extensión
+        // save(table, path) → null   auto-detecta formato por extensión;
+        // las columnas conservan su orden original (CSV/Excel/literal)
         // save(table, path, ["col1", "col2"]) → guarda SOLO esas columnas y EN ESE ORDEN
-        // (sin lista: unión de columnas en orden alfabético)
         "save" => {
             if args.len() < 2 { return Err("table.save requiere (tabla, path)".into()); }
             let rows = list_arg("save", &args, 0)?;
@@ -936,8 +936,8 @@ fn load_json(path: &str) -> Result<EvalValue, String> {
 
 //    Savers                                                                    
 
-// Sin lista de columnas → unión alfabética; con lista → valida contra la tabla
-// y respeta el orden que pidió el dev (la lista también SELECCIONA columnas).
+// Sin lista de columnas → orden original de la tabla; con lista → valida contra
+// la tabla y respeta el orden que pidió el dev (la lista también SELECCIONA).
 fn resolve_columns(fn_name: &str, rows: &[EvalValue], arg: Option<&EvalValue>) -> Result<Vec<String>, String> {
     match arg {
         Some(EvalValue::List(v)) => {
@@ -1788,8 +1788,9 @@ fn ai_call(prompt: &str) -> Result<EvalValue, String> {
 
 //    Helpers generales                                                         
 
-// Unión de las claves de TODAS las filas (no solo la primera), para que las
-// tablas heterogéneas no pierdan columnas al guardar/imprimir.
+// Unión de las claves de TODAS las filas (no solo la primera), en ORDEN DE
+// APARICIÓN: los dicts son IndexMap end-to-end, así que aquí llega el orden
+// original del CSV/Excel/literal tal como lo escribió el dev.
 fn infer_headers(rows: &[EvalValue]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut headers = Vec::new();
@@ -1800,7 +1801,6 @@ fn infer_headers(rows: &[EvalValue]) -> Vec<String> {
             }
         }
     }
-    headers.sort();
     headers
 }
 

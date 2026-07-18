@@ -8,7 +8,7 @@
 
 use crate::ast::{Expr, Param, Stmt};
 use crate::codegen::CodegenError;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 
 type Sigs = HashMap<String, Vec<Param>>;
 

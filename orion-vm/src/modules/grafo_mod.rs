@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
 use petgraph::Graph;
@@ -116,8 +116,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "eliminar" | "delete" => {
             let gid = to_u64(args.first().ok_or("grafo.eliminar requiere (id)")?)?;
             let mut st = store().lock().unwrap();
-            st.graphs.remove(&gid);
-            st.node_index.remove(&gid);
+            st.graphs.shift_remove(&gid);
+            st.node_index.shift_remove(&gid);
             Ok(EvalValue::Bool(true))
         }
         f => Err(format!("grafo.{}() no existe", f)),

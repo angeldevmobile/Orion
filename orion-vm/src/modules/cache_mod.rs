@@ -1,5 +1,5 @@
 use crate::eval_value::EvalValue;
-use std::collections::HashMap;
+use indexmap::IndexMap as HashMap;
 use std::sync::{Mutex, OnceLock};
 
 static CACHE: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLock::new();
@@ -29,7 +29,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // eliminar(clave) → Bool
         "eliminar" | "del" => {
             if args.is_empty() { return Err("cache.eliminar requiere (clave)".into()); }
-            cache().lock().unwrap().remove(&to_str(&args[0]));
+            cache().lock().unwrap().shift_remove(&to_str(&args[0]));
             Ok(EvalValue::Bool(true))
         }
         // existe(clave) → Bool

@@ -84,7 +84,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "parts" => {
             if args.is_empty() { return Err("datetime.parts requiere (dt_str)".into()); }
             let dt = parse_dt(&to_str(&args[0]))?;
-            let mut m = std::collections::HashMap::new();
+            let mut m = indexmap::IndexMap::new();
             m.insert("year".into(),   EvalValue::Int(dt.year() as i64));
             m.insert("month".into(),  EvalValue::Int(dt.month() as i64));
             m.insert("day".into(),    EvalValue::Int(dt.day() as i64));
