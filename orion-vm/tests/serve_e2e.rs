@@ -1,7 +1,9 @@
-//! E2E del stack web: levanta tests/server_test.orx con el binario real de
+//! E2E del stack web: levanta tests/server_e2e.orx con el binario real de
 //! Orion y lo golpea con HTTP de verdad (router, middlewares, headers, CORS,
 //! JWT, rate limit, SSE, state). Un solo #[test] secuencial: el rate limiter
 //! y el contador dependen del orden de los requests.
+//! OJO: el fixture NO puede llamarse test_*.orx ni *_test.orx — el runner de
+//! `orion test` lo ejecutaría y se quedaría bloqueado en serve.
 
 use std::net::TcpStream;
 use std::process::{Child, Command, Stdio};
@@ -18,7 +20,7 @@ impl Drop for ServerGuard {
 }
 
 fn start_server() -> ServerGuard {
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/server_test.orx");
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/server_e2e.orx");
     let child = Command::new(env!("CARGO_BIN_EXE_orion"))
         .arg(script)
         .stdout(Stdio::null())

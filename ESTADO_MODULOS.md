@@ -38,10 +38,10 @@ Probados con aserciones reales sobre su salida:
 | `config` | get sobre dict |
 | `grafo` | create/node/edge |
 | `quantum` | zero, bell |
-| `router` | new + registro de rutas |
-| `sse` | event, named (formato SSE) |
+| `router` | **e2e con servidor HTTP real** (2026-07-18, `orion-vm/tests/serve_e2e.rs` + `tests/server_e2e.orx`): serve despacha por el router activo (attach ya es real, antes era superficie fantasma), rutas por método, `:params` y `*wildcard` verificados con requests reales, middlewares en orden con corte (403/429), fallback al handler global de serve si nada matchea |
+| `sse` | **e2e con servidor real**: named/json_event llegan al cliente con content-type text/event-stream y headers custom; formato spec verificado sobre HTTP |
 | `stream` | range, from |
-| `middleware` | rate_limit |
+| `middleware` | **e2e con servidor real**: rate_limit por IP (3 pasan → 429, poda automática del mapa), cors llega al navegador vía response headers, auth_bearer acepta "Bearer <token>" completo y valida JWT end-to-end (bug arreglado: jsonwebtoken exigía claim exp y rechazaba tokens sin expiración) |
 | `pdf` | create (genera archivo .pdf) |
 | `watch` | stat de archivo |
 | `cosmos` | star, universe (simulación) |

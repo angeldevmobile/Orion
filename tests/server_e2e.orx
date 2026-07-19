@@ -1,6 +1,8 @@
 -- Servidor de prueba e2e del stack web de Orion: router + middlewares +
 -- headers + CORS + JWT + rate limit + SSE + state. Lo levanta el test de
 -- integración orion-vm/tests/serve_e2e.rs y lo golpea con HTTP real.
+-- OJO: este archivo NO debe llamarse test_*.orx ni *_test.orx — el runner de
+-- `orion test` lo ejecutaría y quedaría bloqueado en serve para siempre.
 use "router" as router
 use "middleware" as mw
 use "state" as state
