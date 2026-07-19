@@ -441,6 +441,9 @@ impl TypeChecker {
             Stmt::For { var, iter, body, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;
+                // marca las lecturas del iterable (`for x in lista` LEE lista),
+                // igual que While hace con su condición
+                self.infer_type(iter);
                 let elem_type = self.infer_iter_elem_type(iter);
                 self.push_scope();
                 self.scope_set(var.clone(), elem_type);

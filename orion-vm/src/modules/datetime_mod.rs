@@ -64,6 +64,27 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let new_dt = dt + Duration::hours(hours);
             Ok(EvalValue::Str(new_dt.format("%Y-%m-%dT%H:%M:%S").to_string()))
         }
+        // add_minutes(dt_str, n)
+        "add_minutes" => {
+            if args.len() < 2 { return Err("datetime.add_minutes requiere (dt_str, minutes)".into()); }
+            let dt = parse_dt(&to_str(&args[0]))?;
+            let new_dt = dt + Duration::minutes(to_i64(&args[1])?);
+            Ok(EvalValue::Str(new_dt.format("%Y-%m-%dT%H:%M:%S").to_string()))
+        }
+        // add_months(dt_str, n) → ajusta el fin de mes (31 ene + 1 mes = 28/29 feb)
+        "add_months" => {
+            if args.len() < 2 { return Err("datetime.add_months requiere (dt_str, months)".into()); }
+            let dt = parse_dt(&to_str(&args[0]))?;
+            let new_dt = shift_months(dt, to_i64(&args[1])?)?;
+            Ok(EvalValue::Str(new_dt.format("%Y-%m-%dT%H:%M:%S").to_string()))
+        }
+        // add_years(dt_str, n) → ajusta bisiestos (29 feb + 1 año = 28 feb)
+        "add_years" => {
+            if args.len() < 2 { return Err("datetime.add_years requiere (dt_str, years)".into()); }
+            let dt = parse_dt(&to_str(&args[0]))?;
+            let new_dt = shift_months(dt, to_i64(&args[1])? * 12)?;
+            Ok(EvalValue::Str(new_dt.format("%Y-%m-%dT%H:%M:%S").to_string()))
+        }
         // diff_days(a, b) → días entre dos fechas
         "diff_days" => {
             if args.len() < 2 { return Err("datetime.diff_days requiere (a, b)".into()); }
@@ -80,6 +101,56 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let diff = (b - a).num_seconds();
             Ok(EvalValue::Int(diff))
         }
+        // diff_hours(a, b) → horas completas entre dos fechas
+        "diff_hours" => {
+            if args.len() < 2 { return Err("datetime.diff_hours requiere (a, b)".into()); }
+            let a = parse_dt(&to_str(&args[0]))?;
+            let b = parse_dt(&to_str(&args[1]))?;
+            Ok(EvalValue::Int((b - a).num_hours()))
+        }
+        // diff_minutes(a, b) → minutos completos entre dos fechas
+        "diff_minutes" => {
+            if args.len() < 2 { return Err("datetime.diff_minutes requiere (a, b)".into()); }
+            let a = parse_dt(&to_str(&args[0]))?;
+            let b = parse_dt(&to_str(&args[1]))?;
+            Ok(EvalValue::Int((b - a).num_minutes()))
+        }
+        // to_timestamp(dt_str) → unix segundos (la fecha se interpreta en hora local)
+        "to_timestamp" => {
+            use chrono::TimeZone;
+            if args.is_empty() { return Err("datetime.to_timestamp requiere (dt_str)".into()); }
+            let dt = parse_dt(&to_str(&args[0]))?;
+            let local = Local.from_local_datetime(&dt).single()
+                .or_else(|| Local.from_local_datetime(&dt).earliest())
+                .ok_or("datetime.to_timestamp: fecha ambigua en hora local")?;
+            Ok(EvalValue::Int(local.timestamp()))
+        }
+        // from_timestamp(ts_segundos) → string ISO en hora local
+        "from_timestamp" => {
+            use chrono::TimeZone;
+            if args.is_empty() { return Err("datetime.from_timestamp requiere (ts_segundos)".into()); }
+            let ts = to_i64(&args[0])?;
+            let dt = Local.timestamp_opt(ts, 0).single()
+                .ok_or("datetime.from_timestamp: timestamp inválido")?;
+            Ok(EvalValue::Str(dt.format("%Y-%m-%dT%H:%M:%S").to_string()))
+        }
+        // start_of_month(dt_str) → "YYYY-MM-01"
+        "start_of_month" => {
+            if args.is_empty() { return Err("datetime.start_of_month requiere (dt_str)".into()); }
+            let dt = parse_dt(&to_str(&args[0]))?;
+            let date = NaiveDate::from_ymd_opt(dt.year(), dt.month(), 1)
+                .ok_or("datetime.start_of_month: fecha inválida")?;
+            Ok(EvalValue::Str(date.format("%Y-%m-%d").to_string()))
+        }
+        // end_of_month(dt_str) → último día del mes ("YYYY-MM-28/29/30/31")
+        "end_of_month" => {
+            if args.is_empty() { return Err("datetime.end_of_month requiere (dt_str)".into()); }
+            let dt = parse_dt(&to_str(&args[0]))?;
+            let last = last_day_of_month(dt.year(), dt.month());
+            let date = NaiveDate::from_ymd_opt(dt.year(), dt.month(), last)
+                .ok_or("datetime.end_of_month: fecha inválida")?;
+            Ok(EvalValue::Str(date.format("%Y-%m-%d").to_string()))
+        }
         // parts(dt_str) → dict con year, month, day, hour, minute, second
         "parts" => {
             if args.is_empty() { return Err("datetime.parts requiere (dt_str)".into()); }
@@ -93,13 +164,18 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             m.insert("second".into(), EvalValue::Int(dt.second() as i64));
             Ok(EvalValue::Dict(m))
         }
-        // weekday(dt_str) → "Monday", "Tuesday", etc.
+        // weekday(dt_str) → "Monday"…; weekday(dt_str, "es") → "lunes"…
         "weekday" => {
-            if args.is_empty() { return Err("datetime.weekday requiere (dt_str)".into()); }
+            if args.is_empty() { return Err("datetime.weekday requiere (dt_str [, idioma])".into()); }
             let dt = parse_dt(&to_str(&args[0]))?;
-            let names = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
             let idx = dt.weekday().num_days_from_monday() as usize;
-            Ok(EvalValue::Str(names[idx].to_string()))
+            let es = matches!(args.get(1), Some(EvalValue::Str(s)) if s == "es");
+            let name = if es {
+                ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"][idx]
+            } else {
+                ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"][idx]
+            };
+            Ok(EvalValue::Str(name.to_string()))
         }
         // is_past / is_future
         "is_past" => {
@@ -130,13 +206,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 }
 
 fn parse_dt(s: &str) -> Result<chrono::NaiveDateTime, String> {
-    // Intenta varios formatos comunes
+    // Formatos comunes; día-primero antes que mes-primero en los ambiguos
+    // (misma convención que table.cast(col, "date"))
     let formats = [
+        "%Y-%m-%dT%H:%M:%S%.f",
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
         "%Y-%m-%d",
         "%Y/%m/%d %H:%M:%S",
         "%Y/%m/%d",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y",
+        "%d-%m-%Y",
+        "%d.%m.%Y",
+        "%m/%d/%Y",
     ];
     for fmt in formats {
         if let Ok(dt) = NaiveDateTime::parse_from_str(s, fmt) {
@@ -148,6 +232,22 @@ fn parse_dt(s: &str) -> Result<chrono::NaiveDateTime, String> {
         }
     }
     Err(format!("datetime: no se pudo parsear la fecha '{}'", s))
+}
+
+fn last_day_of_month(y: i32, m: u32) -> u32 {
+    let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
+    (NaiveDate::from_ymd_opt(ny, nm, 1).unwrap() - Duration::days(1)).day()
+}
+
+// Suma meses ajustando el día al fin de mes destino (31 ene + 1 mes = 28/29 feb)
+fn shift_months(dt: NaiveDateTime, months: i64) -> Result<NaiveDateTime, String> {
+    let total = dt.year() as i64 * 12 + (dt.month() as i64 - 1) + months;
+    let y = total.div_euclid(12) as i32;
+    let m = (total.rem_euclid(12) + 1) as u32;
+    let d = dt.day().min(last_day_of_month(y, m));
+    let date = NaiveDate::from_ymd_opt(y, m, d)
+        .ok_or("datetime: fecha resultante inválida")?;
+    Ok(date.and_hms_opt(dt.hour(), dt.minute(), dt.second()).unwrap())
 }
 
 fn to_str(v: &EvalValue) -> String {

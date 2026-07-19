@@ -60,6 +60,17 @@ fn as_number(v: &EvalValue) -> Option<f64> {
     }
 }
 
+/// Valor actual para incr/decr: inexistente → 0; no numérico → error claro.
+fn numeric_current(op: &str, s: &Store, key: &str) -> Result<f64, String> {
+    match s.data.get(key) {
+        None => Ok(0.0),
+        Some(v) => as_number(v).ok_or_else(|| format!(
+            "state.{}: la clave '{}' contiene un valor no numérico ({}); usa set para reemplazarla",
+            op, key, v.type_name()
+        )),
+    }
+}
+
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let mut s = store().lock().unwrap();
     match function {
@@ -85,11 +96,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Bool(s.data.contains_key(&to_str(&args[0]))))
         }
         // incr(clave [, delta=1]) → nuevo valor (ATÓMICO: get+set bajo un lock)
+        // Clave inexistente arranca en 0; clave con valor NO numérico → error
+        // claro (antes se pisaba en silencio).
         "incr" | "increment" => {
             if args.is_empty() { return Err("state.incr requiere (clave)".into()); }
             let key = to_str(&args[0]);
             let delta = args.get(1).and_then(as_number).unwrap_or(1.0);
-            let current = s.data.get(&key).and_then(as_number).unwrap_or(0.0);
+            let current = numeric_current("incr", &s, &key)?;
             let next = current + delta;
             // Si tanto el valor previo como el delta son enteros, mantener Int.
             let is_int = delta.fract() == 0.0 && current.fract() == 0.0;
@@ -103,13 +116,23 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if args.is_empty() { return Err("state.decr requiere (clave)".into()); }
             let key = to_str(&args[0]);
             let delta = args.get(1).and_then(as_number).unwrap_or(1.0);
-            let current = s.data.get(&key).and_then(as_number).unwrap_or(0.0);
+            let current = numeric_current("decr", &s, &key)?;
             let next = current - delta;
             let is_int = delta.fract() == 0.0 && current.fract() == 0.0;
             let val = if is_int { EvalValue::Int(next as i64) } else { EvalValue::Float(next) };
             s.data.insert(key, val.clone());
             flush(&s);
             Ok(val)
+        }
+        // setnx(clave, valor) → Bool: guarda SOLO si la clave no existe.
+        // Atómico bajo el mismo lock — sirve como candado simple entre requests.
+        "setnx" | "set_if_absent" => {
+            if args.len() < 2 { return Err("state.setnx requiere (clave, valor)".into()); }
+            let key = to_str(&args[0]);
+            if s.data.contains_key(&key) { return Ok(EvalValue::Bool(false)); }
+            s.data.insert(key, args[1].clone());
+            flush(&s);
+            Ok(EvalValue::Bool(true))
         }
         // delete(clave) → Bool (true si existía)
         "delete" | "remove" | "del" | "eliminar" => {

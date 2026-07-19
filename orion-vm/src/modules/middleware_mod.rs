@@ -46,6 +46,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let mut store = limiters().lock().unwrap();
             let lim = store.get_mut(&id)
                 .ok_or_else(|| format!("middleware: limiter {} no existe", id))?;
+            // poda de ventanas vencidas para que el mapa no crezca sin límite
+            if lim.clients.len() > 4096 {
+                let w = lim.window_secs;
+                lim.clients.retain(|_, (_, start)| now - *start < w);
+            }
             let entry = lim.clients.entry(ip).or_insert((0, now));
             if now - entry.1 >= lim.window_secs {
                 *entry = (1, now);
@@ -90,9 +95,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
 
         // auth_bearer(token, secret) → Dict {valid, sub?, payload?, error?}
+        // Acepta el header completo: el prefijo "Bearer " se quita solo.
         "auth_bearer" => {
             if args.len() < 2 { return Err("middleware.auth_bearer requiere (token, secret)".into()); }
-            validate_jwt(&to_str(&args[0]), &to_str(&args[1]))
+            let raw = to_str(&args[0]);
+            let token = raw.trim().strip_prefix("Bearer ").unwrap_or(raw.trim()).trim();
+            validate_jwt(token, &to_str(&args[1]))
         }
 
         // log_req(method, path, status, ms) → Bool
@@ -128,6 +136,9 @@ fn validate_jwt(token: &str, secret: &str) -> Result<EvalValue, String> {
 
     let key = DecodingKey::from_secret(secret.as_bytes());
     let mut validation = Validation::new(Algorithm::HS256);
+    // exp se verifica manualmente abajo (tokens sin exp son válidos);
+    // sin esto, jsonwebtoken exige el claim exp y rechaza todo token sin él
+    validation.required_spec_claims.clear();
     validation.validate_exp = false;
 
     match decode::<serde_json::Map<String, serde_json::Value>>(token, &key, &validation) {

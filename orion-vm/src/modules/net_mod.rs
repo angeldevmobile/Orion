@@ -135,10 +135,21 @@ fn http_method(method: &str, url: &str, body: Option<EvalValue>, headers: Vec<(S
 
 fn pack_response(resp: ureq::Response) -> Result<EvalValue, String> {
     let status = resp.status();
+
+    // Headers de respuesta (claves en minúscula) — permiten verificar CORS,
+    // content-type, cache, etc. desde Orion.
+    let mut headers = HashMap::new();
+    for name in resp.headers_names() {
+        if let Some(v) = resp.header(&name) {
+            headers.insert(name.to_lowercase(), EvalValue::Str(v.to_string()));
+        }
+    }
+
     let body   = resp.into_string().unwrap_or_default();
     let mut m  = HashMap::new();
-    m.insert("status".into(), EvalValue::Int(status as i64));
-    m.insert("ok".into(),     EvalValue::Bool(status >= 200 && status < 300));
+    m.insert("status".into(),  EvalValue::Int(status as i64));
+    m.insert("ok".into(),      EvalValue::Bool(status >= 200 && status < 300));
+    m.insert("headers".into(), EvalValue::Dict(headers));
 
     // Intenta parsear como JSON automáticamente
     if let Ok(j) = serde_json::from_str::<serde_json::Value>(&body) {

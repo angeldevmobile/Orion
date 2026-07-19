@@ -110,10 +110,19 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("datetime", "parse", "datetime.parse(s, fmt?)", "String ISO normalizado"));
     v.push(f("datetime", "add_days", "datetime.add_days(dt_str, n)", "Nuevo string de fecha"));
     v.push(f("datetime", "add_hours", "datetime.add_hours(dt_str, n)", "Función del módulo datetime."));
+    v.push(f("datetime", "add_minutes", "datetime.add_minutes(dt_str, n)", "Función del módulo datetime."));
+    v.push(f("datetime", "add_months", "datetime.add_months(dt_str, n)", "Ajusta el fin de mes (31 ene + 1 mes = 28/29 feb)"));
+    v.push(f("datetime", "add_years", "datetime.add_years(dt_str, n)", "Ajusta bisiestos (29 feb + 1 año = 28 feb)"));
     v.push(f("datetime", "diff_days", "datetime.diff_days(a, b)", "Días entre dos fechas"));
     v.push(f("datetime", "diff_seconds", "datetime.diff_seconds(a, b)", "Función del módulo datetime."));
+    v.push(f("datetime", "diff_hours", "datetime.diff_hours(a, b)", "Horas completas entre dos fechas"));
+    v.push(f("datetime", "diff_minutes", "datetime.diff_minutes(a, b)", "Minutos completos entre dos fechas"));
+    v.push(f("datetime", "to_timestamp", "datetime.to_timestamp(dt_str)", "Unix segundos (la fecha se interpreta en hora local)"));
+    v.push(f("datetime", "from_timestamp", "datetime.from_timestamp(ts_segundos)", "String ISO en hora local"));
+    v.push(f("datetime", "start_of_month", "datetime.start_of_month(dt_str)", "\"YYYY-MM-01\""));
+    v.push(f("datetime", "end_of_month", "datetime.end_of_month(dt_str)", "Último día del mes (\"YYYY-MM-28/29/30/31\")"));
     v.push(f("datetime", "parts", "datetime.parts(dt_str)", "Dict con year, month, day, hour, minute, second"));
-    v.push(f("datetime", "weekday", "datetime.weekday(dt_str)", "\"Monday\", \"Tuesday\", etc."));
+    v.push(f("datetime", "weekday", "datetime.weekday(dt_str)", "\"Monday\"…; weekday(dt_str, \"es\") → \"lunes\"…"));
     v.push(f("datetime", "is_past", "datetime.is_past(…)", "Is_past / is_future"));
     v.push(f("datetime", "is_future", "datetime.is_future(…)", "Función del módulo datetime."));
     v.push(f("datetime", "from_date", "datetime.from_date(year, month, day)", "String ISO"));
@@ -278,8 +287,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("timewarp", "timestamp_ns", "timewarp.timestamp_ns()", "Unix nanoseconds"));
     v.push(f("timewarp", "wait", "timewarp.wait(duration)", "Pausa; acepta \"1s\", \"500ms\", \"1000ns\" o número en segundos"));
     v.push(f("timewarp", "sleep", "timewarp.sleep(duration)", "Alias de timewarp.wait."));
-    v.push(f("timewarp", "clock", "timewarp.clock(…)", "Measure(fn_name?) → inicia cronómetro, retorna handle"));
-    v.push(f("timewarp", "start_clock", "timewarp.start_clock(…)", "Alias de timewarp.clock."));
+    v.push(f("timewarp", "clock", "timewarp.clock()", "Cronómetro (dict con start_ns); medir con elapsed(clock)"));
+    v.push(f("timewarp", "start_clock", "timewarp.start_clock()", "Alias de timewarp.clock."));
     v.push(f("timewarp", "elapsed", "timewarp.elapsed(clock)", "Segundos transcurridos"));
     v.push(f("timewarp", "format", "timewarp.format(timestamp_secs, fmt?)", "String formateado"));
     v.push(f("timewarp", "diff", "timewarp.diff(ts1, ts2)", "Segundos de diferencia"));
@@ -630,17 +639,18 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("auth", "verificar_token", "auth.verificar_token(token, secret)", "Dict con payload o {error, valido:false}"));
     v.push(f("auth", "decode_token", "auth.decode_token(token, secret)", "Alias de auth.verificar_token."));
     // cache (cache_mod.rs)
-    v.push(f("cache", "guardar", "cache.guardar(clave, valor)", "Bool"));
-    v.push(f("cache", "set", "cache.set(clave, valor)", "Alias de cache.guardar."));
-    v.push(f("cache", "obtener", "cache.obtener(clave)", "Valor o Null"));
-    v.push(f("cache", "get", "cache.get(clave)", "Alias de cache.obtener."));
-    v.push(f("cache", "eliminar", "cache.eliminar(clave)", "Bool"));
+    v.push(f("cache", "guardar", "cache.guardar(clave, valor) o guardar(clave, valor, ttl_segundos)", "Bool Con ttl la entrada expira sola; acepta segundos con decimales."));
+    v.push(f("cache", "set", "cache.set(clave, valor) o guardar(clave, valor, ttl_segundos)", "Alias de cache.guardar."));
+    v.push(f("cache", "obtener", "cache.obtener(clave) o obtener(clave, default)", "Valor, default o Null"));
+    v.push(f("cache", "get", "cache.get(clave) o obtener(clave, default)", "Alias de cache.obtener."));
+    v.push(f("cache", "eliminar", "cache.eliminar(clave)", "Bool (true si la clave existía y estaba viva)"));
     v.push(f("cache", "del", "cache.del(clave)", "Alias de cache.eliminar."));
-    v.push(f("cache", "existe", "cache.existe(clave)", "Bool"));
+    v.push(f("cache", "existe", "cache.existe(clave)", "Bool (una entrada expirada ya no existe)"));
     v.push(f("cache", "has", "cache.has(clave)", "Alias de cache.existe."));
+    v.push(f("cache", "ttl", "cache.ttl(clave)", "Segundos restantes (Float), o Null si no existe o no tiene ttl"));
     v.push(f("cache", "limpiar", "cache.limpiar()", "Bool"));
     v.push(f("cache", "clear", "cache.clear()", "Alias de cache.limpiar."));
-    v.push(f("cache", "claves", "cache.claves()", "List<Str>"));
+    v.push(f("cache", "claves", "cache.claves()", "List<Str> (solo entradas vivas)"));
     v.push(f("cache", "keys", "cache.keys()", "Alias de cache.claves."));
     // state (state_mod.rs)
     v.push(f("state", "set", "state.set(clave, valor)", "Valor guardado"));
@@ -651,10 +661,12 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("state", "has", "state.has(clave)", "Bool"));
     v.push(f("state", "exists", "state.exists(clave)", "Alias de state.has."));
     v.push(f("state", "existe", "state.existe(clave)", "Alias de state.has."));
-    v.push(f("state", "incr", "state.incr(clave [, delta=1])", "Nuevo valor (ATÓMICO: get+set bajo un lock)"));
+    v.push(f("state", "incr", "state.incr(clave [, delta=1])", "Nuevo valor (ATÓMICO: get+set bajo un lock) Clave inexistente arranca en 0; clave con valor NO numérico → error claro (antes se pisaba en silencio)."));
     v.push(f("state", "increment", "state.increment(clave [, delta=1])", "Alias de state.incr."));
     v.push(f("state", "decr", "state.decr(clave [, delta=1])", "Nuevo valor (atómico)"));
     v.push(f("state", "decrement", "state.decrement(clave [, delta=1])", "Alias de state.decr."));
+    v.push(f("state", "setnx", "state.setnx(clave, valor)", "Bool: guarda SOLO si la clave no existe. Atómico bajo el mismo lock — sirve como candado simple entre requests."));
+    v.push(f("state", "set_if_absent", "state.set_if_absent(clave, valor)", "Alias de state.setnx."));
     v.push(f("state", "delete", "state.delete(clave)", "Bool (true si existía)"));
     v.push(f("state", "remove", "state.remove(clave)", "Alias de state.delete."));
     v.push(f("state", "del", "state.del(clave)", "Alias de state.delete."));
@@ -697,7 +709,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("cola", "peek", "cola.peek(nombre)", "Alias de cola.espiar."));
     v.push(f("cola", "vaciar", "cola.vaciar(nombre)", "Bool"));
     v.push(f("cola", "clear", "cola.clear(nombre)", "Alias de cola.vaciar."));
-    v.push(f("cola", "eliminar", "cola.eliminar(nombre)", "Bool  — elimina la cola entera"));
+    v.push(f("cola", "eliminar", "cola.eliminar(nombre)", "Bool (true si la cola existía) — elimina la cola entera"));
     v.push(f("cola", "delete", "cola.delete(nombre)", "Alias de cola.eliminar."));
     v.push(f("cola", "lista", "cola.lista()", "List<Str> de nombres de colas existentes"));
     v.push(f("cola", "list", "cola.list()", "Alias de cola.lista."));
@@ -748,6 +760,17 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("formato", "table", "formato.table(encabezados, filas)", "Alias de formato.tabla."));
     v.push(f("formato", "separador", "formato.separador(ancho, caracter?)", "String  — línea horizontal"));
     v.push(f("formato", "divider", "formato.divider(ancho, caracter?)", "Alias de formato.separador."));
+    v.push(f("formato", "numero", "formato.numero(n, decimales=0, miles=\",\", decimal=\".\")", "\"1,487,000.50\" Estilo español: numero(n, 2, \".\", \",\") → \"1.487.000,50\""));
+    v.push(f("formato", "number", "formato.number(n, decimales=0, miles=\",\", decimal=\".\")", "Alias de formato.numero."));
+    v.push(f("formato", "moneda", "formato.moneda(n, simbolo=\"$\", decimales=2)", "\"$1,487,000.00\" Símbolo alfabético va con espacio: moneda(n, \"USD\") → \"USD 1,487,000.00\""));
+    v.push(f("formato", "currency", "formato.currency(n, simbolo=\"$\", decimales=2)", "Alias de formato.moneda."));
+    v.push(f("formato", "porcentaje", "formato.porcentaje(x, decimales=1)", "0.156 → \"15.6%\""));
+    v.push(f("formato", "percent", "formato.percent(x, decimales=1)", "Alias de formato.porcentaje."));
+    v.push(f("formato", "bytes", "formato.bytes(n)", "Tamaño humano en base 1024: \"512 B\", \"1.5 KB\", \"2 MB\""));
+    v.push(f("formato", "duracion", "formato.duracion(segundos)", "\"1d 2h 3m 4s\"; menos de 1s → \"500ms\""));
+    v.push(f("formato", "duration", "formato.duration(segundos)", "Alias de formato.duracion."));
+    v.push(f("formato", "truncar", "formato.truncar(s, max)", "Corta a max caracteres agregando \"…\" si hizo falta"));
+    v.push(f("formato", "truncate", "formato.truncate(s, max)", "Alias de formato.truncar."));
     v.push(f("formato", "centrar", "formato.centrar(s, ancho)", "String  — texto centrado con espacios"));
     v.push(f("formato", "center", "formato.center(s, ancho)", "Alias de formato.centrar."));
     // grafo (grafo_mod.rs)
@@ -867,7 +890,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("middleware", "check_rate", "middleware.check_rate(limiter_id, client_ip)", "Bool (true = permitido)"));
     v.push(f("middleware", "reset_rate", "middleware.reset_rate(limiter_id, client_ip?)", "Bool  (resetea contadores)"));
     v.push(f("middleware", "cors", "middleware.cors(origins?, methods?, headers?)", "Dict de headers HTTP"));
-    v.push(f("middleware", "auth_bearer", "middleware.auth_bearer(token, secret)", "Dict {valid, sub?, payload?, error?}"));
+    v.push(f("middleware", "auth_bearer", "middleware.auth_bearer(token, secret)", "Dict {valid, sub?, payload?, error?} Acepta el header completo: el prefijo \"Bearer \" se quita solo."));
     v.push(f("middleware", "log_req", "middleware.log_req(method, path, status, ms)", "Bool"));
     v.push(f("middleware", "drop_rate", "middleware.drop_rate(limiter_id)", "Bool"));
     // sse (sse_mod.rs)

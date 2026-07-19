@@ -33,10 +33,80 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // separador(ancho, caracter?) → String  — línea horizontal
         "separador" | "divider" => {
-            let ancho = to_i64(args.first().ok_or("formato.separador requiere (ancho)")?)?;
+            let ancho = to_i64(args.first().ok_or("formato.separador requiere (ancho)")?)?.max(0);
             let ch    = args.get(1).map(to_str_val).unwrap_or_else(|| "─".to_string());
             let ch    = ch.chars().next().unwrap_or('─');
             Ok(EvalValue::Str(std::iter::repeat(ch).take(ancho as usize).collect()))
+        }
+        // numero(n, decimales=0, miles=",", decimal=".") → "1,487,000.50"
+        // Estilo español: numero(n, 2, ".", ",") → "1.487.000,50"
+        "numero" | "number" => {
+            let n = to_f64(args.first().ok_or("formato.numero requiere (n)")?)?;
+            let dec  = args.get(1).and_then(|v| to_i64(v).ok()).unwrap_or(0).max(0) as usize;
+            let thou = args.get(2).map(to_str_val).unwrap_or_else(|| ",".to_string());
+            let dsep = args.get(3).map(to_str_val).unwrap_or_else(|| ".".to_string());
+            Ok(EvalValue::Str(format_number(n, dec, &thou, &dsep)))
+        }
+        // moneda(n, simbolo="$", decimales=2) → "$1,487,000.00"
+        // Símbolo alfabético va con espacio: moneda(n, "USD") → "USD 1,487,000.00"
+        "moneda" | "currency" => {
+            let n = to_f64(args.first().ok_or("formato.moneda requiere (n)")?)?;
+            let sym = args.get(1).map(to_str_val).unwrap_or_else(|| "$".to_string());
+            let dec = args.get(2).and_then(|v| to_i64(v).ok()).unwrap_or(2).max(0) as usize;
+            let num = format_number(n, dec, ",", ".");
+            let sep = if sym.chars().all(|c| c.is_alphabetic()) { " " } else { "" };
+            Ok(EvalValue::Str(format!("{}{}{}", sym, sep, num)))
+        }
+        // porcentaje(x, decimales=1) → 0.156 → "15.6%"
+        "porcentaje" | "percent" => {
+            let x = to_f64(args.first().ok_or("formato.porcentaje requiere (x)")?)?;
+            let dec = args.get(1).and_then(|v| to_i64(v).ok()).unwrap_or(1).max(0) as usize;
+            Ok(EvalValue::Str(format!("{:.*}%", dec, x * 100.0)))
+        }
+        // bytes(n) → tamaño humano en base 1024: "512 B", "1.5 KB", "2 MB"
+        "bytes" => {
+            let mut n = to_f64(args.first().ok_or("formato.bytes requiere (n)")?)?.max(0.0);
+            let units = ["B", "KB", "MB", "GB", "TB", "PB"];
+            let mut i = 0;
+            while n >= 1024.0 && i < units.len() - 1 { n /= 1024.0; i += 1; }
+            let s = if i == 0 || n.fract() < 0.05 {
+                format!("{} {}", n.round() as i64, units[i])
+            } else {
+                format!("{:.1} {}", n, units[i])
+            };
+            Ok(EvalValue::Str(s))
+        }
+        // duracion(segundos) → "1d 2h 3m 4s"; menos de 1s → "500ms"
+        "duracion" | "duration" => {
+            let secs = to_f64(args.first().ok_or("formato.duracion requiere (segundos)")?)?;
+            if secs <= 0.0 { return Ok(EvalValue::Str("0s".into())); }
+            if secs < 1.0 {
+                return Ok(EvalValue::Str(format!("{}ms", (secs * 1000.0).round() as i64)));
+            }
+            let mut s = secs.round() as i64;
+            let d = s / 86400; s %= 86400;
+            let h = s / 3600;  s %= 3600;
+            let m = s / 60;    s %= 60;
+            let mut parts = Vec::new();
+            if d > 0 { parts.push(format!("{}d", d)); }
+            if h > 0 { parts.push(format!("{}h", h)); }
+            if m > 0 { parts.push(format!("{}m", m)); }
+            if s > 0 || parts.is_empty() { parts.push(format!("{}s", s)); }
+            Ok(EvalValue::Str(parts.join(" ")))
+        }
+        // truncar(s, max) → corta a max caracteres agregando "…" si hizo falta
+        "truncar" | "truncate" => {
+            if args.len() < 2 { return Err("formato.truncar requiere (s, max)".into()); }
+            let s   = to_str_val(&args[0]);
+            let max = to_i64(&args[1])?.max(0) as usize;
+            let out = if s.chars().count() <= max {
+                s
+            } else if max == 0 {
+                String::new()
+            } else {
+                format!("{}…", s.chars().take(max - 1).collect::<String>())
+            };
+            Ok(EvalValue::Str(out))
         }
         // centrar(s, ancho) → String  — texto centrado con espacios
         "centrar" | "center" => {
@@ -74,4 +144,32 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
         EvalValue::Float(f) => Ok(*f as i64),
         other => Err(format!("formato: esperaba número, recibió {}", other.type_name())),
     }
+}
+
+fn to_f64(v: &EvalValue) -> Result<f64, String> {
+    v.to_f64().map_err(|e| format!("formato: {}", e))
+}
+
+// Agrupa la parte entera en miles y aplica los separadores pedidos.
+fn format_number(n: f64, dec: usize, thou: &str, dsep: &str) -> String {
+    let neg = n < 0.0;
+    let s = format!("{:.*}", dec, n.abs());
+    let (int_part, frac_part) = match s.split_once('.') {
+        Some((a, b)) => (a.to_string(), Some(b.to_string())),
+        None => (s, None),
+    };
+    let chars: Vec<char> = int_part.chars().collect();
+    let mut grouped = String::new();
+    for (i, c) in chars.iter().enumerate() {
+        if i > 0 && (chars.len() - i) % 3 == 0 { grouped.push_str(thou); }
+        grouped.push(*c);
+    }
+    let mut out = String::new();
+    if neg { out.push('-'); }
+    out.push_str(&grouped);
+    if let Some(f) = frac_part {
+        out.push_str(dsep);
+        out.push_str(&f);
+    }
+    out
 }

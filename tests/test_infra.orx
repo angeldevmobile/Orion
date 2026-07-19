@@ -1,0 +1,182 @@
+-- Barrido funcional e2e de los módulos de infraestructura: state, cache, cola.
+-- Checks exactos; cada test limpia su módulo porque el store es global al proceso.
+-- Ejecutar desde la raíz del repo: orion test tests
+use "state" as state
+use "cache" as cache
+use "cola" as cola
+use "json" as json
+use "fs" as fs
+use "strings" as st
+
+fn near(a, b) {
+    d = a - b
+    if d < 0 { d = 0 - d }
+    return d < 0.000001
+}
+
+--    state
+
+fn test_state_set_get_has() {
+    state.clear()
+    v = state.set("nombre", "orion")
+    assert_eq(v, "orion", "set devuelve el valor")
+    assert_eq(state.get("nombre"), "orion", "get")
+    assert_eq(state.get("no_existe"), null, "get inexistente null")
+    assert_eq(state.get("no_existe", "def"), "def", "get con default")
+    assert_eq(state.has("nombre"), yes, "has existente")
+    assert_eq(state.has("no_existe"), no, "has inexistente")
+    assert_eq(state.delete("nombre"), yes, "delete existente devuelve yes")
+    assert_eq(state.delete("nombre"), no, "delete repetido devuelve no")
+}
+
+fn test_state_incr_decr() {
+    state.clear()
+    assert_eq(state.incr("visitas"), 1, "incr desde cero")
+    assert_eq(state.incr("visitas", 5), 6, "incr con delta")
+    assert_eq(state.decr("visitas"), 5, "decr")
+    assert_eq(state.decr("visitas", 3), 2, "decr con delta")
+    f = state.incr("visitas", 0.5)
+    assert(near(f, 2.5), "incr float promociona")
+
+    -- incr sobre un valor no numérico es ERROR claro, no lo pisa en silencio
+    state.set("titulo", "hola")
+    ok = no
+    attempt {
+        state.incr("titulo")
+    } handle err {
+        ok = yes
+    }
+    assert(ok, "incr sobre texto lanza error")
+    assert_eq(state.get("titulo"), "hola", "el valor no numérico queda intacto")
+}
+
+fn test_state_setnx() {
+    state.clear()
+    assert_eq(state.setnx("lock", "yo"), yes, "setnx primera vez guarda")
+    assert_eq(state.setnx("lock", "otro"), no, "setnx segunda vez no pisa")
+    assert_eq(state.get("lock"), "yo", "setnx conserva el primer valor")
+}
+
+fn test_state_keys_orden_all() {
+    state.clear()
+    state.set("zeta", 1)
+    state.set("alfa", 2)
+    state.set("media", 3)
+    ks = state.keys()
+    assert_eq(len(ks), 3, "keys len")
+    assert_eq(ks[0], "zeta", "keys conservan orden de inserción")
+    assert_eq(ks[2], "media", "keys última en orden")
+    todo = state.all()
+    assert_eq(todo["alfa"], 2, "all trae valores")
+    assert_eq(state.len(), 3, "len")
+    state.clear()
+    assert_eq(state.len(), 0, "clear vacía")
+}
+
+fn test_state_persist() {
+    state.clear()
+    fs.write("tests/output_state.json", "{\"contador\": 41, \"app\": \"demo\"}")
+    state.persist("tests/output_state.json")
+    assert_eq(state.get("contador"), 41, "persist siembra desde el archivo")
+    assert_eq(state.get("app"), "demo", "persist siembra strings")
+    n = state.incr("contador")
+    assert_eq(n, 42, "incr sobre valor sembrado")
+    crudo = fs.read("tests/output_state.json")
+    assert(st.contains(crudo, "42"), "cada escritura queda en disco")
+}
+
+--    cache
+
+fn test_cache_basico() {
+    cache.clear()
+    assert_eq(cache.set("n", 7), yes, "set")
+    assert_eq(cache.get("n"), 7, "get int")
+    assert_eq(cache.get("no_hay"), null, "get inexistente null")
+    assert_eq(cache.get("no_hay", "def"), "def", "get con default")
+    assert_eq(cache.has("n"), yes, "has")
+    assert_eq(cache.size(), 1, "size")
+    assert_eq(cache.del("n"), yes, "del existente yes")
+    assert_eq(cache.del("n"), no, "del repetido no")
+
+    -- roundtrip de estructura anidada conservando orden de claves
+    cache.set("cfg", { "zeta": 1, "alfa": [1, 2, 3] })
+    cfg = cache.get("cfg")
+    assert_eq(cfg["zeta"], 1, "roundtrip dict")
+    assert_eq(cfg["alfa"][2], 3, "roundtrip lista anidada")
+    assert_eq(json.forge(cfg), "{\"zeta\":1,\"alfa\":[1,2,3]}", "roundtrip conserva orden de claves")
+}
+
+fn test_cache_ttl() {
+    cache.clear()
+    cache.set("vivo", "ok", 3600)
+    assert_eq(cache.get("vivo"), "ok", "con ttl largo sigue vivo")
+    assert_eq(cache.has("vivo"), yes, "has con ttl vivo")
+    restante = cache.ttl("vivo")
+    assert(restante > 3590, "ttl reporta segundos restantes")
+    assert(restante <= 3600, "ttl no excede lo pedido")
+
+    cache.set("muerto", "x", 0)
+    assert_eq(cache.get("muerto"), null, "ttl 0 expira al instante")
+    assert_eq(cache.has("muerto"), no, "has de expirado no")
+
+    cache.set("sin_ttl", 1)
+    assert_eq(cache.ttl("sin_ttl"), null, "ttl de entrada sin ttl es null")
+    assert_eq(cache.ttl("no_existe"), null, "ttl de inexistente es null")
+
+    cache.set("otro", 1, 3600)
+    assert_eq(cache.size(), 3, "size solo cuenta vivas")
+    ks = cache.keys()
+    assert_eq(len(ks), 3, "keys solo lista vivas")
+}
+
+--    cola
+
+fn test_cola_fifo() {
+    cola.eliminar("trabajo")
+    cola.push("trabajo", "a")
+    cola.push("trabajo", "b")
+    cola.push("trabajo", "c")
+    assert_eq(cola.size("trabajo"), 3, "size tras push")
+    assert_eq(cola.peek("trabajo"), "a", "peek ve el frente")
+    assert_eq(cola.size("trabajo"), 3, "peek no consume")
+    assert_eq(cola.pop("trabajo"), "a", "pop FIFO 1")
+    assert_eq(cola.pop("trabajo"), "b", "pop FIFO 2")
+    assert_eq(cola.pop("trabajo"), "c", "pop FIFO 3")
+    assert_eq(cola.pop("trabajo"), null, "pop de vacía null")
+    assert_eq(cola.size("trabajo"), 0, "size vacía")
+}
+
+fn test_cola_valores_complejos() {
+    cola.eliminar("jobs")
+    cola.push("jobs", { "zeta": 9, "alfa": [1, 2] })
+    job = cola.pop("jobs")
+    assert_eq(job["zeta"], 9, "roundtrip dict en cola")
+    assert_eq(job["alfa"][1], 2, "roundtrip lista en cola")
+    assert_eq(json.forge(job), "{\"zeta\":9,\"alfa\":[1,2]}", "cola conserva orden de claves")
+}
+
+fn test_cola_gestion() {
+    cola.eliminar("temp")
+    cola.crear("temp")
+    nombres = cola.lista()
+    tiene = no
+    for n in nombres {
+        if n == "temp" { tiene = yes }
+    }
+    assert(tiene, "lista incluye la cola creada")
+    cola.push("temp", 1)
+    cola.vaciar("temp")
+    assert_eq(cola.size("temp"), 0, "vaciar deja en cero")
+    assert_eq(cola.eliminar("temp"), yes, "eliminar existente yes")
+    assert_eq(cola.eliminar("temp"), no, "eliminar repetido no")
+    assert_eq(cola.size("temp"), 0, "size de inexistente 0")
+}
+
+--    json: preserve_order end-to-end
+
+fn test_json_orden() {
+    d = json.parse("{\"zeta\": 1, \"alfa\": 2, \"media\": 3}")
+    assert_eq(json.forge(d), "{\"zeta\":1,\"alfa\":2,\"media\":3}", "parse+forge conservan orden del JSON fuente")
+    propio = { "b": 1, "a": 2 }
+    assert_eq(json.forge(propio), "{\"b\":1,\"a\":2}", "forge respeta el orden del literal")
+}

@@ -1,50 +1,50 @@
 [
   {
-    "activo": true,
-    "meta": 150,
     "nombre": "ana",
+    "region": "norte",
+    "venta": 100,
     "precio": 1.5,
-    "region": "norte",
-    "venta": 100
+    "activo": true,
+    "meta": 150
   },
   {
-    "activo": false,
-    "meta": 150,
     "nombre": "beto",
-    "precio": 2.5,
     "region": "norte",
-    "venta": 200
+    "venta": 200,
+    "precio": 2.5,
+    "activo": false,
+    "meta": 150
   },
   {
-    "activo": true,
-    "meta": 250,
     "nombre": "carla",
+    "region": "sur",
+    "venta": 300,
     "precio": 3.5,
-    "region": "sur",
-    "venta": 300
-  },
-  {
-    "activo": false,
-    "meta": 500,
-    "nombre": "dan",
-    "precio": 4.5,
-    "region": "sur",
-    "venta": 400
-  },
-  {
     "activo": true,
-    "meta": 450,
-    "nombre": "eva",
-    "precio": 5.5,
-    "region": "este",
-    "venta": 500
+    "meta": 250
   },
   {
+    "nombre": "dan",
+    "region": "sur",
+    "venta": 400,
+    "precio": 4.5,
     "activo": false,
-    "meta": 700,
-    "nombre": "fede",
-    "precio": 6.5,
+    "meta": 500
+  },
+  {
+    "nombre": "eva",
     "region": "este",
-    "venta": 600
+    "venta": 500,
+    "precio": 5.5,
+    "activo": true,
+    "meta": 450
+  },
+  {
+    "nombre": "fede",
+    "region": "este",
+    "venta": 600,
+    "precio": 6.5,
+    "activo": false,
+    "meta": 700
   }
 ]

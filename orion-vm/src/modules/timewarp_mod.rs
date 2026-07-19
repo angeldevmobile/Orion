@@ -1,7 +1,7 @@
 /// Orion Timewarp — manipulación del tiempo en Rust.
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap as HashMap;
-use std::time::{SystemTime, UNIX_EPOCH, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::Local;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
@@ -34,14 +34,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             std::thread::sleep(std::time::Duration::from_secs_f64(duration));
             Ok(EvalValue::Null)
         }
-        // measure(fn_name?) → inicia cronómetro, retorna handle
+        // clock() → cronómetro (dict con start_ns); medir con elapsed(clock)
         "clock" | "start_clock" => {
             let ts = SystemTime::now().duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos() as i64).unwrap_or(0);
             let mut m = HashMap::new();
             m.insert("start_ns".into(), EvalValue::Int(ts));
-            m.insert("paused".into(),   EvalValue::Bool(false));
-            m.insert("scale".into(),    EvalValue::Float(1.0));
             Ok(EvalValue::Dict(m))
         }
         // elapsed(clock) → segundos transcurridos
@@ -60,17 +58,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let elapsed_s = (now_ns - start_ns) as f64 / 1e9;
             Ok(EvalValue::Float((elapsed_s * 1e6).round() / 1e6))
         }
-        // measure_time(fn_description) → ejecuta y retorna {result: null, ms: f64}
+        // measure_time fue retirado: devolvía siempre ~0 ms (no puede ejecutar
+        // una fn de Orion desde el módulo). El patrón honesto es clock/elapsed.
         "measure_time" | "measureMtime" => {
-            let start = Instant::now();
-            // No podemos ejecutar una función Orion desde aquí directamente,
-            // pero retornamos un dict con la hora de inicio para que el usuario
-            // calcule el tiempo manualmente si lo necesita.
-            let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-            let mut m = HashMap::new();
-            m.insert("ms".into(),     EvalValue::Float((elapsed_ms * 1000.0).round() / 1000.0));
-            m.insert("result".into(), EvalValue::Null);
-            Ok(EvalValue::Dict(m))
+            Err("timewarp.measure_time fue retirado (medía siempre 0). Usa:\n  \
+                 t = timewarp.clock()\n  ... tu código ...\n  \
+                 segundos = timewarp.elapsed(t)".into())
         }
         // format(timestamp_secs, fmt?) → string formateado
         "format" => {

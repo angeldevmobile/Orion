@@ -166,7 +166,53 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-//    Helpers                                                                    
+//    Dispatch desde serve
+
+/// Resultado de rutear un request contra el router activo.
+pub struct ActiveMatch {
+    /// Nombre de la función handler (los handlers deben ser funciones con
+    /// nombre: los workers de serve las invocan por nombre en su propia VM).
+    pub handler: String,
+    /// Parámetros de ruta extraídos (`:id`, `*rest`).
+    pub params: Vec<(String, String)>,
+    /// Nombres de los middlewares registrados (se ejecutan en orden).
+    pub middlewares: Vec<String>,
+}
+
+fn handler_name(h: &EvalValue) -> Option<String> {
+    match h {
+        EvalValue::Str(s) => Some(s.clone()),
+        EvalValue::Function { name, .. } if !name.is_empty() => Some(name.clone()),
+        _ => None,
+    }
+}
+
+/// Rutea method+path contra el router activo. `None` si no hay router activo
+/// o ninguna ruta coincide (serve cae al handler global en ese caso).
+pub fn active_match(method: &str, path: &str) -> Option<ActiveMatch> {
+    let id = (*active_id().lock().unwrap())?;
+    let store = store().lock().unwrap();
+    let data = store.get(&id)?;
+    let method = method.to_uppercase();
+    for route in &data.routes {
+        if route.method == method || route.method == "*" {
+            if let Some(params) = match_path(&route.pattern, path) {
+                let handler = handler_name(&route.handler)?;
+                let middlewares = data.middlewares.iter()
+                    .filter_map(handler_name)
+                    .collect();
+                return Some(ActiveMatch {
+                    handler,
+                    params: params.into_iter().collect(),
+                    middlewares,
+                });
+            }
+        }
+    }
+    None
+}
+
+//    Helpers
 
 fn with_router_mut<F>(id: u64, f: F) -> Result<EvalValue, String>
 where F: FnOnce(&mut RouterData) -> Result<EvalValue, String>

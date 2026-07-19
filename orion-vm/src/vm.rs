@@ -2085,8 +2085,12 @@ impl VM {
         }
     }
 
-    /// Construye el dict `req`, ejecuta el handler y responde. Un error del
-    /// handler se traduce a 500 y el worker sigue atendiendo (no tumba el server).
+    /// Construye el dict `req`, rutea (router activo primero, handler global
+    /// como fallback), ejecuta middlewares y responde. Un error del handler se
+    /// traduce a 500 y el worker sigue atendiendo (no tumba el server).
+    ///
+    /// El dict `req` expone: path, method, body, headers (claves en minúscula),
+    /// ip, query (URL-decoded) y params (query + parámetros de ruta `:id`).
     fn handle_http_request(&mut self, mut request: tiny_http::Request, fn_name: &str) {
         use tiny_http::{Response, Header};
         use std::str::FromStr;
@@ -2094,42 +2098,93 @@ impl VM {
         let url = request.url().to_string();
         let method = request.method().to_string();
 
-        let (path, query) = if let Some(pos) = url.find('?') {
+        let (raw_path, query) = if let Some(pos) = url.find('?') {
             (url[..pos].to_string(), url[pos+1..].to_string())
         } else {
             (url.clone(), String::new())
         };
+        let path = url_decode(&raw_path, false);
 
-        let mut params = IndexMap::new();
+        // Query params URL-decoded ('+' cuenta como espacio solo en la query)
+        let mut query_map = IndexMap::new();
         for pair in query.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
-                params.insert(k.to_string(), Value::Str(v.to_string()));
+                query_map.insert(url_decode(k, true), Value::Str(url_decode(v, true)));
+            } else if !pair.is_empty() {
+                query_map.insert(url_decode(pair, true), Value::Str(String::new()));
             }
         }
+
+        // Headers del request, claves normalizadas a minúscula
+        let mut headers_map = IndexMap::new();
+        for h in request.headers() {
+            headers_map.insert(
+                h.field.as_str().as_str().to_lowercase(),
+                Value::Str(h.value.as_str().to_string()),
+            );
+        }
+
+        let client_ip = request.remote_addr()
+            .map(|a| a.ip().to_string())
+            .unwrap_or_default();
 
         let mut body_str = String::new();
         { request.as_reader().read_to_string(&mut body_str).ok(); }
 
+        // Router activo primero; si no matchea, cae al handler global de serve.
+        let routed = crate::modules::router_mod::active_match(&method, &path);
+        let (target_fn, route_params, middlewares) = match &routed {
+            Some(m) => (m.handler.as_str(), m.params.clone(), m.middlewares.clone()),
+            None    => (fn_name, Vec::new(), Vec::new()),
+        };
+
+        // params = query + parámetros de ruta (la ruta gana en colisión)
+        let mut params = query_map.clone();
+        for (k, v) in &route_params {
+            params.insert(k.clone(), Value::Str(v.clone()));
+        }
+
         let mut req_map = IndexMap::new();
-        req_map.insert("path".to_string(),   Value::Str(path));
-        req_map.insert("method".to_string(), Value::Str(method));
-        req_map.insert("body".to_string(),   Value::Str(body_str));
-        req_map.insert("params".to_string(), Value::Dict(params));
+        req_map.insert("path".to_string(),    Value::Str(path));
+        req_map.insert("method".to_string(),  Value::Str(method));
+        req_map.insert("body".to_string(),    Value::Str(body_str));
+        req_map.insert("headers".to_string(), Value::Dict(headers_map));
+        req_map.insert("ip".to_string(),      Value::Str(client_ip));
+        req_map.insert("query".to_string(),   Value::Dict(query_map));
+        req_map.insert("params".to_string(),  Value::Dict(params));
         let req_val = Value::Dict(req_map);
 
+        // Middlewares del router: mw(req) → null continúa; un dict corta y
+        // se responde con él (p. ej. 401 de auth o 429 de rate limit).
+        let mut early_response: Option<Value> = None;
+        for mw in &middlewares {
+            match self.run_handler(mw, req_val.clone()) {
+                Ok(Value::Null) => continue,
+                Ok(other) => { early_response = Some(other); break; }
+                Err(e) => {
+                    eprintln!("[Orion] middleware '{}' falló: {}", mw, e);
+                    early_response = Some(Value::Str(format!("error interno: {}", e)));
+                    break;
+                }
+            }
+        }
+
         // Ejecutar handler; un error se convierte en 500 sin tumbar al worker.
-        let result = match self.run_handler(fn_name, req_val) {
-            Ok(v)  => v,
-            Err(e) => {
-                eprintln!("[Orion] {} {} → 500 ({})", request.method(), request.url(), e);
-                let resp = Response::from_string(format!("error interno: {}", e))
-                    .with_status_code(500);
-                let _ = request.respond(resp);
-                return;
+        let result = match early_response {
+            Some(r) => r,
+            None => match self.run_handler(target_fn, req_val) {
+                Ok(v)  => v,
+                Err(e) => {
+                    eprintln!("[Orion] {} {} → 500 ({})", request.method(), request.url(), e);
+                    let resp = Response::from_string(format!("error interno: {}", e))
+                        .with_status_code(500);
+                    let _ = request.respond(resp);
+                    return;
+                }
             }
         };
 
-        let (status_code, resp_body, content_type) = match result {
+        let (status_code, resp_body, content_type, extra_headers) = match result {
             Value::Dict(ref m) => {
                 let status = match m.get("status") {
                     Some(Value::Int(n)) => *n as u16,
@@ -2139,17 +2194,36 @@ impl VM {
                 let ct = m.get("content_type")
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-                (status, body, ct)
+                // headers: Dict opcional → se envían tal cual (CORS, SSE, cache…)
+                let extra: Vec<(String, String)> = match m.get("headers") {
+                    Some(Value::Dict(hm)) => hm.iter()
+                        .map(|(k, v)| (k.clone(), v.to_string()))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                (status, body, ct, extra)
             }
-            Value::Str(s) => (200, s, "text/plain; charset=utf-8".to_string()),
-            Value::Null   => (204, String::new(), "text/plain".to_string()),
-            other         => (200, other.to_string(), "text/plain; charset=utf-8".to_string()),
+            Value::Str(s) => (200, s, "text/plain; charset=utf-8".to_string(), Vec::new()),
+            Value::Null   => (204, String::new(), "text/plain".to_string(), Vec::new()),
+            other         => (200, other.to_string(), "text/plain; charset=utf-8".to_string(), Vec::new()),
         };
 
-        let header = Header::from_str(&format!("Content-Type: {}", content_type)).ok();
         let mut response = Response::from_string(resp_body).with_status_code(status_code);
-        if let Some(h) = header {
+        if let Ok(h) = Header::from_str(&format!("Content-Type: {}", content_type)) {
             response = response.with_header(h);
+        }
+        // Seguridad por defecto: nosniff salvo que el dev lo sobreescriba
+        let has_nosniff = extra_headers.iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("X-Content-Type-Options"));
+        if !has_nosniff {
+            if let Ok(h) = Header::from_str("X-Content-Type-Options: nosniff") {
+                response = response.with_header(h);
+            }
+        }
+        for (k, v) in &extra_headers {
+            if let Ok(h) = Header::from_str(&format!("{}: {}", k, v)) {
+                response = response.with_header(h);
+            }
         }
 
         eprintln!("[Orion] {} {} → {}", request.method(), request.url(), status_code);
@@ -2889,6 +2963,41 @@ fn json_to_value(v: serde_json::Value) -> Value {
             Value::Dict(hm)
         }
     }
+}
+
+//     Percent-decoding para paths y query strings HTTP
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Decodifica percent-encoding byte a byte (seguro ante UTF-8 multibyte).
+/// Con `plus_as_space` un '+' también cuenta como espacio (convención de query).
+fn url_decode(s: &str, plus_as_space: bool) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                if let (Some(a), Some(b)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                    out.push(a * 16 + b);
+                    i += 3;
+                    continue;
+                }
+                out.push(b'%');
+                i += 1;
+            }
+            b'+' if plus_as_space => { out.push(b' '); i += 1; }
+            b => { out.push(b); i += 1; }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 //     Bridge Value ↔ EvalValue (para módulos stdlib en el bytecode VM)

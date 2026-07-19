@@ -1,0 +1,130 @@
+-- Servidor de prueba e2e del stack web de Orion: router + middlewares +
+-- headers + CORS + JWT + rate limit + SSE + state. Lo levanta el test de
+-- integración orion-vm/tests/serve_e2e.rs y lo golpea con HTTP real.
+use "router" as router
+use "middleware" as mw
+use "state" as state
+use "json" as json
+use "sse" as sse
+use "auth" as auth
+
+SECRET = "secreto-e2e"
+LIMITER = mw.rate_limit(3, 3600)
+
+-- middleware global: bloquea todo lo que lleve el header x-bloqueado
+fn mw_bloqueo(req) {
+    if req["headers"].get("x-bloqueado") != null {
+        return { "status": 403, "body": "bloqueado por middleware" }
+    }
+    return null
+}
+
+fn saludo(req) {
+    return "hola orion"
+}
+
+fn eco(req) {
+    return {
+        "status": 200,
+        "body": json.forge({
+            "metodo":  req["method"],
+            "ruta":    req["path"],
+            "ip":      req["ip"],
+            "agente":  req["headers"].get("user-agent"),
+            "q":       req["query"].get("q"),
+            "cuerpo":  req["body"]
+        }),
+        "content_type": "application/json"
+    }
+}
+
+fn usuario(req) {
+    return {
+        "status": 200,
+        "body": json.forge({ "id": req["params"]["id"], "seccion": req["params"]["seccion"] }),
+        "content_type": "application/json"
+    }
+}
+
+fn archivos(req) {
+    return { "status": 200, "body": "ruta:" + req["params"]["resto"] }
+}
+
+fn crear(req) {
+    datos = json.parse(req["body"])
+    return {
+        "status": 201,
+        "body": json.forge({ "creado": datos["nombre"] }),
+        "content_type": "application/json",
+        "headers": { "X-Creado-Por": "orion", "Location": "/usuarios/99" }
+    }
+}
+
+fn con_cors(req) {
+    return {
+        "status": 200,
+        "body": "cors ok",
+        "headers": mw.cors("https://miapp.com")
+    }
+}
+
+fn protegido(req) {
+    cabecera = req["headers"].get("authorization")
+    if cabecera == null {
+        return { "status": 401, "body": "no autorizado: falta el header" }
+    }
+    resultado = mw.auth_bearer(cabecera, SECRET)
+    if resultado["valid"] == no {
+        return { "status": 401, "body": "no autorizado: " + resultado["error"] }
+    }
+    return { "status": 200, "body": "bienvenido " + resultado["sub"] }
+}
+
+fn emitir_token(req) {
+    token = auth.token({ "sub": "ana" }, SECRET)
+    return { "status": 200, "body": token }
+}
+
+fn limitado(req) {
+    if mw.check_rate(LIMITER, req["ip"]) == no {
+        return { "status": 429, "body": "demasiadas peticiones" }
+    }
+    return { "status": 200, "body": "permitido" }
+}
+
+fn contador(req) {
+    n = state.incr("visitas_e2e")
+    return { "status": 200, "body": "visita " + str(n) }
+}
+
+fn eventos(req) {
+    cuerpo = sse.named("progreso", "50") + sse.json_event("fin", { "ok": yes })
+    return {
+        "status": 200,
+        "body": cuerpo,
+        "content_type": "text/event-stream",
+        "headers": { "Cache-Control": "no-cache" }
+    }
+}
+
+fn fallback(req) {
+    return { "status": 404, "body": "sin ruta: " + req["path"] }
+}
+
+r = router.new()
+router.use_middleware(r, "mw_bloqueo")
+router.get(r,  "/",                        "saludo")
+router.get(r,  "/eco",                     "eco")
+router.post(r, "/eco",                     "eco")
+router.get(r,  "/usuarios/:id/:seccion",   "usuario")
+router.get(r,  "/archivos/*resto",         "archivos")
+router.post(r, "/usuarios",                "crear")
+router.get(r,  "/cors",                    "con_cors")
+router.get(r,  "/token",                   "emitir_token")
+router.get(r,  "/privado",                 "protegido")
+router.get(r,  "/limitado",                "limitado")
+router.get(r,  "/contador",                "contador")
+router.get(r,  "/eventos",                 "eventos")
+router.attach(r)
+
+serve 47611 fallback

@@ -59,11 +59,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if let Some(q) = queues().lock().unwrap().get_mut(&name) { q.clear(); }
             Ok(EvalValue::Bool(true))
         }
-        // eliminar(nombre) → Bool  — elimina la cola entera
+        // eliminar(nombre) → Bool (true si la cola existía) — elimina la cola entera
         "eliminar" | "delete" => {
             let name = one_str("cola.eliminar", &args)?;
-            queues().lock().unwrap().shift_remove(&name);
-            Ok(EvalValue::Bool(true))
+            let existed = queues().lock().unwrap().shift_remove(&name).is_some();
+            Ok(EvalValue::Bool(existed))
         }
         // lista() → List<Str> de nombres de colas existentes
         "lista" | "list" => {
