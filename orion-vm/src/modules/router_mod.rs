@@ -13,6 +13,7 @@ struct RouterData {
     routes:      Vec<Route>,
     middlewares: Vec<EvalValue>,
     statics:     Vec<(String, String)>,   // (prefijo URL, carpeta en disco)
+    guards:      Vec<(String, String)>,   // (prefijo URL, secret JWT)
 }
 
 static ROUTERS: OnceLock<Mutex<HashMap<u64, RouterData>>> = OnceLock::new();
@@ -36,7 +37,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "new" => {
             let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
             store().lock().unwrap().insert(id, RouterData {
-                routes: Vec::new(), middlewares: Vec::new(), statics: Vec::new(),
+                routes: Vec::new(), middlewares: Vec::new(),
+                statics: Vec::new(), guards: Vec::new(),
             });
             Ok(EvalValue::Int(id as i64))
         }
@@ -53,6 +55,22 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let prefix = prefix.trim_end_matches('/').to_string();
             with_router_mut(id, |r| {
                 r.statics.push((prefix, dir));
+                Ok(EvalValue::Bool(true))
+            })
+        }
+
+        // guard(id, "/prefijo", secret) → Bool — protege todo lo que cuelga del
+        // prefijo con JWT Bearer: sin token válido serve responde 401 solo;
+        // con token válido el handler recibe los claims en req["user"].
+        "guard" => {
+            if args.len() < 3 { return Err("router.guard requiere (id, prefijo_url, secret)".into()); }
+            let id     = to_u64(&args[0])?;
+            let mut prefix = to_str(&args[1]);
+            let secret = to_str(&args[2]);
+            if !prefix.starts_with('/') { prefix.insert(0, '/'); }
+            let prefix = prefix.trim_end_matches('/').to_string();
+            with_router_mut(id, |r| {
+                r.guards.push((prefix, secret));
                 Ok(EvalValue::Bool(true))
             })
         }
@@ -214,6 +232,20 @@ pub fn active_static(path: &str) -> Option<(String, String)> {
         if path == prefix || path.starts_with(&format!("{}/", prefix)) {
             let rest = path[prefix.len()..].trim_start_matches('/').to_string();
             return Some((dir.clone(), rest));
+        }
+    }
+    None
+}
+
+/// ¿El path cae bajo un prefijo protegido con router.guard?
+/// Devuelve el secret JWT para que serve valide el token.
+pub fn active_guard(path: &str) -> Option<String> {
+    let id = (*active_id().lock().unwrap())?;
+    let store = store().lock().unwrap();
+    let data = store.get(&id)?;
+    for (prefix, secret) in &data.guards {
+        if path == prefix || path.starts_with(&format!("{}/", prefix)) {
+            return Some(secret.clone());
         }
     }
     None

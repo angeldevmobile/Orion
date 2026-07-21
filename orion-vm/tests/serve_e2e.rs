@@ -92,6 +92,31 @@ fn header_of<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str>
     headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
 }
 
+/// Todos los valores de un header repetido (p. ej. Set-Cookie).
+fn headers_all(resp: &ureq::Response, name: &str) -> Vec<String> {
+    resp.all(name).into_iter().map(|s| s.to_string()).collect()
+}
+
+/// GET que NO sigue redirecciones, para ver el 302 y su Location.
+fn get_noredirect(url: &str) -> (u16, Vec<(String, String)>, String) {
+    let agent = ureq::builder().redirects(0).build();
+    match agent.get(url).call() {
+        Ok(r) => unpack(r),
+        Err(ureq::Error::Status(_, r)) => unpack(r),
+        Err(e) => panic!("GET {} falló: {}", url, e),
+    }
+}
+
+/// GET con Authorization: Bearer <token>, devolviendo también la Response cruda
+/// para poder inspeccionar headers repetidos.
+fn get_raw_with(url: &str, header: (&str, &str)) -> Result<ureq::Response, u16> {
+    match ureq::get(url).set(header.0, header.1).call() {
+        Ok(r) => Ok(r),
+        Err(ureq::Error::Status(code, _)) => Err(code),
+        Err(e) => panic!("GET {} falló: {}", url, e),
+    }
+}
+
 fn get_bytes(url: &str) -> (u16, Vec<(String, String)>, Vec<u8>) {
     use std::io::Read;
     let unpack_b = |r: ureq::Response| {
@@ -248,4 +273,119 @@ fn stack_web_e2e() {
     assert_eq!(st, 200);
     assert_eq!(header_of(&hs, "content-type"), Some("image/png"));
     assert_eq!(bytes, png, "file: debe enviar el archivo byte a byte");
+
+    // 21. Dict de datos sin claves de respuesta → JSON automático (FastAPI)
+    let (st, hs, body) = get(&format!("{}/datos", BASE));
+    assert_eq!(st, 200);
+    assert!(header_of(&hs, "content-type").unwrap().starts_with("application/json"));
+    let d: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(d["id"], 7);
+    assert_eq!(d["nombre"], "orion");
+    assert_eq!(d["activo"], true);
+
+    // 22. Lista → JSON automático
+    let (st, hs, body) = get(&format!("{}/lista", BASE));
+    assert_eq!(st, 200);
+    assert!(header_of(&hs, "content-type").unwrap().starts_with("application/json"));
+    assert_eq!(body, "[1,2,3]");
+
+    // 23. { "json": valor } con status → serializa y fija content-type
+    let (st, hs, body) = get(&format!("{}/envuelto", BASE));
+    assert_eq!(st, 201);
+    assert!(header_of(&hs, "content-type").unwrap().starts_with("application/json"));
+    let d: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(d["creado"], true);
+
+    // 24. { "redirect": ruta } → 302 + Location (sin seguir la redirección)
+    let (st, hs, _) = get_noredirect(&format!("{}/ir", BASE));
+    assert_eq!(st, 302);
+    assert_eq!(header_of(&hs, "location"), Some("/datos"));
+
+    // 25. cookies de respuesta → un Set-Cookie por entrada, con Path por defecto
+    let resp = ureq::get(&format!("{}/login", BASE)).call().unwrap();
+    let cookies = headers_all(&resp, "Set-Cookie");
+    assert!(cookies.iter().any(|c| c == "sid=abc123; Path=/"),
+        "cookie simple gana Path=/ : {:?}", cookies);
+    assert!(cookies.iter().any(|c| c.starts_with("tema=oscuro;") && c.contains("HttpOnly")),
+        "cookie con atributos va tal cual : {:?}", cookies);
+
+    // 26. req["cookies"] y req["json"] ya parseados por serve
+    let body = ureq::post(&format!("{}/perfil", BASE))
+        .set("Cookie", "sid=xyz; tema=claro")
+        .set("Content-Type", "application/json")
+        .send_string("{\"nombre\":\"lía\"}")
+        .unwrap()
+        .into_string()
+        .unwrap();
+    let d: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(d["sid"], "xyz");
+    assert_eq!(d["nombre"], "lía");
+
+    // 27. router.guard: sin token → 401 automático (sin tocar el handler)
+    let st = get_raw_with(&format!("{}/panel/inicio", BASE), ("X-Nada", "1"))
+        .err().expect("sin token debe ser 401");
+    assert_eq!(st, 401);
+
+    // 28. router.guard: con token válido → req["user"] lleva los claims
+    let (_, _, token) = get(&format!("{}/token", BASE));
+    let resp = get_raw_with(
+        &format!("{}/panel/inicio", BASE),
+        ("Authorization", &format!("Bearer {}", token)),
+    ).expect("con token válido debe pasar");
+    let body = resp.into_string().unwrap();
+    let d: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(d["saludo"], "hola ana");
+
+    // 29. Upload multipart: campos de texto + archivo binario byte a byte
+    let boundary = "----orionE2EBoundary";
+    let mut multipart: Vec<u8> = Vec::new();
+    multipart.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
+    multipart.extend_from_slice(b"Content-Disposition: form-data; name=\"nota\"\r\n\r\n");
+    multipart.extend_from_slice(b"hola\r\n");
+    multipart.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
+    multipart.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"archivo\"; filename=\"logo.png\"\r\n");
+    multipart.extend_from_slice(b"Content-Type: image/png\r\n\r\n");
+    multipart.extend_from_slice(&png);
+    multipart.extend_from_slice(b"\r\n");
+    multipart.extend_from_slice(format!("--{}--\r\n", boundary).as_bytes());
+
+    let resp = ureq::post(&format!("{}/subir", BASE))
+        .set("Content-Type", &format!("multipart/form-data; boundary={}", boundary))
+        .send_bytes(&multipart)
+        .unwrap();
+    let body = resp.into_string().unwrap();
+    let d: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(d["campo"], "archivo");
+    assert_eq!(d["nombre"], "logo.png");
+    assert_eq!(d["tipo"], "image/png");
+    assert_eq!(d["bytes"], png.len());
+    assert_eq!(d["nota"], "hola", "el campo de texto del multipart llega a req[form]");
+    // El archivo movido debe conservar los bytes binarios exactos
+    let guardado = std::fs::read(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/static_e2e/subido.bin")).unwrap();
+    assert_eq!(guardado, png, "el upload se guarda byte a byte");
+
+    // 30. Sesión: iniciar_sesion emite Set-Cookie orion_sid; con esa cookie
+    //     ver_sesion recupera los datos del store server-side.
+    let resp = ureq::get(&format!("{}/iniciar_sesion", BASE)).call().unwrap();
+    let set_cookie = headers_all(&resp, "Set-Cookie");
+    let sid_cookie = set_cookie.iter()
+        .find(|c| c.starts_with("orion_sid="))
+        .expect("iniciar_sesion debe emitir orion_sid");
+    assert!(sid_cookie.contains("HttpOnly") && sid_cookie.contains("SameSite=Lax"),
+        "cookie de sesión endurecida: {}", sid_cookie);
+    let sid = sid_cookie.split(';').next().unwrap().to_string();
+
+    let body = ureq::get(&format!("{}/ver_sesion", BASE))
+        .set("Cookie", &sid)
+        .call().unwrap().into_string().unwrap();
+    let d: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(d["usuario"], "ana", "la sesión persiste server-side entre requests");
+    assert_eq!(d["rol"], "admin");
+
+    // 31. Sin cookie de sesión → valores por defecto (sesión nueva vacía)
+    let body = get(&format!("{}/ver_sesion", BASE)).2;
+    let d: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(d["usuario"], "anonimo", "sin cookie no hay sesión previa");
 }

@@ -9,6 +9,8 @@ use "state" as state
 use "json" as json
 use "sse" as sse
 use "auth" as auth
+use "session" as session
+use "fs" as fs
 
 SECRET = "secreto-e2e"
 LIMITER = mw.rate_limit(3, 3600)
@@ -114,6 +116,81 @@ fn descarga(req) {
     return { "file": "tests/static_e2e/logo.png" }
 }
 
+-- Dict de datos SIN claves de respuesta → JSON automático (estilo FastAPI)
+fn datos(req) {
+    return { "id": 7, "nombre": "orion", "activo": yes }
+}
+
+-- Lista → JSON automático
+fn lista(req) {
+    return [1, 2, 3]
+}
+
+-- { "json": valor } → serializa y pone content-type solo
+fn envuelto(req) {
+    return { "status": 201, "json": { "creado": yes } }
+}
+
+-- { "redirect": ruta } → 302 + Location
+fn ir(req) {
+    return { "redirect": "/datos" }
+}
+
+-- cookies de respuesta → Set-Cookie por entrada
+fn login(req) {
+    return {
+        "body": "sesion iniciada",
+        "cookies": { "sid": "abc123", "tema": "oscuro; Path=/; HttpOnly" }
+    }
+}
+
+-- lee cookies y json del request ya parseados por serve
+fn perfil(req) {
+    return {
+        "json": {
+            "sid":    req["cookies"].get("sid"),
+            "nombre": req["json"].get("nombre")
+        }
+    }
+}
+
+-- zona protegida por router.guard: serve ya validó el JWT y puso req["user"]
+fn panel(req) {
+    return { "json": { "saludo": "hola " + req["user"]["sub"] } }
+}
+
+-- upload multipart: serve ya parseó archivos y campos; movemos el archivo
+fn subir(req) {
+    archivo = req["files"][0]
+    fs.move(archivo["tmp_path"], "tests/static_e2e/subido.bin")
+    return {
+        "json": {
+            "campo":        archivo["field"],
+            "nombre":       archivo["filename"],
+            "tipo":         archivo["content_type"],
+            "bytes":        archivo["size"],
+            "nota":         req["form"].get("nota")
+        }
+    }
+}
+
+-- sesión: guarda en el store server-side; serve emite Set-Cookie orion_sid solo
+fn iniciar_sesion(req) {
+    session.set(req["sid"], "usuario", "ana")
+    session.set(req["sid"], "rol", "admin")
+    return { "body": "sesion creada" }
+}
+
+-- lee la sesión con el sid que llega por cookie
+fn ver_sesion(req) {
+    return {
+        "json": {
+            "usuario": session.get(req["sid"], "usuario", "anonimo"),
+            "rol":     session.get(req["sid"], "rol", "invitado")
+        }
+    }
+}
+
 fn fallback(req) {
     return { "status": 404, "body": "sin ruta: " + req["path"] }
 }
@@ -133,7 +210,18 @@ router.get(r,  "/limitado",                "limitado")
 router.get(r,  "/contador",                "contador")
 router.get(r,  "/eventos",                 "eventos")
 router.get(r,  "/descarga",                "descarga")
+router.get(r,  "/datos",                   "datos")
+router.get(r,  "/lista",                   "lista")
+router.get(r,  "/envuelto",                "envuelto")
+router.get(r,  "/ir",                      "ir")
+router.get(r,  "/login",                   "login")
+router.post(r, "/perfil",                  "perfil")
+router.get(r,  "/panel/inicio",            "panel")
+router.post(r, "/subir",                   "subir")
+router.get(r,  "/iniciar_sesion",          "iniciar_sesion")
+router.get(r,  "/ver_sesion",              "ver_sesion")
 router.static(r, "/static", "tests/static_e2e")
+router.guard(r, "/panel", SECRET)
 router.attach(r)
 
 serve 47611 fallback

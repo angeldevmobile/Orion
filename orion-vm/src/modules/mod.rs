@@ -63,6 +63,7 @@ pub mod db_mod;
 pub mod auth_mod;
 pub mod cache_mod;
 pub mod state_mod;
+pub mod session_mod;
 pub mod mail_mod;
 
 //   Automatización                               
@@ -122,6 +123,7 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "auth"     => auth_mod::call(function, args),
         "cache"    => cache_mod::call(function, args),
         "state"    => state_mod::call(function, args),
+        "session"  => session_mod::call(function, args),
         "mail"     => mail_mod::call(function, args),
         // Automatización
         "tarea"    => tarea_mod::call(function, args),
@@ -173,7 +175,7 @@ pub fn is_known_module(name: &str) -> bool {
         // Interfaces
         "gui" | "tui" |
         // Backend core
-        "db" | "auth" | "cache" | "state" | "mail" |
+        "db" | "auth" | "cache" | "state" | "session" | "mail" |
         // Automatización
         "tarea" | "cola" | "watch" |
         // Validación

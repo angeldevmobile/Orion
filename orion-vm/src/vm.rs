@@ -2128,8 +2128,27 @@ impl VM {
             .map(|a| a.ip().to_string())
             .unwrap_or_default();
 
-        let mut body_str = String::new();
-        { request.as_reader().read_to_string(&mut body_str).ok(); }
+        // Body leído como BYTES: soporta subidas binarias (imágenes, multipart)
+        // sin corromper. body_str es la vista UTF-8 (lossy) para texto/JSON.
+        let mut body_bytes: Vec<u8> = Vec::new();
+        { request.as_reader().read_to_end(&mut body_bytes).ok(); }
+        let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
+
+        // multipart/form-data → campos de texto en `form` y archivos en `files`
+        // (cada archivo se vuelca a un temporal; el handler lo mueve con fs.move).
+        let (form_map, files_list) = {
+            let ct = headers_map.get("content-type")
+                .and_then(|v| if let Value::Str(s) = v { Some(s.as_str()) } else { None })
+                .unwrap_or("");
+            if ct.starts_with("multipart/form-data") {
+                match multipart_boundary(ct) {
+                    Some(b) => parse_multipart(&body_bytes, &b),
+                    None => (IndexMap::new(), Vec::new()),
+                }
+            } else {
+                (IndexMap::new(), Vec::new())
+            }
+        };
 
         // Router activo primero; si no matchea, cae al handler global de serve.
         let routed = crate::modules::router_mod::active_match(&method, &path);
@@ -2155,6 +2174,50 @@ impl VM {
             }
         }
 
+        // router.guard: prefijos protegidos con JWT Bearer — sin token válido
+        // responde 401 solo; con token válido req["user"] lleva los claims.
+        let mut guard_user: Option<Value> = None;
+        if let Some(secret) = crate::modules::router_mod::active_guard(&path) {
+            let token = headers_map.get("authorization")
+                .and_then(|v| match v { Value::Str(s) => Some(s.clone()), _ => None })
+                .and_then(|s| {
+                    if s.len() > 7 && s[..7].eq_ignore_ascii_case("bearer ") {
+                        Some(s[7..].trim().to_string())
+                    } else { None }
+                });
+            let claims = token.and_then(|t| {
+                use crate::eval_value::EvalValue as E;
+                match crate::modules::auth_mod::call(
+                    "verificar_token", vec![E::Str(t), E::Str(secret)],
+                ) {
+                    Ok(v) => {
+                        let val = eval_to_value(v);
+                        match &val {
+                            Value::Dict(m) if matches!(m.get("valido"), Some(Value::Bool(false))) => None,
+                            _ => Some(val),
+                        }
+                    }
+                    Err(_) => None,
+                }
+            });
+            match claims {
+                Some(u) => guard_user = Some(u),
+                None => {
+                    let mut response = Response::from_string("{\"error\":\"no autorizado\"}")
+                        .with_status_code(401);
+                    if let Ok(h) = Header::from_str("Content-Type: application/json; charset=utf-8") {
+                        response = response.with_header(h);
+                    }
+                    if let Ok(h) = Header::from_str("WWW-Authenticate: Bearer") {
+                        response = response.with_header(h);
+                    }
+                    eprintln!("[Orion] {} {} → 401 (guard)", request.method(), request.url());
+                    let _ = request.respond(response);
+                    return;
+                }
+            }
+        }
+
         let (target_fn, route_params, middlewares) = match &routed {
             Some(m) => (m.handler.as_str(), m.params.clone(), m.middlewares.clone()),
             None    => (fn_name, Vec::new(), Vec::new()),
@@ -2166,6 +2229,33 @@ impl VM {
             params.insert(k.clone(), Value::Str(v.clone()));
         }
 
+        // cookies: header Cookie parseado a Dict (nombre → valor)
+        let mut cookies_map = IndexMap::new();
+        if let Some(Value::Str(raw)) = headers_map.get("cookie") {
+            for part in raw.split(';') {
+                if let Some((k, v)) = part.split_once('=') {
+                    cookies_map.insert(k.trim().to_string(), Value::Str(v.trim().to_string()));
+                }
+            }
+        }
+
+        // Sesión: reutiliza el sid de la cookie orion_sid o genera uno nuevo.
+        // Se expone en req["sid"]; el Set-Cookie solo se emite (abajo) si el
+        // handler guardó datos con session.set(req["sid"], ...).
+        let incoming_sid = cookies_map.get("orion_sid")
+            .and_then(|v| if let Value::Str(s) = v { Some(s.clone()) } else { None });
+        let sid = incoming_sid.clone()
+            .unwrap_or_else(crate::modules::session_mod::gen_sid);
+
+        // json: body pre-parseado si parece JSON (Null si no aplica o no parsea)
+        let body_json = {
+            let t = body_str.trim_start();
+            if t.starts_with('{') || t.starts_with('[') {
+                serde_json::from_str::<serde_json::Value>(&body_str)
+                    .map(json_to_value).unwrap_or(Value::Null)
+            } else { Value::Null }
+        };
+
         let mut req_map = IndexMap::new();
         req_map.insert("path".to_string(),    Value::Str(path));
         req_map.insert("method".to_string(),  Value::Str(method));
@@ -2174,6 +2264,14 @@ impl VM {
         req_map.insert("ip".to_string(),      Value::Str(client_ip));
         req_map.insert("query".to_string(),   Value::Dict(query_map));
         req_map.insert("params".to_string(),  Value::Dict(params));
+        req_map.insert("cookies".to_string(), Value::Dict(cookies_map));
+        req_map.insert("json".to_string(),    body_json);
+        req_map.insert("form".to_string(),    Value::Dict(form_map));
+        req_map.insert("files".to_string(),   Value::list(files_list));
+        req_map.insert("sid".to_string(),     Value::Str(sid.clone()));
+        if let Some(u) = guard_user {
+            req_map.insert("user".to_string(), u);
+        }
         let req_val = Value::Dict(req_map);
 
         // Middlewares del router: mw(req) → null continúa; un dict corta y
@@ -2207,21 +2305,53 @@ impl VM {
         };
 
         let (status_code, resp_body, content_type, extra_headers) = match result {
+            // Un Dict SIN claves de respuesta (status/body/json/file/redirect/
+            // headers/cookies/content_type) es un payload de datos: se responde
+            // como JSON directamente, estilo FastAPI — return { "id": 42 }.
+            Value::Dict(ref m) if !is_response_spec(m) => (
+                200,
+                value_json_string(&result).into_bytes(),
+                "application/json; charset=utf-8".to_string(),
+                Vec::new(),
+            ),
             Value::Dict(ref m) => {
                 let status_override = match m.get("status") {
                     Some(Value::Int(n)) => Some(*n as u16),
                     _ => None,
                 };
                 // headers: Dict opcional → se envían tal cual (CORS, SSE, cache…)
-                let extra: Vec<(String, String)> = match m.get("headers") {
+                let mut extra: Vec<(String, String)> = match m.get("headers") {
                     Some(Value::Dict(hm)) => hm.iter()
                         .map(|(k, v)| (k.clone(), v.to_string()))
                         .collect(),
                     _ => Vec::new(),
                 };
+                // cookies: Dict → un Set-Cookie por entrada. Valor simple gana
+                // "; Path=/"; un valor con ';' trae sus atributos y va tal cual.
+                if let Some(Value::Dict(cm)) = m.get("cookies") {
+                    for (k, v) in cm {
+                        let val = v.to_string();
+                        let cookie = if val.contains(';') {
+                            format!("{}={}", k, val)
+                        } else {
+                            format!("{}={}; Path=/", k, val)
+                        };
+                        extra.push(("Set-Cookie".to_string(), cookie));
+                    }
+                }
+                // { "redirect": "/destino" } → 302 (u override) + Location
+                if let Some(rv) = m.get("redirect") {
+                    extra.push(("Location".to_string(), rv.to_string()));
+                    (
+                        status_override.unwrap_or(302),
+                        Vec::new(),
+                        "text/plain; charset=utf-8".to_string(),
+                        extra,
+                    )
+                }
                 // { "file": "ruta" } → responde el archivo TAL CUAL (binario ok),
                 // con MIME automático por extensión salvo content_type explícito.
-                if let Some(fv) = m.get("file") {
+                else if let Some(fv) = m.get("file") {
                     let fpath = fv.to_string();
                     match std::fs::read(&fpath) {
                         Ok(bytes) => {
@@ -2237,6 +2367,15 @@ impl VM {
                             extra,
                         ),
                     }
+                }
+                // { "json": valor } → serializa y pone el content-type solo
+                else if let Some(jv) = m.get("json") {
+                    (
+                        status_override.unwrap_or(200),
+                        value_json_string(jv).into_bytes(),
+                        "application/json; charset=utf-8".to_string(),
+                        extra,
+                    )
                 } else {
                     let body = m.get("body").map(|v| v.to_string()).unwrap_or_default();
                     let ct = m.get("content_type")
@@ -2245,6 +2384,13 @@ impl VM {
                     (status_override.unwrap_or(200), body.into_bytes(), ct, extra)
                 }
             }
+            // Una lista también es un payload de datos → JSON
+            Value::List(_) => (
+                200,
+                value_json_string(&result).into_bytes(),
+                "application/json; charset=utf-8".to_string(),
+                Vec::new(),
+            ),
             Value::Str(s) => (200, s.into_bytes(), "text/plain; charset=utf-8".to_string(), Vec::new()),
             Value::Null   => (204, Vec::new(), "text/plain".to_string(), Vec::new()),
             other         => (200, other.to_string().into_bytes(), "text/plain; charset=utf-8".to_string(), Vec::new()),
@@ -2253,6 +2399,17 @@ impl VM {
         let mut response = Response::from_data(resp_body).with_status_code(status_code);
         if let Ok(h) = Header::from_str(&format!("Content-Type: {}", content_type)) {
             response = response.with_header(h);
+        }
+        // Sesión: si el handler guardó datos con session.set(req["sid"], …) y el
+        // sid no venía ya en la cookie, emitir el Set-Cookie automáticamente.
+        // HttpOnly + SameSite=Lax por defecto (no accesible desde JS, anti-CSRF).
+        if incoming_sid.as_deref() != Some(sid.as_str())
+            && crate::modules::session_mod::exists(&sid)
+        {
+            let cookie = format!("orion_sid={}; Path=/; HttpOnly; SameSite=Lax", sid);
+            if let Ok(h) = Header::from_str(&format!("Set-Cookie: {}", cookie)) {
+                response = response.with_header(h);
+            }
         }
         // Seguridad por defecto: nosniff salvo que el dev lo sobreescriba
         let has_nosniff = extra_headers.iter()
@@ -3005,6 +3162,136 @@ fn json_to_value(v: serde_json::Value) -> Value {
             Value::Dict(hm)
         }
     }
+}
+
+/// ¿El Dict devuelto por un handler describe una respuesta HTTP (status,
+/// body, headers…) o es un payload de datos que debe salir como JSON?
+/// Las claves ambiguas solo cuentan si traen el tipo correcto: un dict de
+/// datos con "status": "ok" sigue siendo datos.
+fn is_response_spec(m: &IndexMap<String, Value>) -> bool {
+    m.contains_key("body") || m.contains_key("json") || m.contains_key("file")
+        || m.contains_key("redirect") || m.contains_key("content_type")
+        || matches!(m.get("status"),  Some(Value::Int(_)))
+        || matches!(m.get("headers"), Some(Value::Dict(_)))
+        || matches!(m.get("cookies"), Some(Value::Dict(_)))
+}
+
+/// Serializa un Value de Orion a JSON (mismo camino que json.forge).
+fn value_json_string(v: &Value) -> String {
+    let json = crate::modules::json_mod::eval_to_json(value_to_eval(v.clone()));
+    serde_json::to_string(&json).unwrap_or_else(|_| "null".to_string())
+}
+
+//     multipart/form-data: parser a nivel de bytes (subida de archivos)
+
+/// Extrae el boundary del header Content-Type.
+fn multipart_boundary(content_type: &str) -> Option<String> {
+    content_type.split(';')
+        .map(|s| s.trim())
+        .find_map(|p| p.strip_prefix("boundary="))
+        .map(|b| b.trim_matches('"').to_string())
+}
+
+/// Parsea un cuerpo multipart en (campos_de_texto, archivos). Cada archivo se
+/// escribe a un temporal único y se describe con {field, filename, content_type,
+/// size, tmp_path}; el handler decide dónde guardarlo (fs.move/fs.copy).
+fn parse_multipart(body: &[u8], boundary: &str) -> (IndexMap<String, Value>, Vec<Value>) {
+    let mut form = IndexMap::new();
+    let mut files = Vec::new();
+
+    let delim = format!("--{}", boundary).into_bytes();
+    // Cada parte va entre delimitadores; el bloque de headers termina en \r\n\r\n.
+    for part in split_on(body, &delim) {
+        // Quitar el CRLF inicial y descartar el cierre "--" y partes vacías.
+        let part = part.strip_prefix(b"\r\n").unwrap_or(part);
+        if part.is_empty() || part.starts_with(b"--") { continue; }
+        let sep = match find_sub(part, b"\r\n\r\n") { Some(i) => i, None => continue };
+        let (head, mut content) = (&part[..sep], &part[sep + 4..]);
+        // El contenido termina con un CRLF antes del siguiente delimitador.
+        if content.ends_with(b"\r\n") { content = &content[..content.len() - 2]; }
+
+        let headers = String::from_utf8_lossy(head);
+        let mut name = String::new();
+        let mut filename: Option<String> = None;
+        let mut ctype = String::from("application/octet-stream");
+        for line in headers.split("\r\n") {
+            let low = line.to_ascii_lowercase();
+            if low.starts_with("content-disposition:") {
+                name     = header_param(line, "name").unwrap_or_default();
+                filename = header_param(line, "filename");
+            } else if low.starts_with("content-type:") {
+                ctype = line[13..].trim().to_string();
+            }
+        }
+
+        match filename {
+            // Archivo: volcar a un temporal y describirlo.
+            Some(fname) if !fname.is_empty() => {
+                let tmp = std::env::temp_dir()
+                    .join(format!("orion_upload_{}", next_upload_id()));
+                if std::fs::write(&tmp, content).is_ok() {
+                    let mut d = IndexMap::new();
+                    d.insert("field".into(),        Value::Str(name));
+                    d.insert("filename".into(),     Value::Str(fname));
+                    d.insert("content_type".into(), Value::Str(ctype));
+                    d.insert("size".into(),         Value::Int(content.len() as i64));
+                    d.insert("tmp_path".into(),     Value::Str(tmp.to_string_lossy().into_owned()));
+                    files.push(Value::Dict(d));
+                }
+            }
+            // Campo de texto normal.
+            _ => {
+                form.insert(name, Value::Str(String::from_utf8_lossy(content).into_owned()));
+            }
+        }
+    }
+    (form, files)
+}
+
+fn next_upload_id() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64).unwrap_or(0);
+    t ^ (n << 20) ^ (std::process::id() as u64)
+}
+
+/// Valor de un parámetro `clave="valor"` (o sin comillas) dentro de una línea.
+fn header_param(line: &str, key: &str) -> Option<String> {
+    let needle = format!("{}=", key);
+    let start = line.find(&needle)? + needle.len();
+    let rest = &line[start..];
+    if let Some(stripped) = rest.strip_prefix('"') {
+        stripped.find('"').map(|end| stripped[..end].to_string())
+    } else {
+        Some(rest.split(';').next().unwrap_or(rest).trim().to_string())
+    }
+}
+
+/// Divide `data` por cada aparición de `sep` (sin incluir el separador).
+fn split_on<'a>(data: &'a [u8], sep: &[u8]) -> Vec<&'a [u8]> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut i = 0;
+    while i + sep.len() <= data.len() {
+        if &data[i..i + sep.len()] == sep {
+            out.push(&data[start..i]);
+            i += sep.len();
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    out.push(&data[start..]);
+    out
+}
+
+/// Índice de la primera aparición de `needle` en `hay`.
+fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || hay.len() < needle.len() { return None; }
+    (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
 }
 
 //     Archivos estáticos: MIME por extensión y resolución segura

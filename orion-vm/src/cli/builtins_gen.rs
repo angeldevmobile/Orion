@@ -627,10 +627,14 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("db", "first", "db.first(path, sql, params?)", "Alias de db.uno."));
     v.push(f("db", "ejecutar", "db.ejecutar(path, sql, params?)", "Int (filas afectadas)"));
     v.push(f("db", "exec", "db.exec(path, sql, params?)", "Alias de db.ejecutar."));
-    v.push(f("db", "transaccion", "db.transaccion(path, [sql, ...])", "Bool"));
+    v.push(f("db", "insertar", "db.insertar(path, sql, params?)", "Int (rowid de la fila insertada) Azúcar sobre INSERT: devuelve el last_insert_rowid, no las filas."));
+    v.push(f("db", "insert", "db.insert(path, sql, params?)", "Alias de db.insertar."));
+    v.push(f("db", "transaccion", "db.transaccion(path, [sql, ...])", "Bool  — lista de SQL en una transacción. Cada elemento puede ser \"SQL\" o [ \"SQL\", [params...] ]."));
     v.push(f("db", "transaction", "db.transaction(path, [sql, ...])", "Alias de db.transaccion."));
     v.push(f("db", "tablas", "db.tablas(path)", "List<Str>"));
     v.push(f("db", "tables", "db.tables(path)", "Alias de db.tablas."));
+    v.push(f("db", "cerrar", "db.cerrar(path)", "Bool  — descarta la conexión del pool (libera el archivo)."));
+    v.push(f("db", "close", "db.close(path)", "Alias de db.cerrar."));
     // auth (auth_mod.rs)
     v.push(f("auth", "hash", "auth.hash(password)", "String  — Argon2id con salt aleatorio"));
     v.push(f("auth", "verificar", "auth.verificar(password, hash)", "Bool"));
@@ -680,6 +684,26 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("state", "limpiar", "state.limpiar()", "Alias de state.clear."));
     v.push(f("state", "persist", "state.persist(ruta)", "Bool. Activa el respaldo a disco y carga lo existente."));
     v.push(f("state", "persistir", "state.persistir(ruta)", "Alias de state.persist."));
+    // session (session_mod.rs)
+    v.push(f("session", "new", "session.new()", "String  — genera un session-id nuevo (no crea la sesión aún)"));
+    v.push(f("session", "id", "session.id()", "Alias de session.new."));
+    v.push(f("session", "set", "session.set(sid, clave, valor)", "Bool  — crea la sesión si no existía"));
+    v.push(f("session", "guardar", "session.guardar(sid, clave, valor)", "Alias de session.set."));
+    v.push(f("session", "get", "session.get(sid, clave, default?)", "Valor | default | Null"));
+    v.push(f("session", "obtener", "session.obtener(sid, clave, default?)", "Alias de session.get."));
+    v.push(f("session", "all", "session.all(sid)", "Dict con todos los datos de la sesión"));
+    v.push(f("session", "todo", "session.todo(sid)", "Alias de session.all."));
+    v.push(f("session", "has", "session.has(sid, clave)", "Bool"));
+    v.push(f("session", "existe", "session.existe(sid, clave)", "Alias de session.has."));
+    v.push(f("session", "delete", "session.delete(sid, clave)", "Bool  — borra una clave de la sesión"));
+    v.push(f("session", "del", "session.del(sid, clave)", "Alias de session.delete."));
+    v.push(f("session", "eliminar", "session.eliminar(sid, clave)", "Alias de session.delete."));
+    v.push(f("session", "destroy", "session.destroy(sid)", "Bool  — elimina la sesión entera (logout)"));
+    v.push(f("session", "destruir", "session.destruir(sid)", "Alias de session.destroy."));
+    v.push(f("session", "count", "session.count()", "Int  — sesiones activas"));
+    v.push(f("session", "cuenta", "session.cuenta()", "Alias de session.count."));
+    v.push(f("session", "sweep", "session.sweep(max_edad_secs)", "Int  — poda sesiones inactivas, devuelve cuántas"));
+    v.push(f("session", "podar", "session.podar(max_edad_secs)", "Alias de session.sweep."));
     // mail (mail_mod.rs)
     v.push(f("mail", "enviar", "mail.enviar(smtp, usuario, clave, de, para, asunto, cuerpo)", "Bool"));
     v.push(f("mail", "send", "mail.send(smtp, usuario, clave, de, para, asunto, cuerpo)", "Alias de mail.enviar."));
@@ -874,6 +898,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("router", "new", "router.new()", "Int"));
     v.push(f("router", "static", "router.static(id, \"/static\", \"carpeta\")", "Bool — sirve archivos de la carpeta bajo el prefijo, con MIME automático e index.html en directorios. Los paths se validan contra path traversal (../ no escapa la carpeta)."));
     v.push(f("router", "static_dir", "router.static_dir(id, \"/static\", \"carpeta\")", "Alias de router.static."));
+    v.push(f("router", "guard", "router.guard(id, \"/prefijo\", secret)", "Bool — protege todo lo que cuelga del prefijo con JWT Bearer: sin token válido serve responde 401 solo; con token válido el handler recibe los claims en req[\"user\"]."));
     v.push(f("router", "add", "router.add(id, method, path, handler)", "Bool"));
     v.push(f("router", "get", "router.get(…)", "Get/post/put/delete/patch(id, path, handler) → Bool"));
     v.push(f("router", "post", "router.post(…)", "Alias de router.get."));
