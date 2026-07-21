@@ -2133,6 +2133,28 @@ impl VM {
 
         // Router activo primero; si no matchea, cae al handler global de serve.
         let routed = crate::modules::router_mod::active_match(&method, &path);
+
+        // Archivos estáticos (solo GET/HEAD y solo si ninguna ruta matcheó):
+        // MIME automático, index.html en directorios, anti path-traversal.
+        if routed.is_none() && (method == "GET" || method == "HEAD") {
+            if let Some((dir, rest)) = crate::modules::router_mod::active_static(&path) {
+                let (st, bytes, ct): (u16, Vec<u8>, String) = match resolve_static(&dir, &rest) {
+                    Some((bytes, mime)) => (200, bytes, mime),
+                    None => (404, b"archivo no encontrado".to_vec(), "text/plain; charset=utf-8".into()),
+                };
+                let mut response = Response::from_data(bytes).with_status_code(st);
+                if let Ok(h) = Header::from_str(&format!("Content-Type: {}", ct)) {
+                    response = response.with_header(h);
+                }
+                if let Ok(h) = Header::from_str("X-Content-Type-Options: nosniff") {
+                    response = response.with_header(h);
+                }
+                eprintln!("[Orion] {} {} → {}", request.method(), request.url(), st);
+                let _ = request.respond(response);
+                return;
+            }
+        }
+
         let (target_fn, route_params, middlewares) = match &routed {
             Some(m) => (m.handler.as_str(), m.params.clone(), m.middlewares.clone()),
             None    => (fn_name, Vec::new(), Vec::new()),
@@ -2186,14 +2208,10 @@ impl VM {
 
         let (status_code, resp_body, content_type, extra_headers) = match result {
             Value::Dict(ref m) => {
-                let status = match m.get("status") {
-                    Some(Value::Int(n)) => *n as u16,
-                    _ => 200,
+                let status_override = match m.get("status") {
+                    Some(Value::Int(n)) => Some(*n as u16),
+                    _ => None,
                 };
-                let body = m.get("body").map(|v| v.to_string()).unwrap_or_default();
-                let ct = m.get("content_type")
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
                 // headers: Dict opcional → se envían tal cual (CORS, SSE, cache…)
                 let extra: Vec<(String, String)> = match m.get("headers") {
                     Some(Value::Dict(hm)) => hm.iter()
@@ -2201,14 +2219,38 @@ impl VM {
                         .collect(),
                     _ => Vec::new(),
                 };
-                (status, body, ct, extra)
+                // { "file": "ruta" } → responde el archivo TAL CUAL (binario ok),
+                // con MIME automático por extensión salvo content_type explícito.
+                if let Some(fv) = m.get("file") {
+                    let fpath = fv.to_string();
+                    match std::fs::read(&fpath) {
+                        Ok(bytes) => {
+                            let ct = m.get("content_type")
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| mime_for(std::path::Path::new(&fpath)));
+                            (status_override.unwrap_or(200), bytes, ct, extra)
+                        }
+                        Err(_) => (
+                            404,
+                            format!("archivo no encontrado: {}", fpath).into_bytes(),
+                            "text/plain; charset=utf-8".to_string(),
+                            extra,
+                        ),
+                    }
+                } else {
+                    let body = m.get("body").map(|v| v.to_string()).unwrap_or_default();
+                    let ct = m.get("content_type")
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
+                    (status_override.unwrap_or(200), body.into_bytes(), ct, extra)
+                }
             }
-            Value::Str(s) => (200, s, "text/plain; charset=utf-8".to_string(), Vec::new()),
-            Value::Null   => (204, String::new(), "text/plain".to_string(), Vec::new()),
-            other         => (200, other.to_string(), "text/plain; charset=utf-8".to_string(), Vec::new()),
+            Value::Str(s) => (200, s.into_bytes(), "text/plain; charset=utf-8".to_string(), Vec::new()),
+            Value::Null   => (204, Vec::new(), "text/plain".to_string(), Vec::new()),
+            other         => (200, other.to_string().into_bytes(), "text/plain; charset=utf-8".to_string(), Vec::new()),
         };
 
-        let mut response = Response::from_string(resp_body).with_status_code(status_code);
+        let mut response = Response::from_data(resp_body).with_status_code(status_code);
         if let Ok(h) = Header::from_str(&format!("Content-Type: {}", content_type)) {
             response = response.with_header(h);
         }
@@ -2963,6 +3005,50 @@ fn json_to_value(v: serde_json::Value) -> Value {
             Value::Dict(hm)
         }
     }
+}
+
+//     Archivos estáticos: MIME por extensión y resolución segura
+
+fn mime_for(path: &std::path::Path) -> String {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "css"          => "text/css; charset=utf-8",
+        "js" | "mjs"   => "application/javascript; charset=utf-8",
+        "json"         => "application/json; charset=utf-8",
+        "svg"          => "image/svg+xml",
+        "png"          => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif"          => "image/gif",
+        "webp"         => "image/webp",
+        "ico"          => "image/x-icon",
+        "woff"         => "font/woff",
+        "woff2"        => "font/woff2",
+        "ttf"          => "font/ttf",
+        "otf"          => "font/otf",
+        "pdf"          => "application/pdf",
+        "txt" | "md"   => "text/plain; charset=utf-8",
+        "xml"          => "application/xml",
+        "csv"          => "text/csv; charset=utf-8",
+        "wasm"         => "application/wasm",
+        "mp4"          => "video/mp4",
+        "mp3"          => "audio/mpeg",
+        "zip"          => "application/zip",
+        _              => "application/octet-stream",
+    }.to_string()
+}
+
+/// Resuelve un archivo bajo la carpeta estática de forma SEGURA: canonicaliza
+/// ambos paths y exige que el resultado siga dentro de la carpeta (un `../`
+/// codificado no puede escapar). Directorio → intenta index.html.
+fn resolve_static(dir: &str, rest: &str) -> Option<(Vec<u8>, String)> {
+    let root = std::path::Path::new(dir).canonicalize().ok()?;
+    let mut target = root.join(rest);
+    if target.is_dir() { target = target.join("index.html"); }
+    let canon = target.canonicalize().ok()?;
+    if !canon.starts_with(&root) { return None; }
+    let bytes = std::fs::read(&canon).ok()?;
+    Some((bytes, mime_for(&canon)))
 }
 
 //     Percent-decoding para paths y query strings HTTP

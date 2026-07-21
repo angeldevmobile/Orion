@@ -19,10 +19,23 @@ impl Drop for ServerGuard {
     }
 }
 
+/// Crea la carpeta de archivos estáticos que sirve el servidor de prueba,
+/// incluido un "PNG" con bytes no-UTF8 para verificar integridad binaria.
+fn write_static_fixtures() -> Vec<u8> {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/static_e2e");
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(format!("{}/index.html", dir), "<h1>portada</h1>").unwrap();
+    std::fs::write(format!("{}/style.css", dir), "body{color:red}").unwrap();
+    let png: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0x10, 0x80];
+    std::fs::write(format!("{}/logo.png", dir), &png).unwrap();
+    png
+}
+
 fn start_server() -> ServerGuard {
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/server_e2e.orx");
     let child = Command::new(env!("CARGO_BIN_EXE_orion"))
         .arg(script)
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/.."))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -79,8 +92,27 @@ fn header_of<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str>
     headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
 }
 
+fn get_bytes(url: &str) -> (u16, Vec<(String, String)>, Vec<u8>) {
+    use std::io::Read;
+    let unpack_b = |r: ureq::Response| {
+        let status = r.status();
+        let headers: Vec<(String, String)> = r.headers_names().iter()
+            .filter_map(|n| r.header(n).map(|v| (n.to_lowercase(), v.to_string())))
+            .collect();
+        let mut buf = Vec::new();
+        r.into_reader().read_to_end(&mut buf).unwrap();
+        (status, headers, buf)
+    };
+    match ureq::get(url).call() {
+        Ok(r) => unpack_b(r),
+        Err(ureq::Error::Status(_, r)) => unpack_b(r),
+        Err(e) => panic!("GET {} falló: {}", url, e),
+    }
+}
+
 #[test]
 fn stack_web_e2e() {
+    let png = write_static_fixtures();
     let _server = start_server();
 
     // 1. Ruta raíz por el router + nosniff por defecto
@@ -183,4 +215,37 @@ fn stack_web_e2e() {
     let (st, _, body) = get_with(&format!("{}/", BASE), ("X-Bloqueado", "1"));
     assert_eq!(st, 403);
     assert_eq!(body, "bloqueado por middleware");
+
+    // 15. Estáticos: CSS con MIME correcto
+    let (st, hs, body) = get(&format!("{}/static/style.css", BASE));
+    assert_eq!(st, 200);
+    assert!(header_of(&hs, "content-type").unwrap().starts_with("text/css"));
+    assert_eq!(body, "body{color:red}");
+
+    // 16. Binario servido byte a byte (no-UTF8 intacto)
+    let (st, hs, bytes) = get_bytes(&format!("{}/static/logo.png", BASE));
+    assert_eq!(st, 200);
+    assert_eq!(header_of(&hs, "content-type"), Some("image/png"));
+    assert_eq!(bytes, png, "el PNG debe llegar byte a byte");
+
+    // 17. Directorio → index.html
+    let (st, hs, body) = get(&format!("{}/static/", BASE));
+    assert_eq!(st, 200);
+    assert!(header_of(&hs, "content-type").unwrap().starts_with("text/html"));
+    assert_eq!(body, "<h1>portada</h1>");
+
+    // 18. Path traversal bloqueado (../ codificado no escapa la carpeta)
+    let (st, _, _) = get(&format!("{}/static/%2e%2e/server_e2e.orx", BASE));
+    assert_eq!(st, 404, "un ../ codificado no debe salir de la carpeta estática");
+
+    // 19. Estático inexistente → 404 directo
+    let (st, _, body) = get(&format!("{}/static/nope.css", BASE));
+    assert_eq!(st, 404);
+    assert_eq!(body, "archivo no encontrado");
+
+    // 20. Respuesta { "file": ruta } → binario con MIME automático
+    let (st, hs, bytes) = get_bytes(&format!("{}/descarga", BASE));
+    assert_eq!(st, 200);
+    assert_eq!(header_of(&hs, "content-type"), Some("image/png"));
+    assert_eq!(bytes, png, "file: debe enviar el archivo byte a byte");
 }

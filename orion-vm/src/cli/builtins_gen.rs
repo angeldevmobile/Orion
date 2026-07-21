@@ -872,6 +872,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("crypto2", "rsa_verify", "crypto2.rsa_verify(…)", "Función del módulo crypto2."));
     // router (router_mod.rs)
     v.push(f("router", "new", "router.new()", "Int"));
+    v.push(f("router", "static", "router.static(id, \"/static\", \"carpeta\")", "Bool — sirve archivos de la carpeta bajo el prefijo, con MIME automático e index.html en directorios. Los paths se validan contra path traversal (../ no escapa la carpeta)."));
+    v.push(f("router", "static_dir", "router.static_dir(id, \"/static\", \"carpeta\")", "Alias de router.static."));
     v.push(f("router", "add", "router.add(id, method, path, handler)", "Bool"));
     v.push(f("router", "get", "router.get(…)", "Get/post/put/delete/patch(id, path, handler) → Bool"));
     v.push(f("router", "post", "router.post(…)", "Alias de router.get."));

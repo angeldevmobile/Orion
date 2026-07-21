@@ -12,6 +12,7 @@ struct Route {
 struct RouterData {
     routes:      Vec<Route>,
     middlewares: Vec<EvalValue>,
+    statics:     Vec<(String, String)>,   // (prefijo URL, carpeta en disco)
 }
 
 static ROUTERS: OnceLock<Mutex<HashMap<u64, RouterData>>> = OnceLock::new();
@@ -35,9 +36,25 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "new" => {
             let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
             store().lock().unwrap().insert(id, RouterData {
-                routes: Vec::new(), middlewares: Vec::new(),
+                routes: Vec::new(), middlewares: Vec::new(), statics: Vec::new(),
             });
             Ok(EvalValue::Int(id as i64))
+        }
+
+        // static(id, "/static", "carpeta") → Bool — sirve archivos de la carpeta
+        // bajo el prefijo, con MIME automático e index.html en directorios.
+        // Los paths se validan contra path traversal (../ no escapa la carpeta).
+        "static" | "static_dir" => {
+            if args.len() < 3 { return Err("router.static requiere (id, prefijo_url, carpeta)".into()); }
+            let id     = to_u64(&args[0])?;
+            let mut prefix = to_str(&args[1]);
+            let dir    = to_str(&args[2]);
+            if !prefix.starts_with('/') { prefix.insert(0, '/'); }
+            let prefix = prefix.trim_end_matches('/').to_string();
+            with_router_mut(id, |r| {
+                r.statics.push((prefix, dir));
+                Ok(EvalValue::Bool(true))
+            })
         }
 
         // add(id, method, path, handler) → Bool
@@ -185,6 +202,21 @@ fn handler_name(h: &EvalValue) -> Option<String> {
         EvalValue::Function { name, .. } if !name.is_empty() => Some(name.clone()),
         _ => None,
     }
+}
+
+/// ¿El path cae bajo un prefijo estático del router activo?
+/// Devuelve (carpeta, resto_del_path) para que serve resuelva el archivo.
+pub fn active_static(path: &str) -> Option<(String, String)> {
+    let id = (*active_id().lock().unwrap())?;
+    let store = store().lock().unwrap();
+    let data = store.get(&id)?;
+    for (prefix, dir) in &data.statics {
+        if path == prefix || path.starts_with(&format!("{}/", prefix)) {
+            let rest = path[prefix.len()..].trim_start_matches('/').to_string();
+            return Some((dir.clone(), rest));
+        }
+    }
+    None
 }
 
 /// Rutea method+path contra el router activo. `None` si no hay router activo

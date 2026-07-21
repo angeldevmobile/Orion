@@ -109,6 +109,11 @@ fn eventos(req) {
     }
 }
 
+fn descarga(req) {
+    -- respuesta { "file": ruta } → binario con MIME automático
+    return { "file": "tests/static_e2e/logo.png" }
+}
+
 fn fallback(req) {
     return { "status": 404, "body": "sin ruta: " + req["path"] }
 }
@@ -127,6 +132,8 @@ router.get(r,  "/privado",                 "protegido")
 router.get(r,  "/limitado",                "limitado")
 router.get(r,  "/contador",                "contador")
 router.get(r,  "/eventos",                 "eventos")
+router.get(r,  "/descarga",                "descarga")
+router.static(r, "/static", "tests/static_e2e")
 router.attach(r)
 
 serve 47611 fallback
