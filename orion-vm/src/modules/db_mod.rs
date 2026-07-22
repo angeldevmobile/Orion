@@ -98,6 +98,83 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 }
             })
         }
+        // copiar(path, tabla, [columnas], [[fila],…]) → Int  — carga masiva.
+        // En SQLite se hace con una transacción + sentencia preparada reusada
+        // (el equivalente rápido a COPY): una sola tx para miles de filas.
+        "copiar" | "copy" => {
+            if args.len() < 4 { return Err("db.copiar requiere (path, tabla, columnas, filas)".into()); }
+            let tabla = to_str(&args[1]);
+            let cols = match &args[2] {
+                EvalValue::List(l) => l.iter().map(to_str).collect::<Vec<_>>(),
+                _ => return Err("db.copiar: columnas debe ser una lista".into()),
+            };
+            let filas = match &args[3] {
+                EvalValue::List(l) => l.clone(),
+                _ => return Err("db.copiar: filas debe ser una lista de listas".into()),
+            };
+            let placeholders = vec!["?"; cols.len()].join(", ");
+            let sql = format!("INSERT INTO {} ({}) VALUES ({})", tabla, cols.join(", "), placeholders);
+            with_conn_mut(&to_str(&args[0]), |conn| {
+                let tx = conn.transaction().map_err(|e| format!("db.copiar: {}", e))?;
+                {
+                    let mut stmt = tx.prepare(&sql).map_err(|e| format!("db.copiar prepare: {}", e))?;
+                    for fila in &filas {
+                        let campos = match fila {
+                            EvalValue::List(f) => f,
+                            _ => return Err("db.copiar: cada fila debe ser una lista".into()),
+                        };
+                        let sqlp: Vec<SqlValue> = campos.iter().map(eval_to_sql).collect();
+                        stmt.execute(rusqlite::params_from_iter(sqlp.iter()))
+                            .map_err(|e| format!("db.copiar fila: {}", e))?;
+                    }
+                }
+                tx.commit().map_err(|e| format!("db.copiar commit: {}", e))?;
+                Ok(EvalValue::Int(filas.len() as i64))
+            })
+        }
+        // copiar_archivo(path, tabla, [columnas], ruta_csv, opts?) → Int
+        // Carga en STREAMING con RAM constante: el crate csv lee fila a fila y
+        // se insertan en una transacción con sentencia preparada. No materializa
+        // el CSV en memoria — vale para archivos enormes.
+        "copiar_archivo" | "copy_file" => {
+            if args.len() < 4 { return Err("db.copiar_archivo requiere (path, tabla, columnas, ruta, opts?)".into()); }
+            let tabla = to_str(&args[1]);
+            let cols = match &args[2] {
+                EvalValue::List(l) => l.iter().map(to_str).collect::<Vec<_>>(),
+                _ => return Err("db.copiar_archivo: columnas debe ser una lista".into()),
+            };
+            let ruta = to_str(&args[3]);
+            let (header, delim) = copy_file_opts(args.get(4));
+            let placeholders = vec!["?"; cols.len()].join(", ");
+            let sql = format!("INSERT INTO {} ({}) VALUES ({})", tabla, cols.join(", "), placeholders);
+            with_conn_mut(&to_str(&args[0]), |conn| {
+                let mut rdr = csv::ReaderBuilder::new()
+                    .delimiter(delim)
+                    .has_headers(header)
+                    .flexible(true)
+                    .from_path(&ruta)
+                    .map_err(|e| format!("db.copiar_archivo: no se pudo abrir '{}': {}", ruta, e))?;
+                let tx = conn.transaction().map_err(|e| format!("db.copiar_archivo: {}", e))?;
+                let mut total: i64 = 0;
+                {
+                    let mut stmt = tx.prepare(&sql).map_err(|e| format!("db.copiar_archivo prepare: {}", e))?;
+                    let mut record = csv::StringRecord::new();
+                    // Streaming real: un registro vivo a la vez, RAM constante.
+                    while rdr.read_record(&mut record).map_err(|e| format!("db.copiar_archivo csv: {}", e))? {
+                        let vals: Vec<SqlValue> = record.iter()
+                            .map(|s| SqlValue::Text(s.to_string())).collect();
+                        stmt.execute(rusqlite::params_from_iter(vals.iter()))
+                            .map_err(|e| format!("db.copiar_archivo fila: {}", e))?;
+                        total += 1;
+                    }
+                }
+                tx.commit().map_err(|e| format!("db.copiar_archivo commit: {}", e))?;
+                Ok(EvalValue::Int(total))
+            })
+        }
+        // pool(path, n?) → Int  — en SQLite es no-op (una conexión persistente
+        // por archivo); existe para que el mismo código sirva en Postgres.
+        "pool" => Ok(EvalValue::Int(1)),
         // cerrar(path) → Bool  — descarta la conexión del pool (libera el archivo).
         "cerrar" | "close" => {
             if args.is_empty() { return Err("db.cerrar requiere (path)".into()); }
@@ -229,6 +306,24 @@ fn is_mysql_url(s: &str) -> bool {
     s.starts_with("mysql://")
 }
 
+/// Opciones de carga desde archivo (arg opcional Dict): `header`/`encabezado`
+/// (saltar 1ª fila) y `delim`/`sep` (delimitador, por defecto ','). Devuelve
+/// (header, delimitador_byte).
+fn copy_file_opts(arg: Option<&EvalValue>) -> (bool, u8) {
+    let mut header = false;
+    let mut delim = b',';
+    if let Some(EvalValue::Dict(m)) = arg {
+        if let Some(v) = m.get("header").or_else(|| m.get("encabezado")) {
+            header = matches!(v, EvalValue::Bool(true))
+                || matches!(v, EvalValue::Int(n) if *n != 0);
+        }
+        if let Some(EvalValue::Str(s)) = m.get("delim").or_else(|| m.get("sep")) {
+            if let Some(b) = s.bytes().next() { delim = b; }
+        }
+    }
+    (header, delim)
+}
+
 //    Backend Postgres
 //
 // Misma API que SQLite pero contra un servidor Postgres (cliente-servidor). El
@@ -243,24 +338,87 @@ mod pg {
     use postgres::{Client, NoTls, Row};
     use postgres::types::{Type, ToSql};
     use std::collections::HashMap as StdHashMap;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
-    static POOL: OnceLock<Mutex<StdHashMap<String, Arc<Mutex<Client>>>>> = OnceLock::new();
+    const DEFAULT_MAX: usize = 8;
 
-    fn pool() -> &'static Mutex<StdHashMap<String, Arc<Mutex<Client>>>> {
+    /// Pool de N conexiones por URL. Los workers de serve toman una conexión
+    /// libre (o crean una hasta el tope) y la devuelven al terminar, así las
+    /// peticiones concurrentes NO se serializan en una sola conexión. Al llegar
+    /// al tope, un checkout espera a que otro devuelva la suya.
+    struct PgPool {
+        url:     String,
+        max:     AtomicUsize,
+        idle:    Mutex<Vec<Client>>,
+        created: Mutex<usize>,
+        cv:      Condvar,
+    }
+
+    impl PgPool {
+        fn new(url: &str, max: usize) -> Self {
+            PgPool {
+                url: url.to_string(),
+                max: AtomicUsize::new(max),
+                idle: Mutex::new(Vec::new()),
+                created: Mutex::new(0),
+                cv: Condvar::new(),
+            }
+        }
+
+        fn checkout(&self) -> Result<Client, String> {
+            loop {
+                if let Some(c) = self.idle.lock().unwrap().pop() {
+                    return Ok(c);
+                }
+                // ¿Podemos crear una nueva sin pasar el tope?
+                {
+                    let mut n = self.created.lock().unwrap();
+                    if *n < self.max.load(Ordering::Relaxed) {
+                        *n += 1;
+                        drop(n);
+                        match connect_tls_aware(&self.url) {
+                            Ok(c) => return Ok(c),
+                            Err(e) => {
+                                *self.created.lock().unwrap() -= 1;
+                                return Err(format!("db(postgres): no se pudo conectar: {}", e));
+                            }
+                        }
+                    }
+                }
+                // Tope alcanzado: esperar a que alguien devuelva una conexión.
+                let guard = self.idle.lock().unwrap();
+                let _ = self.cv.wait_timeout(guard, std::time::Duration::from_millis(200)).unwrap();
+            }
+        }
+
+        fn checkin(&self, c: Client) {
+            // Una conexión muerta no vuelve al pool: se descarta y se libera cupo.
+            if c.is_closed() {
+                let mut n = self.created.lock().unwrap();
+                if *n > 0 { *n -= 1; }
+                self.cv.notify_one();
+                return;
+            }
+            self.idle.lock().unwrap().push(c);
+            self.cv.notify_one();
+        }
+    }
+
+    static POOL: OnceLock<Mutex<StdHashMap<String, Arc<PgPool>>>> = OnceLock::new();
+
+    fn pool() -> &'static Mutex<StdHashMap<String, Arc<PgPool>>> {
         POOL.get_or_init(|| Mutex::new(StdHashMap::new()))
     }
 
-    fn client_for(url: &str) -> Result<Arc<Mutex<Client>>, String> {
+    fn pool_for(url: &str) -> Arc<PgPool> {
         let mut guard = pool().lock().unwrap();
-        if let Some(c) = guard.get(url) {
-            return Ok(c.clone());
+        if let Some(p) = guard.get(url) {
+            return p.clone();
         }
-        let client = connect_tls_aware(url)
-            .map_err(|e| format!("db(postgres): no se pudo conectar: {}", e))?;
-        let arc = Arc::new(Mutex::new(client));
-        guard.insert(url.to_string(), arc.clone());
-        Ok(arc)
+        let p = Arc::new(PgPool::new(url, DEFAULT_MAX));
+        guard.insert(url.to_string(), p.clone());
+        p
     }
 
     /// Conecta usando TLS o no según `sslmode` en la URL (semántica libpq):
@@ -373,6 +531,83 @@ mod pg {
                     Ok(EvalValue::List(rows.iter().map(|r| pg_cell(r, 0)).collect()))
                 })
             }
+            // pool(url, n) → Int  — fija el máximo de conexiones concurrentes.
+            "pool" => {
+                if args.is_empty() { return Err("db.pool requiere (url, n?)".into()); }
+                let n = args.get(1).and_then(|v| v.to_i64().ok()).unwrap_or(DEFAULT_MAX as i64).max(1) as usize;
+                pool_for(&to_str(&args[0])).max.store(n, Ordering::Relaxed);
+                Ok(EvalValue::Int(n as i64))
+            }
+            // copiar(url, tabla, [columnas], [[fila],…]) → Int  — carga masiva
+            // vía COPY FROM STDIN (mucho más rápido que INSERT para millones).
+            "copiar" | "copy" => {
+                if args.len() < 4 { return Err("db.copiar requiere (url, tabla, columnas, filas)".into()); }
+                let tabla = to_str(&args[1]);
+                let cols = match &args[2] {
+                    EvalValue::List(l) => l.iter().map(to_str).collect::<Vec<_>>(),
+                    _ => return Err("db.copiar: columnas debe ser una lista".into()),
+                };
+                let filas = match &args[3] {
+                    EvalValue::List(l) => l.clone(),
+                    _ => return Err("db.copiar: filas debe ser una lista de listas".into()),
+                };
+                with_client(&to_str(&args[0]), |c| {
+                    use std::io::Write;
+                    let sql = format!("COPY {} ({}) FROM STDIN", tabla, cols.join(", "));
+                    let mut w = c.copy_in(sql.as_str())
+                        .map_err(|e| format!("db.copiar: {}", e))?;
+                    let mut line = Vec::new();
+                    for fila in &filas {
+                        let campos = match fila {
+                            EvalValue::List(f) => f,
+                            _ => return Err("db.copiar: cada fila debe ser una lista".into()),
+                        };
+                        line.clear();
+                        for (i, val) in campos.iter().enumerate() {
+                            if i > 0 { line.push(b'\t'); }
+                            line.extend_from_slice(copy_encode(val).as_bytes());
+                        }
+                        line.push(b'\n');
+                        w.write_all(&line).map_err(|e| format!("db.copiar write: {}", e))?;
+                    }
+                    let n = w.finish().map_err(|e| format!("db.copiar finish: {}", e))?;
+                    Ok(EvalValue::Int(n as i64))
+                })
+            }
+            // copiar_archivo(url, tabla, [columnas], ruta_csv, opts?) → Int
+            // Carga en STREAMING con RAM constante: lee el CSV en trozos de 64KB
+            // y los empuja a COPY … FROM STDIN (Postgres parsea el CSV). No
+            // materializa el archivo en memoria — sirve para millones de filas.
+            "copiar_archivo" | "copy_file" => {
+                if args.len() < 4 { return Err("db.copiar_archivo requiere (url, tabla, columnas, ruta, opts?)".into()); }
+                let tabla = to_str(&args[1]);
+                let cols = match &args[2] {
+                    EvalValue::List(l) => l.iter().map(to_str).collect::<Vec<_>>(),
+                    _ => return Err("db.copiar_archivo: columnas debe ser una lista".into()),
+                };
+                let ruta = to_str(&args[3]);
+                let (header, delim) = super::copy_file_opts(args.get(4));
+                let delim_ch = delim as char;
+                with_client(&to_str(&args[0]), |c| {
+                    use std::io::{Read, Write};
+                    let mut opts = format!("FORMAT csv, DELIMITER '{}'", delim_ch);
+                    if header { opts.push_str(", HEADER true"); }
+                    let sql = format!("COPY {} ({}) FROM STDIN WITH ({})", tabla, cols.join(", "), opts);
+                    let file = std::fs::File::open(&ruta)
+                        .map_err(|e| format!("db.copiar_archivo: no se pudo abrir '{}': {}", ruta, e))?;
+                    let mut reader = std::io::BufReader::new(file);
+                    let mut w = c.copy_in(sql.as_str())
+                        .map_err(|e| format!("db.copiar_archivo: {}", e))?;
+                    let mut buf = [0u8; 65536];
+                    loop {
+                        let n = reader.read(&mut buf).map_err(|e| format!("db.copiar_archivo read: {}", e))?;
+                        if n == 0 { break; }
+                        w.write_all(&buf[..n]).map_err(|e| format!("db.copiar_archivo write: {}", e))?;
+                    }
+                    let filas = w.finish().map_err(|e| format!("db.copiar_archivo finish: {}", e))?;
+                    Ok(EvalValue::Int(filas as i64))
+                })
+            }
             "cerrar" | "close" => {
                 if args.is_empty() { return Err("db.cerrar requiere (url)".into()); }
                 let removed = pool().lock().unwrap().remove(&to_str(&args[0])).is_some();
@@ -383,9 +618,39 @@ mod pg {
     }
 
     fn with_client<T>(url: &str, f: impl FnOnce(&mut Client) -> Result<T, String>) -> Result<T, String> {
-        let arc = client_for(url)?;
-        let mut c = arc.lock().unwrap();
-        f(&mut c)
+        let pool = pool_for(url);
+        let mut c = pool.checkout()?;
+        // La conexión vuelve al pool tanto si f va bien como si falla: un error
+        // de SQL (constraint, etc.) no rompe la conexión; is_closed la filtra.
+        let r = f(&mut c);
+        pool.checkin(c);
+        r
+    }
+
+    /// Codifica un valor para el formato texto de COPY (TSV con escapes libpq).
+    fn copy_encode(v: &EvalValue) -> String {
+        match v {
+            EvalValue::Null    => "\\N".to_string(),
+            EvalValue::Bool(b) => if *b { "t".into() } else { "f".into() },
+            EvalValue::Int(n)  => n.to_string(),
+            EvalValue::Float(f) => f.to_string(),
+            EvalValue::Str(s)  => copy_escape(s),
+            other => copy_escape(&crate::modules::json_mod::eval_to_json(other.clone()).to_string()),
+        }
+    }
+
+    fn copy_escape(s: &str) -> String {
+        let mut o = String::with_capacity(s.len());
+        for c in s.chars() {
+            match c {
+                '\\' => o.push_str("\\\\"),
+                '\t' => o.push_str("\\t"),
+                '\n' => o.push_str("\\n"),
+                '\r' => o.push_str("\\r"),
+                _    => o.push(c),
+            }
+        }
+        o
     }
 
     fn run_query(c: &mut Client, sql: &str, params: &[EvalValue]) -> Result<EvalValue, String> {
@@ -627,6 +892,90 @@ mod my {
                     .map_err(|e| format!("db.tablas(mysql): {}", e))?;
                 Ok(EvalValue::List(rows.into_iter().map(|mut r| my_cell(r.take(0).unwrap_or(MyValue::NULL))).collect()))
             }
+            // copiar(url, tabla, [columnas], [[fila],…]) → Int — carga masiva.
+            // MySQL no tiene COPY FROM STDIN; se usa INSERT multi-fila por lotes
+            // dentro de una transacción (el camino rápido en MySQL).
+            "copiar" | "copy" => {
+                if args.len() < 4 { return Err("db.copiar requiere (url, tabla, columnas, filas)".into()); }
+                let tabla = to_str(&args[1]);
+                let cols = match &args[2] {
+                    EvalValue::List(l) => l.iter().map(to_str).collect::<Vec<_>>(),
+                    _ => return Err("db.copiar: columnas debe ser una lista".into()),
+                };
+                let filas = match &args[3] {
+                    EvalValue::List(l) => l.clone(),
+                    _ => return Err("db.copiar: filas debe ser una lista de listas".into()),
+                };
+                if filas.is_empty() { return Ok(EvalValue::Int(0)); }
+                let ncols = cols.len();
+                let row_ph = format!("({})", vec!["?"; ncols].join(","));
+                let mut c = conn(&to_str(&args[0]))?;
+                let mut tx = c.start_transaction(mysql::TxOpts::default())
+                    .map_err(|e| format!("db.copiar(mysql): {}", e))?;
+                for chunk in filas.chunks(500) {
+                    let valores = vec![row_ph.as_str(); chunk.len()].join(",");
+                    let sql = format!("INSERT INTO {} ({}) VALUES {}", tabla, cols.join(","), valores);
+                    let mut flat: Vec<EvalValue> = Vec::with_capacity(chunk.len() * ncols);
+                    for fila in chunk {
+                        match fila {
+                            EvalValue::List(f) => flat.extend(f.iter().cloned()),
+                            _ => return Err("db.copiar: cada fila debe ser una lista".into()),
+                        }
+                    }
+                    tx.exec_drop(sql.as_str(), to_params(&flat))
+                        .map_err(|e| format!("db.copiar(mysql) lote: {}", e))?;
+                }
+                tx.commit().map_err(|e| format!("db.copiar commit(mysql): {}", e))?;
+                Ok(EvalValue::Int(filas.len() as i64))
+            }
+            // copiar_archivo(url, tabla, [columnas], ruta_csv, opts?) → Int
+            // Streaming con RAM constante: el crate csv lee fila a fila y se
+            // insertan por lotes de 500 en una transacción.
+            "copiar_archivo" | "copy_file" => {
+                if args.len() < 4 { return Err("db.copiar_archivo requiere (url, tabla, columnas, ruta, opts?)".into()); }
+                let tabla = to_str(&args[1]);
+                let cols = match &args[2] {
+                    EvalValue::List(l) => l.iter().map(to_str).collect::<Vec<_>>(),
+                    _ => return Err("db.copiar_archivo: columnas debe ser una lista".into()),
+                };
+                let ruta = to_str(&args[3]);
+                let (header, delim) = super::copy_file_opts(args.get(4));
+                let ncols = cols.len();
+                let row_ph = format!("({})", vec!["?"; ncols].join(","));
+                let mut rdr = csv::ReaderBuilder::new()
+                    .delimiter(delim).has_headers(header).flexible(true)
+                    .from_path(&ruta)
+                    .map_err(|e| format!("db.copiar_archivo: no se pudo abrir '{}': {}", ruta, e))?;
+                let mut c = conn(&to_str(&args[0]))?;
+                let mut tx = c.start_transaction(mysql::TxOpts::default())
+                    .map_err(|e| format!("db.copiar_archivo(mysql): {}", e))?;
+                let mut total: i64 = 0;
+                let mut lote: Vec<EvalValue> = Vec::new();
+                let mut record = csv::StringRecord::new();
+                let flush = |tx: &mut mysql::Transaction, lote: &mut Vec<EvalValue>| -> Result<(), String> {
+                    if lote.is_empty() { return Ok(()); }
+                    let filas = lote.len() / ncols;
+                    let valores = vec![row_ph.as_str(); filas].join(",");
+                    let sql = format!("INSERT INTO {} ({}) VALUES {}", tabla, cols.join(","), valores);
+                    tx.exec_drop(sql.as_str(), to_params(lote))
+                        .map_err(|e| format!("db.copiar_archivo(mysql) lote: {}", e))?;
+                    lote.clear();
+                    Ok(())
+                };
+                while rdr.read_record(&mut record).map_err(|e| format!("db.copiar_archivo csv: {}", e))? {
+                    for field in record.iter() { lote.push(EvalValue::Str(field.to_string())); }
+                    total += 1;
+                    if lote.len() >= 500 * ncols { flush(&mut tx, &mut lote)?; }
+                }
+                flush(&mut tx, &mut lote)?;
+                tx.commit().map_err(|e| format!("db.copiar_archivo commit(mysql): {}", e))?;
+                Ok(EvalValue::Int(total))
+            }
+            // pool(url, n?) → Int — el crate mysql ya gestiona su propio pool
+            // interno; aquí es informativo (no-op) para paridad de API.
+            "pool" => Ok(EvalValue::Int(
+                args.get(1).and_then(|v| v.to_i64().ok()).unwrap_or(10)
+            )),
             "cerrar" | "close" => {
                 if args.is_empty() { return Err("db.cerrar requiere (url)".into()); }
                 let removed = pools().lock().unwrap().remove(&to_str(&args[0])).is_some();

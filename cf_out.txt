@@ -1,0 +1,2 @@
+STREAM 1,000,000 filas desde CSV: 1.198502s
+verificado en tabla: 1000000 filas

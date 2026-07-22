@@ -633,6 +633,11 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("db", "transaction", "db.transaction(path, [sql, ...])", "Alias de db.transaccion."));
     v.push(f("db", "tablas", "db.tablas(path)", "List<Str>"));
     v.push(f("db", "tables", "db.tables(path)", "Alias de db.tablas."));
+    v.push(f("db", "copiar", "db.copiar(path, tabla, [columnas], [[fila],…])", "Int  — carga masiva. En SQLite se hace con una transacción + sentencia preparada reusada (el equivalente rápido a COPY): una sola tx para miles de filas."));
+    v.push(f("db", "copy", "db.copy(path, tabla, [columnas], [[fila],…])", "Alias de db.copiar."));
+    v.push(f("db", "copiar_archivo", "db.copiar_archivo(path, tabla, [columnas], ruta_csv, opts?)", "Int Carga en STREAMING con RAM constante: el crate csv lee fila a fila y se insertan en una transacción con sentencia preparada. No materializa el CSV en memoria — vale para archivos enormes."));
+    v.push(f("db", "copy_file", "db.copy_file(path, tabla, [columnas], ruta_csv, opts?)", "Alias de db.copiar_archivo."));
+    v.push(f("db", "pool", "db.pool(path, n?)", "Int  — en SQLite es no-op (una conexión persistente por archivo); existe para que el mismo código sirva en Postgres."));
     v.push(f("db", "cerrar", "db.cerrar(path)", "Bool  — descarta la conexión del pool (libera el archivo)."));
     v.push(f("db", "close", "db.close(path)", "Alias de db.cerrar."));
     // auth (auth_mod.rs)
