@@ -757,6 +757,31 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("cola", "delete", "cola.delete(nombre)", "Alias de cola.eliminar."));
     v.push(f("cola", "lista", "cola.lista()", "List<Str> de nombres de colas existentes"));
     v.push(f("cola", "list", "cola.list()", "Alias de cola.lista."));
+    // chan (chan_mod.rs)
+    v.push(f("chan", "crear", "chan.crear(cap?)", "Int (handle). cap=0 o ausente → ilimitado."));
+    v.push(f("chan", "create", "chan.create(cap?)", "Alias de chan.crear."));
+    v.push(f("chan", "new", "chan.new(cap?)", "Alias de chan.crear."));
+    v.push(f("chan", "enviar", "chan.enviar(id, valor)", "Bool. Bloquea si el canal tiene capacidad y está lleno. Error si el canal está cerrado."));
+    v.push(f("chan", "send", "chan.send(id, valor)", "Alias de chan.enviar."));
+    v.push(f("chan", "push", "chan.push(id, valor)", "Alias de chan.enviar."));
+    v.push(f("chan", "recibir", "chan.recibir(id)", "Valor | Null. Bloquea (parking) hasta que haya un valor. Devuelve Null si el canal se cierra y ya no quedan valores."));
+    v.push(f("chan", "recv", "chan.recv(id)", "Alias de chan.recibir."));
+    v.push(f("chan", "pop", "chan.pop(id)", "Alias de chan.recibir."));
+    v.push(f("chan", "try_recibir", "chan.try_recibir(id)", "Valor | Null (no bloquea; Null si vacío)."));
+    v.push(f("chan", "try_recv", "chan.try_recv(id)", "Alias de chan.try_recibir."));
+    v.push(f("chan", "intentar_recibir", "chan.intentar_recibir(id)", "Alias de chan.try_recibir."));
+    v.push(f("chan", "cerrar", "chan.cerrar(id)", "Bool. Despierta a todos los bloqueados."));
+    v.push(f("chan", "close", "chan.close(id)", "Alias de chan.cerrar."));
+    v.push(f("chan", "cerrada", "chan.cerrada(id)", "Bool"));
+    v.push(f("chan", "is_closed", "chan.is_closed(id)", "Alias de chan.cerrada."));
+    v.push(f("chan", "closed", "chan.closed(id)", "Alias de chan.cerrada."));
+    v.push(f("chan", "eliminar", "chan.eliminar(id)", "Bool. Libera el canal del registro."));
+    v.push(f("chan", "delete", "chan.delete(id)", "Alias de chan.eliminar."));
+    v.push(f("chan", "free", "chan.free(id)", "Alias de chan.eliminar."));
+    v.push(f("chan", "select", "chan.select([id1, id2, ...])", "Dict {canal, valor} | Null. Bloquea hasta que ALGÚN canal tenga un valor y lo devuelve junto con su handle. Devuelve Null si todos los canales están cerrados y vacíos. Es la base de la cancelación (canal \"done\") y del fan-in estructurado."));
+    v.push(f("chan", "seleccionar", "chan.seleccionar([id1, id2, ...])", "Alias de chan.select."));
+    v.push(f("chan", "lista", "chan.lista()", "List<Int> de handles de canales vivos"));
+    v.push(f("chan", "list", "chan.list()", "Alias de chan.lista."));
     // watch (watch_mod.rs)
     v.push(f("watch", "observar", "watch.observar(path)", "Bool  — registra el estado actual del archivo"));
     v.push(f("watch", "watch", "watch.watch(path)", "Alias de watch.observar."));

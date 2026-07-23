@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use indexmap::IndexMap as HashMap;
 use std::io::{self, BufRead, Write as IoWrite};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, Condvar, OnceLock};
 
 //     Tags                                                                     
 
@@ -19,7 +19,7 @@ pub const TAG_LIST:    u8 = 5;  // data_i = Box::into_raw(Box<Vec<i64>>)
 pub const TAG_DICT:    u8 = 6;  // data_i = Box::into_raw(Box<Vec<(String, i64)>>)
 // TAG_INSTANCE = 7 definido en runtime_oop
 pub const TAG_CLOSURE: u8 = 9;  // data_i = fn_ptr (i64) de la función capturada
-pub const TAG_TASK:    u8 = 10; // data_i = Box<Arc<Mutex<Option<i64>>>>
+pub const TAG_TASK:    u8 = 10; // data_i = Box<Arc<JitTask>>
 
 // Buffer thread-local para pasar N argumentos variádicos a MakeList/MakeDict.
 thread_local! {
@@ -765,9 +765,32 @@ pub fn register_jit_fn(name: &str, fn_ptr: i64) {
     jit_fn_table().lock().unwrap().insert(name.to_string(), fn_ptr);
 }
 
+/// Estado compartido de una tarea async en el JIT. Como el resultado JIT es un
+/// simple `i64` (OrionVal NaN-boxed, Copy), basta un Option<i64> + Condvar para
+/// parking real: rt_await se aparca en vez de girar en un sleep-loop.
+pub struct JitTask {
+    result: Mutex<Option<i64>>,
+    done:   Condvar,
+}
+
+impl JitTask {
+    fn complete(&self, r: i64) {
+        let mut g = self.result.lock().unwrap();
+        *g = Some(r);
+        self.done.notify_all();
+    }
+    fn wait(&self) -> i64 {
+        let mut g = self.result.lock().unwrap();
+        while g.is_none() {
+            g = self.done.wait(g).unwrap();
+        }
+        g.unwrap()
+    }
+}
+
 /// Boxea un Arc de tarea en un OrionVal TAG_TASK.
-fn alloc_task(slot: Arc<Mutex<Option<i64>>>) -> i64 {
-    let raw = Box::into_raw(Box::new(slot)) as i64;
+fn alloc_task(task: Arc<JitTask>) -> i64 {
+    let raw = Box::into_raw(Box::new(task)) as i64;
     alloc_val(TAG_TASK, raw, 0.0)
 }
 
@@ -832,15 +855,16 @@ pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
         buf.drain(..n).collect()
     });
 
-    let slot: Arc<Mutex<Option<i64>>> = Arc::new(Mutex::new(None));
-    let slot_clone = Arc::clone(&slot);
+    let task = Arc::new(JitTask { result: Mutex::new(None), done: Condvar::new() });
+    let task_worker = Arc::clone(&task);
 
-    std::thread::spawn(move || {
+    // Pool de hilos compartido (reutiliza workers) en vez de un hilo por spawn.
+    crate::task_pool::submit(move || {
         let result = unsafe { call_fn_n(fn_ptr, &args) };
-        *slot_clone.lock().unwrap() = Some(result);
+        task_worker.complete(result);
     });
 
-    alloc_task(slot)
+    alloc_task(task)
 }
 
 /// Bloquea hasta que la tarea (TAG_TASK) complete y devuelve su resultado.
@@ -850,16 +874,9 @@ pub extern "C" fn rt_await(task: i64) -> i64 {
     unsafe {
         let v = val_ref(task);
         if v.tag == TAG_TASK {
-            let arc = &*(v.data_i as *const Arc<Mutex<Option<i64>>>);
-            loop {
-                {
-                    let guard = arc.lock().unwrap();
-                    if let Some(result) = *guard {
-                        return result;
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
+            // Parking real vía Condvar: sin espera activa.
+            let arc = &*(v.data_i as *const Arc<JitTask>);
+            arc.wait()
         } else {
             task
         }

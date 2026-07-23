@@ -1,0 +1,79 @@
+-- demo/demo_concurrencia.orx
+-- Modelo de concurrencia moderno de Orion:
+--   • spawn/await sobre un POOL de hilos (no un hilo por tarea)
+--   • await con parking real (sin espera activa)
+--   • canales (chan) para paso de mensajes entre tareas
+--   • concurrencia estructurada: fan-out a workers + fan-in de resultados
+--   • cancelación cooperativa vía canal "done" + select
+
+use "chan" as chan
+
+show "── 1. Pool de tareas: fan-out + fan-in ──────────────"
+
+-- Trabajo pesado simulado: cada tarea eleva su entrada al cuadrado.
+async fn trabajo(n) {
+    return n * n
+}
+
+-- Fan-out: lanzamos N tareas de golpe. El pool reutiliza hilos.
+tareas = []
+i = 1
+while i <= 10 {
+    tareas.push(trabajo(i))
+    i = i + 1
+}
+
+-- Fan-in: recogemos todos los resultados (await se aparca, no gira).
+suma = 0
+for t in tareas {
+    r = await t
+    suma = suma + r
+}
+show "  suma de cuadrados 1..10 = " + suma      -- 385
+
+show ""
+show "── 2. Productor / consumidor con canal ──────────────"
+
+datos = chan.crear(4)            -- canal con capacidad 4 (backpressure)
+
+async fn productor(canal) {
+    k = 1
+    while k <= 6 {
+        chan.enviar(canal, k * 10)
+        k = k + 1
+    }
+    chan.cerrar(canal)           -- señala "no hay más datos"
+    return 0
+}
+
+spawn productor(datos)           -- fire-and-forget
+
+recibidos = 0
+total = 0
+v = chan.recibir(datos)          -- se bloquea (parking) hasta que haya dato
+while v != null {                -- null = canal cerrado y vacío
+    recibidos = recibidos + 1
+    total = total + v
+    v = chan.recibir(datos)
+}
+show "  recibidos " + recibidos + " mensajes, total = " + total   -- 6 / 210
+
+show ""
+show "── 3. Cancelación cooperativa con canal 'done' ──────"
+
+done = chan.crear()
+
+async fn vigilante(senal) {
+    -- Espera indefinidamente hasta que llegue la señal de parada.
+    aviso = chan.recibir(senal)
+    show "  vigilante recibió la señal: " + aviso
+    return "detenido"
+}
+
+t = vigilante(done)
+chan.enviar(done, "parar")       -- pedimos que termine
+final = await t
+show "  vigilante terminó con estado: " + final
+
+show ""
+show "Listo. Concurrencia estructurada, canales y cancelación ✓"

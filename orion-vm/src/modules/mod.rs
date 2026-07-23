@@ -69,6 +69,7 @@ pub mod mail_mod;
 //   Automatización                               
 pub mod tarea_mod;
 pub mod cola_mod;
+pub mod chan_mod;
 pub mod watch_mod;
 
 //   Validación                                 
@@ -128,6 +129,7 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         // Automatización
         "tarea"    => tarea_mod::call(function, args),
         "cola"     => cola_mod::call(function, args),
+        "chan"     => chan_mod::call(function, args),
         "watch"    => watch_mod::call(function, args),
         // Validación
         "validate" => validate_mod::call(function, args),
@@ -177,7 +179,7 @@ pub fn is_known_module(name: &str) -> bool {
         // Backend core
         "db" | "auth" | "cache" | "state" | "session" | "mail" |
         // Automatización
-        "tarea" | "cola" | "watch" |
+        "tarea" | "cola" | "chan" | "watch" |
         // Validación
         "validate" |
         // Utilidades modernas

@@ -4,10 +4,10 @@ use indexmap::IndexMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use libloading;
 use crate::instruction::Instruction;
-use crate::value::{Value, InstanceData, SendValue, from_send};
+use crate::value::{Value, InstanceData, SendValue, TaskHandle, from_send};
 use crate::bytecode::{ExternFnDef, FunctionDef, ShapeDef};
 use crate::gc::Gc;
 
@@ -140,6 +140,10 @@ pub struct VM {
     gc: Gc,
     /// Contadores de llamadas por función (hotspot detection)
     call_counts: HashMap<String, u64>,
+    /// Token de cancelación cooperativa. Presente solo en sub-VMs lanzadas por
+    /// `spawn`/`async fn`: el bucle de instrucciones lo consulta y aborta si se
+    /// activa (via `tarea.cancelar` o un canal "done").
+    cancel_token: Option<Arc<TaskHandle>>,
 }
 
 impl Drop for VM {
@@ -171,6 +175,7 @@ impl VM {
             error_handlers: Vec::new(),
             gc: Gc::new(),
             call_counts: HashMap::new(),
+            cancel_token: None,
         }
     }
 
@@ -301,6 +306,15 @@ impl VM {
 
     /// Ejecuta un solo ciclo del loop principal. Retorna Ok(true) si el programa terminó.
     fn step(&mut self) -> Result<bool, String> {
+        // Cancelación cooperativa: solo las sub-VMs de `spawn`/`async fn` llevan
+        // token. Si se pidió cancelar, abortamos aquí entre instrucciones (punto
+        // seguro, igual que el safepoint del GC).
+        if let Some(tok) = &self.cancel_token {
+            if tok.is_cancelled() {
+                return Err("tarea cancelada".to_string());
+            }
+        }
+
         // Safepoint del GC: SOLO aquí es seguro colectar. Entre instrucciones
         // ningún local de Rust retiene Values fuera de los roots; colectar en
         // medio de una instrucción (como hacía instantiate_shape) barría la
@@ -1047,6 +1061,29 @@ impl VM {
                             self.value_stack.push(eval_to_value(result));
                         }
                     }
+                    //    Métodos de Task (tarea async lanzada con spawn/async fn)
+                    Value::Task(handle) => {
+                        let result = match method_name.as_str() {
+                            // t.cancelar() → pide cancelación cooperativa; la sub-VM
+                            // aborta en su próximo punto seguro. No bloquea.
+                            "cancelar" | "cancel" => {
+                                handle.cancel();
+                                Value::Bool(true)
+                            }
+                            // t.lista() / t.terminada() → ¿ya terminó? (no bloquea)
+                            "lista" | "terminada" | "is_done" | "done" =>
+                                Value::Bool(handle.is_done()),
+                            // t.esperar() → equivalente a `await t` como método.
+                            "esperar" | "await" | "resultado" => {
+                                match handle.wait() {
+                                    Ok(sv) => from_send(sv),
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            other => return Err(format!("tarea.{}() no existe", other)),
+                        };
+                        self.value_stack.push(result);
+                    }
                     _ => return Err(format!("CallMethod '{}': no es una instancia", method_name)),
                 }
             }
@@ -1174,11 +1211,30 @@ impl VM {
                 let extern_fns_clone = self.extern_fns.clone();
                 let fn_name_clone    = fn_name.clone();
 
-                let slot: Arc<Mutex<Option<Result<SendValue, String>>>> =
-                    Arc::new(Mutex::new(None));
-                let slot_clone = Arc::clone(&slot);
+                // Bindings de módulo (`use "chan" as chan`) visibles en la pila
+                // actual: se reinyectan en la sub-VM para que la función lanzada
+                // pueda usar módulos (canales, state, etc.), igual que en `serve`.
+                let module_bindings: Vec<(String, String)> = self.call_stack.iter()
+                    .flat_map(|f| f.vars.iter())
+                    .filter_map(|(k, v)| match v {
+                        Value::Module(m) => Some((k.clone(), m.clone())),
+                        _ => None,
+                    })
+                    .collect();
 
-                std::thread::spawn(move || {
+                // Handle compartido: parking (Condvar) para await + flag de cancelación.
+                let handle = TaskHandle::new();
+                let handle_worker = Arc::clone(&handle);
+
+                // La tarea corre en el POOL de hilos (reutiliza workers), no en un
+                // hilo nuevo por spawn. El pool crea uno bajo demanda si hace falta,
+                // así spawn/await anidados nunca hacen deadlock.
+                crate::task_pool::submit(move || {
+                    // Si ya la cancelaron antes de arrancar, no ejecutamos nada.
+                    if handle_worker.is_cancelled() {
+                        handle_worker.complete(Err("tarea cancelada".to_string()));
+                        return;
+                    }
                     let mut sub_vm = VM::new(
                         func.body.clone(),
                         func.lines.clone(),
@@ -1186,6 +1242,14 @@ impl VM {
                         shapes_clone,
                         extern_fns_clone,
                     );
+                    // La sub-VM consulta este token en su bucle para abortar limpiamente.
+                    sub_vm.cancel_token = Some(Arc::clone(&handle_worker));
+                    // Reinyectar módulos visibles (para chan/state/etc. dentro de la tarea)
+                    for (k, m) in &module_bindings {
+                        if let Some(frame) = sub_vm.call_stack.first_mut() {
+                            frame.vars.insert(k.clone(), Value::Module(m.clone()));
+                        }
+                    }
                     // Inyectar argumentos como vars del frame principal
                     for (param, val) in func.params.iter()
                         .zip(send_args.into_iter().map(from_send))
@@ -1207,28 +1271,19 @@ impl VM {
                         }
                         Err(e) => Err(e),
                     };
-                    *slot_clone.lock().unwrap() = Some(result);
+                    handle_worker.complete(result);
                 });
 
-                self.value_stack.push(Value::Task(slot));
+                self.value_stack.push(Value::Task(handle));
             }
 
             Instruction::Await => {
                 let val = self.pop()?;
                 match val {
-                    Value::Task(slot) => {
-                        // Espera activa hasta que la tarea termine
-                        let result = loop {
-                            let guard = slot.lock().unwrap();
-                            if let Some(ref r) = *guard {
-                                let r = r.clone();
-                                drop(guard);
-                                break r;
-                            }
-                            drop(guard);
-                            std::thread::sleep(std::time::Duration::from_millis(1));
-                        };
-                        match result {
+                    Value::Task(handle) => {
+                        // Parking real: el hilo se aparca en el Condvar y el SO lo
+                        // despierta cuando la tarea termina. Sin espera activa.
+                        match handle.wait() {
                             Ok(sv)  => self.value_stack.push(from_send(sv)),
                             Err(e)  => return Err(e),
                         }

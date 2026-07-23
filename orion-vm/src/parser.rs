@@ -643,9 +643,12 @@ impl Parser {
             }
 
             // await como expresión: result = await future
+            // Usamos parse_postfix (no parse_primary) para capturar la llamada
+            // completa: `await f(x)` = Await(Call f), no Await(Ident f) seguido
+            // de una llamada `(x)` sobre el resultado (que daba "__call__").
             TokenKind::Await => {
                 self.pos += 1;
-                let inner = self.parse_primary()?;
+                let inner = self.parse_postfix()?;
                 Ok(Expr::Await(Box::new(inner)))
             }
 

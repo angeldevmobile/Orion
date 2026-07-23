@@ -11,6 +11,7 @@ pub mod instruction;
 pub mod bytecode;
 pub mod value;
 pub mod gc;
+pub mod task_pool;
 pub mod error;
 pub mod lexer;
 pub mod parser;

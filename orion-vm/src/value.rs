@@ -2,7 +2,65 @@ use std::fmt;
 use std::rc::Rc;
 use indexmap::IndexMap;
 use std::cell::{Cell, RefCell};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Condvar};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Estado compartido de una tarea async lanzada con `spawn` o al invocar una
+/// `async fn`. Reemplaza el antiguo `Arc<Mutex<Option<...>>>` con busy-wait:
+///   - `result`/`done`  → parking real vía Condvar (await no gira en un sleep-loop).
+///   - `cancel`         → cancelación cooperativa; la sub-VM la consulta en su
+///                        bucle de instrucciones y aborta limpiamente si se activa.
+#[derive(Debug)]
+pub struct TaskHandle {
+    result: Mutex<Option<Result<SendValue, String>>>,
+    done:   Condvar,
+    cancel: AtomicBool,
+}
+
+impl TaskHandle {
+    pub fn new() -> Arc<Self> {
+        Arc::new(TaskHandle {
+            result: Mutex::new(None),
+            done:   Condvar::new(),
+            cancel: AtomicBool::new(false),
+        })
+    }
+
+    /// Llamado por el worker cuando la tarea termina: guarda el resultado y
+    /// despierta a todos los `await` que estén bloqueados en el Condvar.
+    pub fn complete(&self, r: Result<SendValue, String>) {
+        let mut guard = self.result.lock().unwrap();
+        if guard.is_none() {
+            *guard = Some(r);
+        }
+        self.done.notify_all();
+    }
+
+    /// Bloquea (aparcando el hilo) hasta que la tarea termine y devuelve su
+    /// resultado. Sin espera activa: el SO nos despierta al `notify_all`.
+    pub fn wait(&self) -> Result<SendValue, String> {
+        let mut guard = self.result.lock().unwrap();
+        while guard.is_none() {
+            guard = self.done.wait(guard).unwrap();
+        }
+        guard.clone().unwrap()
+    }
+
+    /// ¿Ya terminó la tarea? (no bloquea)
+    pub fn is_done(&self) -> bool {
+        self.result.lock().unwrap().is_some()
+    }
+
+    /// Marca la tarea para cancelación cooperativa.
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    /// ¿Se pidió cancelar esta tarea? Consultado por la sub-VM en su bucle.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+}
 
 /// Datos internos de una instancia de shape
 #[derive(Debug, Clone)]
@@ -134,8 +192,8 @@ pub enum Value {
     /// El entorno es compartido (Rc<RefCell>) para que las mutaciones de las
     /// variables capturadas persistan entre invocaciones del mismo closure.
     Closure { fn_name: String, env: Rc<RefCell<IndexMap<String, Value>>> },
-    /// Handle a una tarea asíncrona en curso
-    Task(Arc<Mutex<Option<Result<SendValue, String>>>>),
+    /// Handle a una tarea asíncrona en curso (parking + cancelación).
+    Task(Arc<TaskHandle>),
     /// Puntero opaco de C FFI (dirección de memoria como u64)
     Ptr(u64),
     /// Módulo stdlib nativo cargado con `use`

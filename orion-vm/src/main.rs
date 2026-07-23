@@ -1,6 +1,7 @@
 mod instruction;
 mod value;
 mod gc;
+mod task_pool;
 mod vm;
 mod aot;
 mod bytecode;
