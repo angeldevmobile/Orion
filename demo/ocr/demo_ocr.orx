@@ -55,4 +55,25 @@ show "PDF de texto  -> " + pdf.texto("demo/ocr/nativo.pdf")
 show "PDF escaneado -> " + pdf.texto("demo/ocr/factura.pdf")
 
 show ""
-show "Listo. OCR real corriendo 100% local dentro de Orion."
+show "========================================"
+show " 6. OCR de un PDF VECTORIAL (sin imagen)"
+show "    pdfium rasteriza la página y la lee."
+show "========================================"
+pdf.crear("demo/ocr/vectorial.pdf", "FACTURA ORION 2026 TOTAL 8842")
+show pdf.ocr("demo/ocr/vectorial.pdf")
+
+show ""
+show "========================================"
+show " 7. Visión estilo OpenCV (Rust puro)"
+show "    Preprocesado que ayuda al OCR."
+show "========================================"
+vision.threshold(IMG, "demo/ocr/_bw.png")
+show "threshold (binariza)  -> demo/ocr/_bw.png"
+vision.edges(IMG, "demo/ocr/_edges.png")
+show "edges (Canny)         -> demo/ocr/_edges.png"
+vision.sharpen(IMG, "demo/ocr/_sharp.png")
+show "sharpen (nitidez)     -> demo/ocr/_sharp.png"
+show "OCR con preprocesado  -> " + vision.ocr(IMG, { "preprocess": yes })
+
+show ""
+show "Listo. OCR + visión + PDF, todo 100% local dentro de Orion."
