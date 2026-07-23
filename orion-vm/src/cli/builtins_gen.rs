@@ -300,6 +300,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("timewarp", "until", "timewarp.until(timestamp_secs)", "Segundos hasta entonces"));
     // vision (vision_mod.rs)
     v.push(f("vision", "info", "vision.info(path)", "{width, height, format}"));
+    v.push(f("vision", "ocr", "vision.ocr(path, opts?)", "String  — reconoce el texto de una imagen. Por defecto usa el motor `ocrs` (Rust puro, local, sin externos). opts = { \"engine\": \"ocrs\"|\"tesseract\", \"lang\": \"spa\" } — con \"tesseract\" llama al binario del sistema si el developer lo tiene instalado."));
+    v.push(f("vision", "leer_texto", "vision.leer_texto(path, opts?)", "Alias de vision.ocr."));
+    v.push(f("vision", "read_text", "vision.read_text(path, opts?)", "Alias de vision.ocr."));
     v.push(f("vision", "resize", "vision.resize(path, width, height, out_path?)", "Out_path"));
     v.push(f("vision", "resize_exact", "vision.resize_exact(path, w, h, out?)", "Out_path (sin mantener ratio)"));
     v.push(f("vision", "crop", "vision.crop(path, x, y, w, h, out?)", "Out_path"));
@@ -831,6 +834,15 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("pdf", "paginar", "pdf.paginar(path, salida, inicio, fin)", "Bool   páginas 1-indexadas"));
     v.push(f("pdf", "paginate", "pdf.paginate(path, salida, inicio, fin)", "Alias de pdf.paginar."));
     v.push(f("pdf", "info", "pdf.info(path)", "Dict"));
+    v.push(f("pdf", "leer", "pdf.leer(path)", "String  — extrae el texto embebido del PDF (PDFs de texto). Para PDFs escaneados (solo imágenes) usar pdf.ocr."));
+    v.push(f("pdf", "read", "pdf.read(path)", "Alias de pdf.leer."));
+    v.push(f("pdf", "extraer_texto", "pdf.extraer_texto(path)", "Alias de pdf.leer."));
+    v.push(f("pdf", "extract_text", "pdf.extract_text(path)", "Alias de pdf.leer."));
+    v.push(f("pdf", "ocr", "pdf.ocr(path, opts?)", "String  — OCR de un PDF escaneado: extrae las imágenes embebidas de cada página y las pasa por el motor de vision."));
+    v.push(f("pdf", "texto", "pdf.texto(path)", "String  — inteligente: intenta el texto embebido; si el PDF no tiene texto (escaneado), cae automáticamente a OCR."));
+    v.push(f("pdf", "text", "pdf.text(path)", "Alias de pdf.texto."));
+    v.push(f("pdf", "desde_imagen", "pdf.desde_imagen(imagen, salida_pdf)", "Salida  — convierte una imagen a PDF."));
+    v.push(f("pdf", "from_image", "pdf.from_image(imagen, salida_pdf)", "Alias de pdf.desde_imagen."));
     // log (log_mod.rs)
     v.push(f("log", "info", "log.info(…)", "Niveles estándar"));
     v.push(f("log", "warn", "log.warn(…)", "Alias de log.info."));

@@ -17,6 +17,20 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             m.insert("path".into(),   EvalValue::Str(path));
             Ok(EvalValue::Dict(m))
         }
+        // ocr(path, opts?) → String  — reconoce el texto de una imagen.
+        // Por defecto usa el motor `ocrs` (Rust puro, local, sin externos).
+        // opts = { "engine": "ocrs"|"tesseract", "lang": "spa" } — con "tesseract"
+        // llama al binario del sistema si el developer lo tiene instalado.
+        "ocr" | "leer_texto" | "read_text" => {
+            if args.is_empty() { return Err("vision.ocr requiere (path, opts?)".into()); }
+            let path = to_str(&args[0]);
+            let (engine, lang) = ocr_opts(args.get(1));
+            let text = match engine.as_str() {
+                "tesseract" => ocr_tesseract(&path, &lang)?,
+                _           => ocr_ocrs(&path)?,
+            };
+            Ok(EvalValue::Str(text))
+        }
         // resize(path, width, height, out_path?) → out_path
         "resize" => {
             if args.len() < 3 { return Err("vision.resize requiere (path, width, height, out_path?)".into()); }
@@ -275,4 +289,94 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
         if chunk.len() > 3 { out.push((b2 & 3) << 6 | b3); }
     }
     Ok(out)
+}
+
+//    OCR — reconocimiento de texto
+//
+// Motor por defecto: `ocrs` (Rust puro, redes ONNX corriendo local vía rten, sin
+// Tesseract, sin API, sin internet). Los modelos van INCRUSTADOS en el binario
+// (include_bytes) → OCR out-of-the-box, sin archivos sueltos que instalar.
+// Motor opcional: Tesseract, solo si el developer lo tiene instalado y lo pide.
+
+use std::sync::{Mutex, OnceLock};
+
+// Modelos de OCR incrustados (detección de regiones + reconocimiento de texto).
+static DETECTION_MODEL:   &[u8] = include_bytes!("../../models/text-detection.rten");
+static RECOGNITION_MODEL: &[u8] = include_bytes!("../../models/text-recognition.rten");
+
+/// Motor OCR inicializado una sola vez (cargar los modelos es caro). Tras Mutex
+/// para compartirlo entre los workers de serve.
+fn ocr_engine() -> Result<&'static Mutex<ocrs::OcrEngine>, String> {
+    static ENGINE: OnceLock<Result<Mutex<ocrs::OcrEngine>, String>> = OnceLock::new();
+    ENGINE.get_or_init(build_ocr_engine).as_ref().map_err(|e| e.clone())
+}
+
+fn build_ocr_engine() -> Result<Mutex<ocrs::OcrEngine>, String> {
+    let det = rten::Model::load_static_slice(DETECTION_MODEL)
+        .map_err(|e| format!("vision.ocr: modelo de detección inválido: {}", e))?;
+    let rec = rten::Model::load_static_slice(RECOGNITION_MODEL)
+        .map_err(|e| format!("vision.ocr: modelo de reconocimiento inválido: {}", e))?;
+    let engine = ocrs::OcrEngine::new(ocrs::OcrEngineParams {
+        detection_model: Some(det),
+        recognition_model: Some(rec),
+        ..Default::default()
+    }).map_err(|e| format!("vision.ocr: no se pudo crear el motor: {}", e))?;
+    Ok(Mutex::new(engine))
+}
+
+/// OCR con el motor local `ocrs`, desde una ruta de archivo.
+fn ocr_ocrs(path: &str) -> Result<String, String> {
+    let img = image::open(path)
+        .map_err(|e| format!("vision.ocr: no se pudo abrir '{}': {}", path, e))?;
+    ocr_dynamic(&img)
+}
+
+/// OCR con `ocrs` desde bytes de imagen en memoria (usado por pdf.ocr).
+pub(crate) fn ocr_image_bytes(data: &[u8]) -> Result<String, String> {
+    let img = image::load_from_memory(data)
+        .map_err(|e| format!("vision.ocr: imagen inválida: {}", e))?;
+    ocr_dynamic(&img)
+}
+
+/// Núcleo del OCR local sobre una imagen ya decodificada.
+fn ocr_dynamic(img: &image::DynamicImage) -> Result<String, String> {
+    let engine = ocr_engine()?.lock().unwrap();
+    let rgb = img.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    let source = ocrs::ImageSource::from_bytes(rgb.as_raw(), (w, h))
+        .map_err(|e| format!("vision.ocr: {}", e))?;
+    let input = engine.prepare_input(source)
+        .map_err(|e| format!("vision.ocr: {}", e))?;
+    engine.get_text(&input)
+        .map_err(|e| format!("vision.ocr: {}", e))
+}
+
+/// OCR con Tesseract (binario del sistema), solo si el developer lo instaló.
+fn ocr_tesseract(path: &str, lang: &str) -> Result<String, String> {
+    let out = std::process::Command::new("tesseract")
+        .arg(path).arg("stdout")
+        .arg("-l").arg(lang)
+        .output()
+        .map_err(|e| format!(
+            "vision.ocr(tesseract): no se encontró 'tesseract' en el PATH. \
+             Instálalo o usa el motor por defecto (ocrs). ({})", e))?;
+    if !out.status.success() {
+        return Err(format!("vision.ocr(tesseract): {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Lee (engine, lang) del Dict de opciones. Defaults: motor "ocrs", idioma "eng".
+fn ocr_opts(arg: Option<&EvalValue>) -> (String, String) {
+    let mut engine = "ocrs".to_string();
+    let mut lang = "eng".to_string();
+    if let Some(EvalValue::Dict(m)) = arg {
+        if let Some(EvalValue::Str(s)) = m.get("engine").or_else(|| m.get("motor")) {
+            engine = s.to_lowercase();
+        }
+        if let Some(EvalValue::Str(s)) = m.get("lang").or_else(|| m.get("idioma")) {
+            lang = s.clone();
+        }
+    }
+    (engine, lang)
 }

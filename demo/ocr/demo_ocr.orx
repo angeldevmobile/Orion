@@ -1,0 +1,58 @@
+-- ============================================================
+--  Demo de OCR en Orion — reconocimiento de texto REAL y LOCAL
+--  Motor por defecto: ocrs (Rust puro, sin Tesseract, sin API,
+--  sin internet). Los modelos van dentro de Orion.
+--  Ejecutar:  orion demo/ocr/demo_ocr.orx
+-- ============================================================
+use "vision" as vision
+use "pdf" as pdf
+
+IMG = "demo/ocr/factura.png"
+
+show "========================================"
+show " 1. OCR de una imagen (motor por defecto)"
+show "========================================"
+texto = vision.ocr(IMG)
+show texto
+
+show ""
+show "========================================"
+show " 2. Mismo OCR con Tesseract (opcional)"
+show "    Solo si el developer lo tiene instalado."
+show "    (lang debe tener su paquete: eng, spa, ...)"
+show "========================================"
+attempt {
+    texto_t = vision.ocr(IMG, { "engine": "tesseract", "lang": "eng" })
+    show texto_t
+} handle e {
+    show "Tesseract no disponible: " + e
+    show "El motor por defecto (ocrs) ya hizo el trabajo arriba."
+}
+
+show ""
+show "========================================"
+show " 3. Convertir la imagen a un PDF escaneado"
+show "========================================"
+pdf.desde_imagen(IMG, "demo/ocr/factura.pdf")
+show "PDF creado: demo/ocr/factura.pdf  (" + str(pdf.paginas("demo/ocr/factura.pdf")) + " página)"
+
+show ""
+show "========================================"
+show " 4. OCR completo del PDF escaneado"
+show "    Extrae la imagen embebida y la lee."
+show "========================================"
+texto_pdf = pdf.ocr("demo/ocr/factura.pdf")
+show texto_pdf
+
+show ""
+show "========================================"
+show " 5. pdf.texto — inteligente"
+show "    Usa el texto embebido si existe;"
+show "    si el PDF es escaneado, cae a OCR solo."
+show "========================================"
+pdf.crear("demo/ocr/nativo.pdf", "Este PDF tiene texto real, no imagen.")
+show "PDF de texto  -> " + pdf.texto("demo/ocr/nativo.pdf")
+show "PDF escaneado -> " + pdf.texto("demo/ocr/factura.pdf")
+
+show ""
+show "Listo. OCR real corriendo 100% local dentro de Orion."

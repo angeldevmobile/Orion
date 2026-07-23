@@ -54,6 +54,36 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let path = one_str("pdf.info", &args)?;
             get_pdf_info(&path)
         }
+        // leer(path) → String  — extrae el texto embebido del PDF (PDFs de texto).
+        // Para PDFs escaneados (solo imágenes) usar pdf.ocr.
+        "leer" | "read" | "extraer_texto" | "extract_text" => {
+            let path = one_str("pdf.leer", &args)?;
+            let text = pdf_extract::extract_text(&path)
+                .map_err(|e| format!("pdf.leer '{}': {}", path, e))?;
+            Ok(EvalValue::Str(text))
+        }
+        // ocr(path, opts?) → String  — OCR de un PDF escaneado: extrae las
+        // imágenes embebidas de cada página y las pasa por el motor de vision.
+        "ocr" => {
+            if args.is_empty() { return Err("pdf.ocr requiere (path, opts?)".into()); }
+            ocr_pdf(&to_str(&args[0]), args.get(1))
+        }
+        // texto(path) → String  — inteligente: intenta el texto embebido; si el
+        // PDF no tiene texto (escaneado), cae automáticamente a OCR.
+        "texto" | "text" => {
+            let path = one_str("pdf.texto", &args)?;
+            let embedded = pdf_extract::extract_text(&path).unwrap_or_default();
+            if embedded.trim().len() >= 8 {
+                Ok(EvalValue::Str(embedded))
+            } else {
+                ocr_pdf(&path, None)
+            }
+        }
+        // desde_imagen(imagen, salida_pdf) → salida  — convierte una imagen a PDF.
+        "desde_imagen" | "from_image" => {
+            if args.len() < 2 { return Err("pdf.desde_imagen requiere (imagen, salida_pdf)".into()); }
+            image_to_pdf(&to_str(&args[0]), &to_str(&args[1]))
+        }
         f => Err(format!("pdf.{}() no existe", f)),
     }
 }
@@ -353,6 +383,125 @@ fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
 
 fn to_str(v: &EvalValue) -> String {
     match v { EvalValue::Str(s) => s.clone(), other => format!("{}", other) }
+}
+
+//    Conversión imagen → PDF (embebe la imagen como JPEG/DCTDecode)
+
+fn image_to_pdf(img_path: &str, out: &str) -> Result<EvalValue, String> {
+    use std::io::Cursor;
+    let img = image::open(img_path)
+        .map_err(|e| format!("pdf.desde_imagen: no se pudo abrir '{}': {}", img_path, e))?;
+    let (w, h) = (img.width(), img.height());
+    // Codificar a JPEG → va directo como stream DCTDecode (sin recomprimir en PDF).
+    let mut jpeg = Vec::new();
+    image::DynamicImage::ImageRgb8(img.to_rgb8())
+        .write_to(&mut Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+        .map_err(|e| format!("pdf.desde_imagen: {}", e))?;
+
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+
+    // XObject imagen
+    let mut xdict = Dictionary::new();
+    xdict.set("Type",             Object::Name(b"XObject".to_vec()));
+    xdict.set("Subtype",          Object::Name(b"Image".to_vec()));
+    xdict.set("Width",            Object::Integer(w as i64));
+    xdict.set("Height",           Object::Integer(h as i64));
+    xdict.set("ColorSpace",       Object::Name(b"DeviceRGB".to_vec()));
+    xdict.set("BitsPerComponent", Object::Integer(8));
+    xdict.set("Filter",           Object::Name(b"DCTDecode".to_vec()));
+    let img_id = doc.add_object(Stream::new(xdict, jpeg));
+
+    // Contenido: dibuja la imagen ocupando toda la página (cm = escala).
+    let content = Content {
+        operations: vec![
+            Operation::new("q", vec![]),
+            Operation::new("cm", vec![
+                Object::Integer(w as i64), Object::Integer(0),
+                Object::Integer(0),        Object::Integer(h as i64),
+                Object::Integer(0),        Object::Integer(0),
+            ]),
+            Operation::new("Do", vec![Object::Name(b"Im0".to_vec())]),
+            Operation::new("Q", vec![]),
+        ],
+    };
+    let content_bytes = content.encode().map_err(|e| format!("pdf.desde_imagen: {}", e))?;
+    let content_id = doc.add_object(Stream::new(Dictionary::new(), content_bytes));
+
+    let mut xobjects = Dictionary::new();
+    xobjects.set("Im0", Object::Reference(img_id));
+    let mut resources = Dictionary::new();
+    resources.set("XObject", Object::Dictionary(xobjects));
+
+    let mut page = Dictionary::new();
+    page.set("Type",      Object::Name(b"Page".to_vec()));
+    page.set("Parent",    Object::Reference(pages_id));
+    page.set("MediaBox",  Object::Array(vec![
+        Object::Integer(0), Object::Integer(0),
+        Object::Integer(w as i64), Object::Integer(h as i64),
+    ]));
+    page.set("Contents",  Object::Reference(content_id));
+    page.set("Resources", Object::Dictionary(resources));
+    let page_id = doc.add_object(Object::Dictionary(page));
+
+    let mut pages = Dictionary::new();
+    pages.set("Type",  Object::Name(b"Pages".to_vec()));
+    pages.set("Kids",  Object::Array(vec![Object::Reference(page_id)]));
+    pages.set("Count", Object::Integer(1));
+    doc.objects.insert(pages_id, Object::Dictionary(pages));
+
+    let mut catalog = Dictionary::new();
+    catalog.set("Type",  Object::Name(b"Catalog".to_vec()));
+    catalog.set("Pages", Object::Reference(pages_id));
+    let catalog_id = doc.add_object(Object::Dictionary(catalog));
+    doc.trailer.set("Root", Object::Reference(catalog_id));
+
+    doc.save(out).map_err(|e| format!("pdf.desde_imagen: {}", e))?;
+    Ok(EvalValue::Str(out.to_string()))
+}
+
+//    OCR de PDF escaneado: extrae las imágenes DCTDecode/JPEG y las pasa por vision
+
+fn ocr_pdf(path: &str, _opts: Option<&EvalValue>) -> Result<EvalValue, String> {
+    let doc = Document::load(path)
+        .map_err(|e| format!("pdf.ocr '{}': {}", path, e))?;
+
+    // Recorrer objetos por id (orden estable) buscando XObjects de imagen JPEG.
+    let mut ids: Vec<_> = doc.objects.keys().cloned().collect();
+    ids.sort();
+
+    let mut partes: Vec<String> = Vec::new();
+    for id in ids {
+        if let Some(Object::Stream(stream)) = doc.objects.get(&id) {
+            let dict = &stream.dict;
+            let is_image = dict.get(b"Subtype").ok()
+                .and_then(|o| o.as_name().ok())
+                .map(|n| n == b"Image").unwrap_or(false);
+            if !is_image { continue; }
+            if !has_filter(dict, b"DCTDecode") { continue; }
+            // El contenido crudo de un stream DCTDecode ES un JPEG → OCR directo.
+            if let Ok(text) = crate::modules::vision_mod::ocr_image_bytes(&stream.content) {
+                let t = text.trim();
+                if !t.is_empty() { partes.push(t.to_string()); }
+            }
+        }
+    }
+
+    if partes.is_empty() {
+        return Err("pdf.ocr: no se encontraron imágenes JPEG embebidas. \
+                    Si el PDF ya tiene texto usa pdf.leer; para otros formatos de \
+                    imagen conviértelo o extrae las páginas como imagen primero.".into());
+    }
+    Ok(EvalValue::Str(partes.join("\n")))
+}
+
+/// ¿El diccionario del stream declara `name` en su Filter (nombre o array)?
+fn has_filter(dict: &Dictionary, name: &[u8]) -> bool {
+    match dict.get(b"Filter") {
+        Ok(Object::Name(n)) => n.as_slice() == name,
+        Ok(Object::Array(arr)) => arr.iter().any(|o| o.as_name().map(|n| n == name).unwrap_or(false)),
+        _ => false,
+    }
 }
 
 fn to_int(v: &EvalValue) -> i64 {
