@@ -24,12 +24,65 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "ocr" | "leer_texto" | "read_text" => {
             if args.is_empty() { return Err("vision.ocr requiere (path, opts?)".into()); }
             let path = to_str(&args[0]);
-            let (engine, lang) = ocr_opts(args.get(1));
+            let (engine, lang, prep) = ocr_opts(args.get(1));
             let text = match engine.as_str() {
                 "tesseract" => ocr_tesseract(&path, &lang)?,
-                _           => ocr_ocrs(&path)?,
+                _           => ocr_ocrs(&path, prep)?,
             };
             Ok(EvalValue::Str(text))
+        }
+        // threshold(path, out?) → out  — binariza (blanco/negro) con Otsu
+        // automático. Ideal como pre-paso del OCR: limpia fondo y ruido.
+        "threshold" | "umbral" | "binarize" => {
+            if args.is_empty() { return Err("vision.threshold requiere (path, out?)".into()); }
+            let path = to_str(&args[0]);
+            let out  = if args.len() > 1 { to_str(&args[1]) } else { format!("{}_bw.png", strip_ext(&path)) };
+            let gray = open_img(&path)?.to_luma8();
+            let level = imageproc::contrast::otsu_level(&gray);
+            let bin = imageproc::contrast::threshold(&gray, level, imageproc::contrast::ThresholdType::Binary);
+            bin.save(&out).map_err(|e| format!("vision.threshold: {}", e))?;
+            Ok(EvalValue::Str(out))
+        }
+        // edges(path, out?, low?, high?) → out  — detección de bordes Canny
+        "edges" | "bordes" | "canny" => {
+            if args.is_empty() { return Err("vision.edges requiere (path, out?, low?, high?)".into()); }
+            let path = to_str(&args[0]);
+            let out  = if args.len() > 1 { to_str(&args[1]) } else { format!("{}_edges.png", strip_ext(&path)) };
+            let low  = if args.len() > 2 { to_f32(&args[2])? } else { 50.0 };
+            let high = if args.len() > 3 { to_f32(&args[3])? } else { 150.0 };
+            let gray = open_img(&path)?.to_luma8();
+            let edges = imageproc::edges::canny(&gray, low, high);
+            edges.save(&out).map_err(|e| format!("vision.edges: {}", e))?;
+            Ok(EvalValue::Str(out))
+        }
+        // contrast(path, factor, out?) → out  — ajusta contraste (>0 aumenta)
+        "contrast" | "contraste" => {
+            if args.len() < 2 { return Err("vision.contrast requiere (path, factor, out?)".into()); }
+            let path   = to_str(&args[0]);
+            let factor = to_f32(&args[1])?;
+            let out    = if args.len() > 2 { to_str(&args[2]) } else { format!("{}_contrast.png", strip_ext(&path)) };
+            let img = open_img(&path)?.adjust_contrast(factor);
+            img.save(&out).map_err(|e| format!("vision.contrast: {}", e))?;
+            Ok(EvalValue::Str(out))
+        }
+        // sharpen(path, out?) → out  — realce de nitidez (unsharp mask)
+        "sharpen" | "nitidez" => {
+            if args.is_empty() { return Err("vision.sharpen requiere (path, out?)".into()); }
+            let path = to_str(&args[0]);
+            let out  = if args.len() > 1 { to_str(&args[1]) } else { format!("{}_sharp.png", strip_ext(&path)) };
+            let img = open_img(&path)?.unsharpen(2.0, 5);
+            img.save(&out).map_err(|e| format!("vision.sharpen: {}", e))?;
+            Ok(EvalValue::Str(out))
+        }
+        // invert(path, out?) → out  — invierte los colores (negativo)
+        "invert" | "invertir" => {
+            if args.is_empty() { return Err("vision.invert requiere (path, out?)".into()); }
+            let path = to_str(&args[0]);
+            let out  = if args.len() > 1 { to_str(&args[1]) } else { format!("{}_inv.png", strip_ext(&path)) };
+            let mut img = open_img(&path)?;
+            img.invert();
+            img.save(&out).map_err(|e| format!("vision.invert: {}", e))?;
+            Ok(EvalValue::Str(out))
         }
         // resize(path, width, height, out_path?) → out_path
         "resize" => {
@@ -325,23 +378,37 @@ fn build_ocr_engine() -> Result<Mutex<ocrs::OcrEngine>, String> {
 }
 
 /// OCR con el motor local `ocrs`, desde una ruta de archivo.
-fn ocr_ocrs(path: &str) -> Result<String, String> {
+fn ocr_ocrs(path: &str, preprocess: bool) -> Result<String, String> {
     let img = image::open(path)
         .map_err(|e| format!("vision.ocr: no se pudo abrir '{}': {}", path, e))?;
-    ocr_dynamic(&img)
+    ocr_dynamic(&img, preprocess)
 }
 
 /// OCR con `ocrs` desde bytes de imagen en memoria (usado por pdf.ocr).
-pub(crate) fn ocr_image_bytes(data: &[u8]) -> Result<String, String> {
+pub(crate) fn ocr_image_bytes(data: &[u8], preprocess: bool) -> Result<String, String> {
     let img = image::load_from_memory(data)
         .map_err(|e| format!("vision.ocr: imagen inválida: {}", e))?;
-    ocr_dynamic(&img)
+    ocr_dynamic(&img, preprocess)
 }
 
-/// Núcleo del OCR local sobre una imagen ya decodificada.
-fn ocr_dynamic(img: &image::DynamicImage) -> Result<String, String> {
+/// OCR sobre una imagen ya decodificada (usado por pdf.ocr al rasterizar).
+pub(crate) fn ocr_dynamic_image(img: &image::DynamicImage, preprocess: bool) -> Result<String, String> {
+    ocr_dynamic(img, preprocess)
+}
+
+/// Núcleo del OCR local sobre una imagen ya decodificada. Con `preprocess`,
+/// convierte a gris y binariza con Otsu antes de leer — limpia fondo y ruido,
+/// lo que reduce falsos positivos (las "E" fantasma) en documentos escaneados.
+fn ocr_dynamic(img: &image::DynamicImage, preprocess: bool) -> Result<String, String> {
+    let rgb = if preprocess {
+        let gray = img.to_luma8();
+        let level = imageproc::contrast::otsu_level(&gray);
+        let bin = imageproc::contrast::threshold(&gray, level, imageproc::contrast::ThresholdType::Binary);
+        image::DynamicImage::ImageLuma8(bin).to_rgb8()
+    } else {
+        img.to_rgb8()
+    };
     let engine = ocr_engine()?.lock().unwrap();
-    let rgb = img.to_rgb8();
     let (w, h) = rgb.dimensions();
     let source = ocrs::ImageSource::from_bytes(rgb.as_raw(), (w, h))
         .map_err(|e| format!("vision.ocr: {}", e))?;
@@ -366,10 +433,12 @@ fn ocr_tesseract(path: &str, lang: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Lee (engine, lang) del Dict de opciones. Defaults: motor "ocrs", idioma "eng".
-fn ocr_opts(arg: Option<&EvalValue>) -> (String, String) {
+/// Lee (engine, lang, preprocess) del Dict de opciones.
+/// Defaults: motor "ocrs", idioma "eng", preprocess false.
+fn ocr_opts(arg: Option<&EvalValue>) -> (String, String, bool) {
     let mut engine = "ocrs".to_string();
     let mut lang = "eng".to_string();
+    let mut prep = false;
     if let Some(EvalValue::Dict(m)) = arg {
         if let Some(EvalValue::Str(s)) = m.get("engine").or_else(|| m.get("motor")) {
             engine = s.to_lowercase();
@@ -377,6 +446,9 @@ fn ocr_opts(arg: Option<&EvalValue>) -> (String, String) {
         if let Some(EvalValue::Str(s)) = m.get("lang").or_else(|| m.get("idioma")) {
             lang = s.clone();
         }
+        if let Some(v) = m.get("preprocess").or_else(|| m.get("preprocesar")) {
+            prep = matches!(v, EvalValue::Bool(true)) || matches!(v, EvalValue::Int(n) if *n != 0);
+        }
     }
-    (engine, lang)
+    (engine, lang, prep)
 }

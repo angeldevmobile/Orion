@@ -107,6 +107,8 @@ ocrs = "0.12.2"
 rten = "0.24.0"
 rten-imageproc = "0.24.0"
 pdf-extract = "0.12.0"
+imageproc = "0.27.0"
+pdfium-render = "0.9.3"
 
 [build-dependencies]
 embed-resource = "2"                                 # embebe orion.rc (manifest UTF-8) en el .exe

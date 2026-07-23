@@ -480,7 +480,19 @@ fn ocr_pdf(path: &str, _opts: Option<&EvalValue>) -> Result<EvalValue, String> {
             if !is_image { continue; }
             if !has_filter(dict, b"DCTDecode") { continue; }
             // El contenido crudo de un stream DCTDecode ES un JPEG → OCR directo.
-            if let Ok(text) = crate::modules::vision_mod::ocr_image_bytes(&stream.content) {
+            // preprocess=true: binariza antes de leer (menos ruido en escaneos).
+            if let Ok(text) = crate::modules::vision_mod::ocr_image_bytes(&stream.content, true) {
+                let t = text.trim();
+                if !t.is_empty() { partes.push(t.to_string()); }
+            }
+        }
+    }
+
+    // Sin imágenes JPEG embebidas → PDF vectorial/de texto: rasterizamos cada
+    // página con pdfium y hacemos OCR del render. Cubre CUALQUIER PDF.
+    if partes.is_empty() {
+        for img in rasterize_pdf(path)? {
+            if let Ok(text) = crate::modules::vision_mod::ocr_dynamic_image(&img, true) {
                 let t = text.trim();
                 if !t.is_empty() { partes.push(t.to_string()); }
             }
@@ -488,11 +500,53 @@ fn ocr_pdf(path: &str, _opts: Option<&EvalValue>) -> Result<EvalValue, String> {
     }
 
     if partes.is_empty() {
-        return Err("pdf.ocr: no se encontraron imágenes JPEG embebidas. \
-                    Si el PDF ya tiene texto usa pdf.leer; para otros formatos de \
-                    imagen conviértelo o extrae las páginas como imagen primero.".into());
+        return Err("pdf.ocr: no se pudo extraer texto por OCR del PDF.".into());
     }
     Ok(EvalValue::Str(partes.join("\n")))
+}
+
+//    Rasterización de PDF con pdfium (dll incrustado, self-contained)
+
+/// pdfium.dll va INCRUSTADO en el binario; en el primer uso se escribe a un
+/// temporal y se enlaza. Así Orion rasteriza PDFs sin pedir instalar nada.
+#[cfg(windows)]
+fn ensure_pdfium() -> Result<std::path::PathBuf, String> {
+    static PDFIUM_DLL: &[u8] = include_bytes!("../../models/pdfium.dll");
+    let dir = std::env::temp_dir().join("orion_pdfium");
+    let dll = dir.join("pdfium.dll");
+    if !dll.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("pdf.ocr: {}", e))?;
+        std::fs::write(&dll, PDFIUM_DLL).map_err(|e| format!("pdf.ocr: {}", e))?;
+    }
+    Ok(dll)
+}
+
+/// Renderiza cada página del PDF a una imagen (RAM constante por página).
+#[cfg(windows)]
+fn rasterize_pdf(path: &str) -> Result<Vec<image::DynamicImage>, String> {
+    use pdfium_render::prelude::*;
+    let dll = ensure_pdfium()?;
+    let bindings = Pdfium::bind_to_library(&dll)
+        .map_err(|e| format!("pdf.ocr: no se pudo cargar pdfium: {}", e))?;
+    let pdfium = Pdfium::new(bindings);
+    let doc = pdfium.load_pdf_from_file(path, None)
+        .map_err(|e| format!("pdf.ocr: {}", e))?;
+    // 2000px de ancho → buena resolución para OCR sin inflar memoria.
+    let cfg = PdfRenderConfig::new().set_target_width(2000);
+    let mut out = Vec::new();
+    for page in doc.pages().iter() {
+        let bmp = page.render_with_config(&cfg)
+            .map_err(|e| format!("pdf.ocr render: {}", e))?;
+        let img = bmp.as_image()
+            .map_err(|e| format!("pdf.ocr as_image: {}", e))?;
+        out.push(img);
+    }
+    Ok(out)
+}
+
+#[cfg(not(windows))]
+fn rasterize_pdf(_path: &str) -> Result<Vec<image::DynamicImage>, String> {
+    Err("pdf.ocr: la rasterización de PDF (pdfium) solo está disponible en Windows por ahora.".into())
 }
 
 /// ¿El diccionario del stream declara `name` en su Filter (nombre o array)?

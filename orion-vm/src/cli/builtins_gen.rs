@@ -303,6 +303,18 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("vision", "ocr", "vision.ocr(path, opts?)", "String  — reconoce el texto de una imagen. Por defecto usa el motor `ocrs` (Rust puro, local, sin externos). opts = { \"engine\": \"ocrs\"|\"tesseract\", \"lang\": \"spa\" } — con \"tesseract\" llama al binario del sistema si el developer lo tiene instalado."));
     v.push(f("vision", "leer_texto", "vision.leer_texto(path, opts?)", "Alias de vision.ocr."));
     v.push(f("vision", "read_text", "vision.read_text(path, opts?)", "Alias de vision.ocr."));
+    v.push(f("vision", "threshold", "vision.threshold(path, out?)", "Out  — binariza (blanco/negro) con Otsu automático. Ideal como pre-paso del OCR: limpia fondo y ruido."));
+    v.push(f("vision", "umbral", "vision.umbral(path, out?)", "Alias de vision.threshold."));
+    v.push(f("vision", "binarize", "vision.binarize(path, out?)", "Alias de vision.threshold."));
+    v.push(f("vision", "edges", "vision.edges(path, out?, low?, high?)", "Out  — detección de bordes Canny"));
+    v.push(f("vision", "bordes", "vision.bordes(path, out?, low?, high?)", "Alias de vision.edges."));
+    v.push(f("vision", "canny", "vision.canny(path, out?, low?, high?)", "Alias de vision.edges."));
+    v.push(f("vision", "contrast", "vision.contrast(path, factor, out?)", "Out  — ajusta contraste (>0 aumenta)"));
+    v.push(f("vision", "contraste", "vision.contraste(path, factor, out?)", "Alias de vision.contrast."));
+    v.push(f("vision", "sharpen", "vision.sharpen(path, out?)", "Out  — realce de nitidez (unsharp mask)"));
+    v.push(f("vision", "nitidez", "vision.nitidez(path, out?)", "Alias de vision.sharpen."));
+    v.push(f("vision", "invert", "vision.invert(path, out?)", "Out  — invierte los colores (negativo)"));
+    v.push(f("vision", "invertir", "vision.invertir(path, out?)", "Alias de vision.invert."));
     v.push(f("vision", "resize", "vision.resize(path, width, height, out_path?)", "Out_path"));
     v.push(f("vision", "resize_exact", "vision.resize_exact(path, w, h, out?)", "Out_path (sin mantener ratio)"));
     v.push(f("vision", "crop", "vision.crop(path, x, y, w, h, out?)", "Out_path"));

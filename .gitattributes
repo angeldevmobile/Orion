@@ -1,1 +1,2 @@
 orion-vm/models/*.rten filter=lfs diff=lfs merge=lfs -text
+orion-vm/models/*.dll filter=lfs diff=lfs merge=lfs -text
