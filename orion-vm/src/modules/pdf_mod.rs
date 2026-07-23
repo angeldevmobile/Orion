@@ -505,28 +505,61 @@ fn ocr_pdf(path: &str, _opts: Option<&EvalValue>) -> Result<EvalValue, String> {
     Ok(EvalValue::Str(partes.join("\n")))
 }
 
-//    Rasterización de PDF con pdfium (dll incrustado, self-contained)
+//    Rasterización de PDF con pdfium (binario incrustado, self-contained)
+//
+// El binario de pdfium correspondiente a la plataforma va INCRUSTADO en Orion
+// (include_bytes) y se extrae a un temporal en el 1er uso. Lo ÚNICO específico
+// de cada SO es qué binario se incrusta (pdfium_blob); la lógica de rasterizado
+// es compartida. Soporta Windows/Linux x64 y macOS arm64/x64.
 
-/// pdfium.dll va INCRUSTADO en el binario; en el primer uso se escribe a un
-/// temporal y se enlaza. Así Orion rasteriza PDFs sin pedir instalar nada.
-#[cfg(windows)]
+// Selección del binario por plataforma (lo único que cambia entre SOs).
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+fn pdfium_blob() -> (&'static [u8], &'static str) {
+    (include_bytes!("../../models/pdfium.dll"), "pdfium.dll")
+}
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn pdfium_blob() -> (&'static [u8], &'static str) {
+    (include_bytes!("../../models/libpdfium.so"), "libpdfium.so")
+}
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn pdfium_blob() -> (&'static [u8], &'static str) {
+    (include_bytes!("../../models/libpdfium-arm64.dylib"), "libpdfium.dylib")
+}
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+fn pdfium_blob() -> (&'static [u8], &'static str) {
+    (include_bytes!("../../models/libpdfium-x64.dylib"), "libpdfium.dylib")
+}
+
+// Lógica COMPARTIDA (validada en Windows): escribe el binario a un temporal y
+// rasteriza. Gateada a las plataformas con binario disponible.
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux",   target_arch = "x86_64"),
+    all(target_os = "macos",   target_arch = "aarch64"),
+    all(target_os = "macos",   target_arch = "x86_64"),
+))]
 fn ensure_pdfium() -> Result<std::path::PathBuf, String> {
-    static PDFIUM_DLL: &[u8] = include_bytes!("../../models/pdfium.dll");
+    let (bytes, name) = pdfium_blob();
     let dir = std::env::temp_dir().join("orion_pdfium");
-    let dll = dir.join("pdfium.dll");
-    if !dll.exists() {
+    let lib = dir.join(name);
+    if !lib.exists() {
         std::fs::create_dir_all(&dir).map_err(|e| format!("pdf.ocr: {}", e))?;
-        std::fs::write(&dll, PDFIUM_DLL).map_err(|e| format!("pdf.ocr: {}", e))?;
+        std::fs::write(&lib, bytes).map_err(|e| format!("pdf.ocr: {}", e))?;
     }
-    Ok(dll)
+    Ok(lib)
 }
 
 /// Renderiza cada página del PDF a una imagen (RAM constante por página).
-#[cfg(windows)]
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux",   target_arch = "x86_64"),
+    all(target_os = "macos",   target_arch = "aarch64"),
+    all(target_os = "macos",   target_arch = "x86_64"),
+))]
 fn rasterize_pdf(path: &str) -> Result<Vec<image::DynamicImage>, String> {
     use pdfium_render::prelude::*;
-    let dll = ensure_pdfium()?;
-    let bindings = Pdfium::bind_to_library(&dll)
+    let lib = ensure_pdfium()?;
+    let bindings = Pdfium::bind_to_library(&lib)
         .map_err(|e| format!("pdf.ocr: no se pudo cargar pdfium: {}", e))?;
     let pdfium = Pdfium::new(bindings);
     let doc = pdfium.load_pdf_from_file(path, None)
@@ -544,9 +577,17 @@ fn rasterize_pdf(path: &str) -> Result<Vec<image::DynamicImage>, String> {
     Ok(out)
 }
 
-#[cfg(not(windows))]
+// Plataformas sin binario pdfium incrustado (p. ej. ARM Linux, Windows ARM):
+// pdf.ocr sigue funcionando con imágenes JPEG embebidas, solo no rasteriza.
+#[cfg(not(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux",   target_arch = "x86_64"),
+    all(target_os = "macos",   target_arch = "aarch64"),
+    all(target_os = "macos",   target_arch = "x86_64"),
+)))]
 fn rasterize_pdf(_path: &str) -> Result<Vec<image::DynamicImage>, String> {
-    Err("pdf.ocr: la rasterización de PDF (pdfium) solo está disponible en Windows por ahora.".into())
+    Err("pdf.ocr: la rasterización de PDF (pdfium) no está disponible en esta \
+         plataforma/arquitectura. El OCR de imágenes embebidas sí funciona.".into())
 }
 
 /// ¿El diccionario del stream declara `name` en su Filter (nombre o array)?
