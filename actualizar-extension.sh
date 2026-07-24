@@ -11,10 +11,16 @@
 #
 set -euo pipefail
 
+# REPO = repo del lenguaje (donde vive este script y el crate orion-vm).
+# EXT  = repo de la extensión, ahora en una carpeta HERMANA (orion-extension),
+#        tras la reorganización 2026-07-23 (antes: vscode-orion/orion-lang).
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-EXT="$REPO/vscode-orion/orion-lang"
+EXT="${ORION_EXT_DIR:-$(cd "$REPO/.." && pwd)/orion-extension}"
 BIN_SRC="$REPO/orion-vm/target/release/orion.exe"
 BIN_DST="$EXT/bin/win32-x64/orion.exe"
+
+[[ -d "$EXT" ]] || { echo "ERROR: no existe la carpeta de la extensión: $EXT"; echo "  (define ORION_EXT_DIR=/ruta/a/orion-extension si está en otro sitio)"; exit 1; }
+mkdir -p "$(dirname "$BIN_DST")"
 
 # 1) Compilar release (salvo --skip-build)
 if [[ "${1:-}" != "--skip-build" ]]; then
