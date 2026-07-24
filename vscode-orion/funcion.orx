@@ -1,5 +1,0 @@
-fn saludar(nombre) {
-  return "Hola " + nombre
-}
-
-show(saludar("Orion"))

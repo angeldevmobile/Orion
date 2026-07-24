@@ -1,9 +1,0 @@
-fn factorial(n) {
-  resultado = 1
-  for i in 1..n {
-    resultado = resultado * i
-  }
-  return resultado
-}
-
-show(factorial(5))

@@ -1,3 +1,0 @@
-shape Animal { }
-shape Perro using [Animal] { }
-shape Pastor using [Perro] { }

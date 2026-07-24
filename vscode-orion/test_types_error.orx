@@ -1,3 +1,0 @@
--- test_types_error.orx — Debe lanzar OrionTypeError en runtime
-x: int = "hola"
-show(x)

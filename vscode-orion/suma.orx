@@ -1,5 +1,0 @@
-x = 20
-y = 22
-
-suma = x + y
-show("La suma es: " + suma)

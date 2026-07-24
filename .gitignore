@@ -9,19 +9,9 @@ orion-vm/target/
 # Logs
 *.log
 orion.log
-vscode-orion/orion.log
 
 # Compiled Orion bytecode
 *.orbc
-
-# VSCode extension build artifacts
-vscode-orion/orion-lang/
-vscode-orion/*.orbc
-vscode-orion/*.png
-vscode-orion/prueba_ocr.orx
-vscode-orion/test_sintaxis.orx
-vscode-orion/test_vm.orx
-vscode-orion/servidor.orx
 
 # Environment / secrets
 .env

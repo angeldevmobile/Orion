@@ -1,8 +1,0 @@
--- This is a comment in Orion script
-
-name = "Gabriel"
-msg = "Hola ${name}, bienvenido a Orion!"
-show(msg)
-
-user = null
-show(user?.email)
