@@ -1,9 +1,9 @@
 name: Release Binaries
 
-# Compila el binario `orion` en los 3 SO nativos y los publica como artefactos
-# listos para colocar en vscode-orion/orion-lang/bin/<platform>-<arch>/.
-#
-# Disparo manual (Actions → Release Binaries → Run workflow) o al crear un tag vX.Y.Z.
+# Compila el binario `orion` en los 4 objetivos nativos y, en un tag vX.Y.Z,
+# crea un GitHub Release con los binarios adjuntos (descarga directa del CLI).
+# Con disparo manual (workflow_dispatch) solo sube los binarios como artefactos
+# (útil para probar la compilación sin crear un Release).
 
 on:
   workflow_dispatch:
@@ -25,12 +25,19 @@ jobs:
           - os: windows-latest
             target_dir: win32-x64
             bin_name: orion.exe
+            asset: orion-win32-x64.exe
           - os: ubuntu-latest
             target_dir: linux-x64
             bin_name: orion
+            asset: orion-linux-x64
+          - os: macos-13            # Intel (x64)
+            target_dir: darwin-x64
+            bin_name: orion
+            asset: orion-darwin-x64
           - os: macos-14            # Apple Silicon (arm64)
             target_dir: darwin-arm64
             bin_name: orion
+            asset: orion-darwin-arm64
 
     defaults:
       run:
@@ -76,10 +83,52 @@ jobs:
 
       - name: Smoke test (--version)
         run: ./target/release/${{ matrix.bin_name }} --version
+        shell: bash
+
+      # Renombra el binario a un nombre único por plataforma para el Release.
+      - name: Rename binary
+        shell: bash
+        run: cp "target/release/${{ matrix.bin_name }}" "target/release/${{ matrix.asset }}"
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: orion-${{ matrix.target_dir }}
-          path: orion-vm/target/release/${{ matrix.bin_name }}
+          path: orion-vm/target/release/${{ matrix.asset }}
           if-no-files-found: error
+
+  # Crea el GitHub Release y adjunta los 4 binarios. Solo en tags vX.Y.Z.
+  release:
+    name: publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # necesario para crear el Release
+    steps:
+      - name: Descargar todos los binarios
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Aplanar a dist/
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec cp {} dist/ \;
+          ls -la dist
+
+      - name: Crear GitHub Release con los binarios
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            Binarios del CLI de Orion para ${{ github.ref_name }}.
+
+            Descarga el de tu plataforma:
+            - **Windows**: `orion-win32-x64.exe`
+            - **macOS Intel**: `orion-darwin-x64`
+            - **macOS Apple Silicon**: `orion-darwin-arm64`
+            - **Linux**: `orion-linux-x64`
+
+            En macOS/Linux: `chmod +x orion-*` y ejecútalo. Ver uso en el README.
