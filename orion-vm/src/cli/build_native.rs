@@ -216,6 +216,25 @@ fn link_native(obj: &Path, lib: &Path, out: &Path) {
     }
 }
 
+/// Librerías de importación de Windows que necesita el runtime bundleado.
+/// Nombres SIN extensión: para MSVC se emiten como `/DEFAULTLIB:<x>.lib`, para
+/// MinGW como `-l<x>`. Cubren: base del SO (kernel32/user32/gdi32/advapi32),
+/// shell y COM (shell32/ole32/oleaut32/uuid/shcore/propsys), red (ws2_32),
+/// crypto y TLS (bcrypt/crypt32/secur32/ncrypt), y la pila de ventana/gráficos
+/// que arrastran egui/winit/glow (opengl32/dwmapi/setupapi/cfgmgr32/imm32/
+/// winmm/version/msimg32/dbghelp/userenv/ntdll).
+const WINDOWS_SYSTEM_LIBS: &[&str] = &[
+    "kernel32", "user32", "gdi32", "advapi32", "shell32",
+    "ole32", "oleaut32", "uuid", "shcore", "propsys", "comdlg32",
+    "ws2_32", "bcrypt", "crypt32", "secur32", "ncrypt",
+    "opengl32", "dwmapi", "setupapi", "cfgmgr32", "imm32",
+    "winmm", "version", "msimg32", "dbghelp", "userenv", "ntdll", "winspool",
+    // Accesibilidad (accesskit), WinRT (windows_result), rutas y shell
+    // (arboard/webbrowser): uiautomationcore/oleacc, runtimeobject, pathcch, shlwapi.
+    "uiautomationcore", "oleacc", "runtimeobject", "pathcch", "shlwapi",
+    "uxtheme", // winit dark_mode → SetWindowTheme
+];
+
 /// Devuelve (linker, argumentos) para el sistema actual.
 fn detect_linker(obj: &Path, lib: &Path, out: &Path) -> (String, Vec<String>) {
     let obj_s = obj.to_string_lossy().to_string();
@@ -225,23 +244,29 @@ fn detect_linker(obj: &Path, lib: &Path, out: &Path) -> (String, Vec<String>) {
     if cfg!(windows) {
         // Intentar link.exe (MSVC) primero
         if which("link").is_some() {
-            return (
-                "link".to_string(),
-                vec![
-                    obj_s,
-                    lib_s,
-                    format!("/OUT:{out_s}"),
-                    "/SUBSYSTEM:CONSOLE".to_string(),
-                    "/DEFAULTLIB:msvcrt.lib".to_string(),
-                    "/NOLOGO".to_string(),
-                ],
-            );
+            let mut args = vec![
+                obj_s,
+                lib_s,
+                format!("/OUT:{out_s}"),
+                "/SUBSYSTEM:CONSOLE".to_string(),
+                "/NOLOGO".to_string(),
+                "/DEFAULTLIB:msvcrt.lib".to_string(),
+            ];
+            // El runtime bundleado (orion_vm.lib) arrastra TODA la stdlib, cuyas
+            // crates nativas referencian APIs de Windows repartidas en varias libs
+            // de sistema. Sin pasarlas, link falla con cientos de símbolos sin
+            // resolver (p. ej. clipboard_win → user32). Las declaramos todas.
+            for l in WINDOWS_SYSTEM_LIBS {
+                args.push(format!("/DEFAULTLIB:{l}.lib"));
+            }
+            return ("link".to_string(), args);
         }
-        // Fallback: gcc (MinGW)
-        (
-            "gcc".to_string(),
-            vec![obj_s, lib_s, "-o".to_string(), out_s, "-lws2_32".to_string()],
-        )
+        // Fallback: gcc (MinGW) — mismas libs de sistema en forma -l<lib>
+        let mut args = vec![obj_s, lib_s, "-o".to_string(), out_s];
+        for l in WINDOWS_SYSTEM_LIBS {
+            args.push(format!("-l{l}"));
+        }
+        ("gcc".to_string(), args)
     } else {
         // Linux / macOS: usar cc (wrapper del compilador del sistema)
         let linker = if which("cc").is_some() { "cc" } else { "gcc" };
