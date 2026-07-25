@@ -626,24 +626,49 @@ mi-api/
 
 ## Arquitectura
 
+Orion **no es un intérprete tree-walk** (ese legado se retiró). Es un compilador a
+bytecode con **tres backends de ejecución** que comparten el mismo frontend y dan
+resultados idénticos (verificado con tests diferenciales). ~13.600 líneas de core
+en Rust, más 58 módulos nativos.
+
 ```
 archivo.orx
     │
     ▼
-lexer.rs        ← tokenización (UTF-8, interpolación, escapes)
+lexer.rs        ← tokenización (UTF-8, interpolación ${}, escapes)
     │
     ▼
 parser.rs       ← AST recursivo descendente
     │
     ▼
-typechecker.rs  ← verificación de tipos estática (opcional)
+typechecker.rs  ← verificación de tipos (ON por defecto; opt-out con --no-typecheck)
     │
     ▼
 codegen.rs      ← compilación AST → bytecode
     │
     ▼
-vm.rs           ← ejecución (Rust nativo, sin GIL)
+  bytecode
+    │
+    ├──►  vm.rs               ← VM de bytecode (default). Rust nativo, sin GIL.
+    │
+    ├──►  jit/  (--jit)       ← JIT a código máquina con Cranelift.
+    │                            Fallback automático a la VM si una instrucción
+    │                            aún no está soportada en JIT.
+    │
+    └──►  aot.rs  (--build)   ← compilación AOT a un ejecutable nativo standalone.
 ```
+
+Subsistemas de runtime que sostienen los tres backends:
+
+- **GC mark-and-sweep** ([`gc.rs`](orion-vm/src/gc.rs)) — recolecta ciclos de
+  referencias; *mark* y *drop* iterativos (sin límite de profundidad de anidamiento).
+- **Aritmética *checked*** — el overflow de enteros es un error explícito, nunca un
+  wrap silencioso.
+- **Concurrencia** — `spawn`/`await` sobre un pool de hilos cacheado
+  ([`task_pool.rs`](orion-vm/src/task_pool.rs)), canales `chan` y estado compartido
+  thread-safe (módulo `state`).
+- **Debugger DAP** ([`dap.rs`](orion-vm/src/dap.rs)) — breakpoints, step y watches
+  reales desde VSCode.
 
 **Sin Python. Sin runtime externo. Un solo ejecutable.**
 
@@ -720,7 +745,7 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 | DAP - Debug Adapter Protocol (VSCode) | ✅ Completo | Rust |
 | LSP - diagnósticos en tiempo real | ✅ Completo | Rust |
 | JIT - Cranelift (I/O, módulos, OOP) | ✅ Completo | Cranelift |
-| AOT - compilación a ejecutable nativo | ✅ Completo | Cranelift |
+| AOT - compilación a ejecutable nativo standalone (requiere toolchain C: MSVC Build Tools o MinGW/gcc en PATH) | ✅ Completo | Cranelift |
 | FFI - librerías nativas externas | ✅ Completo | libloading |
 | Package manager (add/remove/list/search/publish) | ✅ Completo | Rust |
 | Registry oficial en GitHub | ✅ Completo | GitHub API |
