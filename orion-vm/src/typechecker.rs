@@ -44,6 +44,11 @@ pub struct TypeChecker {
     current_col:  u32,
     /// Variables asignadas pero nunca leídas en el scope actual
     written_not_read: Vec<HashMap<String, u32>>,
+    /// Cuando está activo, `scope_set` no registra escrituras en `written_not_read`.
+    /// Se usa en la segunda pasada de los bucles: re-marcamos las lecturas (que un
+    /// bucle ejecuta también DESPUÉS de las escrituras del cuerpo) sin volver a
+    /// registrar esas escrituras, evitando falsos "asignada pero nunca usada".
+    suppress_write_tracking: bool,
 }
 
 impl TypeChecker {
@@ -59,6 +64,7 @@ impl TypeChecker {
             current_line: 0,
             current_col:  0,
             written_not_read: vec![HashMap::new()],
+            suppress_write_tracking: false,
         }
     }
 
@@ -212,15 +218,19 @@ impl TypeChecker {
 
         if let Some(idx) = outer_idx {
             self.scope_stack[idx].insert(name.clone(), ty);
-            if let Some(tracking) = self.written_not_read.get_mut(idx) {
-                tracking.insert(name, self.current_line);
+            if !self.suppress_write_tracking {
+                if let Some(tracking) = self.written_not_read.get_mut(idx) {
+                    tracking.insert(name, self.current_line);
+                }
             }
         } else {
             if let Some(top) = self.scope_stack.last_mut() {
                 top.insert(name.clone(), ty);
             }
-            if let Some(top) = self.written_not_read.last_mut() {
-                top.insert(name, self.current_line);
+            if !self.suppress_write_tracking {
+                if let Some(top) = self.written_not_read.last_mut() {
+                    top.insert(name, self.current_line);
+                }
             }
         }
     }
@@ -435,6 +445,17 @@ impl TypeChecker {
                 self.infer_type(cond);
                 self.push_scope();
                 self.check_stmts(body, return_type);
+                // Segunda pasada de solo-marcado: el bucle re-ejecuta, así que las
+                // lecturas de la condición y del cuerpo también ocurren DESPUÉS de
+                // las escrituras del cuerpo (p.ej. `while k <= 6 { ...; k = k + 1 }`).
+                // Re-marcamos esas lecturas sin registrar escrituras ni duplicar
+                // diagnósticos, eliminando el falso "asignada pero nunca usada".
+                let saved = self.issues.len();
+                self.suppress_write_tracking = true;
+                self.infer_type(cond);
+                self.check_stmts(body, return_type);
+                self.suppress_write_tracking = false;
+                self.issues.truncate(saved);
                 self.pop_scope();
             }
 
@@ -451,6 +472,14 @@ impl TypeChecker {
                     top.remove(var);
                 }
                 self.check_stmts(body, return_type);
+                // Segunda pasada de solo-marcado (ver nota en While): captura las
+                // lecturas que ocurren en iteraciones posteriores, tras las
+                // escrituras del cuerpo del bucle.
+                let saved = self.issues.len();
+                self.suppress_write_tracking = true;
+                self.check_stmts(body, return_type);
+                self.suppress_write_tracking = false;
+                self.issues.truncate(saved);
                 self.pop_scope();
             }
 
