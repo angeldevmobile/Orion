@@ -30,10 +30,6 @@ jobs:
             target_dir: linux-x64
             bin_name: orion
             asset: orion-linux-x64
-          - os: macos-13            # Intel (x64)
-            target_dir: darwin-x64
-            bin_name: orion
-            asset: orion-darwin-x64
           - os: macos-14            # Apple Silicon (arm64)
             target_dir: darwin-arm64
             bin_name: orion
@@ -127,8 +123,7 @@ jobs:
 
             Descarga el de tu plataforma:
             - **Windows**: `orion-win32-x64.exe`
-            - **macOS Intel**: `orion-darwin-x64`
-            - **macOS Apple Silicon**: `orion-darwin-arm64`
+            - **macOS (Apple Silicon)**: `orion-darwin-arm64`
             - **Linux**: `orion-linux-x64`
 
             En macOS/Linux: `chmod +x orion-*` y ejecútalo. Ver uso en el README.
