@@ -31,6 +31,9 @@ show ai.code("función en Orion que calcula el factorial de un número")
 
 show ""
 show "=== Chat con contexto ==="
-c = ai.chat("Eres un experto en lenguajes de programación. Respuestas cortas.")
-show c.ask("¿Qué ventaja tiene compilar a bytecode?")
-show c.ask("¿Y ejecutarlo en una VM en Rust?")
+-- El historial lo mantiene el módulo: chat_start fija el system prompt y
+-- cada chat_ask recuerda los turnos anteriores.
+ai.chat_start("Eres un experto en lenguajes de programación. Respuestas cortas.")
+show ai.chat_ask("¿Qué ventaja tiene compilar a bytecode?")
+show ai.chat_ask("¿Y ejecutarlo en una VM en Rust?")
+ai.chat_reset()

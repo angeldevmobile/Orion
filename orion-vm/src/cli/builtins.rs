@@ -279,8 +279,6 @@ fn mod_state(v: &mut Vec<BuiltinDoc>) {
 fn mod_json(v: &mut Vec<BuiltinDoc>) {
     v.push(f("json", "parse", "json.parse(texto) → any", "Parsea un string JSON a valor de Orion.", "d = json.parse(\"{\\\"a\\\":1}\")"));
     v.push(f("json", "forge", "json.forge(valor) → string", "Serializa un valor a string JSON (claves ordenadas).", "json.forge({ \"a\": 1 })"));
-    v.push(f("json", "sort_keys", "json.sort_keys(dict) → dict", "Ordena las claves del dict.", "json.sort_keys(d)"));
-    v.push(f("json", "merge_deep", "json.merge_deep(a, b) → dict", "Combina dos dicts en profundidad.", "json.merge_deep(base, override)"));
     v.push(f("json", "validate", "json.validate(obj, schema) → bool", "Valida un valor contra un schema ({campo: tipo}).", "json.validate(usuario, {\"nombre\": \"string\", \"edad\": \"int\"})"));
 }
 

@@ -198,12 +198,19 @@ fn main() {
 
         //    Verificar sintaxis (salida legible para humanos)
         "--check" => {
-            if args.len() < 3 {
-                cli::banner::fail("Uso: orion --check <archivo.orx> [--types]");
-                std::process::exit(1);
-            }
+            // La ruta es el primer argumento que no es un flag: así
+            // `check archivo.orx --types` y `check --types archivo.orx`
+            // funcionan igual. Antes se tomaba args[2] a secas y la segunda
+            // forma intentaba abrir un archivo llamado "--types".
             let check_types = args.iter().any(|a| a == "--types");
-            cli::check::run_check(&args[2], check_types);
+            let path = args.iter().skip(2).find(|a| !a.starts_with("--"));
+            match path {
+                Some(p) => cli::check::run_check(p, check_types),
+                None => {
+                    cli::banner::fail("Uso: orion check <archivo.orx> [--types]");
+                    std::process::exit(1);
+                }
+            }
         }
 
         //    Verificar sintaxis (salida JSON para LSP / tooling)

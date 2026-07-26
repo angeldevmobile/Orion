@@ -57,17 +57,43 @@ excel.write_multi("reporte_analisis.xlsx", {
 
 ## Instalación
 
-```bash
-# Compilar desde fuente
-cargo build --release --manifest-path orion-vm/Cargo.toml
+### Binario precompilado (recomendado)
 
-# Ejecutar
-./orion-vm/target/release/orion archivo.orx
+Descarga el ejecutable de tu plataforma desde
+[la última release](https://github.com/angeldevmobile/Orion/releases/latest).
+Es un solo archivo, sin runtime ni dependencias.
+
+| Plataforma | Archivo |
+|---|---|
+| Windows x64 | `orion-win32-x64.exe` |
+| Linux x64 | `orion-linux-x64` |
+| macOS Apple Silicon | `orion-darwin-arm64` |
+
+```bash
+# Linux / macOS - renombrar, dar permisos y poner en el PATH
+chmod +x orion-linux-x64
+sudo mv orion-linux-x64 /usr/local/bin/orion
+
+orion archivo.orx
 ```
 
-**Extensión VSCode** - incluye el binario bundleado, zero-config:
-1. Instalar el paquete local: `code --install-extension vscode-orion/orion-lang/orion-lang-0.7.0.vsix` *(publicación en el Marketplace: en camino)*
-2. Abrir cualquier `.orx` - funciona de inmediato
+En Windows, renombra el `.exe` a `orion.exe` y agrégalo al `PATH`.
+
+### Extensión VSCode
+
+Instálala desde el Marketplace:
+[**Orion Language**](https://marketplace.visualstudio.com/items?itemName=AngelZapata.oriondev).
+
+La extensión descarga el compilador automáticamente la primera vez que abres un
+`.orx` (lo toma de la última release y lo guarda en el almacenamiento global de
+VSCode). Si ya tienes `orion` en el `PATH`, usa ese.
+
+### Compilar desde fuente
+
+```bash
+cargo build --release --manifest-path orion-vm/Cargo.toml
+./orion-vm/target/release/orion archivo.orx
+```
 
 ---
 
@@ -81,6 +107,7 @@ version = 1
 
 show "Hola desde ${nombre} v${version}"
 
+-- Los rangos son semiabiertos: 1..5 recorre 1, 2, 3 y 4.
 for i in 1..5 {
     show "  línea ${i}"
 }
@@ -96,7 +123,7 @@ Hola desde Orion v1
   línea 2
   línea 3
   línea 4
-  línea 5
+[Orion] 1.346 ms
 ```
 
 O corre el demo completo:
@@ -167,7 +194,7 @@ while i < 5 {
     i += 1
 }
 
--- for en rango
+-- for en rango — semiabierto: 1..10 recorre del 1 al 9
 for x in 1..10 { show x }
 
 -- for en colección
@@ -272,23 +299,49 @@ attempt {
 
 ### Servidor HTTP nativo
 
+`serve` es un statement del lenguaje: recibe un puerto y una función manejadora.
+La función toma la petición y devuelve un dict con `status` y `body`.
+
 ```orion
-serve en 8080 {
-    route "GET /ping" {
-        responder("pong")
+use "db"
+
+db.ejecutar("app.db", "CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT)")
+
+fn router(req) {
+    if req["path"] == "/ping" {
+        return { "status": 200, "body": "pong" }
     }
 
-    route "POST /usuarios" {
-        db.insertar("usuarios", body)
-        responder({ok: yes, mensaje: "Creado"})
+    if req["path"] == "/usuarios" {
+        if req["method"] == "GET" {
+            return { "status": 200, "body": db.query("app.db", "SELECT * FROM usuarios") }
+        }
+        if req["method"] == "POST" {
+            db.insertar("app.db", "INSERT INTO usuarios (nombre) VALUES (?)", [req["body"]])
+            return { "status": 201, "body": { "ok": yes, "mensaje": "Creado" } }
+        }
     }
 
-    route "GET /usuarios/:id" {
-        usuario = db.buscar("usuarios", id)
-        responder(usuario)
-    }
+    return { "status": 404, "body": "no encontrado" }
 }
+
+serve 8080 router
 ```
+
+**JSON automático.** Si el `body` es un dict o una lista, Orion lo serializa a
+JSON y responde `application/json`. Si es un string, sale como `text/plain`.
+Un `content_type` explícito siempre manda.
+
+```orion
+return { "status": 200, "body": {"ok": yes, "total": 3} }
+-- → application/json  ·  {"ok":true,"total":3}
+
+return { "status": 200, "body": "pong" }
+-- → text/plain  ·  pong
+```
+
+Para routing declarativo con parámetros `:id` y wildcards, usa el módulo
+[`router`](#bloque-b---web-moderna-) y pásale su despachador a `serve`.
 
 ### IA nativa - `think`, `learn`, `sense`
 
@@ -720,7 +773,8 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 - Import graph
 - Debugger DAP
 - REPL integrado
-- **Binario bundleado** - zero-config, sin instalar nada extra
+- **Compilador on-demand** - si no encuentra `orion` en el `PATH`, la extensión lo
+  descarga sola desde la última release. Zero-config igual, sin inflar el `.vsix`
 
 ---
 
@@ -755,7 +809,7 @@ cada byte al salir, verificado con LeakSanitizer en CI.
 | Módulos stdlib | ✅ 58 módulos (875 funciones) | Rust |
 | Cloud native (S3 / SSH / Docker) | ✅ Completo | Rust |
 | CLI completo | ✅ Completo | Rust |
-| Extensión VSCode con binario bundleado | ✅ Completo | TypeScript |
+| Extensión VSCode (publicada en el Marketplace) | ✅ Completo | TypeScript |
 
 ---
 
@@ -911,39 +965,47 @@ valido  = crypto2.rsa_verify("contrato", firma, claves.public_key)  -- yes
 use "router"
 use "middleware"
 
-r       = router.new()
 limiter = middleware.rate_limit(100, 60)   -- 100 req / 60 seg
 
--- Middleware global: rate limit + logging
-router.use_middleware(r, fn(req) {
-    if not middleware.check_rate(limiter, req.method) {
-        return {status: 429, body: "Too Many Requests"}
+-- Los handlers son funciones nombradas: al router se le pasa el NOMBRE
+-- de la función como string, no una lambda.
+fn mw_global(req) {
+    if not middleware.check_rate(limiter, req["path"]) {
+        return {"status": 429, "body": "Too Many Requests"}
     }
-    middleware.log_req(req.method, req.path, 200, 0)
     return null   -- null = continuar al handler
-})
+}
 
--- Rutas con handlers inline (lambdas)
-router.get(r, "/usuarios/:id", fn(req) {
-    id = req.params.id
-    return {status: 200, body: "Usuario: " + id, content_type: "application/json"}
-})
+fn ver_usuario(req) {
+    return {"status": 200, "body": "Usuario: " + req["params"]["id"]}
+}
 
-router.post(r, "/usuarios", fn(req) {
-    return {status: 201, body: req.body}
-})
+fn crear_usuario(req) {
+    return {"status": 201, "body": req["body"]}
+}
 
-router.get(r, "/archivos/*ruta", fn(req) {
-    return {status: 200, body: "Archivo: " + req.params.ruta}
-})
+fn ver_archivo(req) {
+    return {"status": 200, "body": "Archivo: " + req["params"]["resto"]}
+}
 
+fn fallback(req) {
+    return {"status": 404, "body": "no encontrado"}
+}
+
+r = router.new()
+router.use_middleware(r, "mw_global")
+router.get(r,  "/usuarios/:id",    "ver_usuario")
+router.post(r, "/usuarios",        "crear_usuario")
+router.get(r,  "/archivos/*resto", "ver_archivo")
 router.attach(r)   -- activa el router para el siguiente serve
 
-serve en 8080 { }  -- el router despacha automáticamente; 404 si no hay match
+-- El router despacha automáticamente; `fallback` atiende lo que no
+-- haga match. `serve` siempre recibe puerto + función manejadora.
+serve 8080 fallback
 
 -- También se puede usar router.match() manualmente
 match = router.match(r, "GET", "/usuarios/42")
--- {handler: "<fn>", params: {id: "42"}, method: "GET", path: "/usuarios/42"}
+-- {method: GET, path: /usuarios/42, params: {id: 42}, handler: ver_usuario}
 
 show router.routes(r)   -- lista todas las rutas registradas
 

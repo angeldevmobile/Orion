@@ -24,6 +24,16 @@ pub mod modules;
 pub mod ai;
 pub mod jit;
 
+/// El binario (main.rs) declara su propio árbol de módulos y no enlaza esta
+/// librería, así que `typechecker.rs` se compila en ambos. Consulta el registro
+/// de builtins por `crate::cli::builtins`, y esa ruta tiene que resolver
+/// también aquí: se declaran los dos únicos archivos del registro (solo
+/// dependen de serde), no el resto del CLI.
+pub mod cli {
+    pub mod builtins;
+    pub mod builtins_gen;
+}
+
 //    Punto de entrada C-ABI para ejecutables AOT                               
 //
 // El compilador AOT (aot.rs) genera un main() en Cranelift IR que llama a

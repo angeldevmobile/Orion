@@ -82,6 +82,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let method  = to_str(&args[1]).to_uppercase();
             let pattern = to_str(&args[2]);
             let handler = args[3].clone();
+            check_handler("add", "el handler", &handler)?;
             with_router_mut(id, |r| {
                 r.routes.push(Route { method, pattern, handler });
                 Ok(EvalValue::Bool(true))
@@ -95,6 +96,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let method  = function.to_uppercase();
             let pattern = to_str(&args[1]);
             let handler = args[2].clone();
+            check_handler(function, "el handler", &handler)?;
             with_router_mut(id, |r| {
                 r.routes.push(Route { method, pattern, handler });
                 Ok(EvalValue::Bool(true))
@@ -106,6 +108,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if args.len() < 2 { return Err("router.use_middleware requiere (id, handler_fn)".into()); }
             let id = to_u64(&args[0])?;
             let mw = args[1].clone();
+            check_handler("use_middleware", "el middleware", &mw)?;
             with_router_mut(id, |r| { r.middlewares.push(mw); Ok(EvalValue::Bool(true)) })
         }
 
@@ -277,6 +280,52 @@ pub fn active_match(method: &str, path: &str) -> Option<ActiveMatch> {
 }
 
 //    Helpers
+
+/// Valida un handler EN EL REGISTRO, no en el despacho.
+///
+/// Los workers de serve corren cada petición en su propia VM e invocan los
+/// handlers POR NOMBRE, así que una lambda anónima es inservible: no tiene
+/// nombre que buscar. Antes eso se descubría en tiempo de request —
+/// `handler_name` devolvía `None`, la ruta caía al fallback y el middleware
+/// se descartaba en silencio. Un middleware de autorización escrito como
+/// lambda no bloqueaba nada y el endpoint quedaba abierto sin un solo aviso.
+///
+/// Fallar aquí convierte ese silencio en un error que apunta a la línea
+/// exacta donde se registró la ruta.
+fn check_handler(fn_name: &str, arg_desc: &str, h: &EvalValue) -> Result<(), String> {
+    match h {
+        EvalValue::Str(s) if !s.is_empty() => Ok(()),
+        EvalValue::Function { name, .. } if !name.is_empty() => Ok(()),
+        // Una lambda anónima no sobrevive el paso a un módulo nativo: llega
+        // como Null. Es también lo que llega si se pasa una variable sin
+        // definir, así que el mensaje cubre los dos casos sin afirmar cuál es.
+        EvalValue::Function { .. } | EvalValue::Null => Err(format!(
+            "router.{}: {} tiene que ser una función CON NOMBRE. serve corre \
+             cada petición en su propia VM e invoca los handlers por nombre, \
+             así que una lambda anónima no sirve (y llega aquí como null). \
+             Declara `fn mi_handler(req) {{ ... }}` y pásala como `mi_handler` \
+             o como \"mi_handler\".",
+            fn_name, arg_desc
+        )),
+        other => Err(format!(
+            "router.{}: {} debe ser el nombre de una función (\"mi_handler\") o \
+             una función con nombre, no {}.",
+            fn_name, arg_desc, type_label(other)
+        )),
+    }
+}
+
+fn type_label(v: &EvalValue) -> &'static str {
+    match v {
+        EvalValue::Str(_)   => "un string vacío",
+        EvalValue::Int(_)   => "un entero",
+        EvalValue::Float(_) => "un float",
+        EvalValue::Bool(_)  => "un booleano",
+        EvalValue::List(_)  => "una lista",
+        EvalValue::Dict(_)  => "un dict",
+        _                   => "ese valor",
+    }
+}
 
 fn with_router_mut<F>(id: u64, f: F) -> Result<EvalValue, String>
 where F: FnOnce(&mut RouterData) -> Result<EvalValue, String>

@@ -49,6 +49,71 @@ pub struct TypeChecker {
     /// bucle ejecuta también DESPUÉS de las escrituras del cuerpo) sin volver a
     /// registrar esas escrituras, evitando falsos "asignada pero nunca usada".
     suppress_write_tracking: bool,
+    /// namespace en el código → módulo nativo canónico. Solo se puebla con
+    /// módulos NATIVOS importados por nombre; los `.orx` del usuario quedan
+    /// fuera porque su superficie no se conoce en tiempo de chequeo.
+    module_ns: HashMap<String, String>,
+}
+
+/// Módulos que el runtime atiende bajo más de un nombre (mod.rs).
+fn canonical_module(name: &str) -> &str {
+    match name {
+        "df"          => "table",
+        "embeddings"  => "embed",
+        other         => other,
+    }
+}
+
+/// Distancia de edición (Levenshtein) entre dos nombres.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for i in 1..=a.len() {
+        cur[0] = i;
+        for j in 1..=b.len() {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// El candidato más parecido, si está lo bastante cerca como para que sugerirlo
+/// ayude en vez de confundir (un tercio del nombre, mínimo 1 edición).
+fn closest_name(name: &str, candidates: &HashSet<String>) -> Option<String> {
+    let limit = (name.chars().count() / 3).max(1);
+    candidates.iter()
+        .map(|c| (edit_distance(name, c), c))
+        .filter(|(d, _)| *d <= limit)
+        .min_by(|(d1, c1), (d2, c2)| d1.cmp(d2).then(c1.cmp(c2)))
+        .map(|(_, c)| c.clone())
+}
+
+/// Funciones que existen en el dispatch pero a propósito NO se documentan:
+/// siguen invocables solo para devolver un error de migración mejor que un
+/// "no existe" genérico. Marcarlas aquí evita pisar ese mensaje.
+fn is_retired_builtin(module: &str, function: &str) -> bool {
+    matches!((module, function), ("timewarp", "measure_time" | "measureMtime"))
+}
+
+/// `owner → {funciones}` derivado del registro de builtins, que es la misma
+/// fuente que alimenta `orion --builtins-json`, el typeshed de la extensión y
+/// la referencia de módulos del sitio. El test `registry_matches_runtime`
+/// vigila que no se desincronice del dispatch real.
+fn module_functions() -> &'static HashMap<String, HashSet<String>> {
+    static TABLE: std::sync::OnceLock<HashMap<String, HashSet<String>>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut map: HashMap<String, HashSet<String>> = HashMap::new();
+        for doc in crate::cli::builtins::registry() {
+            if !doc.owner.is_empty() {
+                map.entry(doc.owner.clone()).or_default().insert(doc.name.clone());
+            }
+        }
+        map
+    })
 }
 
 impl TypeChecker {
@@ -65,6 +130,7 @@ impl TypeChecker {
             current_col:  0,
             written_not_read: vec![HashMap::new()],
             suppress_write_tracking: false,
+            module_ns: HashMap::new(),
         }
     }
 
@@ -258,6 +324,31 @@ impl TypeChecker {
 
     fn report(&mut self, msg: impl Into<String>, line: u32, col: u32) {
         self.issues.push(TypeIssue::error(msg, line, col));
+    }
+
+    /// `modulo.funcion(...)`: comprueba que la función exista en el módulo.
+    ///
+    /// Antes esto solo reventaba en ejecución, y `orion check` daba el visto
+    /// bueno a un `db.buscar(...)` inexistente. Solo se valida sobre módulos
+    /// nativos importados por nombre; cualquier otra cosa se deja pasar.
+    fn check_module_fn(&mut self, receiver: &Expr, method: &str) {
+        let Expr::Ident(ns) = receiver else { return };
+        let Some(module) = self.module_ns.get(ns).cloned() else { return };
+        if is_retired_builtin(&module, method) { return; }
+
+        let Some(known) = module_functions().get(&module) else { return };
+        if known.contains(method) { return; }
+
+        let line = self.current_line;
+        let col  = self.current_col;
+        let msg  = match closest_name(method, known) {
+            Some(sug) => format!(
+                "{}.{}() no existe. ¿Quisiste decir {}.{}()?",
+                ns, method, ns, sug
+            ),
+            None => format!("{}.{}() no existe en el módulo '{}'.", ns, method, module),
+        };
+        self.report(msg, line, col);
     }
 
     //    Recolección de firmas (primer pase)                                     
@@ -606,6 +697,15 @@ impl TypeChecker {
                 if let Some(top) = self.written_not_read.last_mut() {
                     top.remove(&ns);
                 }
+                // Solo se puede validar la superficie de un módulo NATIVO
+                // importado por nombre. Con una ruta explícita ("packages/x",
+                // "lib/utils") gana el .orx del usuario — ver load_module en
+                // vm.rs — y ahí no sabemos qué funciones existen.
+                let explicit_path = path.contains('/') || path.contains('\\');
+                let base = canonical_module(path.as_str());
+                if !explicit_path && crate::modules::is_known_module(base) {
+                    self.module_ns.insert(ns.clone(), base.to_string());
+                }
                 // `use "x" take [a, b]` trae a/b como nombres sueltos invocables.
                 if let Some(names) = selective {
                     for n in names {
@@ -720,7 +820,8 @@ impl TypeChecker {
                 self.check_call_types(index);
             }
             Expr::AttrAccess { object, attr: _ } => self.check_call_types(object),
-            Expr::CallMethod { receiver, args, kwargs, .. } => {
+            Expr::CallMethod { receiver, method, args, kwargs } => {
+                self.check_module_fn(receiver, method);
                 self.check_call_types(receiver);
                 for arg in args { self.check_call_types(arg); }
                 for (_, v) in kwargs { self.check_call_types(v); }

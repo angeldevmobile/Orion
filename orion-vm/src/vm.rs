@@ -2452,11 +2452,22 @@ impl VM {
                         extra,
                     )
                 } else {
-                    let body = m.get("body").map(|v| v.to_string()).unwrap_or_default();
-                    let ct = m.get("content_type")
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "text/plain; charset=utf-8".to_string());
-                    (status_override.unwrap_or(200), body.into_bytes(), ct, extra)
+                    // { "status": 200, "body": <Dict|List> } → el body estructurado
+                    // se serializa a JSON, igual que un payload suelto o {"json": …}.
+                    // Sin esto el cliente recibía el Display de Orion ({a: 1}), que
+                    // no es JSON válido. Un content_type explícito sigue mandando.
+                    let explicit_ct = m.get("content_type").map(|v| v.to_string());
+                    let (body, ct) = match m.get("body") {
+                        Some(v @ (Value::Dict(_) | Value::List(_))) if explicit_ct.is_none() => (
+                            value_json_string(v).into_bytes(),
+                            "application/json; charset=utf-8".to_string(),
+                        ),
+                        other => (
+                            other.map(|v| v.to_string()).unwrap_or_default().into_bytes(),
+                            explicit_ct.unwrap_or_else(|| "text/plain; charset=utf-8".to_string()),
+                        ),
+                    };
+                    (status_override.unwrap_or(200), body, ct, extra)
                 }
             }
             // Una lista también es un payload de datos → JSON
