@@ -211,8 +211,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("matrix", "ones", "matrix.ones(rows, cols)", "Matriz de unos"));
     v.push(f("matrix", "shape", "matrix.shape(A)", "[rows, cols]"));
     v.push(f("matrix", "dot", "matrix.dot(A, B)", "Producto punto (misma que mul)"));
+    v.push(f("matrix", "rot2D", "matrix.rot2D(angle_deg)", "Matriz de rotación 2D"));
     v.push(f("matrix", "neuralify", "matrix.neuralify(A, activation?)", "Aplica función de activación"));
-    v.push(f("matrix", "rot2D", "matrix.rot2D(angulo_grados)", "Matriz 2x2 de rotación para el ángulo dado (en grados)"));
     v.push(f("matrix", "flatten", "matrix.flatten(A)", "Lista 1D"));
     v.push(f("matrix", "scale", "matrix.scale(A, factor)", "Multiplica todos los elementos"));
     v.push(f("matrix", "amplify", "matrix.amplify(A, factor)", "Alias de matrix.scale."));
@@ -238,13 +238,13 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("quantum", "fidelity", "quantum.fidelity(s1, s2)", "F64 ∈ [0, 1]"));
     v.push(f("quantum", "bloch", "quantum.bloch(qubit_state)", "[x, y, z]"));
     v.push(f("quantum", "state_from_bits", "quantum.state_from_bits(\"01\")", "Estado |01>"));
+    v.push(f("quantum", "gate_H", "quantum.gate_H(…)", "Puertas estándar como funciones"));
+    v.push(f("quantum", "gate_X", "quantum.gate_X(…)", "Función del módulo quantum."));
+    v.push(f("quantum", "gate_Y", "quantum.gate_Y(…)", "Función del módulo quantum."));
+    v.push(f("quantum", "gate_Z", "quantum.gate_Z(…)", "Función del módulo quantum."));
+    v.push(f("quantum", "gate_S", "quantum.gate_S(…)", "Función del módulo quantum."));
+    v.push(f("quantum", "gate_CNOT", "quantum.gate_CNOT(…)", "Función del módulo quantum."));
     v.push(f("quantum", "amplitudes", "quantum.amplitudes(state)", "Lista de [re, im, prob]"));
-    v.push(f("quantum", "gate_H", "quantum.gate_H()", "Matriz de la puerta Hadamard (para componer con ugate)"));
-    v.push(f("quantum", "gate_X", "quantum.gate_X()", "Matriz de la puerta Pauli-X"));
-    v.push(f("quantum", "gate_Y", "quantum.gate_Y()", "Matriz de la puerta Pauli-Y"));
-    v.push(f("quantum", "gate_Z", "quantum.gate_Z()", "Matriz de la puerta Pauli-Z"));
-    v.push(f("quantum", "gate_S", "quantum.gate_S()", "Matriz de la puerta de fase S"));
-    v.push(f("quantum", "gate_CNOT", "quantum.gate_CNOT()", "Matriz 4x4 de la puerta CNOT"));
     v.push(f("quantum", "circuit", "quantum.circuit(n)", "Id; registro de n qubits inicializado en |0...0> (máx 24)"));
     v.push(f("quantum", "circuito", "quantum.circuito(n)", "Alias de quantum.circuit."));
     v.push(f("quantum", "h", "quantum.h(id, q)", "Hadamard sobre el qubit q"));
@@ -297,6 +297,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("timewarp", "clock", "timewarp.clock()", "Cronómetro (dict con start_ns); medir con elapsed(clock)"));
     v.push(f("timewarp", "start_clock", "timewarp.start_clock()", "Alias de timewarp.clock."));
     v.push(f("timewarp", "elapsed", "timewarp.elapsed(clock)", "Segundos transcurridos"));
+    v.push(f("timewarp", "measure_time", "timewarp.measure_time(…)", "Measure_time fue retirado: devolvía siempre ~0 ms (no puede ejecutar una fn de Orion desde el módulo). El patrón honesto es clock/elapsed."));
+    v.push(f("timewarp", "measureMtime", "timewarp.measureMtime(…)", "Alias de timewarp.measure_time."));
     v.push(f("timewarp", "format", "timewarp.format(timestamp_secs, fmt?)", "String formateado"));
     v.push(f("timewarp", "diff", "timewarp.diff(ts1, ts2)", "Segundos de diferencia"));
     v.push(f("timewarp", "add", "timewarp.add(timestamp, seconds)", "Nuevo timestamp"));
@@ -683,9 +685,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("cache", "clear", "cache.clear()", "Alias de cache.limpiar."));
     v.push(f("cache", "claves", "cache.claves()", "List<Str> (solo entradas vivas)"));
     v.push(f("cache", "keys", "cache.keys()", "Alias de cache.claves."));
-    v.push(f("cache", "len", "cache.len()", "Int — entradas en la caché"));
-    v.push(f("cache", "size", "cache.size()", "Alias de cache.len."));
-    v.push(f("cache", "tamaño", "cache.tamaño()", "Alias de cache.len."));
+    v.push(f("cache", "tamaño", "cache.tamaño()", "Int (solo entradas vivas)"));
+    v.push(f("cache", "size", "cache.size()", "Alias de cache.tamaño."));
+    v.push(f("cache", "len", "cache.len()", "Alias de cache.tamaño."));
     // state (state_mod.rs)
     v.push(f("state", "set", "state.set(clave, valor)", "Valor guardado"));
     v.push(f("state", "put", "state.put(clave, valor)", "Alias de state.set."));
@@ -710,12 +712,13 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("state", "all", "state.all() / snapshot()", "Dict con todo el estado"));
     v.push(f("state", "snapshot", "state.snapshot() / snapshot()", "Alias de state.all."));
     v.push(f("state", "todo", "state.todo() / snapshot()", "Alias de state.all."));
+    v.push(f("state", "len", "state.len() / size()", "Int"));
+    v.push(f("state", "size", "state.size() / size()", "Alias de state.len."));
+    v.push(f("state", "tamaño", "state.tamaño() / size()", "Alias de state.len."));
     v.push(f("state", "clear", "state.clear()", "Bool"));
     v.push(f("state", "limpiar", "state.limpiar()", "Alias de state.clear."));
     v.push(f("state", "persist", "state.persist(ruta)", "Bool. Activa el respaldo a disco y carga lo existente."));
     v.push(f("state", "persistir", "state.persistir(ruta)", "Alias de state.persist."));
-    v.push(f("state", "size", "state.size()", "Alias de state.len."));
-    v.push(f("state", "tamaño", "state.tamaño()", "Alias de state.len."));
     // session (session_mod.rs)
     v.push(f("session", "new", "session.new()", "String  — genera un session-id nuevo (no crea la sesión aún)"));
     v.push(f("session", "id", "session.id()", "Alias de session.new."));
@@ -763,15 +766,15 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("cola", "pop", "cola.pop(nombre)", "Alias de cola.recibir."));
     v.push(f("cola", "espiar", "cola.espiar(nombre)", "Ver el frente sin extraer"));
     v.push(f("cola", "peek", "cola.peek(nombre)", "Alias de cola.espiar."));
+    v.push(f("cola", "tamaño", "cola.tamaño(nombre)", "Int"));
+    v.push(f("cola", "size", "cola.size(nombre)", "Alias de cola.tamaño."));
+    v.push(f("cola", "len", "cola.len(nombre)", "Alias de cola.tamaño."));
     v.push(f("cola", "vaciar", "cola.vaciar(nombre)", "Bool"));
     v.push(f("cola", "clear", "cola.clear(nombre)", "Alias de cola.vaciar."));
     v.push(f("cola", "eliminar", "cola.eliminar(nombre)", "Bool (true si la cola existía) — elimina la cola entera"));
     v.push(f("cola", "delete", "cola.delete(nombre)", "Alias de cola.eliminar."));
     v.push(f("cola", "lista", "cola.lista()", "List<Str> de nombres de colas existentes"));
     v.push(f("cola", "list", "cola.list()", "Alias de cola.lista."));
-    v.push(f("cola", "len", "cola.len(nombre)", "Int — elementos en la cola"));
-    v.push(f("cola", "size", "cola.size(nombre)", "Alias de cola.len."));
-    v.push(f("cola", "tamaño", "cola.tamaño(nombre)", "Alias de cola.len."));
     // chan (chan_mod.rs)
     v.push(f("chan", "crear", "chan.crear(cap?)", "Int (handle). cap=0 o ausente → ilimitado."));
     v.push(f("chan", "create", "chan.create(cap?)", "Alias de chan.crear."));
@@ -790,6 +793,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("chan", "cerrada", "chan.cerrada(id)", "Bool"));
     v.push(f("chan", "is_closed", "chan.is_closed(id)", "Alias de chan.cerrada."));
     v.push(f("chan", "closed", "chan.closed(id)", "Alias de chan.cerrada."));
+    v.push(f("chan", "len", "chan.len(id) / tamaño(id)", "Int (valores en cola ahora mismo)"));
+    v.push(f("chan", "tamaño", "chan.tamaño(id) / tamaño(id)", "Alias de chan.len."));
+    v.push(f("chan", "size", "chan.size(id) / tamaño(id)", "Alias de chan.len."));
     v.push(f("chan", "eliminar", "chan.eliminar(id)", "Bool. Libera el canal del registro."));
     v.push(f("chan", "delete", "chan.delete(id)", "Alias de chan.eliminar."));
     v.push(f("chan", "free", "chan.free(id)", "Alias de chan.eliminar."));
@@ -797,9 +803,6 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("chan", "seleccionar", "chan.seleccionar([id1, id2, ...])", "Alias de chan.select."));
     v.push(f("chan", "lista", "chan.lista()", "List<Int> de handles de canales vivos"));
     v.push(f("chan", "list", "chan.list()", "Alias de chan.lista."));
-    v.push(f("chan", "len", "chan.len(id)", "Int — mensajes pendientes en el canal"));
-    v.push(f("chan", "size", "chan.size(id)", "Alias de chan.len."));
-    v.push(f("chan", "tamaño", "chan.tamaño(id)", "Alias de chan.len."));
     // watch (watch_mod.rs)
     v.push(f("watch", "observar", "watch.observar(path)", "Bool  — registra el estado actual del archivo"));
     v.push(f("watch", "watch", "watch.watch(path)", "Alias de watch.observar."));
@@ -1031,6 +1034,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("vector", "search", "vector.search(handle, embedding, top?)", "Alias de vector.buscar."));
     v.push(f("vector", "remove", "vector.remove(handle, id)", "Bool"));
     v.push(f("vector", "eliminar", "vector.eliminar(handle, id)", "Alias de vector.remove."));
+    v.push(f("vector", "size", "vector.size(handle)", "Int"));
+    v.push(f("vector", "tamaño", "vector.tamaño(handle)", "Alias de vector.size."));
     v.push(f("vector", "clear", "vector.clear(handle)", "Int (entradas eliminadas)"));
     v.push(f("vector", "limpiar", "vector.limpiar(handle)", "Alias de vector.clear."));
     v.push(f("vector", "ids", "vector.ids(handle)", "List<string>"));
@@ -1038,8 +1043,6 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("vector", "guardar", "vector.guardar(handle, path)", "Alias de vector.save."));
     v.push(f("vector", "load", "vector.load(path)", "Handle"));
     v.push(f("vector", "cargar", "vector.cargar(path)", "Alias de vector.load."));
-    v.push(f("vector", "size", "vector.size(db)", "Alias de vector.len."));
-    v.push(f("vector", "tamaño", "vector.tamaño(db)", "Alias de vector.len."));
     // s3 (s3_mod.rs)
     v.push(f("s3", "config", "s3.config(endpoint, access_key, secret_key, region)", "Función del módulo s3."));
     v.push(f("s3", "upload", "s3.upload(bucket, key, local_path)", "{ok, url}"));

@@ -80,8 +80,9 @@ pub fn print_banner() {
     println!();
     // Línea de acento naranja
     println!("  {ORANGE}{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{RESET}");
-    println!("  {BWHITE}{BOLD}  Language Runtime{RESET}  {DIM}v0.4.0{RESET}  \
-              {DIM}·{RESET}  {BCYAN}Fast · Safe · Expressive{RESET}");
+    println!("  {BWHITE}{BOLD}  Language Runtime{RESET}  {DIM}v{}{RESET}  \
+              {DIM}·{RESET}  {BCYAN}Fast · Safe · Expressive{RESET}",
+             env!("CARGO_PKG_VERSION"));
     println!("  {ORANGE}{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{RESET}");
     // Capacidades reales — da confianza de que es un runtime serio
     println!("  {DIM}JIT nativo{RESET} {BBLUE}·{RESET} {DIM}Motor de datos{RESET} {BBLUE}·{RESET} \

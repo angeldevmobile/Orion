@@ -59,9 +59,15 @@ function extractFns(file) {
         if (trimmed.startsWith('//')) { comments.push(trimmed.replace(/^\/\/\s?/, '')); continue; }
 
         if (depthBefore === 2) {
-            const arm = trimmed.match(/^((?:"[a-z_0-9]+"\s*\|\s*)*"[a-z_0-9]+")\s*=>/);
+            // Los nombres llevan mayúsculas ("rot2D", "gate_CNOT") y alias en
+            // español ("tamaño"). Con un patrón solo-minúsculas-ASCII, un único
+            // carácter fuera de rango descartaba el arm ENTERO y se llevaba por
+            // delante a sus hermanos: `"len" | "size" | "tamaño"` perdía los tres.
+            // Esas ausencias hacen que el typechecker marque como inexistentes
+            // funciones reales y aborte programas que funcionan.
+            const arm = trimmed.match(/^((?:"[\p{L}\p{N}_]+"\s*\|\s*)*"[\p{L}\p{N}_]+")\s*=>/u);
             if (arm) {
-                const names = [...arm[1].matchAll(/"([a-z_0-9]+)"/g)].map(x => x[1]);
+                const names = [...arm[1].matchAll(/"([\p{L}\p{N}_]+)"/gu)].map(x => x[1]);
                 fns.push({ names, comment: comments.join(' ').trim() });
             }
         }

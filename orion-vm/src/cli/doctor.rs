@@ -11,7 +11,7 @@ pub fn run_doctor() {
     let mut all_ok = true;
 
     // 1. Binary version
-    banner::row("Versión VM", "v0.4.0", true);
+    banner::row("Versión VM", &format!("v{}", env!("CARGO_PKG_VERSION")), true);
 
     // 2. Packages directory
     let pkg_dir = packages_dir();

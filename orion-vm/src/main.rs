@@ -193,7 +193,8 @@ fn main() {
         }
 
         "--version" | "-v" => {
-            println!("Orion VM v0.4.0 (Rust) — pipeline completo: lexer + parser + codegen + VM");
+            println!("Orion VM v{} (Rust) — pipeline completo: lexer + parser + codegen + VM",
+                     env!("CARGO_PKG_VERSION"));
         }
 
         //    Verificar sintaxis (salida legible para humanos)
@@ -846,7 +847,8 @@ fn run_repl() {
 
     cli::banner::animate_startup();
     cli::banner::print_banner();
-    println!("  REPL v0.4.0  —  {DIM}Ctrl+C / Ctrl+D para salir{RESET}",
+    println!("  REPL v{V}  —  {DIM}Ctrl+C / Ctrl+D para salir{RESET}",
+        V = env!("CARGO_PKG_VERSION"),
         DIM = cli::banner::DIM, RESET = cli::banner::RESET);
     println!("  Comandos: {DIM}:help  :vars  :fns  :clear  :history{RESET}",
         DIM = cli::banner::DIM, RESET = cli::banner::RESET);

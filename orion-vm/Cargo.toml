@@ -1,6 +1,8 @@
 [package]
 name = "orion-vm"
-version = "0.1.0"
+# Única fuente de la versión: banner, doctor, REPL y `--version` la leen con
+# env!("CARGO_PKG_VERSION"). Al publicar, el tag vX.Y.Z debe coincidir.
+version = "0.1.2"
 edition = "2021"
 description = "Orion Language Virtual Machine"
 build = "build.rs"
