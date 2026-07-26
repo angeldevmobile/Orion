@@ -19,6 +19,10 @@ orion.log
 # Runtime DB del gestor de tareas (demo_tasks.orx)
 demo/tasks.db
 
+# Página de documentación (tiene su propio repo Web-documentation-Orion;
+# vive aquí temporalmente para pruebas y se separará luego). No trackear.
+Page-Orion-Doumentation/
+
 # Scratch / salidas de prueba en raiz
 /out.txt
 /out2.txt

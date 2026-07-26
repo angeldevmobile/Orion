@@ -2153,6 +2153,26 @@ impl VM {
         let url = request.url().to_string();
         let method = request.method().to_string();
 
+        // Log de acceso con estilo: hora local, método, ruta, status coloreado y latencia.
+        let __t0 = std::time::Instant::now();
+        let __log_m = method.clone();
+        let __log_u = url.clone();
+        let log_req = move |status: u16, note: &str| {
+            let ts = chrono::Local::now().format("%H:%M:%S").to_string();
+            let color = match status {
+                200..=299 => "\x1b[32m", // verde
+                300..=399 => "\x1b[36m", // cian
+                400..=499 => "\x1b[33m", // amarillo
+                _         => "\x1b[31m", // rojo
+            };
+            let ms = __t0.elapsed().as_millis();
+            let extra = if note.is_empty() { String::new() } else { format!(" ({})", note) };
+            eprintln!(
+                "\x1b[2m[Orion]\x1b[0m \x1b[2m{}\x1b[0m  {:<7}{}  {}{}\x1b[0m \x1b[2m{}ms\x1b[0m{}",
+                ts, __log_m, __log_u, color, status, ms, extra
+            );
+        };
+
         let (raw_path, query) = if let Some(pos) = url.find('?') {
             (url[..pos].to_string(), url[pos+1..].to_string())
         } else {
@@ -2223,7 +2243,7 @@ impl VM {
                 if let Ok(h) = Header::from_str("X-Content-Type-Options: nosniff") {
                     response = response.with_header(h);
                 }
-                eprintln!("[Orion] {} {} → {}", request.method(), request.url(), st);
+                log_req(st, "");
                 let _ = request.respond(response);
                 return;
             }
@@ -2266,7 +2286,7 @@ impl VM {
                     if let Ok(h) = Header::from_str("WWW-Authenticate: Bearer") {
                         response = response.with_header(h);
                     }
-                    eprintln!("[Orion] {} {} → 401 (guard)", request.method(), request.url());
+                    log_req(401, "guard");
                     let _ = request.respond(response);
                     return;
                 }
@@ -2350,7 +2370,7 @@ impl VM {
             None => match self.run_handler(target_fn, req_val) {
                 Ok(v)  => v,
                 Err(e) => {
-                    eprintln!("[Orion] {} {} → 500 ({})", request.method(), request.url(), e);
+                    log_req(500, &e.to_string());
                     let resp = Response::from_string(format!("error interno: {}", e))
                         .with_status_code(500);
                     let _ = request.respond(resp);
@@ -2480,7 +2500,7 @@ impl VM {
             }
         }
 
-        eprintln!("[Orion] {} {} → {}", request.method(), request.url(), status_code);
+        log_req(status_code as u16, "");
         let _ = request.respond(response);
     }
 
