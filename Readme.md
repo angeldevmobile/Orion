@@ -184,10 +184,11 @@ pattern = "\\d{4}-\\d{2}-\\d{2}"       -- regex: \d{4}-\d{2}-\d{2}
 ### Control flow
 
 ```orion
--- if / elsif / else
+-- if / else if / else — the middle branch is two tokens, `else if`.
+-- There is no `elsif` keyword.
 if age >= 18 {
     show "Adult"
-} elsif age >= 13 {
+} else if age >= 13 {
     show "Teenager"
 } else {
     show "Child"
@@ -206,11 +207,12 @@ for x in 1..10 { show x }
 -- for over a collection
 for n in ["Ana", "Luis", "Eva"] { show n }
 
--- match
-result = match value {
-    1    => "one"
-    2    => "two"
-    _    => "other"
+-- match is a statement, not an expression: each arm is `pattern { block }`,
+-- with no `=>` arrow, and the whole thing cannot be assigned to a variable.
+match value {
+    1 { show "one" }
+    2 { show "two" }
+    _ { show "other" }
 }
 
 -- break / continue
@@ -362,18 +364,23 @@ think "Summarize this text in 3 bullet points: " + content
 use "ai" as ai
 
 category  = ai.classify(email.text, ["spam", "work", "personal"])
-summary   = ai.summarize(document, length: "corto")
-translated = ai.translate(text, to: "english")
+-- Module functions take positional arguments only. Named arguments (`x = 1`)
+-- work on functions you define, not on module methods.
+summary   = ai.summarize(document)
+translated = ai.translate(text, "english")
 sentiment = ai.sentiment(review)   -- "positivo" / "negativo" / "neutro"
 ```
 
-### Pipe operator
+### Pipe operator - not implemented
+
+`|>` is recognized by the lexer but no parser or codegen path handles it, so
+any program using it fails with `Token inesperado en expresión: PipeOp`. The
+chained style is written with intermediate bindings:
 
 ```orion
-result = data
-    |> filter_by("active", yes)
-    |> sort_by("date", "desc")
-    |> top(10)
+step1 = filter_by(data, "active", yes)
+step2 = sort_by(step1, "date", "desc")
+result = top(step2, 10)
 ```
 
 ### Concurrency
@@ -383,8 +390,8 @@ result = data
 spawn long_running_job()
 
 -- Async/await
-async fn process(item) { ... }
-result = await process(data)
+async fn process(item) { return item * 2 }
+result = await process(21)
 ```
 
 ---
@@ -571,7 +578,7 @@ summary    = ai.summarize(text)
 category   = ai.classify(email, ["spam", "work", "personal"])
 code       = ai.code("function that sorts a list of dicts by date")
 sentiment  = ai.sentiment(review)
-translated = ai.translate(text, to: "english")
+translated = ai.translate(text, "english")
 extracted  = ai.extract(invoice, ["number", "date", "total"])
 
 -- vision
@@ -618,7 +625,7 @@ b = quantum.collapse(c, 0)          -- measures one qubit and COLLAPSES the stat
 
 -- cosmos - N-body simulation
 u = cosmos.create(5)
-u = cosmos.run(u, steps: 100)
+u = cosmos.run(u, 100)              -- cosmos.run(universe, steps?, dt?)
 show cosmos.summary(u)
 ```
 
@@ -1017,8 +1024,9 @@ router.attach(r)   -- activates the router for the next serve
 -- does not match. `serve` always takes a port plus a handler function.
 serve 8080 fallback
 
--- router.match() can also be used manually
-match = router.match(r, "GET", "/users/42")
+-- router.match() can also be used manually. `match` is a keyword, so the
+-- result cannot be bound to a variable of that name.
+hit = router.match(r, "GET", "/users/42")
 -- {method: GET, path: /users/42, params: {id: 42}, handler: view_user}
 
 show router.routes(r)   -- lists every registered route
@@ -1103,7 +1111,7 @@ r = llm.chat("claude-haiku-4-5-20251001", msgs)
 vec = llm.embed("text-embedding-3-small", text)   -- List<float>
 
 -- Semantic search over a small corpus (no vector DB)
-results = embed.search("When was it founded?", documents, top: 3)
+results = embed.search("When was it founded?", documents, 3)
 -- → [{text: "...", score: 0.91, index: 4}, ...]
 
 -- Cosine similarity between two vectors
@@ -1423,7 +1431,7 @@ data  = excel.group(data, "region", { "sales": "sum", "count": yes })
 data  = excel.sort(data, "region")          -- single column
 data  = excel.join(data, targets, "region") -- single key
 stats = excel.stats(data, "sales")
-excel.write_styled("report.xlsx", data, { ... })
+excel.write_styled("report.xlsx", data, { titulo: "Q1", stripe: yes })
 
 -- Data plus a chart in one file, in a single call
 excel.write_styled("report.xlsx", data, {
@@ -1447,17 +1455,23 @@ excel.write_styled("report.xlsx", data, {
 
 ### The nine designed features
 
+Status below reflects what the compiler actually exposes, checked against
+`orion --builtins-json`.
+
 | # | Feature | Pandas equivalent | Status |
 |---|---|---|---|
-| 1 | `compute` | `df["col"].apply(fn)` | ✅ Complete |
+| 1 | `compute` | `df["col"].apply(fn)` | Designed, not implemented |
 | 2 | `sort`, multi-column | `sort_values(["a","b"])` | ✅ Complete |
 | 3 | `group`, multi-agg | `groupby().agg({...})` | ✅ Complete |
 | 4 | `long` | `df.melt(...)` | ✅ Complete |
 | 5 | `dates` + `date_parts` | `pd.to_datetime(...)` | ✅ Complete |
 | 6 | `join`, multi-key | `merge(on=["a","b"])` | ✅ Complete |
 | 7 | `chart` | openpyxl charts | ✅ Complete |
-| 8 | `formula` | `ws["A1"] = "=SUM(...)"` | ✅ Complete |
-| 9 | `sheet` builder | openpyxl cell-level | Next |
+| 8 | `formula` | `ws["A1"] = "=SUM(...)"` | Partial: the `excel.f` builder exists, `excel.formula` does not |
+| 9 | `sheet` builder | openpyxl cell-level | ✅ Complete |
+
+The sections below marked as not implemented describe the intended API, not
+current behaviour.
 
 ---
 
@@ -1467,10 +1481,18 @@ The lambda receives the whole row, so fields can reference each other. Several
 columns in a single pass.
 
 ```orion
+-- Two lambda forms exist: `params => body`, whose body may be an expression
+-- or a block, and `fn(params) { block }`. They do not mix: `fn row => ...`
+-- is a syntax error. `if` is a statement, not an expression, so a branching
+-- body needs a block with `return`.
 data = excel.compute(data, {
-    "bonus":    fn row => row["sales"] * 0.05,
-    "tier":     fn row => if row["sales"] > 90000 { "A" } or if row["sales"] > 70000 { "B" } else { "C" },
-    "on_track": fn row => row["sales"] >= row["target"]
+    "bonus":    row => row["sales"] * 0.05,
+    "tier":     row => {
+        if row["sales"] > 90000 { return "A" }
+        if row["sales"] > 70000 { return "B" }
+        return "C"
+    },
+    "on_track": row => row["sales"] >= row["target"]
 })
 ```
 
@@ -1514,24 +1536,20 @@ Turns wide format into long format. A clear name: `long`, not `melt`.
 -- Before (wide): region | CRM Pro | Analytics | Cloud
 -- After (long):  region | product | sales
 
-long_data = excel.long(wide_data,
-    keep: ["region", "seller"],
-    var:  "product",
-    val:  "sales"
-)
+-- excel.long(data, keep, var, val) — positional, like every module function
+long_data = excel.long(wide_data, ["region", "seller"], "product", "sales")
 ```
 
 ---
 
 ### F-5 `dates` and `date_parts`
 
-Integrated with the `datetime` module. Works in a `|>` pipeline.
+Integrated with the `datetime` module.
 
 ```orion
-data = data
-    |> excel.dates("sale_date", "DD/MM/YYYY")
-    |> excel.date_parts("sale_date", ["year", "month", "quarter", "weekday"])
-    |> excel.group("quarter", { "sales": ["sum", "avg"] })
+data = excel.dates(data, "sale_date", "DD/MM/YYYY")
+data = excel.date_parts(data, "sale_date", ["year", "month", "quarter", "weekday"])
+data = excel.group(data, "quarter", { "sales": ["sum", "avg"] })
 ```
 
 Formats: `"DD/MM/YYYY"` `"MM/DD/YYYY"` `"YYYY-MM-DD"` `"auto"`
@@ -1623,25 +1641,25 @@ excel.save(sheet, "custom_report.xlsx")
 
 ### The full pipeline, in a single API
 
+`excel.compute` is not implemented yet, so it is left out of this example.
+Each step rebinds `data`, since `|>` does not exist.
+
 ```orion
 use "excel" as excel
 
-excel.read("sales_q1.xlsx")
-    |> excel.filter("active", "==", yes)
-    |> excel.dates("sale_date", "DD/MM/YYYY")
-    |> excel.date_parts("sale_date", ["month", "quarter"])
-    |> excel.compute({
-        "bonus": fn row => row["sales"] * 0.05,
-        "tier":  fn row => if row["sales"] > 90000 { "A" } else { "B" }
-    })
-    |> excel.group("quarter", { "sales": ["sum", "avg"], "count": yes })
-    |> excel.sort("quarter+")
-    |> excel.write_styled("q1_report.xlsx", {
-        title:      "Q1 Sales Analysis",
-        stripe:     yes,
-        freeze:     yes,
-        autofilter: yes
-    })
+data = excel.read("sales_q1.xlsx")
+data = excel.filter(data, "active", "==", yes)
+data = excel.dates(data, "sale_date", "DD/MM/YYYY")
+data = excel.date_parts(data, "sale_date", ["month", "quarter"])
+by_quarter = excel.group(data, "quarter", { "sales": ["sum", "avg"], "count": yes })
+by_quarter = excel.sort(by_quarter, "quarter+")
+
+excel.write_styled("q1_report.xlsx", by_quarter, {
+    title:      "Q1 Sales Analysis",
+    stripe:     yes,
+    freeze:     yes,
+    autofilter: yes
+})
 
 excel.chart("q1_report.xlsx", by_quarter, {
     type:  "bars",

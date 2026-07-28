@@ -123,7 +123,12 @@ fn keywords(v: &mut Vec<BuiltinDoc>) {
     v.push(kw("await", "await expr", "Espera el resultado de una operación asíncrona.", "datos = await bajar(\"https://...\")"));
     v.push(kw("if", "if cond { ... } else { ... }", "Ejecuta un bloque si la condición es verdadera.", "if x > 0 { show(\"positivo\") }"));
     v.push(kw("else", "else { ... }", "Bloque alternativo de un `if`.", "if ok { a() } else { b() }"));
-    v.push(kw("elsif", "elsif cond { ... }", "Rama intermedia entre `if` y `else`.", "if x>0 { } elsif x<0 { } else { }"));
+    // La rama intermedia es `else if`, dos tokens: el parser acepta Else
+    // seguido de If. No existe una keyword `elsif`; ofrecerla en el
+    // autocompletado hacía que quien la aceptara escribiera código que el
+    // lexer rechaza, y con un error desorientador ("se esperaba clave de
+    // diccionario", porque el bloque se lee como un dict).
+    v.push(kw("else if", "else if cond { ... }", "Rama intermedia entre `if` y `else`.", "if x > 0 { } else if x < 0 { } else { }"));
     v.push(kw("for", "for item in coleccion { ... }", "Itera sobre una lista, string o rango.", "for t in tareas { show(t) }"));
     v.push(kw("while", "while cond { ... }", "Repite mientras la condición sea verdadera.", "while n > 0 { n = n - 1 }"));
     v.push(kw("in", "for x in xs", "Operador de pertenencia/iteración usado con `for`.", "for c in \"hola\" { show(c) }"));
