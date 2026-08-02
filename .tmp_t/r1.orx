@@ -1,0 +1,15 @@
+ficha = { "cabecera": {"a":1}, "totales": {"b":2} }
+attempt {
+    cab = ficha["cabecera"]
+    tot = ficha["totales"]
+    resumen = []
+    for par in [
+        ["Operación", cab["a"]],
+        ["Total",     tot["b"]]
+    ] {
+        resumen = push(resumen, { "Campo": par[0], "Valor": par[1] })
+    }
+    show resumen
+} handle e {
+    show "err"
+}

@@ -1,0 +1,4 @@
+d = { "k": 1 }
+cab = d
+lista = [ ["x", cab["k"]] ]
+for p in lista { show p[0] }

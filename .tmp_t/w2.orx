@@ -1,0 +1,3 @@
+d = { "k": 1 }
+cab = d
+for p in [ ["x", cab["k"]] ] { show p[0] }

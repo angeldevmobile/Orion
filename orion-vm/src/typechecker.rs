@@ -138,6 +138,10 @@ impl TypeChecker {
         self.collect_fn_sigs(stmts);
         self.infer_untyped_fn_returns(stmts);
         self.check_stmts(stmts, None);
+        // Cerrar el scope del programa: sin esto una variable muerta escrita en
+        // el nivel superior no se reportaba nunca, porque el aviso se emite al
+        // hacer pop y este scope se abre en `new()` y no se cerraba jamás.
+        self.pop_scope();
         self.issues
     }
 
@@ -304,6 +308,44 @@ impl TypeChecker {
     fn push_scope(&mut self) {
         self.scope_stack.push(HashMap::new());
         self.written_not_read.push(HashMap::new());
+    }
+
+    /// Scope de un bloque de control (if/while/for/attempt/with).
+    ///
+    /// En Orion estos bloques NO delimitan variables: lo que se asigna dentro
+    /// sigue vivo al salir, y solo las funciones abren un ámbito nuevo. Se
+    /// empuja igualmente un scope para poder alojar los nombres que el bloque
+    /// sí introduce por su cuenta (la variable de iteración, el error del
+    /// handler), pero al cerrarlo el resto se devuelve al scope de fuera.
+    fn push_block_scope(&mut self) {
+        self.push_scope();
+    }
+
+    /// Cierra un scope de bloque propagando hacia fuera lo que se asignó dentro.
+    ///
+    /// `propios` son los nombres que pertenecen al bloque y mueren con él. Todo
+    /// lo demás pasa al scope padre: su tipo, para que usarlo después no sea
+    /// "no definida", y su marca de escritura pendiente, para que una lectura
+    /// posterior la cancele y el aviso de variable muerta se decida al cerrar
+    /// la función, que es donde de verdad termina su vida.
+    fn pop_block_scope(&mut self, propios: &[&str]) {
+        let tipos = self.scope_stack.pop().unwrap_or_default();
+        let pend  = self.written_not_read.pop().unwrap_or_default();
+
+        if let Some(padre) = self.scope_stack.last_mut() {
+            for (n, t) in tipos {
+                if !propios.contains(&n.as_str()) {
+                    padre.entry(n).or_insert(t);
+                }
+            }
+        }
+        if let Some(padre) = self.written_not_read.last_mut() {
+            for (n, line) in pend {
+                if !propios.contains(&n.as_str()) {
+                    padre.entry(n).or_insert(line);
+                }
+            }
+        }
     }
 
     fn pop_scope(&mut self) {
@@ -520,13 +562,13 @@ impl TypeChecker {
                 self.current_line = *line;
                 self.current_col  = *col;
                 self.infer_type(cond);
-                self.push_scope();
+                self.push_block_scope();
                 self.check_stmts(then_body, return_type);
-                self.pop_scope();
+                self.pop_block_scope(&[]);
                 if !else_body.is_empty() {
-                    self.push_scope();
+                    self.push_block_scope();
                     self.check_stmts(else_body, return_type);
-                    self.pop_scope();
+                    self.pop_block_scope(&[]);
                 }
             }
 
@@ -534,7 +576,7 @@ impl TypeChecker {
                 self.current_line = *line;
                 self.current_col  = *col;
                 self.infer_type(cond);
-                self.push_scope();
+                self.push_block_scope();
                 self.check_stmts(body, return_type);
                 // Segunda pasada de solo-marcado: el bucle re-ejecuta, así que las
                 // lecturas de la condición y del cuerpo también ocurren DESPUÉS de
@@ -547,7 +589,7 @@ impl TypeChecker {
                 self.check_stmts(body, return_type);
                 self.suppress_write_tracking = false;
                 self.issues.truncate(saved);
-                self.pop_scope();
+                self.pop_block_scope(&[]);
             }
 
             Stmt::For { var, iter, body, line, col } => {
@@ -557,7 +599,7 @@ impl TypeChecker {
                 // igual que While hace con su condición
                 self.infer_type(iter);
                 let elem_type = self.infer_iter_elem_type(iter);
-                self.push_scope();
+                self.push_block_scope();
                 self.scope_set(var.clone(), elem_type);
                 if let Some(top) = self.written_not_read.last_mut() {
                     top.remove(var);
@@ -571,17 +613,17 @@ impl TypeChecker {
                 self.check_stmts(body, return_type);
                 self.suppress_write_tracking = false;
                 self.issues.truncate(saved);
-                self.pop_scope();
+                self.pop_block_scope(&[var.as_str()]);
             }
 
             Stmt::Attempt { body, handler, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;
-                self.push_scope();
+                self.push_block_scope();
                 self.check_stmts(body, return_type);
-                self.pop_scope();
+                self.pop_block_scope(&[]);
                 if let Some(Handler { err_name, body: hbody }) = handler {
-                    self.push_scope();
+                    self.push_block_scope();
                     self.scope_set(err_name.clone(), "string".to_string());
                     // El binding de error es implícito; `handle err { }` sin
                     // inspeccionar el error es idiomático → no avisar "nunca usado".
@@ -589,7 +631,7 @@ impl TypeChecker {
                         top.remove(err_name);
                     }
                     self.check_stmts(hbody, return_type);
-                    self.pop_scope();
+                    self.pop_block_scope(&[err_name.as_str()]);
                 }
             }
 
@@ -601,7 +643,7 @@ impl TypeChecker {
                 self.current_col  = *col;
                 self.check_call_types(init);
                 let ty = self.infer_type(init).unwrap_or_else(|| "any".into());
-                self.push_scope();
+                self.push_block_scope();
                 self.scope_set(var.clone(), ty);
                 // El handle puede usarse solo como recurso implícito (el free
                 // del desugar lo lee); no avisar "asignado pero nunca leído".
@@ -609,7 +651,8 @@ impl TypeChecker {
                     top.remove(var);
                 }
                 self.check_stmts(body, return_type);
-                self.pop_scope();
+                // Solo el handle muere con el bloque: lo demás sigue vivo fuera.
+                self.pop_block_scope(&[var.as_str()]);
             }
 
             Stmt::AssignIndex { object, index, value, line, col } => {
@@ -857,15 +900,75 @@ impl TypeChecker {
         }
     }
 
+    /// Marca como leídas las variables que aparecen dentro de `${…}`.
+    ///
+    /// Solo cancela el aviso de "asignada pero nunca usada": no se reporta nada
+    /// desde aquí, porque el contenido no está parseado y un nombre podría ser
+    /// un módulo, un método o una clave, no una variable.
+    fn mark_interpolated_reads(&mut self, lit: &str) {
+        let bytes = lit.as_bytes();
+        let mut i = 0;
+        while i + 1 < bytes.len() {
+            if bytes[i] != b'$' || bytes[i + 1] != b'{' {
+                i += 1;
+                continue;
+            }
+            i += 2;
+            // Recorre hasta el '}' que cierra, contando anidamiento.
+            let mut depth = 1usize;
+            let inicio = i;
+            while i < bytes.len() && depth > 0 {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => depth -= 1,
+                    _ => {}
+                }
+                if depth > 0 { i += 1; }
+            }
+            let dentro = &lit[inicio..i.min(lit.len())];
+
+            // Cada identificador del fragmento cuenta como posible lectura.
+            let mut ident = String::new();
+            for c in dentro.chars().chain(std::iter::once(' ')) {
+                if c.is_alphanumeric() || c == '_' {
+                    ident.push(c);
+                } else {
+                    if !ident.is_empty() && !ident.chars().next().unwrap().is_ascii_digit() {
+                        for usage in self.written_not_read.iter_mut().rev() {
+                            usage.remove(&ident);
+                        }
+                    }
+                    ident.clear();
+                }
+            }
+        }
+    }
+
     fn infer_type(&mut self, expr: &Expr) -> Option<String> {
         match expr {
             Expr::Int(_)       => Some("int".into()),
             Expr::Float(_)     => Some("float".into()),
-            Expr::Str(_)       => Some("string".into()),
+            // `"total: ${n}"` LEE n. La interpolación se resuelve en la VM y el
+            // literal llega entero hasta aquí, así que hay que mirar dentro
+            // para no dar por muerta una variable usada solo ahí.
+            Expr::Str(s)       => {
+                self.mark_interpolated_reads(s);
+                Some("string".into())
+            }
             Expr::Bool(_)      => Some("bool".into()),
             Expr::Null         => Some("any".into()),
-            Expr::List(_)      => Some("list".into()),
-            Expr::Dict(_)      => Some("dict".into()),
+            // Los elementos se visitan aunque el tipo del literal ya se sepa:
+            // dentro puede haber lecturas de variables (`[["a", cab["k"]]]`) y
+            // sin recorrerlas no quedaban registradas, lo que hacía pasar por
+            // muerta a una variable que sí se usa.
+            Expr::List(items)  => {
+                for e in items { self.infer_type(e); }
+                Some("list".into())
+            }
+            Expr::Dict(pairs)  => {
+                for (_, v) in pairs { self.infer_type(v); }
+                Some("dict".into())
+            }
             Expr::Lambda { .. } => Some("fn".into()),
 
             Expr::Ident(name)  => {
@@ -931,6 +1034,16 @@ impl TypeChecker {
             Expr::AttrAccess { object, attr: _ } => {
                 self.infer_type(object);
                 Some("any".into())
+            }
+
+            // `cab["clave"]` LEE `cab`. Sin este brazo la indexación caía en el
+            // comodín de abajo sin visitar nada, así que una variable usada solo
+            // a través de un índice pasaba por muerta. El tipo del elemento se
+            // deja sin determinar, como antes.
+            Expr::Index { object, index } => {
+                self.infer_type(object);
+                self.infer_type(index);
+                None
             }
 
             _ => None,

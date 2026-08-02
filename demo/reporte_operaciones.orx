@@ -132,13 +132,15 @@ gui.theme({
 })
 gui.panel("Orion · Reporte por operación", 1040, 760)
 
+-- Sin archivo se invita a abrirlo; con archivo, a cerrarlo.
 if ruta == "" {
-    gui.header("Reporte por operación", "Ningún archivo cargado",
-               { "press": "Examinar…", "event": "examinar" })
+    subtitulo = "Ningún archivo cargado"
+    accion    = { "press": "Examinar…", "event": "examinar" }
 } else {
-    gui.header("Reporte por operación", str(len(datos)) + " filas · " + ruta,
-               { "ghost": "Cerrar archivo", "event": "cerrar" })
+    subtitulo = str(len(datos)) + " filas · " + ruta
+    accion    = { "ghost": "Cerrar archivo", "event": "cerrar" }
 }
+gui.header("Reporte por operación", subtitulo, accion)
 gui.spacer(8)
 
 if msg_error != "" {
