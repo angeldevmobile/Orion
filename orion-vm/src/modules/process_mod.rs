@@ -30,6 +30,41 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             m.insert("pid".into(), EvalValue::Int(child as i64));
             Ok(EvalValue::Dict(m))
         }
+        // args() → lista de argumentos pasados al script
+        //
+        //   orion run reporte.orx datos.xlsx 913916
+        //   → ["datos.xlsx", "913916"]
+        //
+        // Se devuelve lo que va DESPUÉS del .orx, que es lo que el script pidió;
+        // los flags del propio Orion (--profile, --no-typecheck…) se descartan
+        // porque son del intérprete y no del programa.
+        "args" | "argumentos" => {
+            const FLAGS_ORION: &[&str] = &["--profile", "--no-typecheck", "--jit", "--debug"];
+            let todos: Vec<String> = std::env::args().collect();
+            let inicio = todos.iter().position(|a| a.ends_with(".orx") || a.ends_with(".orbc"));
+            let out: Vec<EvalValue> = match inicio {
+                Some(i) => todos[i + 1..].iter()
+                    .filter(|a| !FLAGS_ORION.contains(&a.as_str()))
+                    .map(|a| EvalValue::Str(a.clone()))
+                    .collect(),
+                None => vec![],
+            };
+            Ok(EvalValue::List(out))
+        }
+        // arg(n, default?) → argumento n-ésimo, o el default si no se pasó
+        "arg" | "argumento" => {
+            let idx = match args.first() {
+                Some(EvalValue::Int(n))   => *n as usize,
+                Some(EvalValue::Float(f)) => *f as usize,
+                _ => return Err("process.arg requiere (indice, default?)".into()),
+            };
+            let lista = match call("args", vec![])? {
+                EvalValue::List(l) => l,
+                _ => vec![],
+            };
+            Ok(lista.into_iter().nth(idx)
+                .unwrap_or_else(|| args.get(1).cloned().unwrap_or(EvalValue::Null)))
+        }
         // check_dependency(cmd) → bool
         "check_dependency" => {
             let cmd = one_str("check_dependency", args)?;

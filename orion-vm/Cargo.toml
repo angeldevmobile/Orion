@@ -46,6 +46,9 @@ base64       = "0.21"
 egui      = "0.29"
 eframe    = "0.29"
 egui_plot = "0.29"
+# Diálogos de archivo del sistema (gui.file_open / gui.file_save).
+# En Linux se usa el portal XDG en vez de GTK para no exigir sus -dev al compilar.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 
 # ── TUI terminal (orion-tui) ──────────────────────────────────────────────────
 ratatui   = "0.29"

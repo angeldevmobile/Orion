@@ -130,6 +130,10 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("process", "execute", "process.execute(command)", "{code, out, err}"));
     v.push(f("process", "execute_timed", "process.execute_timed(command)", "{code, out, err, elapsed}"));
     v.push(f("process", "background", "process.background(command)", "{pid}"));
+    v.push(f("process", "args", "process.args()", "Lista de argumentos pasados al script    orion run reporte.orx datos.xlsx 913916 → [\"datos.xlsx\", \"913916\"]  Se devuelve lo que va DESPUÉS del .orx, que es lo que el script pidió; los flags del propio Orion (no-typecheck…) se descartan porque son del intérprete y no del programa."));
+    v.push(f("process", "argumentos", "process.argumentos()", "Alias de process.args."));
+    v.push(f("process", "arg", "process.arg(n, default?)", "Argumento n-ésimo, o el default si no se pasó"));
+    v.push(f("process", "argumento", "process.argumento(n, default?)", "Alias de process.arg."));
     v.push(f("process", "check_dependency", "process.check_dependency(cmd)", "Bool"));
     v.push(f("process", "pid", "process.pid()", "PID del proceso actual"));
     v.push(f("process", "exit", "process.exit(code?)", "Termina el proceso"));
@@ -592,6 +596,12 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("gui", "spacer", "gui.spacer(…)", "Función del módulo gui."));
     v.push(f("gui", "banner", "gui.banner(…)", "Función del módulo gui."));
     v.push(f("gui", "avatar", "gui.avatar(…)", "Función del módulo gui."));
+    v.push(f("gui", "file_open", "gui.file_open(opts?)", "Ruta | null opts = { title, filter, extensions, dir, multiple }"));
+    v.push(f("gui", "abrir_archivo", "gui.abrir_archivo(opts?)", "Alias de gui.file_open."));
+    v.push(f("gui", "file_save", "gui.file_save(opts?)", "Ruta | null opts = { title, filter, extensions, dir, name }"));
+    v.push(f("gui", "guardar_archivo", "gui.guardar_archivo(opts?)", "Alias de gui.file_save."));
+    v.push(f("gui", "folder_open", "gui.folder_open(opts?)", "Ruta de carpeta | null"));
+    v.push(f("gui", "abrir_carpeta", "gui.abrir_carpeta(opts?)", "Alias de gui.folder_open."));
     v.push(f("gui", "pick", "gui.pick(…)", "Inputs avanzados"));
     v.push(f("gui", "slide", "gui.slide(…)", "Función del módulo gui."));
     v.push(f("gui", "progress", "gui.progress(valor, \"color?\") — acepta 0..1 o 0..100 (se normaliza).", "Función del módulo gui."));
@@ -601,6 +611,16 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("gui", "modal", "gui.modal(\"título\") … gui.end() — diálogo centrado (contenedor).", "Función del módulo gui."));
     v.push(f("gui", "card", "gui.card() / gui.row() / gui.col() / gui.zone()", "Abre el contenedor    gui.end() → cierra el último contenedor abierto gui.card({ width: N?, fill: bool? }) — config opcional. Por defecto la tarjeta llena el ancho de su celda; el dev puede fijar un width concreto o pedir fill:false para que se encoja al contenido."));
     v.push(f("gui", "row", "gui.row(…)", "Función del módulo gui."));
+    v.push(f("gui", "stats", "gui.stats([{label, value, caption?}, …], opts?) — fila de tarjetas. Cada item admite dict {label, value} o par [\"label\", \"value\"]. opts = { height, gap } y cualquier estilo de card.", "Función del módulo gui."));
+    v.push(f("gui", "metricas", "gui.metricas([{label, value, caption?}, …], opts?) — fila de tarjetas. Cada item admite dict {label, value} o par [\"label\", \"value\"]. opts = { height, gap } y cualquier estilo de card.", "Alias de gui.stats."));
+    v.push(f("gui", "header", "gui.header(titulo, subtitulo?, accion?) — encabezado de pantalla. El título y su subtítulo a la izquierda, un botón opcional pegado a la derecha. accion = { press | ghost, event? }.", "Función del módulo gui."));
+    v.push(f("gui", "encabezado", "gui.encabezado(titulo, subtitulo?, accion?) — encabezado de pantalla. El título y su subtítulo a la izquierda, un botón opcional pegado a la derecha. accion = { press | ghost, event? }.", "Alias de gui.header."));
+    v.push(f("gui", "section", "gui.section(titulo, accion?) … — card con cabecera y acción opcional. Deja la card ABIERTA: el contenido va después y se cierra con `with` o con gui.end(), igual que gui.card().", "Función del módulo gui."));
+    v.push(f("gui", "seccion", "gui.seccion(titulo, accion?) … — card con cabecera y acción opcional. Deja la card ABIERTA: el contenido va después y se cierra con `with` o con gui.end(), igual que gui.card().", "Alias de gui.section."));
+    v.push(f("gui", "chips", "gui.chips(lista, opts?) — fila de botones a partir de una lista. opts = { event: \"prefijo:\" , style… }. El evento de cada botón es el prefijo seguido del propio texto, que es el patrón con el que se manejan listas dinámicas (`gui.ev()` empieza por el prefijo).", "Función del módulo gui."));
+    v.push(f("gui", "opciones", "gui.opciones(lista, opts?) — fila de botones a partir de una lista. opts = { event: \"prefijo:\" , style… }. El evento de cada botón es el prefijo seguido del propio texto, que es el patrón con el que se manejan listas dinámicas (`gui.ev()` empieza por el prefijo).", "Alias de gui.chips."));
+    v.push(f("gui", "fields", "gui.fields([[\"Etiqueta\", \"valor\"], …], opts?) — rejilla etiqueta/valor. opts = { cols: 3, gap: 6 }. Con cols=1 sale una lista vertical.", "Función del módulo gui."));
+    v.push(f("gui", "campos", "gui.campos([[\"Etiqueta\", \"valor\"], …], opts?) — rejilla etiqueta/valor. opts = { cols: 3, gap: 6 }. Con cols=1 sale una lista vertical.", "Alias de gui.fields."));
     v.push(f("gui", "col", "gui.col(…)", "Función del módulo gui."));
     v.push(f("gui", "grid", "gui.grid(cols) … gui.end() — rejilla de N columnas, los hijos se acomodan por filas.", "Función del módulo gui."));
     v.push(f("gui", "tick", "gui.tick(ms)", "Dispara el evento \"tick\" cada ms milisegundos (re-corre el script)"));
@@ -612,6 +632,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("gui", "text_at", "gui.text_at(x, y, texto, size?, color?)", "Texto centrado en (x, y)"));
     v.push(f("gui", "sidebar", "gui.sidebar(ancho?) … gui.end() — barra lateral fija (SidePanel izquierdo). El ancho lo decide el dev; 220 es solo el fallback si no se indica.", "Función del módulo gui."));
     v.push(f("gui", "zone", "gui.zone(…)", "Función del módulo gui."));
+    v.push(f("gui", "free", "gui.free(handle)", "Cierra el contenedor abierto; lo llama `with`.  `with c = gui.card() { … }` desugar a una llamada a `gui.free` al salir del bloque, también si el cuerpo lanza un error. La pila de contenedores es LIFO, así que el del tope es siempre el de este bloque y el handle en sí no hace falta para nada."));
     v.push(f("gui", "end", "gui.end(…)", "Función del módulo gui."));
     v.push(f("gui", "val", "gui.val(\"key\", default)", "Lee del state_store o devuelve default"));
     v.push(f("gui", "set", "gui.set(\"key\", value)", "Escribe en state_store"));

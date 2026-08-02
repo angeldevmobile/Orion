@@ -1,0 +1,7 @@
+d = { "k": 1 }
+attempt {
+    cab = d
+    for par in [ ["a", cab["k"]] ] { show par[0] }
+} handle e {
+    show "err"
+}

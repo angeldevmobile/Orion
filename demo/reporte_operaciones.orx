@@ -1,0 +1,231 @@
+-- reporte_operaciones.orx — Consulta de operaciones desde un Excel.
+--
+--   orion run demo/reporte_operaciones.orx
+--
+-- Flujo: "Examinar" abre el diálogo del sistema, se elige el .xlsx, se escribe
+-- un número de operación y sale su ficha con todos los certificados. El botón
+-- "Exportar" guarda esa ficha en un Excel nuevo.
+--
+-- El script se re-ejecuta entero en cada evento (GUI reactiva), así que el
+-- Excel se lee UNA vez al abrirlo y queda cacheado en `state`: releerlo en
+-- cada clic costaría ~700 ms de tirón por interacción.
+use "gui" as gui
+use "state" as state
+use "excel" as xl
+use "formato" as fmt
+use "demo/reporte_lib" as rep
+
+MAX_SUGERENCIAS = 12
+
+-- ── Carga del archivo ───────────────────────────────────────────────────────
+
+if gui.pressed("examinar") {
+    elegido = gui.file_open({
+        "title":      "Elige el Excel de operaciones",
+        "filter":     "Libros de Excel",
+        "extensions": ["xlsx", "xls", "xlsm"]
+    })
+    -- null = el usuario canceló; se deja todo como estaba.
+    if elegido != null {
+        attempt {
+            datos = xl.read(elegido)
+            state.set("ruta",  elegido)
+            state.set("datos", datos)
+            state.set("error", "")
+            state.set("op", "")
+        } handle e {
+            state.set("error", "No se pudo leer el archivo: " + str(e))
+            state.set("datos", [])
+            state.set("ruta", "")
+        }
+    }
+}
+
+if gui.pressed("cerrar") {
+    state.set("ruta", "")
+    state.set("datos", [])
+    state.set("op", "")
+    state.set("error", "")
+}
+
+ruta  = state.get("ruta", "")
+datos = state.get("datos", [])
+msg_error = state.get("error", "")
+
+-- ── Búsqueda de la operación ────────────────────────────────────────────────
+
+-- El campo manda; los botones de sugerencia solo lo rellenan.
+if gui.pressed("buscar") {
+    state.set("op", gui.value("op"))
+}
+
+ev = gui.ev()
+if ev.starts_with("sug:") {
+    elegida = ev.slice(4, len(ev))
+    state.set("op", elegida)
+    gui.setval("op", elegida)
+}
+
+operacion = state.get("op", "")
+ficha = null
+if len(datos) > 0 and operacion != "" {
+    ficha = rep.ficha(datos, operacion)
+}
+
+-- ── Exportar la ficha ───────────────────────────────────────────────────────
+
+if gui.pressed("exportar") and ficha != null {
+    destino = gui.file_save({
+        "title":      "Guardar el reporte",
+        "filter":     "Libro de Excel",
+        "extensions": ["xlsx"],
+        "name":       "operacion_" + operacion + ".xlsx"
+    })
+    if destino != null {
+        attempt {
+            cab = ficha["cabecera"]
+            tot = ficha["totales"]
+            -- Hoja 1: los datos de la operación, en vertical para que se lea
+            -- como una ficha y no como una tabla de una sola fila.
+            resumen = []
+            for par in [
+                ["Operación",     cab["operacion"]],
+                ["Contratante",   cab["contratante"]],
+                ["Detalle",       cab["detalle"]],
+                ["Situación",     cab["situacion"]],
+                ["Gestión",       cab["gestion"]],
+                ["Observaciones", cab["observacion"]],
+                ["Estado",        cab["estado"]],
+                ["Riesgo",        cab["riesgo"]],
+                ["Garantía",      cab["garantia"]],
+                ["Aseguradora",   cab["aseguradora"]],
+                ["Moneda",        cab["moneda"]],
+                ["Certificados",  str(tot["certificados"])],
+                ["Suma asegurada", fmt.numero(tot["suma"], 2)],
+                ["Prima neta",     fmt.numero(tot["prima_neta"], 2)],
+                ["Prima bruta",    fmt.numero(tot["prima_bruta"], 2)]
+            ] {
+                resumen = push(resumen, { "Campo": par[0], "Valor": par[1] })
+            }
+
+            xl.write_multi(destino, {
+                "Resumen":      resumen,
+                "Certificados": ficha["certificados"]
+            })
+            state.set("error", "")
+            state.set("aviso", "Guardado en " + destino)
+        } handle e {
+            state.set("error", "No se pudo guardar: " + str(e))
+        }
+    }
+}
+aviso = state.get("aviso", "")
+
+-- ── Interfaz ────────────────────────────────────────────────────────────────
+
+gui.theme({
+    "accent":   "#2f6fed",
+    "bg":       "#0f1420",
+    "surface":  "#182031",
+    "rounding": 10,
+    "heading":  24
+})
+gui.panel("Orion · Reporte por operación", 1040, 760)
+
+if ruta == "" {
+    gui.header("Reporte por operación", "Ningún archivo cargado",
+               { "press": "Examinar…", "event": "examinar" })
+} else {
+    gui.header("Reporte por operación", str(len(datos)) + " filas · " + ruta,
+               { "ghost": "Cerrar archivo", "event": "cerrar" })
+}
+gui.spacer(8)
+
+if msg_error != "" {
+    gui.banner("Error", msg_error, "error")
+    gui.spacer(8)
+}
+
+if ruta == "" {
+    -- Estado inicial: sin archivo no hay nada más que ofrecer.
+    with c = gui.card() {
+        gui.spacer(20)
+        gui.heading("Elige un Excel para empezar")
+        gui.caption("Se abrirá el explorador de archivos de Windows.")
+        gui.spacer(12)
+        gui.press("Examinar…", { "event": "examinar" })
+        gui.spacer(20)
+    }
+} else {
+    with busq = gui.section("NÚMERO DE OPERACIÓN") {
+        with r = gui.row() {
+            with c = gui.col() { gui.field("Ej. 913916", { "id": "op" }) }
+            with c = gui.col() { gui.press("Buscar", { "event": "buscar" }) }
+        }
+
+        -- Sugerencias por prefijo mientras se escribe.
+        tecleado = gui.value("op")
+        if tecleado != "" and ficha == null {
+            sugerencias = rep.buscar_operaciones(datos, tecleado, MAX_SUGERENCIAS)
+            if len(sugerencias) > 0 {
+                gui.spacer(6)
+                gui.caption("¿Buscabas alguna de estas?")
+                gui.chips(sugerencias, { "event": "sug:" })
+            }
+        }
+    }
+    gui.spacer(10)
+
+    if operacion != "" and ficha == null {
+        gui.banner("Sin resultados",
+                   "La operación " + operacion + " no está en este archivo.",
+                   "warning")
+    }
+
+    if ficha != null {
+        cab = ficha["cabecera"]
+        tot = ficha["totales"]
+
+        gui.stats([
+            ["CERTIFICADOS",   str(tot["certificados"])],
+            ["SUMA ASEGURADA", fmt.numero(tot["suma"], 2)],
+            ["PRIMA BRUTA",    fmt.numero(tot["prima_bruta"], 2)]
+        ])
+        gui.spacer(10)
+
+        with datos_op = gui.section("DATOS DE LA OPERACIÓN") {
+            gui.fields([
+                ["OPERACIÓN",   cab["operacion"]],
+                ["CONTRATANTE", cab["contratante"]],
+                ["RIESGO",      cab["riesgo"]],
+                ["SITUACIÓN",   cab["situacion"]],
+                ["GESTIÓN",     cab["gestion"]],
+                ["GARANTÍA",    cab["garantia"]],
+                ["ESTADO",      cab["estado"]],
+                ["ASEGURADORA", cab["aseguradora"]],
+                ["MONEDA",      cab["moneda"]]
+            ], { "cols": 3 })
+
+            if cab["observacion"] != "—" {
+                gui.spacer(8)
+                gui.fields([["OBSERVACIONES", cab["observacion"]]], { "cols": 1 })
+            }
+        }
+        gui.spacer(10)
+
+        exportar = { "press": "Exportar a Excel", "event": "exportar" }
+        with certs = gui.section("CERTIFICADOS DE LA OPERACIÓN", exportar) {
+            gui.table(ficha["certificados"], {
+                "cols":   ["numero", "tipo", "bien", "suma", "prima_bruta", "desde", "hasta"],
+                "height": 260
+            })
+        }
+
+        if aviso != "" {
+            gui.spacer(8)
+            gui.caption(aviso)
+        }
+    }
+}
+
+gui.run()

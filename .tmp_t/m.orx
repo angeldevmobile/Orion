@@ -1,0 +1,7 @@
+d = { "k": 1 }
+attempt {
+    cab = d
+    show cab["k"]
+} handle e {
+    show "err"
+}

@@ -1,0 +1,173 @@
+-- reporte_lib.orx — Lógica del reporte de operaciones, sin interfaz.
+--
+-- Vive aparte para que el panel (demo/reporte_operaciones.orx) y cualquier
+-- automatización por línea de comandos usen exactamente el mismo cálculo.
+--
+-- El Excel de origen trae dos rarezas que hay que normalizar antes de mostrar
+-- nada: las fechas vienen como número de serie de Excel (45809, no 01/06/2025)
+-- y los huecos aparecen mezclados como "-" y como null.
+use "datetime" as dt
+use "strings" as st
+
+-- Los seriales de Excel cuentan días desde el 1899-12-30.
+EPOCA_EXCEL = "1899-12-30"
+
+-- Columnas cuyo valor es un serial de fecha y no un número de verdad.
+COLS_FECHA = [
+    "Fin Vig. Certificado",
+    "Ini Vig. Certificado",
+    "Fecha de Situación"
+]
+
+-- ── Normalización ───────────────────────────────────────────────────────────
+
+-- "-", "" y null son la misma ausencia de dato; se unifican en null para que
+-- la interfaz decida una sola vez cómo pintar un hueco.
+fn vacio(v) {
+    if v == null { return yes }
+    s = str(v).trim()
+    return s == "" or s == "-"
+}
+
+fn o_guion(v) {
+    if vacio(v) { return "—" }
+    return str(v)
+}
+
+-- Serial de Excel → dd/mm/aaaa.
+--
+-- El lector devuelve TODO el texto como string, así que un serial llega como
+-- "45809" y no como número: hay que mirar el contenido, no el tipo. Las dos
+-- formas conviven en el mismo archivo para la misma clase de dato, y una fecha
+-- ya escrita ("01/06/2025") se respeta tal cual.
+fn fecha_legible(v) {
+    if vacio(v) { return "—" }
+    s = str(v).trim()
+    if s.contains("/") { return s }
+    if !st.is_numeric(s) { return s }
+    dias = int(float(s))
+    if dias <= 0 { return "—" }
+    return dt.format(dt.add_days(EPOCA_EXCEL, dias), "%d/%m/%Y")
+}
+
+-- Importe. Los vacíos valen 0 para poder sumar sin excepciones, y un número
+-- que venga como texto se convierte en vez de perderse.
+fn num(v) {
+    if vacio(v) { return 0.0 }
+    s = str(v).trim()
+    if !st.is_numeric(s) { return 0.0 }
+    return float(s)
+}
+
+-- ── Búsqueda ────────────────────────────────────────────────────────────────
+
+-- Todas las filas de una operación. La comparación es por texto porque el
+-- número llega como int desde el Excel y como string desde el campo de la UI.
+fn filas_de(datos, operacion) {
+    objetivo = str(operacion).trim()
+    out = []
+    for r in datos {
+        if str(r["Num OPERACION"]).trim() == objetivo {
+            out = push(out, r)
+        }
+    }
+    return out
+}
+
+-- Lista de operaciones que empiezan por lo tecleado, para sugerir mientras
+-- se escribe. Se corta en `limite` porque son 1631 y no cabrían en pantalla.
+fn buscar_operaciones(datos, prefijo, limite) {
+    p = str(prefijo).trim()
+    vistas = {}
+    out = []
+    for r in datos {
+        if len(out) >= limite { return out }
+        k = str(r["Num OPERACION"]).trim()
+        if !vistas.has_key(k) {
+            if p == "" or k.starts_with(p) {
+                vistas[k] = 1
+                out = push(out, k)
+            }
+        }
+    }
+    return out
+}
+
+-- ── Ficha de una operación ──────────────────────────────────────────────────
+
+-- Cabecera: los datos que describen la operación en sí. Se toman de la primera
+-- fila porque son iguales en todas las de la misma operación.
+fn cabecera(filas) {
+    r = filas[0]
+    return {
+        "operacion":   str(r["Num OPERACION"]),
+        "contratante": o_guion(r["Un Contratante"]),
+        "detalle":     o_guion(r["DETALLE"]),
+        "situacion":   o_guion(r["SITUACION SEGURO"]),
+        "gestion":     o_guion(r["GESTION DE SEGURO"]),
+        "observacion": o_guion(r["OBSERVACIONES"]),
+        "estado":      o_guion(r["ESTADO"]),
+        "riesgo":      o_guion(r["RIESGO"]),
+        "garantia":    o_guion(r["Tipo de GAR"]),
+        "aseguradora": o_guion(r["ASEGURADORA"]),
+        "moneda":      o_guion(r["Moneda"])
+    }
+}
+
+-- Un certificado por fila, ya normalizado y listo para pintar.
+fn certificados(filas) {
+    out = []
+    for r in filas {
+        cert = {
+            "numero":      o_guion(r["Número Certificado"]),
+            "bien":        o_guion(r["Descripción del Bien"]),
+            "suma":        num(r["Suma Asegurada"]),
+            "prima_neta":  num(r["Prima Neta"]),
+            "prima_bruta": num(r["Prima Bruta"]),
+            "desde":       fecha_legible(r["Ini Vig. Certificado"]),
+            "hasta":       fecha_legible(r["Fin Vig. Certificado"]),
+            "situacion":   o_guion(r["Situación"]),
+            "compania":    o_guion(r["Cia de Seguros"]),
+            "tipo":        o_guion(r["Tipo Seguro"])
+        }
+        -- El bloque de vehículo solo aplica al riesgo VEHICULAR; en el resto
+        -- de filas viene entero en null y no tiene sentido mostrarlo.
+        if !vacio(r["Placa"]) {
+            cert["placa"]  = o_guion(r["Placa"])
+            cert["marca"]  = o_guion(r["Marca"])
+            cert["modelo"] = o_guion(r["Modelo"])
+            cert["anio"]   = o_guion(r["Año Fab."])
+        }
+        out = push(out, cert)
+    }
+    return out
+}
+
+fn totales(certs) {
+    suma = 0.0
+    neta = 0.0
+    bruta = 0.0
+    for c in certs {
+        suma  = suma + c["suma"]
+        neta  = neta + c["prima_neta"]
+        bruta = bruta + c["prima_bruta"]
+    }
+    return {
+        "certificados": len(certs),
+        "suma":         suma,
+        "prima_neta":   neta,
+        "prima_bruta":  bruta
+    }
+}
+
+-- Ficha completa: lo único que necesita la interfaz para pintar la operación.
+fn ficha(datos, operacion) {
+    filas = filas_de(datos, operacion)
+    if len(filas) == 0 { return null }
+    certs = certificados(filas)
+    return {
+        "cabecera":     cabecera(filas),
+        "certificados": certs,
+        "totales":      totales(certs)
+    }
+}

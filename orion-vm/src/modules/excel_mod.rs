@@ -1,5 +1,6 @@
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap as HashMap;
+use indexmap::IndexSet;
 use chrono::{Datelike, NaiveDate};
 use calamine::{Reader, open_workbook_auto, Data};
 use rust_xlsxwriter::{Workbook, Format, Color, Formula,
@@ -10,6 +11,26 @@ use rust_xlsxwriter::conditional_format::{
     ConditionalFormatFormula,
     ConditionalFormatText, ConditionalFormatTextRule,
 };
+
+/// Columnas de una hoja, en el orden en que las escribió el developer.
+///
+/// Se recorren TODAS las filas, no solo la primera: es normal que un campo
+/// opcional aparezca a mitad de la lista (los datos de vehículo de un
+/// certificado, por ejemplo), y mirando solo la primera fila esa columna se
+/// perdía entera. Al ser un IndexSet, el orden es el de aparición y no el
+/// alfabético — el dict de Orion preserva el orden de inserción y ordenarlo
+/// aquí descartaba una decisión deliberada de quien escribió el reporte.
+fn collect_headers(rows: &[EvalValue]) -> Vec<String> {
+    let mut cols: IndexSet<String> = IndexSet::new();
+    for r in rows {
+        if let EvalValue::Dict(m) = r {
+            for k in m.keys() {
+                cols.insert(k.clone());
+            }
+        }
+    }
+    cols.into_iter().collect()
+}
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
@@ -112,13 +133,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             // Extraer cabeceras antes de crear el workbook
             let has_dicts = matches!(rows.first(), Some(EvalValue::Dict(_)));
             let headers: Vec<String> = if has_dicts {
-                if let Some(EvalValue::Dict(m)) = rows.first() {
-                    let mut h: Vec<String> = m.keys().cloned().collect();
-                    h.sort();
-                    h
-                } else {
-                    vec![]
-                }
+                collect_headers(&rows)
             } else {
                 match rows.first() {
                     Some(EvalValue::List(_)) | None => vec![],
@@ -192,8 +207,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .set_background_color(Color::RGB(0x2D5F8A))
                 .set_font_color(Color::White);
 
-            let mut sheet_names: Vec<String> = sheets_map.keys().cloned().collect();
-            sheet_names.sort();
+            // Las hojas salen en el orden en que el developer las escribió.
+            let sheet_names: Vec<String> = sheets_map.keys().cloned().collect();
 
             for sheet_name in &sheet_names {
                 let rows = match sheets_map.get(sheet_name) {
@@ -202,11 +217,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 };
 
                 let headers: Vec<String> = match rows.first() {
-                    Some(EvalValue::Dict(m)) => {
-                        let mut h: Vec<String> = m.keys().cloned().collect();
-                        h.sort();
-                        h
-                    }
+                    Some(EvalValue::Dict(_)) => collect_headers(&rows),
                     _ => vec![],
                 };
 

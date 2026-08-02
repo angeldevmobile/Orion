@@ -4,6 +4,7 @@ pub mod state;
 pub mod theme;
 
 use std::sync::atomic::Ordering;
+use indexmap::IndexMap;
 use crate::eval_value::EvalValue;
 use components::{Component, Style, ChartKind, ChartConfig, Shape};
 use state::{with_state, IS_WATCH_MODE, IS_REACTIVE_MODE, get_script_path};
@@ -96,6 +97,56 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             push(Component::Avatar { text, size, style })
         }
 
+        //    Diálogos de archivo del sistema
+        //
+        //    Abren el selector nativo y bloquean hasta que el usuario responde,
+        //    igual que cualquier app de escritorio. Devuelven la ruta elegida o
+        //    null si se cancela — nunca un error, cancelar no es un fallo.
+
+        // file_open(opts?) → ruta | null
+        // opts = { title, filter, extensions, dir, multiple }
+        "file_open" | "abrir_archivo" => {
+            let cfg = dict_opt(&args, 0);
+            let dialog = file_dialog(&cfg);
+            if cfg_bool_opt(&cfg, "multiple").unwrap_or(false) {
+                return Ok(match dialog.pick_files() {
+                    Some(paths) => EvalValue::List(
+                        paths.iter()
+                            .map(|p| EvalValue::Str(p.display().to_string()))
+                            .collect()
+                    ),
+                    None => EvalValue::List(vec![]),
+                });
+            }
+            Ok(match dialog.pick_file() {
+                Some(p) => EvalValue::Str(p.display().to_string()),
+                None    => EvalValue::Null,
+            })
+        }
+
+        // file_save(opts?) → ruta | null
+        // opts = { title, filter, extensions, dir, name }
+        "file_save" | "guardar_archivo" => {
+            let cfg = dict_opt(&args, 0);
+            let mut dialog = file_dialog(&cfg);
+            if let Some(name) = cfg_str(&cfg, "name").or_else(|| cfg_str(&cfg, "nombre")) {
+                dialog = dialog.set_file_name(name);
+            }
+            Ok(match dialog.save_file() {
+                Some(p) => EvalValue::Str(p.display().to_string()),
+                None    => EvalValue::Null,
+            })
+        }
+
+        // folder_open(opts?) → ruta de carpeta | null
+        "folder_open" | "abrir_carpeta" => {
+            let cfg = dict_opt(&args, 0);
+            Ok(match file_dialog(&cfg).pick_folder() {
+                Some(p) => EvalValue::Str(p.display().to_string()),
+                None    => EvalValue::Null,
+            })
+        }
+
         //    Inputs avanzados
         "pick" => {
             let id = str_arg(&args, 0).unwrap_or_else(|| with_state(|s| format!("pick_{}", s.components.len())));
@@ -170,6 +221,159 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "row" => {
             with_state(|s| s.container_stack.push(("row".into(), s.components.len())));
             Ok(EvalValue::Null)
+        }
+
+        //    Composiciones de alto nivel
+        //
+        //    Son los dos arreglos que aparecen en casi cualquier panel y que a
+        //    mano cuestan una veintena de líneas de row/col/card/end anidados.
+        //    Emiten exactamente los mismos componentes que se escribirían a
+        //    mano, así que el tema y el estilo siguen siendo los del developer.
+
+        // gui.stats([{label, value, caption?}, …], opts?) — fila de tarjetas.
+        // Cada item admite dict {label, value} o par ["label", "value"].
+        // opts = { height, gap } y cualquier estilo de card.
+        "stats" | "metricas" => {
+            let items = list_arg(&args, 0, "stats")?;
+            if items.is_empty() { return Ok(EvalValue::Null); }
+            let cfg = dict_opt(&args, 1);
+            let card_cfg = args.get(1).cloned().unwrap_or(EvalValue::Null);
+            let _ = &cfg;
+
+            call("row", vec![])?;
+            for it in &items {
+                let (label, value, extra) = tri_texto(it);
+                call("col", vec![])?;
+                if matches!(card_cfg, EvalValue::Dict(_)) {
+                    call("card", vec![card_cfg.clone()])?;
+                } else {
+                    call("card", vec![])?;
+                }
+                call("caption", vec![EvalValue::Str(label)])?;
+                call("heading", vec![EvalValue::Str(value)])?;
+                if let Some(e) = extra {
+                    call("caption", vec![EvalValue::Str(e)])?;
+                }
+                call("end", vec![])?;  // card
+                call("end", vec![])?;  // col
+            }
+            call("end", vec![])       // row
+        }
+
+        // gui.header(titulo, subtitulo?, accion?) — encabezado de pantalla.
+        // El título y su subtítulo a la izquierda, un botón opcional pegado a
+        // la derecha. accion = { press | ghost, event? }.
+        "header" | "encabezado" => {
+            let titulo = req_str(&args, 0, "header")?;
+            let sub    = args.get(1).and_then(|v| match v {
+                EvalValue::Str(s) if !s.is_empty() => Some(s.clone()),
+                _ => None,
+            });
+            let accion = args.iter().find_map(|a| match a {
+                EvalValue::Dict(_) => Some(a.clone()),
+                _ => None,
+            });
+
+            call("row", vec![])?;
+            call("col", vec![])?;
+            call("heading", vec![EvalValue::Str(titulo)])?;
+            if let Some(s) = sub {
+                call("caption", vec![EvalValue::Str(s)])?;
+            }
+            call("end", vec![])?;
+            if let Some(a) = accion {
+                call("col", vec![])?;
+                boton_de(&a)?;
+                call("end", vec![])?;
+            }
+            call("end", vec![])
+        }
+
+        // gui.section(titulo, accion?) … — card con cabecera y acción opcional.
+        // Deja la card ABIERTA: el contenido va después y se cierra con `with`
+        // o con gui.end(), igual que gui.card().
+        "section" | "seccion" => {
+            let titulo = req_str(&args, 0, "section")?;
+            let accion = args.iter().skip(1).find_map(|a| match a {
+                EvalValue::Dict(_) => Some(a.clone()),
+                _ => None,
+            });
+
+            call("card", vec![])?;
+            match accion {
+                Some(a) => {
+                    call("row", vec![])?;
+                    call("col", vec![])?;
+                    call("caption", vec![EvalValue::Str(titulo)])?;
+                    call("end", vec![])?;
+                    call("col", vec![])?;
+                    boton_de(&a)?;
+                    call("end", vec![])?;
+                    call("end", vec![])?;
+                    call("spacer", vec![EvalValue::Float(6.0)])?;
+                }
+                None => {
+                    call("caption", vec![EvalValue::Str(titulo)])?;
+                    call("spacer", vec![EvalValue::Float(4.0)])?;
+                }
+            }
+            Ok(EvalValue::Null)
+        }
+
+        // gui.chips(lista, opts?) — fila de botones a partir de una lista.
+        // opts = { event: "prefijo:" , style… }. El evento de cada botón es el
+        // prefijo seguido del propio texto, que es el patrón con el que se
+        // manejan listas dinámicas (`gui.ev()` empieza por el prefijo).
+        "chips" | "opciones" => {
+            let items = list_arg(&args, 0, "chips")?;
+            if items.is_empty() { return Ok(EvalValue::Null); }
+            let cfg    = dict_opt(&args, 1);
+            let prefijo = cfg_str(&cfg, "event").or_else(|| cfg_str(&cfg, "ev")).unwrap_or_default();
+            let solido = cfg_bool_opt(&cfg, "solid").unwrap_or(false);
+
+            call("row", vec![])?;
+            for it in &items {
+                let etiqueta = texto(it);
+                let mut estilo: IndexMap<String, EvalValue> = match &cfg {
+                    Some(m) => m.clone(),
+                    None    => IndexMap::new(),
+                };
+                estilo.insert("event".into(), EvalValue::Str(format!("{prefijo}{etiqueta}")));
+                let args_btn = vec![EvalValue::Str(etiqueta), EvalValue::Dict(estilo)];
+                if solido { call("press", args_btn)?; } else { call("ghost", args_btn)?; }
+            }
+            call("end", vec![])
+        }
+
+        // gui.fields([["Etiqueta", "valor"], …], opts?) — rejilla etiqueta/valor.
+        // opts = { cols: 3, gap: 6 }. Con cols=1 sale una lista vertical.
+        "fields" | "campos" => {
+            let items = list_arg(&args, 0, "fields")?;
+            if items.is_empty() { return Ok(EvalValue::Null); }
+            let cfg  = dict_opt(&args, 1);
+            let cols = cfg_f32_opt(&cfg, "cols").unwrap_or(3.0).max(1.0) as usize;
+            let gap  = cfg_f32_opt(&cfg, "gap").unwrap_or(6.0);
+
+            // Reparto por columnas: se llena la primera columna hasta agotar su
+            // cuota antes de pasar a la siguiente, de modo que al leer en
+            // vertical los campos salen en el orden en que se escribieron.
+            let por_col = items.len().div_ceil(cols);
+
+            call("row", vec![])?;
+            for c in 0..cols {
+                let desde = c * por_col;
+                if desde >= items.len() { break; }
+                let hasta = ((c + 1) * por_col).min(items.len());
+                call("col", vec![])?;
+                for (i, it) in items[desde..hasta].iter().enumerate() {
+                    let (label, value, _) = tri_texto(it);
+                    if i > 0 { call("spacer", vec![EvalValue::Float(gap as f64)])?; }
+                    call("caption", vec![EvalValue::Str(label)])?;
+                    call("text",    vec![EvalValue::Str(value)])?;
+                }
+                call("end", vec![])?;  // col
+            }
+            call("end", vec![])        // row
         }
         "col" => {
             with_state(|s| s.container_stack.push(("col".into(), s.components.len())));
@@ -274,6 +478,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             });
             Ok(EvalValue::Null)
         }
+        // free(handle) → cierra el contenedor abierto; lo llama `with`.
+        //
+        // `with c = gui.card() { … }` desugar a una llamada a `gui.free` al
+        // salir del bloque, también si el cuerpo lanza un error. La pila de
+        // contenedores es LIFO, así que el del tope es siempre el de este
+        // bloque y el handle en sí no hace falta para nada.
+        "free" => call("end", vec![]),
+
         "end" => {
             with_state(|s| {
                 if let Some((kind, start)) = s.container_stack.pop() {
@@ -664,6 +876,100 @@ fn parse_rgb_tag(s: &str) -> Option<[u8; 3]> {
 // ── Helpers para gui.table / gui.chart ──────────────────────────────────────
 
 type CfgMap = Option<indexmap::IndexMap<String, EvalValue>>;
+
+/// Emite el botón descrito por `{ press | ghost, event? }`.
+///
+/// Lo comparten `header` y `section`: en ambos la acción es un único botón
+/// alineado a la derecha, y el resto de claves del dict pasan como estilo.
+fn boton_de(accion: &EvalValue) -> Result<EvalValue, String> {
+    let EvalValue::Dict(m) = accion else { return Ok(EvalValue::Null) };
+    let (etiqueta, solido) = match m.get("press").or_else(|| m.get("boton")) {
+        Some(v) => (texto(v), true),
+        None => match m.get("ghost") {
+            Some(v) => (texto(v), false),
+            None    => return Ok(EvalValue::Null),
+        },
+    };
+    let args = vec![EvalValue::Str(etiqueta), EvalValue::Dict(m.clone())];
+    if solido { call("press", args) } else { call("ghost", args) }
+}
+
+/// Lista obligatoria en la posición `i`.
+fn list_arg(args: &[EvalValue], i: usize, fn_name: &str) -> Result<Vec<EvalValue>, String> {
+    match args.get(i) {
+        Some(EvalValue::List(l)) => Ok(l.clone()),
+        _ => Err(format!("gui.{fn_name} requiere una lista como primer argumento")),
+    }
+}
+
+/// Texto plano de un valor, sin la representación de depuración.
+fn texto(v: &EvalValue) -> String {
+    match v {
+        EvalValue::Str(s) => s.clone(),
+        other             => format!("{other}"),
+    }
+}
+
+/// (etiqueta, valor, extra) de un item de `stats`/`fields`.
+///
+/// Se aceptan las dos formas que resultan naturales al escribir un panel: el
+/// par posicional `["Etiqueta", valor]` y el dict `{label, value}`. En el dict
+/// se admiten alias en español y las claves `Campo`/`Valor`, que son las que
+/// produce un reporte leído de Excel.
+fn tri_texto(v: &EvalValue) -> (String, String, Option<String>) {
+    match v {
+        EvalValue::List(l) => (
+            l.first().map(texto).unwrap_or_default(),
+            l.get(1).map(texto).unwrap_or_default(),
+            l.get(2).map(texto),
+        ),
+        EvalValue::Dict(m) => {
+            let pick = |keys: &[&str]| -> Option<String> {
+                keys.iter().find_map(|k| m.get(*k).map(texto))
+            };
+            (
+                pick(&["label", "etiqueta", "Campo", "campo", "name", "nombre"]).unwrap_or_default(),
+                pick(&["value", "valor", "Valor"]).unwrap_or_default(),
+                pick(&["caption", "nota", "hint"]),
+            )
+        }
+        other => (texto(other), String::new(), None),
+    }
+}
+
+/// Construye el diálogo nativo a partir de las opciones del developer.
+///
+/// `extensions` acepta una lista (`["xlsx", "xls"]`) o una cadena suelta; el
+/// punto inicial es opcional para que dé igual escribir "xlsx" o ".xlsx".
+fn file_dialog(cfg: &CfgMap) -> rfd::FileDialog {
+    let mut d = rfd::FileDialog::new();
+
+    if let Some(t) = cfg_str(cfg, "title").or_else(|| cfg_str(cfg, "titulo")) {
+        d = d.set_title(t);
+    }
+    if let Some(dir) = cfg_str(cfg, "dir").or_else(|| cfg_str(cfg, "carpeta")) {
+        d = d.set_directory(dir);
+    }
+
+    let exts: Vec<String> = match cfg.as_ref()
+        .and_then(|m| m.get("extensions").or_else(|| m.get("extensiones")))
+    {
+        Some(EvalValue::List(l)) => l.iter().filter_map(|v| match v {
+            EvalValue::Str(s) => Some(s.trim_start_matches('.').to_string()),
+            _ => None,
+        }).collect(),
+        Some(EvalValue::Str(s)) => vec![s.trim_start_matches('.').to_string()],
+        _ => Vec::new(),
+    };
+    if !exts.is_empty() {
+        let label = cfg_str(cfg, "filter")
+            .or_else(|| cfg_str(cfg, "filtro"))
+            .unwrap_or_else(|| "Archivos".into());
+        let refs: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
+        d = d.add_filter(label, &refs);
+    }
+    d
+}
 
 fn dict_opt(args: &[EvalValue], i: usize) -> CfgMap {
     match args.get(i) {
