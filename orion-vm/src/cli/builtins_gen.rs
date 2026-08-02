@@ -275,18 +275,18 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("quantum", "free", "quantum.free(id)", "Libera el circuito; yes si existía"));
     // cosmos (cosmos_mod.rs)
     v.push(f("cosmos", "body", "cosmos.body(name, mass, x, y, z, vx, vy, vz)", "Dict body"));
-    v.push(f("cosmos", "random_star", "cosmos.random_star()", "Body con masa y posición aleatorias"));
-    v.push(f("cosmos", "star", "cosmos.star()", "Alias de cosmos.random_star."));
-    v.push(f("cosmos", "create", "cosmos.create(n?)", "Universo con n cuerpos aleatorios"));
-    v.push(f("cosmos", "universe", "cosmos.universe(n?)", "Alias de cosmos.create."));
-    v.push(f("cosmos", "step", "cosmos.step(universe, dt?)", "Universo actualizado"));
-    v.push(f("cosmos", "run", "cosmos.run(universe, steps?, dt?)", "Universo final"));
-    v.push(f("cosmos", "summary", "cosmos.summary(universe)", "{time, bodies_count, total_energy}"));
-    v.push(f("cosmos", "gravity", "cosmos.gravity(b1, b2, G?)", "Fuerza [fx, fy, fz]"));
-    v.push(f("cosmos", "energy", "cosmos.energy(universe)", "{kinetic, potential, total}"));
+    v.push(f("cosmos", "random_star", "cosmos.random_star(opts?)", "Body con masa y posición aleatorias opts = { mass_min, mass_max, pos_min, pos_max, vel_min, vel_max, seed }"));
+    v.push(f("cosmos", "star", "cosmos.star(opts?)", "Alias de cosmos.random_star."));
+    v.push(f("cosmos", "create", "cosmos.create(n?, opts?)", "Universo con n cuerpos aleatorios opts = { mass_min, mass_max, pos_min, pos_max, vel_min, vel_max, seed }"));
+    v.push(f("cosmos", "universe", "cosmos.universe(n?, opts?)", "Alias de cosmos.create."));
+    v.push(f("cosmos", "step", "cosmos.step(universe, dt?, opts?)", "Universo actualizado opts = { g, softening }"));
+    v.push(f("cosmos", "run", "cosmos.run(universe, steps?, dt?, opts?)", "Universo final"));
+    v.push(f("cosmos", "summary", "cosmos.summary(universe)", "{time, bodies}"));
+    v.push(f("cosmos", "gravity", "cosmos.gravity(b1, b2, G|opts?)", "Fuerza [fx, fy, fz] El tercer argumento admite un número (G) o un Dict { g, softening }."));
+    v.push(f("cosmos", "energy", "cosmos.energy(universe, G|opts?)", "{kinetic, potential, total}"));
     v.push(f("cosmos", "distance", "cosmos.distance(b1, b2)", "F64"));
-    v.push(f("cosmos", "stardust", "cosmos.stardust(n?)", "Lista de n puntos 3D aleatorios"));
-    v.push(f("cosmos", "dust", "cosmos.dust(n?)", "Alias de cosmos.stardust."));
+    v.push(f("cosmos", "stardust", "cosmos.stardust(n?, opts?)", "Lista de n puntos 3D aleatorios opts = { min, max, seed }"));
+    v.push(f("cosmos", "dust", "cosmos.dust(n?, opts?)", "Alias de cosmos.stardust."));
     // timewarp (timewarp_mod.rs)
     v.push(f("timewarp", "now", "timewarp.now()", "ISO timestamp"));
     v.push(f("timewarp", "timestamp", "timewarp.timestamp()", "Unix seconds"));
@@ -347,16 +347,18 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("vision", "pixels_sample", "vision.pixels_sample(path, n?)", "Lista de n píxeles [r, g, b, a] muestreados"));
     v.push(f("vision", "sample_pixels", "vision.sample_pixels(path, n?)", "Alias de vision.pixels_sample."));
     // insight (insight_mod.rs)
-    v.push(f("insight", "analyze", "insight.analyze(path, question?)", "Análisis con AI Vision (Claude o GPT-4o)"));
-    v.push(f("insight", "metadata", "insight.metadata(path)", "{width, height, density, orientation, contrast}"));
-    v.push(f("insight", "extract_metadata", "insight.extract_metadata(path)", "Alias de insight.metadata."));
-    v.push(f("insight", "summarize", "insight.summarize(path)", "Resumen estructurado del documento"));
-    v.push(f("insight", "detect_tables", "insight.detect_tables(path)", "{detected: bool, confidence: float}"));
-    v.push(f("insight", "extract_tables", "insight.extract_tables(path)", "Alias de insight.detect_tables."));
-    v.push(f("insight", "detect_signatures", "insight.detect_signatures(path)", "{detected: bool, confidence: float}"));
-    v.push(f("insight", "extract_signatures", "insight.extract_signatures(path)", "Alias de insight.detect_signatures."));
-    v.push(f("insight", "pixel_density", "insight.pixel_density(path)", "Float (proporción de píxeles oscuros)"));
-    v.push(f("insight", "density", "insight.density(path)", "Alias de insight.pixel_density."));
+    v.push(f("insight", "analyze", "insight.analyze(path, question?, opts?)", "Análisis con AI Vision opts = { model, max_tokens, provider }"));
+    v.push(f("insight", "metadata", "insight.metadata(path, opts?)", "{width, height, density, contrast, orientation, threshold}"));
+    v.push(f("insight", "extract_metadata", "insight.extract_metadata(path, opts?)", "Alias de insight.metadata."));
+    v.push(f("insight", "summarize", "insight.summarize(path, opts?)", "Resumen estructurado del documento"));
+    v.push(f("insight", "detect_tables", "insight.detect_tables(path, opts?)", "{detected, confidence, h_lines, v_lines, threshold} opts = { threshold, line_ratio, gap_tolerance, line_merge, min_lines }"));
+    v.push(f("insight", "extract_tables", "insight.extract_tables(path, opts?)", "Alias de insight.detect_tables."));
+    v.push(f("insight", "detect_signatures", "insight.detect_signatures(path, opts?)", "{detected, confidence, density, threshold, box?} opts = { threshold, region_from, region_to, min_stroke_ratio, min_width_ratio, max_fill, min_aspect, max_aspect, min_height_ratio, max_straightness }"));
+    v.push(f("insight", "extract_signatures", "insight.extract_signatures(path, opts?)", "Alias de insight.detect_signatures."));
+    v.push(f("insight", "pixel_density", "insight.pixel_density(path, opts?)", "Float (proporción de píxeles con tinta)"));
+    v.push(f("insight", "density", "insight.density(path, opts?)", "Alias de insight.pixel_density."));
+    v.push(f("insight", "threshold", "insight.threshold(path)", "Int  — el umbral que Otsu calcula para esta imagen"));
+    v.push(f("insight", "umbral", "insight.umbral(path)", "Alias de insight.threshold."));
     v.push(f("insight", "to_base64", "insight.to_base64(path)", "String base64 JPEG (para enviar a AI)"));
     // csv (csv_mod.rs)
     v.push(f("csv", "read", "csv.read(path)", "List of dicts read(path, delimiter) → list of dicts con delimitador custom"));

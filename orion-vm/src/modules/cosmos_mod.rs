@@ -1,8 +1,33 @@
 /// Orion Cosmos — simulación gravitacional en Rust puro.
 /// Cuerpos como Dicts, universo como Dict con lista de cuerpos.
+///
+/// Ninguna constante de la simulación está fijada: G, el softening y los rangos
+/// de generación se pasan en un Dict de opciones. Los valores por defecto son
+/// los del SI en el vacío, pero nada impide simular otras escalas o unidades.
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap as HashMap;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
+
+/// Constante de gravitación universal en unidades SI (m³·kg⁻¹·s⁻²).
+/// Solo es el valor por defecto: `opts["g"]` lo reemplaza.
+const G_SI: f64 = 6.674e-11;
+
+/// Parámetros de la física, leídos de las opciones.
+#[derive(Clone, Copy)]
+struct Physics {
+    /// Constante de gravitación.
+    g: f64,
+    /// Softening de Plummer: F = G·m₁·m₂ / (r² + ε²). Evita que la fuerza
+    /// diverja cuando dos cuerpos se acercan, sin descartar la interacción.
+    softening: f64,
+}
+
+impl Default for Physics {
+    fn default() -> Self {
+        Physics { g: G_SI, softening: 0.0 }
+    }
+}
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
@@ -18,67 +43,68 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let vz = if args.len() > 7 { to_f64(&args[7])? } else { 0.0 };
             Ok(make_body(&name, mass, [x,y,z], [vx,vy,vz]))
         }
-        // random_star() → body con masa y posición aleatorias
+        // random_star(opts?) → body con masa y posición aleatorias
+        // opts = { mass_min, mass_max, pos_min, pos_max, vel_min, vel_max, seed }
         "random_star" | "star" => {
-            let mut rng = rand::thread_rng();
+            let r = SpawnRange::from(args.first())?;
+            let mut rng = r.rng();
             let name = format!("Star_{}", rng.gen_range(1000..9999));
-            let mass = rng.gen_range(1e20..1e30);
-            let pos  = [rng.gen_range(-1e5..1e5), rng.gen_range(-1e5..1e5), rng.gen_range(-1e5..1e5)];
-            let vel  = [rng.gen_range(-10.0..10.0), rng.gen_range(-10.0..10.0), rng.gen_range(-10.0..10.0)];
-            Ok(make_body(&name, mass, pos, vel))
+            Ok(spawn_body(&name, &r, &mut *rng))
         }
-        // create(n?) → universo con n cuerpos aleatorios
+        // create(n?, opts?) → universo con n cuerpos aleatorios
+        // opts = { mass_min, mass_max, pos_min, pos_max, vel_min, vel_max, seed }
         "create" | "universe" => {
             let n = if args.is_empty() { 5 } else { to_i64(&args[0])? as usize };
-            let mut rng = rand::thread_rng();
-            let bodies: Vec<EvalValue> = (0..n).map(|i| {
-                let name = format!("Star_{}", i + 1);
-                let mass = rng.gen_range(1e20..1e30);
-                let pos  = [rng.gen_range(-1e5..1e5f64), rng.gen_range(-1e5..1e5), rng.gen_range(-1e5..1e5)];
-                let vel  = [rng.gen_range(-10.0..10.0f64), rng.gen_range(-10.0..10.0), rng.gen_range(-10.0..10.0)];
-                make_body(&name, mass, pos, vel)
-            }).collect();
+            let r = SpawnRange::from(args.get(1))?;
+            let mut rng = r.rng();
+            let bodies: Vec<EvalValue> = (0..n)
+                .map(|i| spawn_body(&format!("Star_{}", i + 1), &r, &mut *rng))
+                .collect();
             let mut m = HashMap::new();
             m.insert("bodies".into(), EvalValue::List(bodies));
             m.insert("time".into(),   EvalValue::Float(0.0));
             Ok(EvalValue::Dict(m))
         }
-        // step(universe, dt?) → universo actualizado
+        // step(universe, dt?, opts?) → universo actualizado
+        // opts = { g, softening }
         "step" => {
-            if args.is_empty() { return Err("cosmos.step requiere (universe, dt?)".into()); }
+            if args.is_empty() { return Err("cosmos.step requiere (universe, dt?, opts?)".into()); }
             let dt = if args.len() > 1 { to_f64(&args[1])? } else { 1.0 };
-            let universe = args[0].clone();
-            step_universe(universe, dt)
+            let phys = physics_from(args.get(2))?;
+            step_universe(args[0].clone(), dt, phys)
         }
-        // run(universe, steps?, dt?) → universo final
+        // run(universe, steps?, dt?, opts?) → universo final
         "run" => {
-            if args.is_empty() { return Err("cosmos.run requiere (universe, steps?, dt?)".into()); }
+            if args.is_empty() { return Err("cosmos.run requiere (universe, steps?, dt?, opts?)".into()); }
             let mut universe = args[0].clone();
             let steps = if args.len() > 1 { to_i64(&args[1])? as usize } else { 10 };
             let dt    = if args.len() > 2 { to_f64(&args[2])? } else { 1.0 };
+            let phys  = physics_from(args.get(3))?;
             for _ in 0..steps {
-                universe = step_universe(universe, dt)?;
+                universe = step_universe(universe, dt, phys)?;
             }
             Ok(universe)
         }
-        // summary(universe) → {time, bodies_count, total_energy}
+        // summary(universe) → {time, bodies}
         "summary" => {
             if args.is_empty() { return Err("cosmos.summary requiere (universe)".into()); }
             universe_summary(&args[0])
         }
-        // gravity(b1, b2, G?) → fuerza [fx, fy, fz]
+        // gravity(b1, b2, G|opts?) → fuerza [fx, fy, fz]
+        // El tercer argumento admite un número (G) o un Dict { g, softening }.
         "gravity" => {
-            if args.len() < 2 { return Err("cosmos.gravity requiere (b1, b2, G?)".into()); }
-            let g_const = if args.len() > 2 { to_f64(&args[2])? } else { 6.674e-11 };
+            if args.len() < 2 { return Err("cosmos.gravity requiere (b1, b2, G|opts?)".into()); }
+            let phys = physics_from(args.get(2))?;
             let b1 = parse_body(&args[0])?;
             let b2 = parse_body(&args[1])?;
-            let force = compute_gravity(&b1, &b2, g_const);
+            let force = compute_gravity(&b1, &b2, phys);
             Ok(EvalValue::List(force.iter().map(|&f| EvalValue::Float(f)).collect()))
         }
-        // energy(universe) → {kinetic, potential, total}
+        // energy(universe, G|opts?) → {kinetic, potential, total}
         "energy" => {
-            if args.is_empty() { return Err("cosmos.energy requiere (universe)".into()); }
-            universe_energy(&args[0])
+            if args.is_empty() { return Err("cosmos.energy requiere (universe, G|opts?)".into()); }
+            let phys = physics_from(args.get(1))?;
+            universe_energy(&args[0], phys)
         }
         // distance(b1, b2) → f64
         "distance" => {
@@ -88,16 +114,27 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let d  = body_distance(&b1, &b2);
             Ok(EvalValue::Float(d))
         }
-        // stardust(n?) → lista de n puntos 3D aleatorios
+        // stardust(n?, opts?) → lista de n puntos 3D aleatorios
+        // opts = { min, max, seed }
         "stardust" | "dust" => {
             let n = if args.is_empty() { 100 } else { to_i64(&args[0])? as usize };
-            let mut rng = rand::thread_rng();
+            let (mut lo, mut hi, mut seed) = (-1.0f64, 1.0f64, None);
+            if let Some(EvalValue::Dict(m)) = args.get(1) {
+                if let Some(v) = opt_f64(m, &["min", "minimo"]) { lo = v; }
+                if let Some(v) = opt_f64(m, &["max", "maximo"]) { hi = v; }
+                seed = opt_u64(m, &["seed", "semilla"]);
+                if lo > hi {
+                    return Err(format!("cosmos.stardust: rango inválido ({lo} > {hi})"));
+                }
+            }
+            let mut rng: Box<dyn RngCore> = match seed {
+                Some(s) => Box::new(StdRng::seed_from_u64(s)),
+                None    => Box::new(rand::thread_rng()),
+            };
             let dust: Vec<EvalValue> = (0..n).map(|_| {
-                EvalValue::List(vec![
-                    EvalValue::Float(rng.gen_range(-1.0..1.0)),
-                    EvalValue::Float(rng.gen_range(-1.0..1.0)),
-                    EvalValue::Float(rng.gen_range(-1.0..1.0)),
-                ])
+                EvalValue::List((0..3)
+                    .map(|_| EvalValue::Float(SpawnRange::sample(&mut *rng, (lo, hi))))
+                    .collect())
             }).collect();
             Ok(EvalValue::List(dust))
         }
@@ -145,23 +182,142 @@ fn body_to_eval(b: &Body) -> EvalValue {
     make_body(&b.name, b.mass, b.pos, b.vel)
 }
 
-//     Física                                                                    
+//     Opciones
+
+/// Lee un número del Dict aceptando cualquiera de los alias dados.
+fn opt_f64(m: &HashMap<String, EvalValue>, keys: &[&str]) -> Option<f64> {
+    for k in keys {
+        if let Some(v) = m.get(*k) {
+            if let Ok(f) = to_f64(v) { return Some(f); }
+        }
+    }
+    None
+}
+
+fn opt_u64(m: &HashMap<String, EvalValue>, keys: &[&str]) -> Option<u64> {
+    for k in keys {
+        if let Some(v) = m.get(*k) {
+            if let Ok(n) = to_i64(v) { return Some(n as u64); }
+        }
+    }
+    None
+}
+
+/// Física a partir de un argumento opcional, que puede ser:
+///   - un número → se interpreta como G (forma corta e histórica de `gravity`)
+///   - un Dict   → `{ "g": ..., "softening": ... }`, con alias en español
+fn physics_from(arg: Option<&EvalValue>) -> Result<Physics, String> {
+    let mut p = Physics::default();
+    match arg {
+        None | Some(EvalValue::Null) => {}
+        Some(EvalValue::Dict(m)) => {
+            if let Some(g) = opt_f64(m, &["g", "G", "gravedad", "gravity"]) { p.g = g; }
+            if let Some(s) = opt_f64(m, &["softening", "suavizado", "epsilon"]) {
+                if s < 0.0 { return Err("cosmos: 'softening' no puede ser negativo".into()); }
+                p.softening = s;
+            }
+        }
+        Some(other) => p.g = to_f64(other)?,
+    }
+    Ok(p)
+}
+
+/// Rangos de generación aleatoria. Sin opciones usa una escala estelar
+/// arbitraria pero razonable; con ellas, la que el developer necesite.
+struct SpawnRange {
+    mass: (f64, f64),
+    pos:  (f64, f64),
+    vel:  (f64, f64),
+    seed: Option<u64>,
+}
+
+impl Default for SpawnRange {
+    fn default() -> Self {
+        SpawnRange {
+            mass: (1e20, 1e30),
+            pos:  (-1e5, 1e5),
+            vel:  (-10.0, 10.0),
+            seed: None,
+        }
+    }
+}
+
+impl SpawnRange {
+    /// `{ mass_min, mass_max, pos_min, pos_max, vel_min, vel_max, seed }`
+    fn from(arg: Option<&EvalValue>) -> Result<Self, String> {
+        let mut r = SpawnRange::default();
+        let Some(EvalValue::Dict(m)) = arg else { return Ok(r) };
+
+        let pairs: [(&mut (f64, f64), [&[&str]; 2]); 3] = [
+            (&mut r.mass, [&["mass_min", "masa_min"], &["mass_max", "masa_max"]]),
+            (&mut r.pos,  [&["pos_min"],              &["pos_max"]]),
+            (&mut r.vel,  [&["vel_min"],              &["vel_max"]]),
+        ];
+        for (target, keys) in pairs {
+            if let Some(v) = opt_f64(m, keys[0]) { target.0 = v; }
+            if let Some(v) = opt_f64(m, keys[1]) { target.1 = v; }
+            if target.0 > target.1 {
+                return Err(format!(
+                    "cosmos: rango inválido ({} > {}): el mínimo no puede superar al máximo",
+                    target.0, target.1
+                ));
+            }
+        }
+        r.seed = opt_u64(m, &["seed", "semilla"]);
+        Ok(r)
+    }
+
+    /// RNG sembrado si el developer pidió reproducibilidad, aleatorio si no.
+    fn rng(&self) -> Box<dyn RngCore> {
+        match self.seed {
+            Some(s) => Box::new(StdRng::seed_from_u64(s)),
+            None    => Box::new(rand::thread_rng()),
+        }
+    }
+
+    /// Un rango degenerado (min == max) haría entrar en pánico a `gen_range`.
+    fn sample(rng: &mut dyn RngCore, (lo, hi): (f64, f64)) -> f64 {
+        if lo >= hi { lo } else { rng.gen_range(lo..hi) }
+    }
+}
+
+use rand::RngCore;
+
+//     Física
 
 fn body_distance(b1: &Body, b2: &Body) -> f64 {
     let d: f64 = (0..3).map(|i| (b1.pos[i] - b2.pos[i]).powi(2)).sum();
     d.sqrt()
 }
 
-fn compute_gravity(b1: &Body, b2: &Body, g: f64) -> [f64; 3] {
+fn compute_gravity(b1: &Body, b2: &Body, p: Physics) -> [f64; 3] {
     let dist = body_distance(b1, b2);
-    if dist < 1e-10 { return [0.0; 3]; }
-    let f = g * b1.mass * b2.mass / (dist * dist);
+    // Con softening = 0 se conserva el comportamiento newtoniano exacto y solo
+    // se descarta el caso degenerado de dos cuerpos en la misma posición.
+    let denom = dist * dist + p.softening * p.softening;
+    if denom <= 0.0 { return [0.0; 3]; }
+    if p.softening == 0.0 && dist == 0.0 { return [0.0; 3]; }
+    let f = p.g * b1.mass * b2.mass / denom;
     let mut force = [0.0f64; 3];
-    for i in 0..3 { force[i] = f * (b2.pos[i] - b1.pos[i]) / dist; }
+    // La dirección se normaliza con la distancia real, no con la suavizada.
+    let dir_norm = if dist > 0.0 { dist } else { 1.0 };
+    for i in 0..3 { force[i] = f * (b2.pos[i] - b1.pos[i]) / dir_norm; }
     force
 }
 
-fn step_universe(universe: EvalValue, dt: f64) -> Result<EvalValue, String> {
+/// Cuerpo aleatorio dentro de los rangos pedidos.
+fn spawn_body(name: &str, r: &SpawnRange, rng: &mut dyn RngCore) -> EvalValue {
+    let mass = SpawnRange::sample(rng, r.mass);
+    let mut pos = [0.0f64; 3];
+    let mut vel = [0.0f64; 3];
+    for i in 0..3 {
+        pos[i] = SpawnRange::sample(rng, r.pos);
+        vel[i] = SpawnRange::sample(rng, r.vel);
+    }
+    make_body(name, mass, pos, vel)
+}
+
+fn step_universe(universe: EvalValue, dt: f64, phys: Physics) -> Result<EvalValue, String> {
     let EvalValue::Dict(mut uni_map) = universe else {
         return Err("cosmos.step: se esperaba un universo (dict)".into());
     };
@@ -177,7 +333,7 @@ fn step_universe(universe: EvalValue, dt: f64) -> Result<EvalValue, String> {
     let mut forces = vec![[0.0f64; 3]; n];
     for i in 0..n {
         for j in (i+1)..n {
-            let f = compute_gravity(&bodies[i], &bodies[j], 6.674e-11);
+            let f = compute_gravity(&bodies[i], &bodies[j], phys);
             for k in 0..3 {
                 forces[i][k] += f[k];
                 forces[j][k] -= f[k];
@@ -212,7 +368,7 @@ fn universe_summary(universe: &EvalValue) -> Result<EvalValue, String> {
     Ok(EvalValue::Dict(result))
 }
 
-fn universe_energy(universe: &EvalValue) -> Result<EvalValue, String> {
+fn universe_energy(universe: &EvalValue, phys: Physics) -> Result<EvalValue, String> {
     let EvalValue::Dict(m) = universe else { return Err("cosmos.energy: se esperaba un universo".into()); };
     let bodies_val = m.get("bodies").ok_or("cosmos.energy: universo sin 'bodies'")?;
     let EvalValue::List(body_vals) = bodies_val else { return Err("cosmos.energy: 'bodies' debe ser lista".into()); };
@@ -222,11 +378,16 @@ fn universe_energy(universe: &EvalValue) -> Result<EvalValue, String> {
         0.5 * b.mass * b.vel.iter().map(|v| v * v).sum::<f64>()
     }).sum();
 
+    // El potencial usa el mismo softening que la fuerza; si no, la energía no
+    // se conserva en las simulaciones que lo activan.
     let mut potential = 0.0f64;
     for i in 0..bodies.len() {
         for j in (i+1)..bodies.len() {
             let r = body_distance(&bodies[i], &bodies[j]);
-            if r > 1e-10 { potential -= 6.674e-11 * bodies[i].mass * bodies[j].mass / r; }
+            let denom = (r * r + phys.softening * phys.softening).sqrt();
+            if denom > 0.0 {
+                potential -= phys.g * bodies[i].mass * bodies[j].mass / denom;
+            }
         }
     }
 

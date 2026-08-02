@@ -1,0 +1,313 @@
+-- Barrido funcional e2e de cosmos, zip e insight con valores exactos.
+-- Ejecutar desde la raíz del repo: orion test tests
+--
+-- El eje de estos tests es que NADA esté fijado en el código: cada constante
+-- (G, softening, rangos, umbrales) tiene que poder venir del developer, y el
+-- resultado tiene que cambiar en consecuencia.
+use "cosmos" as cos
+use "zip" as z
+use "insight" as ins
+use "fs" as fs
+
+fn near(a, b) {
+    d = a - b
+    if d < 0 { d = 0 - d }
+    return d < 0.000001
+}
+
+--     cosmos: física
+
+fn test_cosmos_body_y_distancia() {
+    b = cos.body("sol", 1000.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    assert_eq(b["name"], "sol", "body name")
+    assert_eq(b["mass"], 1000.0, "body mass")
+    assert_eq(b["x"], 1.0, "body x")
+    assert_eq(b["vz"], 6.0, "body vz")
+
+    a = cos.body("a", 1.0, 0.0, 0.0, 0.0)
+    c = cos.body("c", 1.0, 3.0, 4.0, 0.0)
+    assert_eq(cos.distance(a, c), 5.0, "distancia 3-4-5")
+}
+
+fn test_cosmos_gravedad_con_G_del_developer() {
+    a = cos.body("a", 2.0, 0.0, 0.0, 0.0)
+    b = cos.body("b", 3.0, 2.0, 0.0, 0.0)
+
+    -- G = 1 → F = m1*m2/r² = 6/4 = 1.5
+    f = cos.gravity(a, b, 1.0)
+    assert_eq(f[0], 1.5, "gravity G=1 fx")
+    assert_eq(f[1], 0.0, "gravity G=1 fy")
+
+    -- mismo resultado pasando un dict
+    f2 = cos.gravity(a, b, { "g": 1.0 })
+    assert_eq(f2[0], 1.5, "gravity dict fx")
+
+    -- G = 10 → 10 veces la fuerza
+    f3 = cos.gravity(a, b, 10.0)
+    assert_eq(f3[0], 15.0, "gravity G=10 fx")
+}
+
+fn test_cosmos_softening() {
+    a = cos.body("a", 2.0, 0.0, 0.0, 0.0)
+    b = cos.body("b", 3.0, 2.0, 0.0, 0.0)
+
+    -- softening ε: F = G*m1*m2 / (r² + ε²) = 6 / (4 + 4) = 0.75
+    f = cos.gravity(a, b, { "g": 1.0, "softening": 2.0 })
+    assert_eq(f[0], 0.75, "gravity con softening")
+
+    -- softening 0 es el newtoniano exacto
+    f0 = cos.gravity(a, b, { "g": 1.0, "softening": 0.0 })
+    assert_eq(f0[0], 1.5, "softening 0 = newtoniano")
+}
+
+fn test_cosmos_cuerpos_superpuestos_no_divergen() {
+    a = cos.body("a", 5.0, 1.0, 1.0, 1.0)
+    b = cos.body("b", 5.0, 1.0, 1.0, 1.0)
+    f = cos.gravity(a, b, 1.0)
+    assert_eq(f[0], 0.0, "misma posición fx")
+    assert_eq(f[1], 0.0, "misma posición fy")
+    assert_eq(f[2], 0.0, "misma posición fz")
+}
+
+fn test_cosmos_seed_reproducible() {
+    u1 = cos.create(4, { "seed": 42 })
+    u2 = cos.create(4, { "seed": 42 })
+    assert_eq(u1 == u2, yes, "misma seed = mismo universo")
+
+    u3 = cos.create(4, { "seed": 43 })
+    assert_eq(u1 == u3, no, "otra seed = otro universo")
+
+    d1 = cos.stardust(5, { "seed": 7 })
+    d2 = cos.stardust(5, { "seed": 7 })
+    assert_eq(d1 == d2, yes, "stardust con seed reproducible")
+}
+
+fn test_cosmos_rangos_del_developer() {
+    u = cos.create(3, {
+        "seed": 1,
+        "mass_min": 7.0, "mass_max": 7.0,
+        "pos_min": 0.0,  "pos_max": 0.0,
+        "vel_min": 2.0,  "vel_max": 2.0
+    })
+    bs = u["bodies"]
+    assert_eq(len(bs), 3, "create n cuerpos")
+    assert_eq(bs[0]["mass"], 7.0, "masa fijada por el developer")
+    assert_eq(bs[2]["mass"], 7.0, "masa fijada (ultimo)")
+    assert_eq(bs[0]["x"], 0.0, "pos fijada")
+    assert_eq(bs[1]["vy"], 2.0, "vel fijada")
+    assert_eq(u["time"], 0.0, "universo empieza en t=0")
+
+    d = cos.stardust(4, { "seed": 2, "min": 5.0, "max": 5.0 })
+    assert_eq(len(d), 4, "stardust n puntos")
+    assert_eq(d[0][0], 5.0, "stardust rango fijado")
+    assert_eq(d[3][2], 5.0, "stardust rango fijado (ultimo)")
+}
+
+fn test_cosmos_step_avanza_el_tiempo() {
+    u = cos.create(2, { "seed": 9 })
+    s0 = cos.summary(u)
+    assert_eq(s0["time"], 0.0, "t inicial")
+    assert_eq(s0["bodies"], 2, "conteo de cuerpos")
+
+    u1 = cos.step(u, 2.5)
+    assert_eq(cos.summary(u1)["time"], 2.5, "step avanza dt")
+
+    u2 = cos.run(u, 4, 0.5)
+    assert_eq(cos.summary(u2)["time"], 2.0, "run avanza steps*dt")
+}
+
+fn test_cosmos_energia_con_G_del_developer() {
+    -- dos masas de 2 y 3 a distancia 2, en reposo
+    a = cos.body("a", 2.0, 0.0, 0.0, 0.0)
+    b = cos.body("b", 3.0, 2.0, 0.0, 0.0)
+    u = { "bodies": [a, b], "time": 0.0 }
+
+    -- G=1 → U = -G*m1*m2/r = -6/2 = -3 ; K = 0
+    e = cos.energy(u, 1.0)
+    assert_eq(e["kinetic"], 0.0, "energia cinetica en reposo")
+    assert_eq(e["potential"], -3.0, "energia potencial G=1")
+    assert_eq(e["total"], -3.0, "energia total")
+
+    -- con softening 2: U = -6 / sqrt(4+4) = -2.1213203...
+    es = cos.energy(u, { "g": 1.0, "softening": 2.0 })
+    assert_eq(near(es["potential"], -2.121320), yes, "potencial con softening")
+}
+
+fn test_cosmos_energia_cinetica() {
+    -- un cuerpo de masa 4 a velocidad (3,4,0): K = 0.5*4*25 = 50
+    a = cos.body("a", 4.0, 0.0, 0.0, 0.0, 3.0, 4.0, 0.0)
+    u = { "bodies": [a], "time": 0.0 }
+    e = cos.energy(u, 1.0)
+    assert_eq(e["kinetic"], 50.0, "K = 1/2 m v^2")
+    assert_eq(e["potential"], 0.0, "sin pares no hay potencial")
+}
+
+--     zip
+
+fn test_zip_roundtrip_archivo() {
+    fs.write("tests/_z_src.txt", "contenido de prueba orion")
+    n = z.compress("tests/_z_src.txt", "tests/_z1.zip")
+    assert_eq(n, 1, "compress cuenta 1 archivo")
+
+    entradas = z.list("tests/_z1.zip")
+    assert_eq(len(entradas), 1, "list 1 entrada")
+    assert_eq(entradas[0]["name"], "_z_src.txt", "nombre relativo sin ruta")
+    assert_eq(entradas[0]["size"], 25, "tamaño original")
+    assert_eq(entradas[0]["is_dir"], no, "no es directorio")
+
+    ext = z.decompress("tests/_z1.zip", "tests/_zout")
+    assert_eq(ext, 1, "decompress cuenta 1")
+    assert_eq(fs.read("tests/_zout/_z_src.txt"), "contenido de prueba orion", "contenido intacto")
+
+    fs.delete("tests/_z_src.txt")
+    fs.delete("tests/_z1.zip")
+    fs.delete("tests/_zout/_z_src.txt")
+}
+
+fn test_zip_gzip_roundtrip() {
+    fs.write("tests/_g_src.txt", "orion gzip roundtrip")
+    assert_eq(z.gzip("tests/_g_src.txt", "tests/_g.gz"), yes, "gzip ok")
+    assert_eq(z.gunzip("tests/_g.gz", "tests/_g_out.txt"), yes, "gunzip ok")
+    assert_eq(fs.read("tests/_g_out.txt"), "orion gzip roundtrip", "contenido tras gzip")
+
+    fs.delete("tests/_g_src.txt")
+    fs.delete("tests/_g.gz")
+    fs.delete("tests/_g_out.txt")
+}
+
+fn test_zip_errores() {
+    attempt {
+        z.compress("tests/_no_existe_jamas.txt", "tests/_x.zip")
+        assert_eq("no llego", "aqui", "compress de inexistente debe fallar")
+    } handle e {
+        assert_eq(len(str(e)) > 0, yes, "error de compress no vacio")
+    }
+}
+
+--     insight: umbral adaptativo
+
+fn test_insight_metadata() {
+    m = ins.metadata("tests/fixtures/insight/tabla.png")
+    assert_eq(m["width"], 400, "ancho")
+    assert_eq(m["height"], 300, "alto")
+    assert_eq(m["orientation"], "landscape", "orientacion")
+
+    v = ins.metadata("tests/fixtures/insight/blanco.png")
+    assert_eq(v["density"], 0.0, "pagina en blanco no tiene tinta")
+}
+
+fn test_insight_umbral_otsu_se_adapta() {
+    -- la imagen en blanco y negro puros da corte en 0
+    assert_eq(ins.threshold("tests/fixtures/insight/tabla.png"), 0, "otsu b/n puro")
+    -- la misma tabla en grises da un corte intermedio, no el fijo de antes
+    assert_eq(ins.threshold("tests/fixtures/insight/tabla_gris.png"), 120, "otsu grises")
+}
+
+fn test_insight_tabla_gris_es_el_caso_del_umbral_fijo() {
+    -- Con umbral automatico la rejilla gris se ve...
+    adapt = ins.detect_tables("tests/fixtures/insight/tabla_gris.png")
+    assert_eq(adapt["detected"], yes, "tabla gris detectada con otsu")
+    assert_eq(adapt["h_lines"], 5, "5 lineas horizontales")
+    assert_eq(adapt["v_lines"], 5, "5 lineas verticales")
+
+    -- ...y con el umbral fijo que se usaba antes, desaparece entera.
+    fijo = ins.detect_tables("tests/fixtures/insight/tabla_gris.png", { "threshold": 50 })
+    assert_eq(fijo["detected"], no, "umbral fijo pierde la tabla gris")
+    assert_eq(fijo["h_lines"], 0, "umbral fijo no ve lineas")
+}
+
+fn test_insight_detect_tables() {
+    t = ins.detect_tables("tests/fixtures/insight/tabla.png")
+    assert_eq(t["detected"], yes, "tabla nitida detectada")
+    assert_eq(t["h_lines"], 5, "h_lines agrupadas (grosor 2px = 1 linea)")
+    assert_eq(t["v_lines"], 5, "v_lines agrupadas")
+
+    -- texto denso NO es una tabla: antes bastaba con tener muchos pixeles oscuros
+    x = ins.detect_tables("tests/fixtures/insight/texto.png")
+    assert_eq(x["detected"], no, "texto denso no es tabla")
+    assert_eq(x["h_lines"], 0, "texto no tiene lineas continuas")
+
+    b = ins.detect_tables("tests/fixtures/insight/blanco.png")
+    assert_eq(b["detected"], no, "pagina en blanco no es tabla")
+}
+
+fn test_insight_min_lines_lo_decide_el_developer() {
+    ruta = "tests/fixtures/insight/tabla.png"
+    assert_eq(ins.detect_tables(ruta, { "min_lines": 5 })["detected"], yes, "min_lines 5 se cumple")
+    assert_eq(ins.detect_tables(ruta, { "min_lines": 6 })["detected"], no,  "min_lines 6 no se cumple")
+}
+
+--     insight: firmas
+
+fn test_insight_detect_signatures() {
+    f = ins.detect_signatures("tests/fixtures/insight/firma.png")
+    assert_eq(f["detected"], yes, "firma detectada")
+    assert_eq(f["confidence"] > 0.5, yes, "confianza alta en la firma")
+
+    caja = f["box"]
+    assert_eq(caja["x"], 60, "caja x del trazo")
+    assert_eq(caja["width"], 300, "caja ancho del trazo")
+}
+
+fn test_insight_texto_no_es_firma() {
+    -- Este era el falso positivo: cualquier documento con texto caia en el
+    -- rango de densidad y se reportaba como firmado.
+    t = ins.detect_signatures("tests/fixtures/insight/texto.png")
+    assert_eq(t["detected"], no, "texto no es firma")
+    assert_eq(t["confidence"], 0.0, "confianza cero sin firma")
+
+    b = ins.detect_signatures("tests/fixtures/insight/blanco.png")
+    assert_eq(b["detected"], no, "pagina en blanco no esta firmada")
+}
+
+fn test_insight_rejilla_no_es_firma() {
+    -- Una regla de tabla es ancha, fina y de relleno bajo como un trazo: lo
+    -- que la separa es que es recta.
+    r = ins.detect_signatures("tests/fixtures/insight/tabla.png")
+    assert_eq(r["detected"], no, "rejilla no es firma")
+
+    -- si el developer relaja la rectitud, la acepta
+    libre = ins.detect_signatures("tests/fixtures/insight/tabla.png", { "max_straightness": 1.0 })
+    assert_eq(libre["detected"], yes, "con max_straightness 1.0 la rejilla pasa")
+}
+
+fn test_insight_region_lo_decide_el_developer() {
+    ruta = "tests/fixtures/insight/firma.png"
+    -- el trazo esta abajo: buscar solo arriba no lo encuentra
+    arriba = ins.detect_signatures(ruta, { "region_from": 0.0, "region_to": 0.5 })
+    assert_eq(arriba["detected"], no, "no hay firma en la mitad superior")
+
+    abajo = ins.detect_signatures(ruta, { "region_from": 0.6, "region_to": 1.0 })
+    assert_eq(abajo["detected"], yes, "la firma esta en el tercio inferior")
+}
+
+fn test_insight_pixel_density_respeta_umbral() {
+    ruta = "tests/fixtures/insight/tabla_gris.png"
+    adapt = ins.pixel_density(ruta)
+    assert_eq(adapt > 0.0, yes, "densidad con umbral automatico")
+    -- la tinta gris (120) queda fuera de un umbral de 50
+    assert_eq(ins.pixel_density(ruta, { "threshold": 50 }), 0.0, "umbral 50 no ve tinta gris")
+}
+
+fn test_insight_summarize() {
+    s = ins.summarize("tests/fixtures/insight/tabla.png")
+    assert_eq(s["metadata"]["width"], 400, "summarize trae metadata")
+    assert_eq(s["tables"]["detected"], yes, "summarize trae tablas")
+    assert_eq(s["signatures"]["detected"], no, "summarize trae firmas")
+}
+
+fn test_insight_errores() {
+    attempt {
+        ins.metadata("tests/fixtures/insight/_no_existe.png")
+        assert_eq("no llego", "aqui", "abrir inexistente debe fallar")
+    } handle e {
+        assert_eq(len(str(e)) > 0, yes, "error de imagen no vacio")
+    }
+
+    attempt {
+        ins.detect_signatures("tests/fixtures/insight/firma.png", { "region_from": 0.9, "region_to": 0.1 })
+        assert_eq("no llego", "aqui", "region invertida debe fallar")
+    } handle e {
+        assert_eq(len(str(e)) > 0, yes, "error de region no vacio")
+    }
+}
