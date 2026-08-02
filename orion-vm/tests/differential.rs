@@ -623,3 +623,83 @@ fn diff_break_dentro_de_fn() {
 show corta(100)"#,
     );
 }
+
+//     Constructor implícito de shapes (sin on_create)
+
+#[test]
+fn diff_shape_constructor_posicional() {
+    // El JIT ignoraba los args cuando el shape no declara on_create: creaba la
+    // instancia con todos los campos en null y devolvía null en vez del valor.
+    assert_vm_jit_match(
+        r#"shape P {
+    x
+}
+p = P(5)
+show p.x"#,
+    );
+}
+
+#[test]
+fn diff_shape_constructor_posicional_multi_campo() {
+    assert_vm_jit_match(
+        r#"shape Punto {
+    x
+    y
+}
+p = Punto(3, 7)
+show p.x
+show p.y"#,
+    );
+}
+
+#[test]
+fn diff_shape_constructor_posicional_dos_instancias() {
+    // Los args se drenan del buffer compartido: una instancia no debe heredar
+    // los argumentos de la anterior.
+    assert_vm_jit_match(
+        r#"shape P {
+    x
+}
+a = P(5)
+b = P(9)
+show a.x
+show b.x"#,
+    );
+}
+
+#[test]
+fn diff_shape_constructor_posicional_desde_fn() {
+    assert_vm_jit_match(
+        r#"shape P {
+    x
+}
+fn crea(v) {
+    return P(v)
+}
+q = crea(42)
+show q.x"#,
+    );
+}
+
+#[test]
+fn diff_shape_constructor_sin_args_deja_null() {
+    assert_vm_jit_match(
+        r#"shape P {
+    x
+}
+p = P()
+show p.x"#,
+    );
+}
+
+#[test]
+fn diff_shape_constructor_demasiados_args_falla() {
+    // Más argumentos que campos: ambos backends deben rechazar, no truncar.
+    assert_vm_jit_agree(
+        r#"shape P {
+    x
+}
+p = P(1, 2)
+show p.x"#,
+    );
+}

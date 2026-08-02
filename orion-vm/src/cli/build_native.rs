@@ -41,22 +41,23 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
         }
     };
 
-    let bc_bytes = match serde_json::to_vec(&bc) {
-        Ok(b) => b,
-        Err(e) => {
-            banner::fail(&format!("Error serializando bytecode: {e}"));
-            std::process::exit(1);
+    //   2. cranelift-object → .o
+    //
+    //   Se prefiere compilar el programa a código máquina. Si usa algo que el
+    //   backend nativo no cubre, se recurre al modo bundle: el objeto lleva el
+    //   bytecode y el runtime lo ejecuta (JIT si puede, intérprete si no).
+    let obj_bytes = match crate::jit::aot_backend::compile_to_native_object(&bc) {
+        Ok(Some(b)) => {
+            banner::ok("Código:   nativo (Cranelift)");
+            b
         }
-    };
-
-    banner::ok(&format!("Bytecode: {} bytes", bc_bytes.len()));
-
-    //   2. cranelift-object → .o                      
-    let obj_bytes = match crate::aot::compile_to_object(&bc_bytes) {
-        Ok(b) => b,
+        Ok(None) => {
+            banner::info("El programa usa construcciones sin soporte nativo; se embebe el bytecode.");
+            build_bundle_object(&bc)
+        }
         Err(e) => {
-            banner::fail(&format!("Error AOT (cranelift-object): {e}"));
-            std::process::exit(1);
+            banner::info(&format!("Compilación nativa no disponible ({e}); se embebe el bytecode."));
+            build_bundle_object(&bc)
         }
     };
 
@@ -100,7 +101,28 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
     println!();
 }
 
-//   Helpers                                  
+//   Helpers
+
+/// Objeto en modo bundle: bytecode embebido + un `main` que llama al runtime.
+/// Es el camino de reserva cuando el programa no se puede compilar entero.
+fn build_bundle_object(bc: &crate::bytecode::OrionBytecode) -> Vec<u8> {
+    let bc_bytes = match serde_json::to_vec(bc) {
+        Ok(b) => b,
+        Err(e) => {
+            banner::fail(&format!("Error serializando bytecode: {e}"));
+            std::process::exit(1);
+        }
+    };
+    banner::ok(&format!("Bytecode: {} bytes", bc_bytes.len()));
+
+    match crate::aot::compile_to_object(&bc_bytes) {
+        Ok(b) => b,
+        Err(e) => {
+            banner::fail(&format!("Error AOT (cranelift-object): {e}"));
+            std::process::exit(1);
+        }
+    }
+}
 
 fn read_src(path: &str) -> String {
     match fs::read_to_string(path) {
@@ -138,17 +160,16 @@ fn locate_vm_crate() -> PathBuf {
 /// Construye la staticlib de orion_vm. Devuelve la ruta al .lib/.a.
 /// En el primer build es lento (~30s), luego usa la caché de cargo.
 fn build_staticlib(vm_dir: &Path, tmp_dir: &Path) -> PathBuf {
-    // Verificar si ya existe en caché (el artefacto de cargo)
     let profile_dir = vm_dir.join("target").join("release");
     let lib_name    = if cfg!(windows) { "orion_vm.lib" } else { "liborion_vm.a" };
     let cached      = profile_dir.join(lib_name);
 
-    if cached.exists() {
-        return cached;
+    // Se delega el cacheo a cargo en vez de saltárselo cuando el .lib existe:
+    // esto último congelaba el runtime del primer build para siempre, así que
+    // los cambios en la VM nunca llegaban a los ejecutables AOT.
+    if !cached.exists() {
+        banner::info("Compilando runtime de Orion (primera vez, puede tardar ~30s)...");
     }
-
-    // Construir la staticlib con cargo
-    banner::info("Compilando runtime de Orion (primera vez, puede tardar ~30s)...");
 
     let status = Command::new("cargo")
         .args(["build", "--lib", "--release"])
@@ -157,6 +178,12 @@ fn build_staticlib(vm_dir: &Path, tmp_dir: &Path) -> PathBuf {
 
     match status {
         Ok(s) if s.success() => {}
+        // Sin fuentes o sin cargo se puede seguir con la staticlib ya
+        // construida; solo hay que avisar de que puede estar desactualizada.
+        _ if cached.exists() => {
+            banner::info("No se pudo recompilar el runtime; se usa la staticlib existente.");
+            return cached;
+        }
         Ok(s) => {
             banner::fail(&format!("cargo build --lib falló con código {:?}", s.code()));
             std::process::exit(1);
@@ -165,6 +192,10 @@ fn build_staticlib(vm_dir: &Path, tmp_dir: &Path) -> PathBuf {
             banner::fail(&format!("No se pudo ejecutar cargo: {e}"));
             std::process::exit(1);
         }
+    }
+
+    if cached.exists() {
+        return cached;
     }
 
     // Intentar encontrar el artefacto en la caché de cargo (puede tener hash)
@@ -195,11 +226,14 @@ fn link_native(obj: &Path, lib: &Path, out: &Path) {
     banner::info("Enlazando...");
 
     // Determinar linker disponible
-    let (linker, args) = detect_linker(obj, lib, out);
+    let (linker, args, env) = detect_linker(obj, lib, out);
 
-    let status = Command::new(&linker)
-        .args(&args)
-        .status();
+    let mut cmd = Command::new(&linker);
+    cmd.args(&args);
+    for (k, v) in &env {
+        cmd.env(k, v);
+    }
+    let status = cmd.status();
 
     match status {
         Ok(s) if s.success() => {}
@@ -235,23 +269,20 @@ const WINDOWS_SYSTEM_LIBS: &[&str] = &[
     "uxtheme", // winit dark_mode → SetWindowTheme
 ];
 
-/// Devuelve (linker, argumentos) para el sistema actual.
-fn detect_linker(obj: &Path, lib: &Path, out: &Path) -> (String, Vec<String>) {
+/// Devuelve (linker, argumentos, variables de entorno) para el sistema actual.
+fn detect_linker(obj: &Path, lib: &Path, out: &Path) -> (String, Vec<String>, Vec<(String, String)>) {
     let obj_s = obj.to_string_lossy().to_string();
     let lib_s = lib.to_string_lossy().to_string();
     let out_s = out.to_string_lossy().to_string();
 
     if cfg!(windows) {
-        // Intentar link.exe (MSVC) primero
-        if which("link").is_some() {
-            let mut args = vec![
-                obj_s,
-                lib_s,
+        let msvc_args = |mut args: Vec<String>| -> Vec<String> {
+            args.extend([
                 format!("/OUT:{out_s}"),
                 "/SUBSYSTEM:CONSOLE".to_string(),
                 "/NOLOGO".to_string(),
                 "/DEFAULTLIB:msvcrt.lib".to_string(),
-            ];
+            ]);
             // El runtime bundleado (orion_vm.lib) arrastra TODA la stdlib, cuyas
             // crates nativas referencian APIs de Windows repartidas en varias libs
             // de sistema. Sin pasarlas, link falla con cientos de símbolos sin
@@ -259,14 +290,39 @@ fn detect_linker(obj: &Path, lib: &Path, out: &Path) -> (String, Vec<String>) {
             for l in WINDOWS_SYSTEM_LIBS {
                 args.push(format!("/DEFAULTLIB:{l}.lib"));
             }
-            return ("link".to_string(), args);
+            args
+        };
+        let base = vec![obj_s.clone(), lib_s.clone()];
+
+        // 1) Developer Command Prompt: LIB ya está poblada, `link` del PATH es
+        //    el de MSVC. Es el único caso en que el PATH es de fiar (ver abajo).
+        if std::env::var_os("LIB").is_some() && which("link").is_some() {
+            return ("link".to_string(), msvc_args(base), Vec::new());
         }
-        // Fallback: gcc (MinGW) — mismas libs de sistema en forma -l<lib>
+
+        // 2) Shell normal: resolver la toolchain nosotros. NO se busca `link` en
+        //    el PATH — Git for Windows trae un `link.exe` de GNU coreutils (crea
+        //    hard links) que se encontraría primero y fallaría con "extra operand".
+        if let Some(msvc) = find_msvc_toolchain() {
+            let mut env = vec![("LIB".to_string(), msvc.lib_paths.join(";"))];
+            // link.exe carga DLLs vecinas (mspdbcore, tbbmalloc): su bin al PATH.
+            if let Some(bin) = msvc.link_exe.parent() {
+                let path = std::env::var("PATH").unwrap_or_default();
+                env.push(("PATH".to_string(), format!("{};{}", bin.display(), path)));
+            }
+            return (
+                msvc.link_exe.to_string_lossy().to_string(),
+                msvc_args(base),
+                env,
+            );
+        }
+
+        // 3) Fallback: gcc (MinGW) — mismas libs de sistema en forma -l<lib>
         let mut args = vec![obj_s, lib_s, "-o".to_string(), out_s];
         for l in WINDOWS_SYSTEM_LIBS {
             args.push(format!("-l{l}"));
         }
-        ("gcc".to_string(), args)
+        ("gcc".to_string(), args, Vec::new())
     } else {
         // Linux / macOS: usar cc (wrapper del compilador del sistema)
         let linker = if which("cc").is_some() { "cc" } else { "gcc" };
@@ -281,8 +337,116 @@ fn detect_linker(obj: &Path, lib: &Path, out: &Path) -> (String, Vec<String>) {
                 "-ldl".to_string(),
                 "-lm".to_string(),
             ],
+            Vec::new(),
         )
     }
+}
+
+/// Toolchain de MSVC resuelta: el linker y las rutas de librerías que necesita.
+struct MsvcToolchain {
+    link_exe:  PathBuf,
+    lib_paths: Vec<String>,
+}
+
+/// Arquitectura del host en la nomenclatura de directorios de MSVC.
+fn msvc_arch() -> &'static str {
+    if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" }
+}
+
+/// Localiza link.exe de MSVC y las rutas de LIB (VC Tools + Windows SDK).
+///
+/// Fuera del Developer Command Prompt nada de esto está en el entorno, así que
+/// se replica lo que hace vcvarsall.bat: ubicar la instalación de Visual Studio
+/// con vswhere, leer la versión de las VC Tools, y añadir el Windows SDK (um +
+/// ucrt) — sin ellas link no resuelve ni kernel32 ni la CRT.
+fn find_msvc_toolchain() -> Option<MsvcToolchain> {
+    let arch = msvc_arch();
+
+    let vs_root = find_vs_install()?;
+    let ver = fs::read_to_string(
+        vs_root.join("VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt"),
+    ).ok()?;
+    let ver = ver.trim();
+
+    let tools    = vs_root.join("VC/Tools/MSVC").join(ver);
+    let link_exe = tools.join(format!("bin/Host{arch}/{arch}/link.exe"));
+    if !link_exe.exists() { return None; }
+
+    let mut lib_paths = Vec::new();
+    let vc_lib = tools.join("lib").join(arch);
+    if vc_lib.exists() {
+        lib_paths.push(vc_lib.to_string_lossy().to_string());
+    }
+    if let Some((sdk_root, sdk_ver)) = find_windows_sdk() {
+        for part in ["um", "ucrt"] {
+            let p = sdk_root.join("Lib").join(&sdk_ver).join(part).join(arch);
+            if p.exists() {
+                lib_paths.push(p.to_string_lossy().to_string());
+            }
+        }
+    }
+    if lib_paths.is_empty() { return None; }
+
+    Some(MsvcToolchain { link_exe, lib_paths })
+}
+
+/// Directorio de instalación de Visual Studio, vía vswhere o rutas conocidas.
+fn find_vs_install() -> Option<PathBuf> {
+    let pf86 = std::env::var("ProgramFiles(x86)")
+        .unwrap_or_else(|_| "C:/Program Files (x86)".to_string());
+
+    let vswhere = PathBuf::from(&pf86).join("Microsoft Visual Studio/Installer/vswhere.exe");
+    if vswhere.exists() {
+        let out = Command::new(&vswhere)
+            .args([
+                "-latest", "-products", "*",
+                "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property", "installationPath",
+                "-utf8",
+            ])
+            .output();
+        if let Ok(o) = out {
+            let path = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if !path.is_empty() && Path::new(&path).exists() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    // vswhere ausente o sin resultados: rutas de instalación por defecto.
+    let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:/Program Files".to_string());
+    for root in [pf.as_str(), pf86.as_str()] {
+        for year in ["2022", "2019"] {
+            for ed in ["Enterprise", "Professional", "Community", "BuildTools"] {
+                let p = PathBuf::from(root).join("Microsoft Visual Studio").join(year).join(ed);
+                if p.join("VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt").exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Raíz y versión del Windows SDK más reciente que tenga las libs del host.
+fn find_windows_sdk() -> Option<(PathBuf, String)> {
+    let pf86 = std::env::var("ProgramFiles(x86)")
+        .unwrap_or_else(|_| "C:/Program Files (x86)".to_string());
+    let root = PathBuf::from(pf86).join("Windows Kits/10");
+
+    let mut versions: Vec<String> = fs::read_dir(root.join("Lib")).ok()?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        // Solo versiones utilizables: um/<arch> es donde vive kernel32.lib.
+        .filter(|v| root.join("Lib").join(v).join("um").join(msvc_arch()).exists())
+        .collect();
+
+    // Orden numérico por componente: "10.0.22000.0" > "10.0.9412.0", que el
+    // orden lexicográfico invertiría.
+    versions.sort_by_key(|v| {
+        v.split('.').map(|n| n.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>()
+    });
+    versions.pop().map(|v| (root, v))
 }
 
 fn which(name: &str) -> Option<PathBuf> {

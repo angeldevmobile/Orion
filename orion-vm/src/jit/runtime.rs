@@ -765,6 +765,14 @@ pub fn register_jit_fn(name: &str, fn_ptr: i64) {
     jit_fn_table().lock().unwrap().insert(name.to_string(), fn_ptr);
 }
 
+/// `rt_register_fn(name, fn_ptr)` — versión C-ABI para binarios AOT, donde el
+/// registro lo emite el prólogo de `main` en vez de hacerlo el compilador.
+#[no_mangle]
+pub extern "C" fn rt_register_fn(name_ptr: i64, fn_ptr: i64) {
+    let name = unsafe { cstr_to_str(name_ptr) };
+    register_jit_fn(name, fn_ptr);
+}
+
 /// Estado compartido de una tarea async en el JIT. Como el resultado JIT es un
 /// simple `i64` (OrionVal NaN-boxed, Copy), basta un Option<i64> + Condvar para
 /// parking real: rt_await se aparca en vez de girar en un sleep-loop.

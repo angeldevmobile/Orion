@@ -91,6 +91,48 @@ pub fn register_method(shape_name: &str, act_name: &str, fn_ptr: i64) {
     METHOD_TABLE.with(|mt| mt.borrow_mut().insert(key, fn_ptr));
 }
 
+//     Registro desde el propio binario (AOT)
+//
+// En JIT el compilador puebla estas tablas desde Rust antes de saltar al código.
+// Un ejecutable AOT no tiene esa fase: nadie corre el compilador al arrancarlo,
+// así que el prólogo de su `main` llama a estas funciones. Los campos y padres
+// viajan como una lista separada por '\x1f' (nunca aparece en un identificador)
+// para que baste un literal por shape.
+
+/// Separador de los nombres dentro de un literal de campos/padres.
+const SEP: char = '\x1f';
+
+fn split_names(s: &str) -> Vec<String> {
+    if s.is_empty() { return Vec::new(); }
+    s.split(SEP).map(|x| x.to_string()).collect()
+}
+
+/// Une nombres en el literal que consume `rt_register_shape`.
+pub fn join_names(names: &[String]) -> String {
+    names.join(&SEP.to_string())
+}
+
+/// `rt_register_shape(name, "campo1\x1fcampo2", "padre1\x1f...")`
+#[no_mangle]
+pub extern "C" fn rt_register_shape(name_ptr: i64, fields_ptr: i64, parents_ptr: i64) {
+    unsafe {
+        let name    = cstr_to_str(name_ptr).to_string();
+        let fields  = split_names(cstr_to_str(fields_ptr));
+        let parents = split_names(cstr_to_str(parents_ptr));
+        register_shape_info(&name, fields, parents);
+    }
+}
+
+/// `rt_register_method(shape, act, fn_ptr)` — el puntero lo provee el linker.
+#[no_mangle]
+pub extern "C" fn rt_register_method(shape_ptr: i64, act_ptr: i64, fn_ptr: i64) {
+    unsafe {
+        let shape = cstr_to_str(shape_ptr).to_string();
+        let act   = cstr_to_str(act_ptr).to_string();
+        register_method(&shape, &act, fn_ptr);
+    }
+}
+
 //     Instanciación
 
 /// Crea una instancia con todos sus campos en null.
@@ -106,7 +148,9 @@ pub extern "C" fn rt_create_instance(shape_name_ptr: i64) -> i64 {
     }
 }
 
-/// Crea la instancia y, si existe on_create, lo invoca con los N args del ARG_BUF.
+/// Crea la instancia y la inicializa con los N args del ARG_BUF: vía on_create
+/// si el shape lo define, o asignando los args a los campos por posición si no
+/// (mismo constructor implícito que aplica la VM en `instantiate_shape`).
 #[no_mangle]
 pub extern "C" fn rt_create_instance_and_init(shape_name_ptr: i64, n_args: i64) -> i64 {
     let inst_ptr = rt_create_instance(shape_name_ptr);
@@ -114,16 +158,32 @@ pub extern "C" fn rt_create_instance_and_init(shape_name_ptr: i64, n_args: i64) 
         let shape_name = cstr_to_str(shape_name_ptr).to_string();
         let oc_key = format!("{}::on_create", shape_name);
         let fn_ptr = METHOD_TABLE.with(|mt| mt.borrow().get(&oc_key).copied());
+
+        // Drenar SIEMPRE: dejar args del constructor en el buffer los haría
+        // aparecer como argumentos de la siguiente llamada.
+        let args: Vec<i64> = ARG_BUF.with(|b| {
+            let mut buf = b.borrow_mut();
+            let take = (n_args as usize).min(buf.len());
+            buf.drain(..take).collect()
+        });
+
         if let Some(fp) = fn_ptr {
-            let args: Vec<i64> = ARG_BUF.with(|b| {
-                let mut buf = b.borrow_mut();
-                let n = n_args as usize;
-                let take = n.min(buf.len());
-                buf.drain(..take).collect()
-            });
             SELF_STACK.with(|ss| ss.borrow_mut().push(inst_ptr));
             call_act_ptr(fp, &args);
             SELF_STACK.with(|ss| ss.borrow_mut().pop());
+        } else if !args.is_empty() {
+            // Sin on_create: P(5) rellena los campos declarados en orden.
+            let inst = get_inst_mut(inst_ptr);
+            if args.len() > inst.fields.len() {
+                eprintln!(
+                    "[JIT] '{}' tiene {} campo(s), recibió {} argumento(s)",
+                    shape_name, inst.fields.len(), args.len()
+                );
+                std::process::exit(1);
+            }
+            for (slot, val) in inst.fields.iter_mut().zip(args) {
+                slot.1 = val;
+            }
         }
     }
     inst_ptr

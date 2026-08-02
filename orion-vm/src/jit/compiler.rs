@@ -8,12 +8,12 @@
 use std::collections::HashSet;
 use indexmap::IndexMap as HashMap;
 
-use cranelift_codegen::ir::{types, AbiParam, InstBuilder};
+use cranelift_codegen::ir::{types, AbiParam, InstBuilder, Value};
 use cranelift_codegen::settings;
 use cranelift_codegen::settings::Configurable;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
+use cranelift_module::{default_libcall_names, DataDescription, DataId, FuncId, Linkage, Module};
 
 use crate::bytecode::OrionBytecode;
 use crate::instruction::Instruction;
@@ -174,15 +174,52 @@ fn is_eligible(instr: &Instruction) -> bool {
 
 //     Compilador JIT                                                           
 
-pub struct JitCompiler {
-    module:         JITModule,
+/// Generador de código Cranelift, parametrizado por el backend del módulo.
+///
+/// `JITModule` compila en memoria y ejecuta en el acto; `ObjectModule` emite un
+/// archivo objeto para enlazar (AOT). La generación de IR es idéntica salvo en
+/// cómo se materializan los literales de cadena — ver [`CodeGen::cstr_ptr`].
+pub struct CodeGen<M: Module> {
+    module:         M,
     fn_counter:     usize,
     fn_cache:       HashMap<String, FuncId>,
+    /// Modo JIT: mantiene vivos los buffers a los que apunta el código emitido.
     string_storage: Vec<Vec<u8>>,
+    /// Modo AOT: cadenas ya emitidas como datos del objeto, deduplicadas.
+    str_data:       HashMap<String, DataId>,
+    /// Si se emite a un objeto en vez de a memoria ejecutable.
+    aot:            bool,
     rt:             Option<RuntimeIds>,
 }
 
-impl JitCompiler {
+/// El compilador JIT es el generador sobre el backend en memoria.
+pub type JitCompiler = CodeGen<JITModule>;
+
+/// Resultado de compilar un programa: lo que el backend necesita para cerrar.
+///
+/// El JIT resuelve los `FuncId` a direcciones reales tras `finalize_definitions`;
+/// el AOT los referencia por símbolo dentro del objeto.
+pub struct CompiledProgram {
+    /// `None` solo para el programa vacío, que no tiene nada que ejecutar.
+    pub main:      Option<FuncId>,
+    /// Funciones de usuario: (nombre, id). Necesarias para closures y async.
+    pub functions: Vec<(String, FuncId)>,
+    /// Acts de shapes: (shape, act, id).
+    pub methods:   Vec<(String, String, FuncId)>,
+    /// Shapes declaradas: (nombre, campos, padres).
+    pub shapes:    Vec<(String, Vec<String>, Vec<String>)>,
+}
+
+impl CompiledProgram {
+    fn empty() -> Self {
+        CompiledProgram {
+            main: None, functions: Vec::new(),
+            methods: Vec::new(), shapes: Vec::new(),
+        }
+    }
+}
+
+impl CodeGen<JITModule> {
     pub fn new() -> Result<Self, String> {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
@@ -255,7 +292,135 @@ impl JitCompiler {
         sym!("rt_not",             super::runtime::rt_not);
 
         let module = JITModule::new(jit_builder);
-        Ok(JitCompiler { module, fn_counter: 0, fn_cache: HashMap::new(), string_storage: Vec::new(), rt: None })
+        Ok(CodeGen {
+            module, fn_counter: 0, fn_cache: HashMap::new(),
+            string_storage: Vec::new(), str_data: HashMap::new(),
+            aot: false, rt: None,
+        })
+    }
+
+    /// Compila y ejecuta un programa completo (main + funciones).
+    ///
+    /// - `Ok(true)`  → JIT compiló y ejecutó con éxito.
+    /// - `Ok(false)` → instrucciones no elegibles → usar intérprete.
+    /// - `Err(msg)`  → error real de compilación JIT.
+    pub fn run_program(&mut self, bc: &OrionBytecode) -> Result<bool, String> {
+        let prog = match self.compile_program(bc)? {
+            Some(p) => p,
+            None => return Ok(false),
+        };
+
+        self.module.finalize_definitions()
+            .map_err(|e| format!("JIT finalize: {e}"))?;
+
+        // Las shapes viven en TLS del proceso: aquí basta registrarlas, mientras
+        // que en AOT hay que emitir el registro dentro del propio binario.
+        for (name, fields, parents) in &prog.shapes {
+            super::runtime_oop::register_shape_info(name, fields.clone(), parents.clone());
+        }
+        // Punteros reales para CallAsync / MakeClosure y para el dispatch de acts.
+        for (name, fid) in &prog.functions {
+            let fn_ptr = self.module.get_finalized_function(*fid) as i64;
+            super::runtime::register_jit_fn(name, fn_ptr);
+        }
+        for (shape, act, fid) in &prog.methods {
+            let fn_ptr = self.module.get_finalized_function(*fid) as i64;
+            super::runtime_oop::register_method(shape, act, fn_ptr);
+        }
+
+        let Some(main_id) = prog.main else { return Ok(true) };
+        let code_ptr = self.module.get_finalized_function(main_id);
+        unsafe {
+            let f: extern "C" fn() = std::mem::transmute(code_ptr);
+            f();
+        }
+        Ok(true)
+    }
+}
+
+impl<M: Module> CodeGen<M> {
+    /// Generador en modo AOT sobre un backend que emite a archivo objeto.
+    ///
+    /// A diferencia del JIT no se registran punteros de símbolos: las `rt_*`
+    /// son `extern "C"` exportadas por la staticlib de orion_vm, así que se
+    /// declaran como `Linkage::Import` y las resuelve el linker.
+    pub fn new_aot(module: M) -> Self {
+        CodeGen {
+            module, fn_counter: 0, fn_cache: HashMap::new(),
+            string_storage: Vec::new(), str_data: HashMap::new(),
+            aot: true, rt: None,
+        }
+    }
+
+    pub fn module_mut(&mut self) -> &mut M {
+        &mut self.module
+    }
+
+    pub fn into_module(self) -> M {
+        self.module
+    }
+
+    /// Emite literales NUL-terminados como datos del objeto y devuelve sus ids.
+    ///
+    /// Lo usa el prólogo del AOT, que necesita las direcciones de las cadenas
+    /// fuera del flujo normal de generación (donde las produce `cstr_ptr`).
+    pub fn emit_literals(
+        &mut self,
+        lits: &HashMap<String, String>,
+    ) -> Result<HashMap<String, DataId>, String> {
+        let mut out = HashMap::new();
+        for (key, text) in lits {
+            let sym = format!("orion_lit_{}", self.str_data.len() + out.len());
+            let id = self.module
+                .declare_data(&sym, Linkage::Local, false, false)
+                .map_err(|e| format!("declare_data '{key}': {e}"))?;
+            let mut desc = DataDescription::new();
+            let mut bytes = text.as_bytes().to_vec();
+            bytes.push(0u8);
+            desc.define(bytes.into_boxed_slice());
+            self.module.define_data(id, &desc)
+                .map_err(|e| format!("define_data '{key}': {e}"))?;
+            out.insert(key.clone(), id);
+        }
+        Ok(out)
+    }
+
+    /// Puntero a un literal C (NUL-terminado) utilizable desde el código emitido.
+    ///
+    /// En JIT basta la dirección del buffer en este proceso, mantenido vivo por
+    /// `string_storage`. En AOT esa dirección no existirá cuando corra el
+    /// binario, así que la cadena se emite como dato del objeto y se referencia
+    /// por símbolo; se deduplica porque los mismos nombres de campo, shape y
+    /// módulo reaparecen en cada instrucción que los menciona.
+    fn cstr_ptr(&mut self, builder: &mut FunctionBuilder, s: &str) -> Value {
+        if !self.aot {
+            let mut bytes = s.as_bytes().to_vec();
+            bytes.push(0u8);
+            // El puntero se toma antes de mover el Vec al storage: mover el Vec
+            // no reubica su buffer en el heap, así que sigue siendo válido.
+            let raw = bytes.as_ptr() as i64;
+            self.string_storage.push(bytes);
+            return builder.ins().iconst(types::I64, raw);
+        }
+
+        let data_id = match self.str_data.get(s) {
+            Some(&id) => id,
+            None => {
+                let sym = format!("orion_str_{}", self.str_data.len());
+                let id = self.module
+                    .declare_data(&sym, Linkage::Local, false, false)
+                    .expect("declare_data de literal");
+                let mut desc = DataDescription::new();
+                let mut bytes = s.as_bytes().to_vec();
+                bytes.push(0u8);
+                desc.define(bytes.into_boxed_slice());
+                self.module.define_data(id, &desc).expect("define_data de literal");
+                self.str_data.insert(s.to_string(), id);
+                id
+            }
+        };
+        let gv = self.module.declare_data_in_func(data_id, builder.func);
+        builder.ins().symbol_value(types::I64, gv)
     }
 
     fn ensure_runtime(&mut self) -> Result<(), String> {
@@ -342,14 +507,17 @@ impl JitCompiler {
         Ok(())
     }
 
-    //     API pública                                                          
+    //     API pública
 
-    /// Compila y ejecuta un programa completo (main + funciones).
+    /// Compila un programa completo (main + funciones + acts) a IR nativo.
     ///
-    /// - `Ok(true)`  → JIT compiló y ejecutó con éxito.
-    /// - `Ok(false)` → instrucciones no elegibles → usar intérprete.
-    /// - `Err(msg)`  → error real de compilación JIT.
-    pub fn run_program(&mut self, bc: &OrionBytecode) -> Result<bool, String> {
+    /// No lo ejecuta ni lo emite: cada backend decide qué hacer con el
+    /// resultado — el JIT finaliza y salta a `main`, el AOT escribe el objeto.
+    ///
+    /// - `Ok(Some(p))` → compilado; `p` lleva los ids para la fase final.
+    /// - `Ok(None)`    → instrucciones no elegibles → usar intérprete.
+    /// - `Err(msg)`    → error real de compilación.
+    pub fn compile_program(&mut self, bc: &OrionBytecode) -> Result<Option<CompiledProgram>, String> {
         // Nombres llamables por el JIT: solo funciones de usuario y shapes.
         // El JIT NO implementa builtins (len, str, range, ...) ni métodos de módulo;
         // un Call a algo fuera de este conjunto => programa no elegible => fallback al VM.
@@ -379,23 +547,23 @@ impl JitCompiler {
 
         // Elegibilidad
         for instr in &bc.main {
-            if !eligible(instr) { return Ok(false); }
+            if !eligible(instr) { return Ok(None); }
         }
         for fdef in bc.functions.values() {
             for instr in &fdef.body {
-                if !eligible(instr) { return Ok(false); }
+                if !eligible(instr) { return Ok(None); }
             }
         }
         for shape in bc.shapes.values() {
             let check_act = |body: &[Instruction]| body.iter().all(&eligible);
             if let Some(oc) = &shape.on_create {
-                if !check_act(&oc.body) { return Ok(false); }
+                if !check_act(&oc.body) { return Ok(None); }
             }
             for act in shape.acts.values() {
-                if !check_act(&act.body) { return Ok(false); }
+                if !check_act(&act.body) { return Ok(None); }
             }
         }
-        if bc.main.is_empty() { return Ok(true); }
+        if bc.main.is_empty() { return Ok(Some(CompiledProgram::empty())); }
 
         self.ensure_runtime()?;
 
@@ -511,31 +679,24 @@ impl JitCompiler {
             .map_err(|e| format!("JIT define main: {e}"))?;
         self.module.clear_context(&mut ctx);
 
-        // 7. Compilar
-        self.module.finalize_definitions()
-            .map_err(|e| format!("JIT finalize: {e}"))?;
-
-        // 8a. JIT-6: Registrar punteros de funciones de usuario para CallAsync / MakeClosure
-        for name in &fn_names {
-            let fid = self.fn_cache[name];
-            let fn_ptr = self.module.get_finalized_function(fid) as i64;
-            super::runtime::register_jit_fn(name, fn_ptr);
-        }
-
-        // 8b. Registrar punteros de acts en METHOD_TABLE (JIT-5)
-        for entry in &act_entries {
-            let fid = self.fn_cache[&entry.jit_name];
-            let fn_ptr = self.module.get_finalized_function(fid) as i64;
-            super::runtime_oop::register_method(&entry.shape, &entry.act, fn_ptr);
-        }
-
-        // 9. Ejecutar main
-        let code_ptr = self.module.get_finalized_function(main_id);
-        unsafe {
-            let f: extern "C" fn() = std::mem::transmute(code_ptr);
-            f();
-        }
-        Ok(true)
+        // 7. Entregar los ids: finalizar y ejecutar (JIT) o emitir el objeto
+        //    (AOT) es responsabilidad del backend.
+        Ok(Some(CompiledProgram {
+            main: Some(main_id),
+            functions: fn_names.iter()
+                .map(|n| (n.clone(), self.fn_cache[n]))
+                .collect(),
+            methods: act_entries.iter()
+                .map(|e| (e.shape.clone(), e.act.clone(), self.fn_cache[&e.jit_name]))
+                .collect(),
+            shapes: bc.shapes.iter()
+                .map(|(n, d)| (
+                    n.clone(),
+                    d.fields.iter().map(|f| f.name.clone()).collect(),
+                    d.using.clone(),
+                ))
+                .collect(),
+        }))
     }
 
     //     Generación de IR
@@ -667,11 +828,7 @@ impl JitCompiler {
             let init_val = if let Some(fields) = field_names {
                 if fields.contains(name) {
                     // Leer el campo del self activo via TLS
-                    let mut bytes = name.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let name_ptr = self.cstr_ptr(&mut builder, name);
                     let call = builder.ins().call(get_self_field_ref, &[name_ptr]);
                     builder.inst_results(call)[0]
                 } else {
@@ -769,11 +926,7 @@ impl JitCompiler {
                     stack.push(builder.inst_results(call)[0]);
                 }
                 Instruction::LoadStr(s) => {
-                    let mut bytes = s.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let ptr = builder.ins().iconst(types::I64, raw);
+                    let ptr = self.cstr_ptr(&mut builder, s);
                     let call = builder.ins().call(make_str_ref, &[ptr]);
                     stack.push(builder.inst_results(call)[0]);
                 }
@@ -792,11 +945,7 @@ impl JitCompiler {
                     // JIT-5: si es campo de un act, sincronizar al self activo
                     if let Some(fields) = field_names {
                         if fields.contains(name) {
-                            let mut bytes = name.as_bytes().to_vec();
-                            bytes.push(0u8);
-                            let raw = bytes.as_ptr() as i64;
-                            self.string_storage.push(bytes);
-                            let name_ptr = builder.ins().iconst(types::I64, raw);
+                            let name_ptr = self.cstr_ptr(&mut builder, name);
                             builder.ins().call(set_self_field_ref, &[name_ptr, val]);
                         }
                     }
@@ -868,11 +1017,7 @@ impl JitCompiler {
                         for &arg in &args {
                             builder.ins().call(push_arg_ref, &[arg]);
                         }
-                        let mut bytes = fname.as_bytes().to_vec();
-                        bytes.push(0u8);
-                        let raw = bytes.as_ptr() as i64;
-                        self.string_storage.push(bytes);
-                        let name_ptr  = builder.ins().iconst(types::I64, raw);
+                        let name_ptr = self.cstr_ptr(&mut builder, fname);
                         let n_args_v  = builder.ins().iconst(types::I64, n as i64);
                         let call = builder.ins().call(create_instance_ref, &[name_ptr, n_args_v]);
                         stack.push(builder.inst_results(call)[0]);
@@ -893,11 +1038,7 @@ impl JitCompiler {
                         for &arg in &args {
                             builder.ins().call(push_arg_ref, &[arg]);
                         }
-                        let mut bytes = fname.as_bytes().to_vec();
-                        bytes.push(0u8);
-                        let raw = bytes.as_ptr() as i64;
-                        self.string_storage.push(bytes);
-                        let name_ptr = builder.ins().iconst(types::I64, raw);
+                        let name_ptr = self.cstr_ptr(&mut builder, fname);
                         let n_args_v = builder.ins().iconst(types::I64, n as i64);
                         let call = builder.ins().call(call_builtin_ref, &[name_ptr, n_args_v]);
                         stack.push(builder.inst_results(call)[0]);
@@ -1024,31 +1165,19 @@ impl JitCompiler {
 
                 Instruction::GetAttr(attr) => {
                     let obj = stack.pop().ok_or("GetAttr: pila vacía")?;
-                    let mut bytes = attr.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let name_ptr = self.cstr_ptr(&mut builder, attr);
                     let call = builder.ins().call(get_attr_ref, &[obj, name_ptr]);
                     stack.push(builder.inst_results(call)[0]);
                 }
                 Instruction::SetAttr(attr) => {
                     let val = stack.pop().ok_or("SetAttr: pila vacía (val)")?;
                     let obj = stack.pop().ok_or("SetAttr: pila vacía (obj)")?;
-                    let mut bytes = attr.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let name_ptr = self.cstr_ptr(&mut builder, attr);
                     builder.ins().call(set_attr_ref, &[obj, name_ptr, val]);
                 }
                 Instruction::IsInstance(shape_name) => {
                     let obj = stack.pop().ok_or("IsInstance: pila vacía")?;
-                    let mut bytes = shape_name.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let name_ptr = self.cstr_ptr(&mut builder, shape_name);
                     let call = builder.ins().call(is_instance_ref, &[obj, name_ptr]);
                     stack.push(builder.inst_results(call)[0]);
                 }
@@ -1067,11 +1196,7 @@ impl JitCompiler {
                         builder.ins().call(push_arg_ref, &[arg]);
                     }
                     let obj = stack.pop().ok_or("CallMethod: pila vacía (obj)")?;
-                    let mut bytes = method_name.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let name_ptr = self.cstr_ptr(&mut builder, method_name);
                     let n_val    = builder.ins().iconst(types::I64, n as i64);
                     let call = builder.ins().call(call_method_ref, &[obj, name_ptr, n_val]);
                     stack.push(builder.inst_results(call)[0]);
@@ -1080,11 +1205,7 @@ impl JitCompiler {
                 //    I/O nativo — JIT-4                                       
                 Instruction::ReadInput { cast, choices } => {
                     let cast_ptr = if let Some(c) = cast {
-                        let mut bytes = c.as_bytes().to_vec();
-                        bytes.push(0u8);
-                        let raw = bytes.as_ptr() as i64;
-                        self.string_storage.push(bytes);
-                        builder.ins().iconst(types::I64, raw)
+                        self.cstr_ptr(&mut builder, c)
                     } else {
                         builder.ins().iconst(types::I64, 0i64)
                     };
@@ -1100,41 +1221,25 @@ impl JitCompiler {
                     }
                 }
                 Instruction::ReadFile(fmt) => {
-                    let mut bytes = fmt.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let fmt_ptr = builder.ins().iconst(types::I64, raw);
+                    let fmt_ptr = self.cstr_ptr(&mut builder, fmt);
                     let path = stack.pop().ok_or("ReadFile: pila vacía")?;
                     let call = builder.ins().call(read_file_ref, &[path, fmt_ptr]);
                     stack.push(builder.inst_results(call)[0]);
                 }
                 Instruction::WriteFile(mode) => {
-                    let mut bytes = mode.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let mode_ptr = builder.ins().iconst(types::I64, raw);
+                    let mode_ptr = self.cstr_ptr(&mut builder, mode);
                     let data = stack.pop().ok_or("WriteFile: pila vacía (data)")?;
                     let path = stack.pop().ok_or("WriteFile: pila vacía (path)")?;
                     builder.ins().call(write_file_ref, &[path, data, mode_ptr]);
                 }
                 Instruction::ReadEnv(cast) => {
-                    let mut bytes = cast.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let cast_ptr = builder.ins().iconst(types::I64, raw);
+                    let cast_ptr = self.cstr_ptr(&mut builder, cast);
                     let key = stack.pop().ok_or("ReadEnv: pila vacía")?;
                     let call = builder.ins().call(read_env_ref, &[key, cast_ptr]);
                     stack.push(builder.inst_results(call)[0]);
                 }
                 Instruction::UseModule(path, alias, _selective) => {
-                    let mut bytes = path.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let path_ptr = builder.ins().iconst(types::I64, raw);
+                    let path_ptr = self.cstr_ptr(&mut builder, path);
                     let call = builder.ins().call(use_module_ref, &[path_ptr]);
                     let module_val = builder.inst_results(call)[0];
                     if let Some(&var) = var_table.get(alias) {
@@ -1146,11 +1251,7 @@ impl JitCompiler {
                 Instruction::MakeClosure(fn_name) => {
                     // Crea un OrionVal TAG_CLOSURE con el fn_ptr de la función.
                     // Las llamadas en JIT son estáticas; el valor sirve como marcador.
-                    let mut bytes = fn_name.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let name_ptr = self.cstr_ptr(&mut builder, fn_name);
                     let call = builder.ins().call(make_closure_ref, &[name_ptr]);
                     stack.push(builder.inst_results(call)[0]);
                 }
@@ -1166,11 +1267,7 @@ impl JitCompiler {
                     for &arg in &args {
                         builder.ins().call(push_arg_ref, &[arg]);
                     }
-                    let mut bytes = fname.as_bytes().to_vec();
-                    bytes.push(0u8);
-                    let raw = bytes.as_ptr() as i64;
-                    self.string_storage.push(bytes);
-                    let name_ptr = builder.ins().iconst(types::I64, raw);
+                    let name_ptr = self.cstr_ptr(&mut builder, fname);
                     let n_val    = builder.ins().iconst(types::I64, n as i64);
                     let call = builder.ins().call(call_async_ref, &[name_ptr, n_val]);
                     stack.push(builder.inst_results(call)[0]);

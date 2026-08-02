@@ -9,6 +9,7 @@
 //! }
 //! ```
 
+pub mod aot_backend;
 pub mod bridge;
 pub mod compiler;
 pub mod runtime;

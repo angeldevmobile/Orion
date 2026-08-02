@@ -18,7 +18,7 @@ use json
 PORT = 8088
 DB = "orion-tasks-api/tasks_db.json"
 
--- ── Persistencia ───────────────────────────────────────────────────────
+--   Persistencia                             
 -- El estado en memoria NO sobrevive entre requests (cada handler corre en su
 -- propio frame), así que la fuente de verdad es un archivo JSON: se carga al
 -- inicio de cada request y se guarda tras cada escritura. Persiste incluso
@@ -35,7 +35,7 @@ fn save_db(db) {
     json.emit(DB, db)
 }
 
--- ── Helpers ────────────────────────────────────────────────────────────
+--   Helpers                               
 fn json_response(status, value) {
     return { "status": status, "body": json.forge(value), "content_type": "application/json" }
 }
@@ -71,7 +71,7 @@ fn parse_body(req) {
     }
 }
 
--- ── Router ─────────────────────────────────────────────────────────────
+--   Router                                
 fn router(req) {
     path = req["path"]
     method = req["method"]
@@ -88,7 +88,7 @@ fn router(req) {
         return json_response(200, { "status": "ok" })
     }
 
-    -- ── Colección /tasks ──
+    --   Colección /tasks  
     if path == "/tasks" {
         db = load_db()
 
@@ -115,7 +115,7 @@ fn router(req) {
         return json_response(405, { "error": "método no permitido en /tasks" })
     }
 
-    -- ── Recurso /tasks/:id ──
+    --   Recurso /tasks/:id  
     if path.starts_with("/tasks/") {
         id = parse_id(path)
         db = load_db()
@@ -172,7 +172,7 @@ fn router(req) {
     return json_response(404, { "error": "ruta no encontrada", "path": path })
 }
 
--- ── Arranque ───────────────────────────────────────────────────────────
+--   Arranque                               
 -- Siembra datos de ejemplo solo si el archivo no existe todavía.
 attempt {
     json.absorb(DB)

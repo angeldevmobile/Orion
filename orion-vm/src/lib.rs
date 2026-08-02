@@ -54,6 +54,20 @@ pub extern "C" fn orion_rt_exec(bytecode_ptr: *const u8, bytecode_len: usize) ->
         }
     };
 
+    // Compilar a nativo con Cranelift antes de recurrir al intérprete: el
+    // ejecutable AOT ya paga el arranque, no tiene sentido que además
+    // interprete lo que el JIT puede compilar. `ORION_NO_JIT=1` lo desactiva.
+    if std::env::var_os("ORION_NO_JIT").is_none() {
+        match jit::run_program(&bc) {
+            Ok(true) => return 0,
+            // No elegible o el JIT no pudo compilar: la VM sí sabe ejecutarlo.
+            // A diferencia de `orion --jit`, aquí un Err no es fatal — un
+            // binario distribuido debe correr igual, no abortar.
+            Ok(false) => {}
+            Err(e) => eprintln!("[orion] JIT no disponible ({e}) → intérprete"),
+        }
+    }
+
     let mut machine = vm::VM::new(
         bc.main,
         bc.lines,
