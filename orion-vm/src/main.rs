@@ -183,7 +183,7 @@ fn main() {
     // Subcomandos modernos (estilo cargo/npm/git): `orion run x.orx`. Se
     // normalizan a su flag equivalente para reusar el dispatch; los flags
     // `--run` siguen funcionando (retrocompatibilidad total).
-    if let Some(flag) = subcommand_to_flag(&args[1]) {
+    if let Some(flag) = subcommand_to_flag(&args[1], args.len()) {
         args[1] = flag.to_string();
     }
 
@@ -645,7 +645,14 @@ fn print_hotspots(machine: &vm::VM) {
 
 /// Traduce un subcomando moderno (`run`, `build`, `add`, …) a su flag `--x`.
 /// Devuelve `None` si no es un subcomando conocido (p.ej. una ruta de archivo).
-fn subcommand_to_flag(s: &str) -> Option<&'static str> {
+///
+/// `argc` desempata `install`: con un paquete detrás instala ese paquete, y a
+/// secas instala las dependencias del manifiesto. Es la convención que ya
+/// espera cualquiera que venga de npm, y evita tener dos verbos para lo mismo.
+fn subcommand_to_flag(s: &str, argc: usize) -> Option<&'static str> {
+    if s == "install" {
+        return Some(if argc > 2 { "--add" } else { "--install" });
+    }
     Some(match s {
         "run"                 => "--run",
         "jit"                 => "--jit",
@@ -655,7 +662,7 @@ fn subcommand_to_flag(s: &str) -> Option<&'static str> {
         "test"                => "--test",
         "repl"                => "--repl",
         "new"                 => "--new",
-        "add" | "install"     => "--add",
+        "add"                 => "--add",
         "remove" | "uninstall"=> "--remove",
         "list"                => "--list",
         "search"              => "--search",
@@ -698,9 +705,10 @@ fn print_help() {
             ("doctor",                "Verificar el entorno"),
         ]),
         ("Paquetes", &[
-            ("add <paquete>",         "Instalar paquete  [--force]  (alias: install)"),
+            ("install",               "Instalar las dependencias de orion.json  (escribe orion.lock)"),
+            ("add <origen>",          "Añadir paquete: nombre | url | gh:owner/repo | ruta.orx  [--force] [--sha256 <hex>]"),
             ("remove <paquete>",      "Desinstalar paquete  (alias: uninstall)"),
-            ("list",                  "Listar paquetes disponibles"),
+            ("list",                  "Listar paquetes disponibles e instalados"),
             ("search <consulta>",     "Buscar paquetes"),
             ("update [paquete]",      "Actualizar uno o todos"),
             ("publish",               "Publicar al registry (requiere orion.json)"),
