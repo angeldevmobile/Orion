@@ -706,13 +706,10 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
         // Path explícito (p.ej. "packages/math") → el archivo .orx tiene prioridad
         // sobre los módulos nativos del mismo nombre (paridad con la VM).
         let explicit_path = path_str.contains('/') || path_str.contains('\\');
-        let candidates = [
-            format!("packages/{}.orx", path_str),
-            format!("{}.orx", path_str),
-            format!("lib/{}.orx", path_str),
-        ];
+        let resolved = crate::paths::resolve_module_file(path_str)
+            .map(|p| p.to_string_lossy().to_string());
         if explicit_path {
-            if let Some(file) = candidates.iter().find(|c| std::path::Path::new(c).exists()) {
+            if let Some(file) = &resolved {
                 return super::bridge::load_orx_module_jit(file);
             }
         }
@@ -740,7 +737,7 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
                 alloc_val(TAG_DICT, raw, 0.0)
             }
             _ => {
-                match candidates.iter().find(|c| std::path::Path::new(c).exists()) {
+                match &resolved {
                     Some(file) => super::bridge::load_orx_module_jit(file),
                     None => {
                         eprintln!("[JIT] Módulo '{}' no encontrado", path_str);

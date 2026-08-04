@@ -7,6 +7,7 @@
 
 pub mod token;
 pub mod ast;
+pub mod paths;
 pub mod instruction;
 pub mod bytecode;
 pub mod value;

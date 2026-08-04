@@ -1449,18 +1449,12 @@ impl VM {
         // el paquete instalado, sin que uno eclipse silenciosamente al otro.
         let explicit_path = path.contains('/') || path.contains('\\');
 
-        // Candidatos de archivo .orx en packages/ o ruta relativa
-        let orx_candidates = [
-            format!("packages/{}.orx", path),
-            format!("{}.orx", path),
-            format!("lib/{}.orx", path),
-        ];
-
+        // La búsqueda del archivo vive en `paths`: el mismo orden (proyecto,
+        // archivo de entrada, cwd, global) que usan el JIT y el gestor.
         if explicit_path {
-            for candidate in &orx_candidates {
-                if std::path::Path::new(candidate).exists() {
-                    return self.load_orx_module(candidate, base_name, &prefix);
-                }
+            if let Some(file) = crate::paths::resolve_module_file(path) {
+                let file = file.to_string_lossy().to_string();
+                return self.load_orx_module(&file, base_name, &prefix);
             }
         }
 
@@ -1474,10 +1468,9 @@ impl VM {
         }
 
         // 2) Buscar archivo .orx (fallback para imports por nombre sin módulo nativo)
-        for candidate in &orx_candidates {
-            if std::path::Path::new(candidate).exists() {
-                return self.load_orx_module(candidate, base_name, &prefix);
-            }
+        if let Some(file) = crate::paths::resolve_module_file(path) {
+            let file = file.to_string_lossy().to_string();
+            return self.load_orx_module(&file, base_name, &prefix);
         }
 
         Err(format!("Módulo '{}' no encontrado", path))
@@ -3214,13 +3207,36 @@ impl VM {
 // ---------------------------------------------------------------------------
 
 /// Resuelve el nombre de librería al path correcto para la plataforma.
+/// Resuelve el nombre de una librería para `extern ... from "<lib>"`.
+///
+/// Una ruta escrita a mano se respeta tal cual. Un nombre suelto se traduce al
+/// nombre de archivo de la plataforma y se busca primero entre las librerías
+/// que instaló el gestor de paquetes (`<packages>/native/<pkg>/`); si no está
+/// ahí, se deja el nombre pelado para que lo resuelva el cargador del sistema,
+/// que es el comportamiento de siempre.
 fn ffi_resolve_lib(name: &str) -> String {
-    if name.contains('.') { return name.to_string(); }
-    #[cfg(target_os = "windows")]  return format!("{}.dll", name);
-    #[cfg(target_os = "linux")]    return format!("lib{}.so", name);
-    #[cfg(target_os = "macos")]    return format!("lib{}.dylib", name);
-    #[allow(unreachable_code)]
-    name.to_string()
+    if name.contains('/') || name.contains('\\') {
+        return name.to_string();
+    }
+    let file = crate::paths::dylib_file_name(name);
+
+    for base in crate::paths::native_dirs() {
+        // <native>/<lib>/<archivo>  — el paquete se llama como la librería.
+        let direct = base.join(name).join(&file);
+        if direct.is_file() {
+            return direct.to_string_lossy().to_string();
+        }
+        // <native>/<paquete>/<archivo> — el paquete se llama de otra forma.
+        if let Ok(rd) = std::fs::read_dir(&base) {
+            for e in rd.flatten() {
+                let cand = e.path().join(&file);
+                if cand.is_file() {
+                    return cand.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+    file
 }
 
 // ---------------------------------------------------------------------------

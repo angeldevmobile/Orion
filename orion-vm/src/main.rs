@@ -14,6 +14,7 @@ mod lexer;
 mod parser;
 mod codegen;
 mod named_args;
+mod paths;
 mod pkg;
 mod typechecker;
 mod cli;
@@ -345,12 +346,17 @@ fn main() {
         //    Package manager                                                    
         "--add" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --add <paquete> [--force]");
+                cli::banner::fail("Uso: orion --add <paquete|url|gh:owner/repo|ruta.orx> [--force] [--sha256 <hex>]");
                 std::process::exit(1);
             }
             let force = args.iter().any(|a| a == "--force");
-            pkg::add_package(&args[2], force);
+            let sha = args.windows(2)
+                .find(|w| w[0] == "--sha256")
+                .map(|w| w[1].as_str());
+            pkg::add_package(&args[2], force, sha);
         }
+
+        "--install" => pkg::install_project(),
 
         "--remove" => {
             if args.len() < 3 {
@@ -727,6 +733,12 @@ fn print_help() {
 }
 
 fn read_src(path: &str) -> String {
+    // Único embudo por el que pasa el archivo de entrada, y por tanto el sitio
+    // donde se ancla el proyecto: a partir de aquí `use` resuelve respecto a la
+    // raíz del programa y no respecto al directorio desde el que se invocó.
+    // `set_entry_file` solo atiende la primera llamada, así que los módulos que
+    // se carguen después no reubican nada.
+    paths::set_entry_file(path);
     match fs::read_to_string(path) {
         Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
         Err(e) => {

@@ -1,4 +1,4 @@
--- reporte_operaciones.orx — Consulta de operaciones desde un Excel.
+-- reporte_operaciones.orx — Consulta de desde un Excel.
 --
 --   orion run demo/reporte_operaciones.orx
 --
@@ -21,7 +21,7 @@ MAX_SUGERENCIAS = 12
 
 if gui.pressed("examinar") {
     elegido = gui.file_open({
-        "title":      "Elige el Excel de operaciones",
+        "title":      "Elige el Excel",
         "filter":     "Libros de Excel",
         "extensions": ["xlsx", "xls", "xlsm"]
     })
