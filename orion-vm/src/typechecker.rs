@@ -138,10 +138,15 @@ impl TypeChecker {
         self.collect_fn_sigs(stmts);
         self.infer_untyped_fn_returns(stmts);
         self.check_stmts(stmts, None);
-        // Cerrar el scope del programa: sin esto una variable muerta escrita en
-        // el nivel superior no se reportaba nunca, porque el aviso se emite al
-        // hacer pop y este scope se abre en `new()` y no se cerraba jamás.
-        self.pop_scope();
+        // El scope del programa se deja SIN cerrar a propósito: el aviso de
+        // variable muerta se emite al hacer pop, así que las del nivel superior
+        // no se reportan.
+        //
+        // Cerrarlo aquí parece la mejora obvia, pero destapa que el marcado de
+        // lecturas no cubre todas las rutas (argumentos de método, slices…), y
+        // el resultado son avisos sobre variables que sí se usan. Mientras esas
+        // rutas no estén completas, un falso positivo es mucho peor que un
+        // falso negativo: el aviso deja de merecer confianza y se ignora.
         self.issues
     }
 
