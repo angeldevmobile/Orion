@@ -18,27 +18,28 @@ pub fn run_doctor() {
     // una copia local: este check existía y mentía porque miraba otro sitio.
     let root = paths::project_root();
     banner::row("Raíz de proyecto", &root.to_string_lossy(), true);
+    // El manifiesto es opcional: un script suelto es un uso legítimo de Orion.
     banner::row(
         "Manifiesto",
         &if paths::has_manifest() {
             paths::manifest_path().to_string_lossy().to_string()
         } else {
-            format!("(sin {})", paths::MANIFEST)
+            format!("(sin {} — proyecto sin declarar)", paths::MANIFEST)
         },
-        paths::has_manifest(),
+        true,
     );
 
-    let proj_pkgs = paths::project_packages_dir();
-    banner::row("Paquetes del proyecto", &proj_pkgs.to_string_lossy(), proj_pkgs.is_dir());
-
-    let global_pkgs = paths::global_packages_dir();
-    banner::row("Paquetes globales", &global_pkgs.to_string_lossy(), global_pkgs.is_dir());
-
-    // Ninguno de los dos es obligatorio: un proyecto sin dependencias no tiene
-    // por qué tener directorio de paquetes, así que esto no tumba el
-    // diagnóstico. Lo que sí importa es poder escribir donde toca.
-    let pkg_dir = paths::install_dir();
-    banner::row("Instalaría en", &pkg_dir.to_string_lossy(), true);
+    // Ninguno de los dos directorios es obligatorio: un proyecto sin
+    // dependencias no tiene por qué tener uno, así que se marcan siempre como
+    // correctos y se anota si todavía no existen. Un ✗ aquí haría pensar en una
+    // avería donde solo hay ausencia de paquetes.
+    let describe = |d: &std::path::Path| {
+        if d.is_dir() { d.to_string_lossy().to_string() }
+        else { format!("{} (aún no creado)", d.display()) }
+    };
+    banner::row("Paquetes del proyecto", &describe(&paths::project_packages_dir()), true);
+    banner::row("Paquetes globales",     &describe(&paths::global_packages_dir()),  true);
+    banner::row("Instalaría en",         &paths::install_dir().to_string_lossy(),   true);
 
     // 3. Temp write access
     let tmp = std::env::temp_dir().join("orion_doctor_check.tmp");

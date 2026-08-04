@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 //    Paleta moderna: azul eléctrico + cyan + naranja                           
 pub const RESET:  &str = "\x1b[0m";
@@ -124,4 +124,101 @@ pub fn table_row(cols: &[&str]) {
         .map(|c| format!("{BWHITE}{c:<20}{RESET}"))
         .collect();
     println!("  {row}");
+}
+
+//    Progreso de operaciones largas
+
+/// ¿La salida va a una terminal de verdad?
+///
+/// Todo lo que se reescribe con `\r` se calla cuando la respuesta es no: en un
+/// log de CI o en una tubería, las animaciones solo dejan basura ilegible.
+pub fn is_tty() -> bool {
+    use std::io::IsTerminal;
+    io::stdout().is_terminal()
+}
+
+/// Tamaño en unidades legibles: `312 B`, `4.1 KB`, `1.2 MB`.
+pub fn human_size(n: u64) -> String {
+    const KB: f64 = 1024.0;
+    let f = n as f64;
+    if f < KB            { format!("{n} B") }
+    else if f < KB * KB  { format!("{:.1} KB", f / KB) }
+    else if f < KB*KB*KB { format!("{:.1} MB", f / (KB * KB)) }
+    else                 { format!("{:.1} GB", f / (KB * KB * KB)) }
+}
+
+/// Indicador de progreso de una descarga: una sola línea que se reescribe.
+///
+/// Con tamaño conocido dibuja una barra; sin él, un spinner con los bytes que
+/// llevan bajados. Fuera de una terminal no imprime absolutamente nada, así que
+/// se puede usar sin condicionales en el sitio de llamada.
+pub struct Download {
+    label:  String,
+    total:  Option<u64>,
+    done:   u64,
+    frame:  usize,
+    last:   Instant,
+    activo: bool,
+}
+
+impl Download {
+    pub fn start(label: &str, total: Option<u64>) -> Self {
+        let d = Download {
+            label: label.to_string(),
+            total,
+            done: 0,
+            frame: 0,
+            last: Instant::now() - Duration::from_secs(1),
+            activo: is_tty(),
+        };
+        d.draw();
+        d
+    }
+
+    /// Suma bytes recibidos y redibuja como mucho cada 60 ms: pintar en cada
+    /// chunk gasta más tiempo en la terminal que en la descarga.
+    pub fn advance(&mut self, n: usize) {
+        self.done += n as u64;
+        if !self.activo { return; }
+        if self.last.elapsed() < Duration::from_millis(60) { return; }
+        self.last = Instant::now();
+        self.frame = self.frame.wrapping_add(1);
+        self.draw();
+    }
+
+    fn draw(&self) {
+        if !self.activo { return; }
+        let cuerpo = match self.total {
+            Some(t) if t > 0 => {
+                let ancho = 22usize;
+                let hechos = ((self.done.min(t) as f64 / t as f64) * ancho as f64) as usize;
+                let pct = (self.done.min(t) * 100 / t) as u32;
+                format!(
+                    "{DIM}[{RESET}{BBLUE}{BOLD}{}{RESET}{DIM}{}{RESET}{DIM}]{RESET} {ORANGE}{BOLD}{pct:>3}%{RESET} {DIM}{}{RESET}",
+                    "█".repeat(hechos),
+                    "░".repeat(ancho - hechos),
+                    human_size(t),
+                )
+            }
+            _ => {
+                let frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+                format!(
+                    "{BBLUE}{BOLD}{}{RESET} {DIM}{}{RESET}",
+                    frames[self.frame % frames.len()],
+                    human_size(self.done),
+                )
+            }
+        };
+        let mut out = io::stdout().lock();
+        write!(out, "\r  {DIM}↓{RESET}  {BWHITE}{:<16}{RESET}{cuerpo}   ", self.label).ok();
+        out.flush().ok();
+    }
+
+    /// Borra la línea para que la escriba el resultado definitivo.
+    pub fn clear(&self) {
+        if !self.activo { return; }
+        let mut out = io::stdout().lock();
+        write!(out, "\r{:<78}\r", "").ok();
+        out.flush().ok();
+    }
 }

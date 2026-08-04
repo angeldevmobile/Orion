@@ -32,6 +32,68 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use sha2::{Digest, Sha256};
 
 use crate::paths;
+use crate::cli::banner;
+use banner::{BOLD, DIM, RESET, GREEN, RED, ORANGE, BCYAN, BWHITE};
+
+//    Presentación
+//
+// El gestor imprime bastante y conviene que se lea de un vistazo: una línea por
+// paquete, siempre con las columnas en el mismo sitio, y el detalle atenuado
+// para que el ojo salte de nombre a nombre.
+
+/// Cabecera de una operación, con el destino debajo.
+fn encabezado(titulo: &str, destino: &Path) {
+    println!();
+    println!("  {BOLD}{BCYAN}{titulo}{RESET}");
+    println!("  {DIM}{}{RESET}", destino.display());
+    println!();
+}
+
+/// Línea de un paquete: glifo, nombre, y el resto ya formateado.
+fn linea(glifo: &str, color: &str, nombre: &str, resto: &str) {
+    println!("  {BOLD}{color}{glifo}{RESET}  {BWHITE}{nombre:<18}{RESET}{resto}");
+}
+
+fn linea_ok(nombre: &str, resto: &str)   { linea("✓", GREEN,  nombre, resto); }
+fn linea_error(nombre: &str, msg: &str)  { linea("✗", RED,    nombre, &format!("{DIM}{msg}{RESET}")); }
+fn linea_aviso(nombre: &str, msg: &str)  { linea("!", ORANGE, nombre, &format!("{DIM}{msg}{RESET}")); }
+
+/// Columnas de detalle de un paquete instalado: versión, origen, tamaño y
+/// cualquier nota extra (por ejemplo el binario nativo que vino con él).
+///
+/// Un origen sin registry no declara versión, y el `0.0.0` de relleno que se
+/// guarda en `installed.json` como marcador se muestra aquí como `—`: fingir una
+/// versión que nadie ha declarado es peor que admitir que no se conoce.
+fn detalle(version: &str, origen: &str, bytes: u64, extra: &str) -> String {
+    let ver = if version == "0.0.0" { "—" } else { version };
+    let tam = banner::human_size(bytes);
+    format!("{DIM}{ver:<9}{origen:<11}{tam:>9}{RESET}{extra}")
+}
+
+/// Paso numerado de una secuencia larga (publicar son siete llamadas a GitHub).
+/// Ver el avance evita que parezca colgado durante la parte de red.
+fn paso(n: usize, total: usize, texto: &str) {
+    println!("  {DIM}{n}/{total}{RESET}  {BWHITE}{texto}{RESET}");
+}
+
+/// Resumen final: qué se hizo y en cuánto tiempo.
+///
+/// El destino no se repite aquí: ya lo dijo el encabezado, y estas rutas son
+/// largas — pintarlas dos veces convierte el resumen en ruido.
+fn resumen(instalados: usize, fallos: usize, inicio: std::time::Instant) {
+    let secs = inicio.elapsed().as_secs_f64();
+    let tiempo = if secs < 1.0 { format!("{:.0} ms", secs * 1000.0) } else { format!("{secs:.1} s") };
+    let plural = |n: usize, s: &str, p: &str| if n == 1 { s.to_string() } else { p.to_string() };
+    let cuenta = match (instalados, fallos) {
+        (n, 0) => format!("{n} {}", plural(n, "paquete instalado", "paquetes instalados")),
+        (0, f) => format!("{f} {}", plural(f, "fallo", "fallos")),
+        (n, f) => format!("{n} {}, {f} {}",
+                          plural(n, "instalado", "instalados"), plural(f, "fallo", "fallos")),
+    };
+    let glifo = if fallos == 0 { format!("{BOLD}{GREEN}✓{RESET}") } else { format!("{BOLD}{ORANGE}!{RESET}") };
+    println!();
+    println!("  {glifo}  {BWHITE}{cuenta}{RESET}  {DIM}·  {tiempo}{RESET}");
+}
 
 const DEFAULT_REGISTRY_BASE: &str =
     "https://raw.githubusercontent.com/angeldevmobile/Orion/master/packages";
@@ -182,16 +244,32 @@ fn verify_signature(pkg: &str, bytes: &[u8], sig_b64: &str) -> Result<bool, Stri
 
 //    HTTP
 
+/// Descarga mostrando progreso. Se lee por trozos en vez de `read_to_end` para
+/// poder ir dibujando: una descarga de varios megas sin señal de vida parece
+/// un cuelgue.
 fn http_get_bytes(what: &str, url: &str) -> Result<Vec<u8>, String> {
     let resp = ureq::get(url)
         .set("User-Agent", "orion-lang/pkg")
         .call()
         .map_err(|e| format!("no se pudo descargar '{what}' desde {url}: {e}"))?;
-    let mut buf = Vec::new();
-    resp.into_reader()
-        .take(MAX_DOWNLOAD)
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("error leyendo '{what}': {e}"))?;
+
+    let total = resp.header("Content-Length").and_then(|v| v.trim().parse::<u64>().ok());
+    let mut progreso = banner::Download::start(what, total);
+
+    let mut lector = resp.into_reader().take(MAX_DOWNLOAD);
+    let mut buf = Vec::with_capacity(total.unwrap_or(8 * 1024) as usize);
+    let mut trozo = [0u8; 16 * 1024];
+    loop {
+        match lector.read(&mut trozo) {
+            Ok(0) => break,
+            Ok(n) => { buf.extend_from_slice(&trozo[..n]); progreso.advance(n); }
+            Err(e) => {
+                progreso.clear();
+                return Err(format!("error leyendo '{what}': {e}"));
+            }
+        }
+    }
+    progreso.clear();
     Ok(buf)
 }
 
@@ -207,11 +285,29 @@ fn http_get_string(what: &str, url: &str) -> Result<String, String> {
 fn load_registry(refresh: bool) -> Result<(String, HashMap<String, PkgEntry>), String> {
     let local = registry_path();
 
-    if refresh || !local.exists() {
+    // La caché guarda de qué registro salió. Sin esa marca, apuntar a otro
+    // registro (ORION_REGISTRY) seguía sirviendo el contenido del anterior:
+    // la caché existía, así que nunca se refrescaba.
+    let cache_ajena = fs::read_to_string(&local).ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .map(|j| j["_meta"]["source"].as_str().unwrap_or("").to_string())
+        .map(|origen| origen != registry_base())
+        .unwrap_or(true);
+
+    if refresh || !local.exists() || cache_ajena {
         if let Ok(body) = http_get_string("registry.json", &registry_url()) {
             let dest = registry_cache_path();
             let _ = fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")));
-            let _ = fs::write(&dest, &body);
+            // Se anota el origen antes de guardar, para poder detectar después
+            // que la caché pertenece a otro registro.
+            let marcado = match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(mut j) => {
+                    j["_meta"]["source"] = serde_json::Value::String(registry_base());
+                    serde_json::to_string_pretty(&j).unwrap_or(body)
+                }
+                Err(_) => body,
+            };
+            let _ = fs::write(&dest, &marcado);
         }
     }
 
@@ -530,7 +626,13 @@ fn install_native_asset(name: &str, entry: &PkgEntry, dir: &Path) -> Result<Opti
 struct Installed {
     version: String,
     sha256:  String,
+    /// De dónde salió realmente: la URL resuelta, la ruta, o "local".
     origin:  String,
+    /// Etiqueta corta de la clase de origen: builtin, community, url, github…
+    kind:    String,
+    bytes:   u64,
+    /// Ruta relativa del binario nativo, si el paquete traía uno.
+    native:  Option<String>,
 }
 
 /// Instala un paquete concreto. `expect_sha` viene de `--sha256` o del lockfile.
@@ -592,7 +694,10 @@ fn install_one(
     installed.insert(name.to_string(), record);
     save_installed_at(&dir, &installed)?;
 
-    Ok(Installed { version, sha256: digest, origin })
+    Ok(Installed {
+        version, sha256: digest, kind: origin_kind(src, entry), origin,
+        bytes: bytes.len() as u64, native,
+    })
 }
 
 fn origin_kind(src: &Source, entry: Option<&PkgEntry>) -> String {
@@ -615,62 +720,90 @@ pub fn add_package(spec: &str, force: bool, sha: Option<&str>) {
     let dir = install_dir();
     let installed = load_installed_at(&dir);
     if installed.contains_key(&name) && !force {
-        let v = installed[&name]["version"].as_str().unwrap_or("?");
-        println!("[ya instalado] {name} v{v}  — usa --force para reinstalar");
+        let v = match installed[&name]["version"].as_str() {
+            Some("0.0.0") | None => "sin versión declarada".to_string(),
+            Some(v) => format!("v{v}"),
+        };
+        encabezado("Añadir paquete", &dir);
+        linea_aviso(&name, &format!("ya instalado ({v}) — usa --force para reinstalar"));
+        println!();
         return;
     }
+
+    let inicio = std::time::Instant::now();
+    encabezado("Añadir paquete", &dir);
 
     // Solo el registry aporta metadatos (versión, deps, assets). Una URL o un
     // repo se instalan tal cual: no hay nadie que responda por ellos.
     let entry = match &src {
         Source::Registry(n) => match lookup_registry(n) {
             Ok(e) => Some(e),
-            Err(e) => { eprintln!("[orion pkg] {e}"); std::process::exit(1); }
+            Err(e) => { banner::fail(&e); std::process::exit(1); }
         },
         _ => None,
     };
 
     if entry.is_none() && sha.is_none() {
-        println!("[orion pkg] aviso: '{spec}' no viene del registry y no fijaste --sha256;");
-        println!("            se instalará lo que responda el servidor y se anotará su hash.");
+        linea_aviso(&name, "origen sin registry ni --sha256: se anotará el hash recibido");
     }
 
     match install_one(&name, &src, entry.as_ref(), sha, force) {
         Ok(i) => {
-            println!("[orion pkg] {name} v{} instalado → {}", i.version, dir.display());
-            println!("            sha256 {}", &i.sha256[..16.min(i.sha256.len())]);
-            if i.origin != "local" && entry.is_some() {
-                install_deps_of(entry.as_ref().unwrap(), force);
+            let extra = match &i.native {
+                Some(_) => format!("{DIM}  + binario {}{RESET}", paths::current_platform()),
+                None    => String::new(),
+            };
+            linea_ok(&name, &detalle(&i.version, &i.kind, i.bytes, &extra));
+            println!("     {DIM}sha256 {}{RESET}", &i.sha256[..16.min(i.sha256.len())]);
+
+            let mut extras = 0;
+            if i.origin != "local" {
+                if let Some(e) = entry.as_ref() { extras = install_deps_of(e, force); }
             }
-            println!("            úsalo con:  use \"{name}\"");
+            resumen(1 + extras, 0, inicio);
+            println!("  {DIM}úsalo con{RESET}  {BCYAN}use \"{name}\"{RESET}");
+            println!();
         }
-        Err(e) => { eprintln!("[orion pkg] {e}"); std::process::exit(1); }
+        Err(e) => {
+            linea_error(&name, &e.lines().next().unwrap_or(&e).to_string());
+            for extra in e.lines().skip(1) { println!("     {DIM}{extra}{RESET}"); }
+            resumen(0, 1, inicio);
+            std::process::exit(1);
+        }
     }
 }
 
+
 /// Instala las dependencias declaradas por un paquete del registry.
-fn install_deps_of(entry: &PkgEntry, force: bool) {
-    if entry.deps.is_empty() { return; }
+/// Devuelve cuántas se instalaron, para poder contarlas en el resumen.
+fn install_deps_of(entry: &PkgEntry, force: bool) -> usize {
+    if entry.deps.is_empty() { return 0; }
     let dir = install_dir();
+    let mut hechas = 0;
     for (dep, spec) in &entry.deps {
         let installed = load_installed_at(&dir);
         if let Some(cur) = installed.get(dep) {
             let v = cur["version"].as_str().unwrap_or("0.0.0");
             if satisfies(v, spec) { continue; }
         }
-        println!("[orion pkg] dependencia: {dep} {spec}");
         match lookup_registry(dep) {
             Ok(e) => {
                 if !satisfies(&e.version, spec) {
-                    eprintln!("[orion pkg] aviso: '{dep}' v{} no satisface '{spec}' (se instala igual)", e.version);
+                    linea_aviso(dep, &format!("v{} no satisface '{spec}' — se instala igual", e.version));
                 }
-                if let Err(err) = install_one(dep, &Source::Registry(dep.clone()), Some(&e), None, force) {
-                    eprintln!("[orion pkg] {err}");
+                match install_one(dep, &Source::Registry(dep.clone()), Some(&e), None, force) {
+                    Ok(i) => {
+                        linea_ok(dep, &format!("{}{DIM}  ← dependencia de {}{RESET}",
+                                 detalle(&i.version, &i.kind, i.bytes, ""), entry.file));
+                        hechas += 1;
+                    }
+                    Err(err) => linea_error(dep, err.lines().next().unwrap_or(&err)),
                 }
             }
-            Err(err) => eprintln!("[orion pkg] {err}"),
+            Err(err) => linea_error(dep, err.lines().next().unwrap_or(&err)),
         }
     }
+    hechas
 }
 
 fn lookup_registry(name: &str) -> Result<PkgEntry, String> {
@@ -693,32 +826,38 @@ fn lookup_registry(name: &str) -> Result<PkgEntry, String> {
 pub fn install_project() {
     let manifest = paths::manifest_path();
     if !manifest.is_file() {
-        eprintln!("[orion pkg] No hay {} en este proyecto.", paths::MANIFEST);
-        eprintln!("  Raíz detectada: {}", paths::project_root().display());
-        eprintln!("  Crea el manifiesto con los campos name, version y dependencies.");
+        println!();
+        banner::fail(&format!("No hay {} en este proyecto.", paths::MANIFEST));
+        println!("     {DIM}Raíz detectada: {}{RESET}", paths::project_root().display());
+        println!("     {DIM}Crea el manifiesto con los campos name, version y dependencies.{RESET}");
+        println!();
         std::process::exit(1);
     }
 
     let raw = match fs::read_to_string(&manifest) {
         Ok(s) => s,
-        Err(e) => { eprintln!("[orion pkg] No se pudo leer {}: {e}", manifest.display()); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("No se pudo leer {}: {e}", manifest.display())); std::process::exit(1); }
     };
     let json: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(j) => j,
-        Err(e) => { eprintln!("[orion pkg] {} malformado: {e}", paths::MANIFEST); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("{} malformado: {e}", paths::MANIFEST)); std::process::exit(1); }
     };
 
     let deps = json["dependencies"].as_object().cloned().unwrap_or_default();
     if deps.is_empty() {
-        println!("[orion pkg] {} no declara dependencies — nada que instalar.", paths::MANIFEST);
+        banner::info(&format!("{} no declara dependencies — nada que instalar.", paths::MANIFEST));
         return;
     }
 
     let lock = load_lock();
     let mut new_lock = HashMap::new();
     let mut fallos = 0;
+    let mut hechas = 0;
+    let inicio = std::time::Instant::now();
+    let destino = install_dir();
 
-    println!("[orion pkg] Instalando {} dependencia(s) en {}", deps.len(), install_dir().display());
+    let proyecto = json["name"].as_str().unwrap_or("(sin nombre)");
+    encabezado(&format!("{proyecto}  ·  {} dependencia(s)", deps.len()), &destino);
 
     for (name, spec_val) in &deps {
         let spec = spec_val.as_str().unwrap_or("*");
@@ -738,39 +877,58 @@ pub fn install_project() {
             Source::Registry(n) => match lookup_registry(n) {
                 Ok(e) => {
                     if !satisfies(&e.version, spec) {
-                        eprintln!("[orion pkg] aviso: '{n}' v{} no satisface '{spec}'", e.version);
+                        linea_aviso(n, &format!("v{} no satisface '{spec}'", e.version));
                     }
                     Some(e)
                 }
-                Err(e) => { eprintln!("[orion pkg] {e}"); fallos += 1; continue; }
+                Err(e) => {
+                    linea_error(name, e.lines().next().unwrap_or(&e));
+                    fallos += 1;
+                    if let Some(prev) = lock.get(name) { new_lock.insert(name.clone(), prev.clone()); }
+                    continue;
+                }
             },
             _ => None,
         };
 
         match install_one(name, &src, entry.as_ref(), expect_sha, true) {
             Ok(i) => {
-                println!("  ok  {name} v{}", i.version);
+                let extra = match &i.native {
+                    Some(_) => format!("{DIM}  + binario {}{RESET}", paths::current_platform()),
+                    None    => String::new(),
+                };
+                linea_ok(name, &detalle(&i.version, &i.kind, i.bytes, &extra));
+                hechas += 1;
                 new_lock.insert(name.clone(), serde_json::json!({
                     "version":  i.version,
                     "resolved": i.origin,
                     "sha256":   i.sha256,
-                    "source":   origin_kind(&src, entry.as_ref()),
+                    "source":   i.kind,
                 }));
             }
-            Err(e) => { eprintln!("  err {name}: {e}"); fallos += 1; }
+            Err(e) => {
+                linea_error(name, e.lines().next().unwrap_or(&e));
+                for extra in e.lines().skip(1) { println!("     {DIM}{extra}{RESET}"); }
+                fallos += 1;
+                // El pin anterior sobrevive al fallo. Reescribir el lockfile sin
+                // esta entrada convertiría un error de instalación en la pérdida
+                // silenciosa de la versión que sí estaba fijada.
+                if let Some(prev) = lock.get(name) {
+                    new_lock.insert(name.clone(), prev.clone());
+                }
+            }
         }
     }
 
-    if let Err(e) = save_lock(&new_lock) {
-        eprintln!("[orion pkg] {e}");
-    } else {
-        println!("[orion pkg] {} actualizado.", paths::LOCKFILE);
+    resumen(hechas, fallos, inicio);
+
+    match save_lock(&new_lock) {
+        Err(e) => banner::fail(&e),
+        Ok(()) if fallos == 0 => println!("  {DIM}{} actualizado{RESET}\n", paths::LOCKFILE),
+        Ok(()) => println!("  {DIM}{} conservado (hubo fallos){RESET}\n", paths::LOCKFILE),
     }
 
-    if fallos > 0 {
-        eprintln!("[orion pkg] {fallos} dependencia(s) no se pudieron instalar.");
-        std::process::exit(1);
-    }
+    if fallos > 0 { std::process::exit(1); }
 }
 
 fn load_lock() -> HashMap<String, serde_json::Value> {
@@ -806,10 +964,11 @@ pub fn remove_package(name: &str) {
     let Some(dir) = search_dirs().into_iter()
         .find(|d| load_installed_at(d).contains_key(name))
     else {
-        eprintln!("[orion pkg] '{name}' no está instalado.");
+        banner::fail(&format!("'{name}' no está instalado."));
         std::process::exit(1);
     };
 
+    encabezado("Desinstalar", &dir);
     let mut installed = load_installed_at(&dir);
     let source = installed[name]["source"].as_str().unwrap_or("").to_string();
     let file   = installed[name]["file"].as_str().unwrap_or("").to_string();
@@ -817,7 +976,7 @@ pub fn remove_package(name: &str) {
 
     installed.shift_remove(name);
     if let Err(e) = save_installed_at(&dir, &installed) {
-        eprintln!("[orion pkg] {e}");
+        banner::fail(&e);
         std::process::exit(1);
     }
 
@@ -826,23 +985,30 @@ pub fn remove_package(name: &str) {
         let p = dir.join(rel);
         let _ = fs::remove_file(&p);
         let _ = fs::remove_dir(p.parent().unwrap_or(Path::new(".")));
+        linea_ok(name, &format!("{DIM}binario nativo eliminado{RESET}"));
     }
 
     // Los .orx builtin vienen con Orion y se conservan.
     if source == "builtin" {
-        println!("[orion pkg] '{name}' desregistrado (archivo builtin conservado).");
+        linea_ok(name, &format!("{DIM}desregistrado (archivo builtin conservado){RESET}"));
+        println!();
         return;
     }
     if !file.is_empty() {
         let path = dir.join(&file);
         if path.exists() {
             match fs::remove_file(&path) {
-                Ok(_)  => { println!("[orion pkg] '{name}' desinstalado de {}.", dir.display()); return; }
-                Err(e) => eprintln!("[orion pkg] Advertencia: no se pudo eliminar {}: {e}", path.display()),
+                Ok(_) => {
+                    linea_ok(name, &format!("{DIM}desinstalado{RESET}"));
+                    println!();
+                    return;
+                }
+                Err(e) => linea_aviso(name, &format!("no se pudo eliminar {}: {e}", path.display())),
             }
         }
     }
-    println!("[orion pkg] '{name}' desregistrado.");
+    linea_ok(name, &format!("{DIM}desregistrado{RESET}"));
+    println!();
 }
 
 //    orion --list
@@ -850,7 +1016,7 @@ pub fn remove_package(name: &str) {
 pub fn list_packages() {
     let (_base_url, registry) = match load_registry(false) {
         Ok(r) => r,
-        Err(e) => { eprintln!("[orion pkg] {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&e); std::process::exit(1); }
     };
 
     let mut all_installed: HashMap<String, (String, PathBuf)> = HashMap::new();
@@ -867,14 +1033,17 @@ pub fn list_packages() {
     names.sort();
 
     println!();
-    println!("  Paquetes Orion disponibles:");
-    println!("  {:<14} {:<10} {:<12} {}", "NOMBRE", "VERSIÓN", "TIPO", "DESCRIPCIÓN");
-    println!("  {}", " ".repeat(72));
+    println!("  {BOLD}{BCYAN}Paquetes disponibles{RESET}");
+    println!();
+    println!("     {DIM}{:<18}{:<10}{:<12}{}{RESET}", "NOMBRE", "VERSIÓN", "TIPO", "DESCRIPCIÓN");
     for name in names {
         let entry = &registry[name];
-        let mark = if all_installed.contains_key(name) { "✓" } else { " " };
-        println!("  {} {:<13} {:<10} {:<12} {}",
-                 mark, name, entry.version, entry.pkg_type, entry.description);
+        let marca = match all_installed.contains_key(name) {
+            true  => format!("{BOLD}{GREEN}✓{RESET}"),
+            false => " ".to_string(),
+        };
+        println!("  {marca}  {BWHITE}{name:<18}{RESET}{DIM}{:<10}{:<12}{RESET}{}",
+                 entry.version, entry.pkg_type, entry.description);
     }
 
     // Lo instalado fuera del registry (URL, repo, ruta local) también existe y
@@ -884,14 +1053,15 @@ pub fn list_packages() {
         .collect();
     if !extras.is_empty() {
         println!();
-        println!("  Instalados fuera del registry:");
+        println!("  {BOLD}{BCYAN}Instalados fuera del registry{RESET}");
+        println!();
         for (name, (ver, dir)) in extras {
-            println!("  ✓ {:<13} {:<10} {}", name, ver, dir.display());
+            println!("  {BOLD}{GREEN}✓{RESET}  {BWHITE}{name:<18}{RESET}{DIM}{ver:<10}{}{RESET}", dir.display());
         }
     }
 
     println!();
-    println!("  ✓ = instalado   |   Instalar: orion --add <paquete|url|gh:owner/repo|ruta>");
+    println!("  {DIM}✓ instalado  ·  añadir:{RESET}  {BCYAN}orion add <paquete|url|gh:owner/repo|ruta>{RESET}");
     println!();
 }
 
@@ -900,7 +1070,7 @@ pub fn list_packages() {
 pub fn search_packages(query: &str) {
     let (_base, registry) = match load_registry(false) {
         Ok(r) => r,
-        Err(e) => { eprintln!("[orion pkg] {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&e); std::process::exit(1); }
     };
 
     let q = query.to_lowercase();
@@ -918,18 +1088,23 @@ pub fn search_packages(query: &str) {
     results.sort_by(|a, b| b.0.cmp(&a.0));
 
     if results.is_empty() {
-        println!("[orion pkg] Sin resultados para '{query}'.");
+        println!();
+        banner::info(&format!("Sin resultados para '{query}'."));
+        println!();
         return;
     }
 
     let installed = load_installed();
     println!();
-    println!("  Resultados para '{query}':");
-    println!("  {:<14} {:<10} {}", "NOMBRE", "VERSIÓN", "DESCRIPCIÓN");
-    println!("  {}", " ".repeat(60));
+    println!("  {BOLD}{BCYAN}Resultados para '{query}'{RESET}  {DIM}({}){RESET}", results.len());
+    println!();
     for (_, name, entry) in &results {
-        let mark = if installed.contains_key(*name) { "✓" } else { " " };
-        println!("  {} {:<13} {:<10} {}", mark, name, entry.version, entry.description);
+        let marca = match installed.contains_key(*name) {
+            true  => format!("{BOLD}{GREEN}✓{RESET}"),
+            false => " ".to_string(),
+        };
+        println!("  {marca}  {BWHITE}{name:<18}{RESET}{DIM}{:<10}{}{RESET}",
+                 entry.version, entry.description);
     }
     println!();
 }
@@ -940,13 +1115,15 @@ pub fn update_packages(pkg_name: Option<&str>) {
     let dir = install_dir();
     let installed = load_installed_at(&dir);
     if installed.is_empty() {
-        println!("[orion pkg] No hay paquetes instalados en {}.", dir.display());
+        println!();
+        banner::info(&format!("No hay paquetes instalados en {}.", dir.display()));
+        println!();
         return;
     }
 
     let (_base, registry) = match load_registry(true) {
         Ok(r) => r,
-        Err(e) => { eprintln!("[orion pkg] {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&e); std::process::exit(1); }
     };
 
     let targets: Vec<String> = match pkg_name {
@@ -954,21 +1131,42 @@ pub fn update_packages(pkg_name: Option<&str>) {
         None    => { let mut v: Vec<_> = installed.keys().cloned().collect(); v.sort(); v }
     };
 
+    let inicio = std::time::Instant::now();
+    encabezado("Actualizar paquetes", &dir);
+    let (mut hechas, mut fallos) = (0usize, 0usize);
+
     for name in &targets {
-        if !installed.contains_key(name.as_str()) {
-            eprintln!("[orion pkg] '{name}' no está instalado.");
+        let Some(actual) = installed.get(name.as_str()) else {
+            linea_error(name, "no está instalado");
+            fallos += 1;
             continue;
-        }
+        };
+        let antes = actual["version"].as_str().unwrap_or("?").to_string();
+
         match registry.get(name.as_str()) {
-            None => eprintln!("[orion pkg] '{name}' no está en el registry (instalado desde otra fuente)."),
+            None => linea_aviso(name, "no está en el registry (instalado desde otra fuente)"),
             Some(entry) => {
                 match install_one(name, &Source::Registry(name.clone()), Some(entry), None, true) {
-                    Ok(i)  => println!("[orion pkg] {name} → v{}", i.version),
-                    Err(e) => eprintln!("[orion pkg] {name}: {e}"),
+                    Ok(i) => {
+                        // Distinguir "actualizado" de "ya estaba al día" ahorra
+                        // tener que comparar versiones a ojo en la salida.
+                        let nota = if antes == i.version {
+                            format!("{DIM}  al día{RESET}")
+                        } else {
+                            format!("{DIM}  ← v{antes}{RESET}")
+                        };
+                        linea_ok(name, &detalle(&i.version, &i.kind, i.bytes, &nota));
+                        hechas += 1;
+                    }
+                    Err(e) => {
+                        linea_error(name, e.lines().next().unwrap_or(&e));
+                        fallos += 1;
+                    }
                 }
             }
         }
     }
+    resumen(hechas, fallos, inicio);
 }
 
 //    orion --publish
@@ -1080,17 +1278,17 @@ fn gh_create_branch(api_base: &str, token: &str, branch: &str, sha: &str) -> Res
 pub fn publish_package() {
     let m = match read_manifest() {
         Ok(m) => m,
-        Err(e) => { eprintln!("[orion publish] {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&e); std::process::exit(1); }
     };
 
     if !m.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-        eprintln!("[orion publish] Nombre inválido '{}'. Usa solo letras minúsculas, números y guiones.", m.name);
+        banner::fail(&format!("Nombre inválido '{}'. Usa solo letras minúsculas, números y guiones.", m.name));
         std::process::exit(1);
     }
 
     let orx_src = match fs::read(&m.file) {
         Ok(s) => s,
-        Err(e) => { eprintln!("[orion publish] No se pudo leer '{}': {e}", m.file); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("No se pudo leer '{}': {e}", m.file)); std::process::exit(1); }
     };
     // El registry publica el checksum: quien instale puede comprobar que recibe
     // exactamente lo que se publicó, aunque el CDN o el espejo mientan.
@@ -1099,23 +1297,24 @@ pub fn publish_package() {
     let token = match std::env::var("ORION_GITHUB_TOKEN") {
         Ok(t) if !t.trim().is_empty() => t,
         _ => {
-            eprintln!("[orion publish] Falta el token de GitHub.");
-            eprintln!("  1. Crea uno en:  https://github.com/settings/tokens");
-            eprintln!("     Permisos: repo (Contents read/write, Pull requests write)");
-            eprintln!("  2. Configúralo:  $env:ORION_GITHUB_TOKEN = \"<token>\"");
+            banner::fail("Falta el token de GitHub.");
+            println!("     {DIM}1. Créalo en https://github.com/settings/tokens{RESET}");
+            println!("     {DIM}   Permisos: repo (Contents read/write, Pull requests write){RESET}");
+            println!("     {DIM}2. Configúralo: $env:ORION_GITHUB_TOKEN = \"<token>\"{RESET}");
             std::process::exit(1);
         }
     };
 
     let api_base = format!("{GITHUB_API}/repos/{REPO_OWNER}/{REPO_NAME}");
-    println!("[orion publish] Publicando {} v{} ...", m.name, m.version);
-    println!("[orion publish] sha256 {orx_sha}");
-
-    println!("[orion publish] Leyendo registry remoto ...");
+    println!();
+    println!("  {BOLD}{BCYAN}Publicar  {}  v{}{RESET}", m.name, m.version);
+    println!("  {DIM}{REPO_OWNER}/{REPO_NAME}  ·  sha256 {}{RESET}", &orx_sha[..16]);
+    println!();
+    paso(1, 6, "Leyendo registry remoto");
     let reg_url = format!("{api_base}/contents/{REGISTRY_PATH}");
     let reg_resp = match gh_get(&reg_url, &token) {
         Ok(r) => r,
-        Err(e) => { eprintln!("[orion publish] {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&e); std::process::exit(1); }
     };
 
     let reg_blob_sha = reg_resp["sha"].as_str().unwrap_or("").to_string();
@@ -1124,21 +1323,21 @@ pub fn publish_package() {
 
     let reg_bytes = match B64.decode(&reg_b64_clean) {
         Ok(b) => b,
-        Err(e) => { eprintln!("[orion publish] Error decodificando registry.json: {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("Error decodificando registry.json: {e}")); std::process::exit(1); }
     };
     let mut reg_json: serde_json::Value = match serde_json::from_slice(&reg_bytes) {
         Ok(j) => j,
-        Err(e) => { eprintln!("[orion publish] registry.json malformado: {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("registry.json malformado: {e}")); std::process::exit(1); }
     };
 
     if let Some(existing) = reg_json["packages"][&m.name].as_object() {
         let ev = existing.get("version").and_then(|v| v.as_str()).unwrap_or("0.0.0");
         if ev == m.version {
-            eprintln!("[orion publish] '{}' v{} ya está en el registry.", m.name, m.version);
-            eprintln!("  Incrementa la versión en {} antes de publicar.", paths::MANIFEST);
+            banner::fail(&format!("'{}' v{} ya está en el registry.", m.name, m.version));
+            println!("     {DIM}Incrementa la versión en {} antes de publicar.{RESET}", paths::MANIFEST);
             std::process::exit(1);
         }
-        println!("[orion publish] Actualizando {} v{ev} → v{}", m.name, m.version);
+        println!("       {DIM}{} v{ev} → v{}{RESET}", m.name, m.version);
     }
 
     let mut entry = serde_json::json!({
@@ -1154,20 +1353,20 @@ pub fn publish_package() {
     if m.assets.is_object() { entry["assets"]       = m.assets.clone(); }
     reg_json["packages"][&m.name] = entry;
 
-    println!("[orion publish] Obteniendo referencia de master ...");
+    paso(2, 6, "Obteniendo referencia de master");
     let refs_resp = match gh_get(&format!("{api_base}/git/refs/heads/master"), &token) {
         Ok(r) => r,
-        Err(e) => { eprintln!("[orion publish] {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&e); std::process::exit(1); }
     };
     let master_sha = match refs_resp["object"]["sha"].as_str() {
         Some(s) => s.to_string(),
-        None => { eprintln!("[orion publish] No se pudo leer el SHA de master."); std::process::exit(1); }
+        None => { banner::fail("No se pudo leer el SHA de master."); std::process::exit(1); }
     };
 
     let branch = format!("publish/{}-{}", m.name, m.version.replace('.', "-"));
-    println!("[orion publish] Creando rama {branch} ...");
+    paso(3, 6, &format!("Creando rama {branch}"));
     if let Err(e) = gh_create_branch(&api_base, &token, &branch, &master_sha) {
-        eprintln!("[orion publish] {e}"); std::process::exit(1);
+        banner::fail(&e); std::process::exit(1);
     }
 
     let orx_path_in_repo = format!("packages/{}", m.file);
@@ -1185,25 +1384,25 @@ pub fn publish_package() {
         }
     }
 
-    println!("[orion publish] Subiendo {} ...", m.file);
+    paso(4, 6, &format!("Subiendo {} ({})", m.file, banner::human_size(orx_src.len() as u64)));
     if let Err(e) = gh_put(&orx_url, &token, &orx_body) {
-        eprintln!("[orion publish] Error subiendo .orx: {e}"); std::process::exit(1);
+        banner::fail(&format!("Error subiendo .orx: {e}")); std::process::exit(1);
     }
 
     let updated_reg = serde_json::to_string_pretty(&reg_json).unwrap_or_default();
     let reg_new_b64 = B64.encode(updated_reg.as_bytes());
 
-    println!("[orion publish] Actualizando registry.json ...");
+    paso(5, 6, "Actualizando registry.json");
     if let Err(e) = gh_put(&reg_url, &token, &serde_json::json!({
         "message": format!("registry: add {} v{}", m.name, m.version),
         "content": reg_new_b64,
         "sha":     reg_blob_sha,
         "branch":  branch,
     })) {
-        eprintln!("[orion publish] Error actualizando registry: {e}"); std::process::exit(1);
+        banner::fail(&format!("Error actualizando registry: {e}")); std::process::exit(1);
     }
 
-    println!("[orion publish] Abriendo Pull Request ...");
+    paso(6, 6, "Abriendo Pull Request");
     let tags_str = if m.tags.is_empty() { "-".to_string() } else { m.tags.join(", ") };
     let pr_body = format!(
         "## Paquete: `{}` v{}\n\n{}\n\n| Campo | Valor |\n|---|---|\n| Autor | {} |\n| Tags | {} |\n| Licencia | {} |\n| sha256 | `{}` |\n\n---\n*Publicado con `orion --publish`*",
@@ -1217,16 +1416,16 @@ pub fn publish_package() {
         "base":  "master",
     })) {
         Ok(r) => r,
-        Err(e) => { eprintln!("[orion publish] Error creando PR: {e}"); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("Error creando PR: {e}")); std::process::exit(1); }
     };
 
     let pr_url = pr_resp["html_url"].as_str().unwrap_or("(ver GitHub)");
     println!();
-    println!("[orion publish] Publicacion enviada exitosamente.");
-    println!("[orion publish] PR:  {pr_url}");
+    banner::ok(&format!("{BWHITE}{} v{} enviado{RESET}", m.name, m.version));
+    println!("     {BCYAN}{pr_url}{RESET}");
     println!();
-    println!("  El paquete estara disponible despues de la revision y merge del PR.");
-    println!("  Usa `orion --update {}` cuando el PR sea aceptado.", m.name);
+    println!("  {DIM}Estará disponible tras la revisión y el merge del PR.{RESET}");
+    println!("  {DIM}Después:{RESET}  {BCYAN}orion update {}{RESET}", m.name);
     println!();
 }
 

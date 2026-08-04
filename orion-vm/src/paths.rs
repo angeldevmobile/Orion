@@ -139,11 +139,16 @@ pub fn packages_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Directorio donde escribe `--add`: el del proyecto si hay manifiesto, el
-/// global si no. Así un proyecto declarado se lleva sus dependencias dentro y
-/// un uso suelto de la CLI no ensucia el directorio desde el que se ejecuta.
+/// Directorio donde escribe `--add`.
+///
+/// Se instala dentro del proyecto cuando hay algo que lo identifique como tal:
+/// un manifiesto, o un `packages/` que ya existe. Lo segundo es lo que mantiene
+/// intacto el comportamiento de los repos anteriores al manifiesto, que
+/// instalaban justo ahí. Sin ninguna de las dos señales se usa el global, para
+/// no sembrar un `packages/` en cualquier directorio desde el que se invoque.
 pub fn install_dir() -> PathBuf {
-    if has_manifest() { project_packages_dir() } else { global_packages_dir() }
+    let project = project_packages_dir();
+    if has_manifest() || project.is_dir() { project } else { global_packages_dir() }
 }
 
 /// Igualdad de rutas tolerante: compara la forma canónica cuando ambas existen
