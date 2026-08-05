@@ -28,15 +28,51 @@ use super::cdp::Conn;
 /// que sobreviva a una navegación ni ensucia el espacio global del sitio, que
 /// es una forma barata de que un scraper se delate.
 pub const FIND_JS: &str = r#"
-const __find = (sel) => {
+// Documentos donde buscar: el principal y el de cada iframe accesible.
+//
+// Muchos modales —los de consentimiento de cookies sobre todo— viven dentro de
+// un iframe. Sin esto, el selector correcto "no existe" y el usuario acaba
+// buscando en las herramientas del navegador por qué. Los iframes de otro
+// origen lanzan al tocarlos y simplemente se saltan: no hay forma de entrar.
+const __docs = () => {
+  const out = [document];
+  const scan = (doc) => {
+    let marcos;
+    try { marcos = doc.querySelectorAll('iframe,frame'); } catch (e) { return; }
+    for (const f of marcos) {
+      let d = null;
+      try { d = f.contentDocument; } catch (e) { d = null; }
+      if (d) { out.push(d); scan(d); }
+    }
+  };
+  scan(document);
+  return out;
+};
+
+// Desplazamiento acumulado de la cadena de iframes que contiene al elemento.
+// Las coordenadas de un elemento dentro de un iframe son relativas a ese
+// iframe; para despachar un clic hacen falta las de la página de arriba.
+const __offset = (el) => {
+  let dx = 0, dy = 0;
+  let doc = el.ownerDocument;
+  for (let i = 0; i < 8; i++) {
+    const fr = doc && doc.defaultView && doc.defaultView.frameElement;
+    if (!fr) break;
+    const r = fr.getBoundingClientRect();
+    dx += r.left; dy += r.top;
+    doc = fr.ownerDocument;
+  }
+  return [dx, dy];
+};
+
+const __unoEn = (doc, sel) => {
   if (sel.startsWith('//') || sel.startsWith('(//')) {
-    return document.evaluate(sel, document, null, 9, null).singleNodeValue;
+    return doc.evaluate(sel, doc, null, 9, null).singleNodeValue;
   }
   if (sel.startsWith('text=')) {
     const want = sel.slice(5).trim();
-    const all = document.querySelectorAll('*');
     let laxo = null;
-    for (const e of all) {
+    for (const e of doc.querySelectorAll('*')) {
       if (e.children.length) continue;
       const t = (e.textContent || '').trim();
       if (t === want) return e;
@@ -44,21 +80,39 @@ const __find = (sel) => {
     }
     return laxo;
   }
-  return document.querySelector(sel);
+  return doc.querySelector(sel);
 };
-const __findAll = (sel) => {
+
+const __todosEn = (doc, sel) => {
   if (sel.startsWith('//') || sel.startsWith('(//')) {
-    const r = document.evaluate(sel, document, null, 7, null);
+    const r = doc.evaluate(sel, doc, null, 7, null);
     const out = [];
     for (let i = 0; i < r.snapshotLength; i++) out.push(r.snapshotItem(i));
     return out;
   }
   if (sel.startsWith('text=')) {
     const want = sel.slice(5).trim();
-    return Array.from(document.querySelectorAll('*'))
+    return Array.from(doc.querySelectorAll('*'))
       .filter(e => !e.children.length && (e.textContent || '').trim().includes(want));
   }
-  return Array.from(document.querySelectorAll(sel));
+  return Array.from(doc.querySelectorAll(sel));
+};
+
+const __find = (sel) => {
+  for (const d of __docs()) {
+    let e = null;
+    try { e = __unoEn(d, sel); } catch (err) { e = null; }
+    if (e) return e;
+  }
+  return null;
+};
+
+const __findAll = (sel) => {
+  const out = [];
+  for (const d of __docs()) {
+    try { out.push(...__todosEn(d, sel)); } catch (err) {}
+  }
+  return out;
 };
 "#;
 
@@ -202,6 +256,10 @@ pub fn box_for_click(
       ].filter(([x, y]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight);
     }};
     const __suyo = (el, enc) => enc && (enc === el || el.contains(enc) || enc.contains(el));
+    // El hit-test tiene que ocurrir en el documento del elemento: dentro de un
+    // iframe, `document.elementFromPoint` de la página de arriba devolvería el
+    // propio iframe y todo parecería tapado.
+    const __enPunto = (el, x, y) => el.ownerDocument.elementFromPoint(x, y);
     const __nombre = (e) => {{
       const cls = String(e.className || '').split(' ').filter(Boolean)[0];
       return '<' + e.tagName.toLowerCase() + (cls ? '.' + cls : '') + '>';
@@ -224,12 +282,13 @@ pub fn box_for_click(
             why = 'está oculto';
           else {{
             const cands = __puntos(r);
+            const [ox, oy] = __offset(el);
             for (const [x, y] of cands) {{
-              if (__suyo(el, document.elementFromPoint(x, y))) {{
-                return resolve({{ ok: true, x: x, y: y }});
+              if (__suyo(el, __enPunto(el, x, y))) {{
+                return resolve({{ ok: true, x: x + ox, y: y + oy }});
               }}
             }}
-            const enc = document.elementFromPoint(cands[0][0], cands[0][1]);
+            const enc = __enPunto(el, cands[0][0], cands[0][1]);
             why = enc ? ('lo tapa ' + __nombre(enc)) : 'no responde al puntero';
           }}
         }}
@@ -246,9 +305,10 @@ pub fn box_for_click(
         const r = el.getBoundingClientRect();
         const cands = __puntos(r);
         const [x, y] = cands[0];
+        const [ox, oy] = __offset(el);
         const tapados = [];
         for (let i = 0; i < 12; i++) {{
-          const enc = document.elementFromPoint(x, y);
+          const enc = __enPunto(el, x, y);
           if (__suyo(el, enc) || !enc) break;
           // El valor original se guarda en el propio elemento: así se restaura
           // exactamente lo que había, sin ensuciar el espacio global de la
@@ -257,10 +317,10 @@ pub fn box_for_click(
           enc.style.pointerEvents = 'none';
           tapados.push(__nombre(enc));
         }}
-        if (!__suyo(el, document.elementFromPoint(x, y))) {{
+        if (!__suyo(el, __enPunto(el, x, y))) {{
           return resolve({{ ok: false, why: why + ' (ni forzando)' }});
         }}
-        return resolve({{ ok: true, x: x, y: y, forced: true, through: tapados }});
+        return resolve({{ ok: true, x: x + ox, y: y + oy, forced: true, through: tapados }});
       }};
 
       intenta();
@@ -299,7 +359,12 @@ pub fn box_for_click(
 /// media página sorda al ratón rompería todo lo que viniera después.
 pub fn restore_pointer_events(conn: &Conn, session: &str, timeout: Duration) {
     let js = r#"(() => {
-      for (const e of document.querySelectorAll('[data-orion-pe]')) {
+      const docs = [document];
+      const scan = (d) => { for (const f of d.querySelectorAll('iframe,frame')) {
+        let c = null; try { c = f.contentDocument; } catch (err) {}
+        if (c) { docs.push(c); scan(c); } } };
+      try { scan(document); } catch (err) {}
+      for (const d of docs) for (const e of d.querySelectorAll('[data-orion-pe]')) {
         const prev = e.getAttribute('data-orion-pe');
         if (prev) e.style.pointerEvents = prev; else e.style.removeProperty('pointer-events');
         e.removeAttribute('data-orion-pe');
@@ -330,9 +395,29 @@ mod tests {
 
     #[test]
     fn el_helper_cubre_las_tres_formas() {
-        assert!(FIND_JS.contains("document.evaluate"), "falta XPath");
+        // La búsqueda es por documento (`doc`), no sobre `document`: es lo que
+        // permite entrar en los iframes.
+        assert!(FIND_JS.contains("doc.evaluate"), "falta XPath");
         assert!(FIND_JS.contains("text="), "falta la búsqueda por texto");
-        assert!(FIND_JS.contains("querySelector"), "falta CSS");
+        assert!(FIND_JS.contains("doc.querySelector"), "falta CSS");
+    }
+
+    #[test]
+    fn el_helper_entra_en_los_iframes() {
+        // Los modales de consentimiento suelen vivir en un iframe; sin esto el
+        // selector correcto parece no existir.
+        assert!(FIND_JS.contains("contentDocument"), "no se recorre el contenido de los iframes");
+        assert!(FIND_JS.contains("frameElement"),
+                "no se calcula el desplazamiento del iframe, y el clic caería en otro sitio");
+        // Y la búsqueda debe partir del conjunto de documentos, no de uno solo.
+        assert!(FIND_JS.contains("__docs()"), "la búsqueda no recorre todos los documentos");
+    }
+
+    #[test]
+    fn un_iframe_de_otro_origen_no_rompe_la_busqueda() {
+        // Tocar un iframe cross-origin lanza; el helper tiene que seguir.
+        assert!(FIND_JS.matches("catch").count() >= 3,
+                "faltan guardas: un iframe de otro origen abortaría la búsqueda entera");
     }
 
     #[test]

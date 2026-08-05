@@ -74,6 +74,20 @@ fn hay_navegador(dir: &PathBuf) -> bool {
     salida.contains("found: yes")
 }
 
+/// Turno para arrancar un navegador.
+///
+/// Cargo ejecuta los tests en paralelo, y un Chrome por test significa una
+/// docena de navegadores compitiendo a la vez: en una máquina cargada, una
+/// navegación llega a superar los 30 s y el test falla por contención, no por
+/// un defecto. Se serializan para que lo que se mida sea el módulo.
+static TURNO: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn turno() -> std::sync::MutexGuard<'static, ()> {
+    // Un test que falle envenena el mutex; recuperarlo evita que un fallo
+    // legítimo se convierta en una cascada de fallos sin relación.
+    TURNO.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 const PAGINA: &str = r#"<!doctype html>
 <html><head><title>Pagina de prueba</title></head>
 <body><h1>Hola Orion</h1><div id="n" data-valor="42">contenido</div></body></html>"#;
@@ -127,6 +141,7 @@ fn navega_lee_el_titulo_y_evalua_javascript() {
         eprintln!("[skip] no hay navegador Chromium en esta máquina");
         return;
     }
+    let _turno = turno();
     let url = serve_html(PAGINA);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -154,6 +169,7 @@ fn el_with_cierra_el_navegador_aunque_falle_el_cuerpo() {
     // un Chrome huérfano comiendo memoria.
     let dir = tmp_dir("limpieza");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -184,6 +200,7 @@ fn un_dialogo_que_bloquea_la_carga_se_explica() {
     // "se me queda colgado" que nadie sabe diagnosticar.
     let dir = tmp_dir("dialogo");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_CON_ALERT);
 
     let (salida, _) = run_orion(&dir, &format!(r##"
@@ -212,6 +229,7 @@ with b = web.open({{ timeout: 8000 }}) {{
 fn los_handles_equivocados_dan_errores_claros() {
     let dir = tmp_dir("handles");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
 
     let (salida, _) = run_orion(&dir, r##"
 use "browser" as web
@@ -250,6 +268,7 @@ fn el_click_espera_a_que_se_quite_lo_que_tapa() {
     // espera a que el elemento sea accionable de verdad.
     let dir = tmp_dir("click_tapado");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_VIVA);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -272,6 +291,7 @@ fn escribir_produce_eventos_de_teclado_reales() {
     // quedaría en cero y los formularios de React no se enterarían del cambio.
     let dir = tmp_dir("teclado_real");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_VIVA);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -294,6 +314,7 @@ with b = web.open() {{
 fn press_enter_dispara_el_formulario() {
     let dir = tmp_dir("press_enter");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_VIVA);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -316,6 +337,7 @@ fn las_lecturas_de_contenido_esperan_y_las_de_estado_no() {
     // haya contenido; `exists`/`count` responden sobre el instante actual.
     let dir = tmp_dir("espera_lectura");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_VIVA);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -341,6 +363,7 @@ with b = web.open() {{
 fn css_xpath_y_texto_son_el_mismo_selector() {
     let dir = tmp_dir("selectores");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_VIVA);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -367,6 +390,7 @@ fn cuando_de_verdad_no_se_puede_clicar_el_error_dice_por_que() {
     // está estorbando.
     let dir = tmp_dir("tapado_siempre");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_TAPADA);
 
     let (salida, _) = run_orion(&dir, &format!(r##"
@@ -387,6 +411,7 @@ with b = web.open() {{
 fn la_captura_se_escribe_en_disco() {
     let dir = tmp_dir("captura");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -409,6 +434,7 @@ with b = web.open() {{
 fn una_tecla_inventada_lista_las_validas() {
     let dir = tmp_dir("tecla_mala");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA);
 
     let (salida, _) = run_orion(&dir, &format!(r##"
@@ -462,6 +488,7 @@ fn un_tapado_parcial_se_clica_por_la_zona_libre() {
     // pincharía en la parte visible; esto hace lo mismo, sin pedir `force`.
     let dir = tmp_dir("tapado_parcial");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_PARCIAL);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -485,6 +512,7 @@ fn force_atraviesa_un_velo_permanente_sin_clicar_el_velo() {
     // real y aterriza en el botón, no en lo que estaba encima.
     let dir = tmp_dir("force_velo");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_VELO);
 
     let (salida, ok) = run_orion(&dir, &format!(r##"
@@ -511,6 +539,7 @@ with b = web.open() {{
 fn sin_force_el_error_dice_como_resolverlo() {
     let dir = tmp_dir("sugerencia_force");
     if !hay_navegador(&dir) { return; }
+    let _turno = turno();
     let url = serve_html(PAGINA_VELO);
 
     let (salida, _) = run_orion(&dir, &format!(r##"
@@ -523,4 +552,162 @@ with b = web.open() {{
 "##));
     assert!(salida.contains("cookie-banner"), "no nombra al culpable:\n{salida}");
     assert!(salida.contains("force: yes"), "no sugiere la salida:\n{salida}");
+}
+
+/// Página con todo lo que un scraper se encuentra en la vida real: modal con
+/// fondo bloqueante, `<select>` nativo, menú desplegable, diálogos del
+/// navegador y un iframe accesible.
+const PAGINA_MODAL: &str = r##"<!doctype html><html><head><meta charset="utf-8"><title>Modales</title><style>
+ #modal{display:none;position:fixed;top:20%;left:20%;width:60%;background:#fff;border:3px solid #333;padding:20px;z-index:50}
+ #fondo{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#0006;z-index:40}
+ .abierto{display:block !important}
+</style></head><body>
+<button id="abrir">Abrir modal</button>
+<div id="fondo"></div>
+<div id="modal">
+  <select id="pais"><option value="pe">Peru</option><option value="mx">Mexico</option></select>
+  <input id="nom" placeholder="nombre">
+  <button id="ok">Confirmar</button>
+</div>
+<div id="menu"><button id="mbtn">Menu</button><ul id="ops" style="display:none"><li id="op2">Opcion B</li></ul></div>
+<button id="alerta">confirm</button>
+<button id="preg">prompt</button>
+<iframe id="marco" style="width:400px;height:120px"
+        srcdoc="&lt;button id='dentro'&gt;En iframe&lt;/button&gt;&lt;div id='eco'&gt;-&lt;/div&gt;&lt;script&gt;document.getElementById('dentro').onclick=()=&gt;document.getElementById('eco').textContent='IFRAME-OK'&lt;/script&gt;"></iframe>
+<div id="log">-</div>
+<script>
+ const log = t => document.getElementById('log').textContent = t;
+ abrir.onclick = () => { modal.classList.add('abierto'); fondo.classList.add('abierto'); };
+ ok.onclick = () => { log('MODAL:' + pais.value + ':' + nom.value);
+                      modal.classList.remove('abierto'); fondo.classList.remove('abierto'); };
+ mbtn.onclick = () => ops.style.display = 'block';
+ op2.onclick = () => log('MENU-B');
+ alerta.onclick = () => log(confirm('Seguro?') ? 'CONFIRM-SI' : 'CONFIRM-NO');
+ preg.onclick = () => log('PROMPT:' + prompt('Nombre?'));
+</script></body></html>"##;
+
+#[test]
+fn modal_con_select_nativo_y_desplegable() {
+    // Un `<select>` abre un desplegable del sistema operativo, fuera del DOM:
+    // ningún clic puede navegarlo. Por eso se elige la opción y se emiten
+    // `input`/`change`, que es lo que el sitio escucha.
+    let dir = tmp_dir("modales");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_MODAL);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.click(p, "#abrir")
+    web.select(p, "#pais", "Mexico")
+    web.type(p, "#nom", "Angel")
+    web.click(p, "#ok")
+    show("M=" + web.text(p, "#log"))
+    web.click(p, "#mbtn")
+    web.click(p, "#op2")
+    show("D=" + web.text(p, "#log"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("M=MODAL:mx:Angel"),
+            "el select por texto visible o el campo del modal fallaron:\n{salida}");
+    assert!(salida.contains("D=MENU-B"), "el desplegable no funcionó:\n{salida}");
+}
+
+#[test]
+fn select_con_opcion_inexistente_lista_las_que_hay() {
+    let dir = tmp_dir("select_malo");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_MODAL);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.click(p, "#abrir")
+    attempt {{ web.select(p, "#pais", "Narnia") }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(salida.contains("no hay opción"), "no se explicó el fallo:\n{salida}");
+    assert!(salida.contains("Peru") && salida.contains("Mexico"),
+            "no se listaron las opciones disponibles:\n{salida}");
+}
+
+#[test]
+fn los_dialogos_nativos_se_atienden_por_politica() {
+    // Un diálogo sin atender congela la página sin dar ningún error: es el peor
+    // fallo posible. La política se declara una vez y vale para la sesión.
+    let dir = tmp_dir("dialogos");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_MODAL);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.dialogs(p, "accept")
+    web.click(p, "#alerta")
+    show("A=" + web.text(p, "#log"))
+    web.dialogs(p, "dismiss")
+    web.click(p, "#alerta")
+    show("R=" + web.text(p, "#log"))
+    web.dialogs(p, "answer:Orion")
+    web.click(p, "#preg")
+    show("P=" + web.text(p, "#log"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("A=CONFIRM-SI"), "accept no funcionó:\n{salida}");
+    assert!(salida.contains("R=CONFIRM-NO"), "dismiss no funcionó:\n{salida}");
+    assert!(salida.contains("P=PROMPT:Orion"), "answer no funcionó:\n{salida}");
+}
+
+#[test]
+fn una_politica_de_dialogo_invalida_lista_las_validas() {
+    let dir = tmp_dir("dialogo_malo");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.dialogs(p, "quizas") }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(salida.contains("desconocida"), "no se explicó:\n{salida}");
+    assert!(salida.contains("accept") && salida.contains("answer:"),
+            "no se listaron las políticas válidas:\n{salida}");
+}
+
+#[test]
+fn los_selectores_atraviesan_iframes_accesibles() {
+    // Los modales de consentimiento suelen vivir en un iframe. Sin esto, el
+    // selector correcto "no existe" y nadie entiende por qué.
+    let dir = tmp_dir("iframe");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_MODAL);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.click(p, "#dentro")
+    show("F=" + web.text(p, "#eco"))
+}}
+"##));
+    assert!(ok, "no se pudo clicar dentro del iframe:\n{salida}");
+    assert!(salida.contains("F=IFRAME-OK"),
+            "el clic no llegó al botón del iframe:\n{salida}");
 }

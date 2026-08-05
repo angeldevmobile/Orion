@@ -869,6 +869,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "scroll", "browser.scroll(…)", "Función del módulo browser."));
     v.push(f("browser", "type", "browser.type(…)", "Función del módulo browser."));
     v.push(f("browser", "press", "browser.press(…)", "Función del módulo browser."));
+    v.push(f("browser", "select", "browser.select(…)", "Función del módulo browser."));
+    v.push(f("browser", "dialogs", "browser.dialogs(…)", "Modales y ventanas"));
+    v.push(f("browser", "click_opens", "browser.click_opens(…)", "Función del módulo browser."));
     v.push(f("browser", "wait", "browser.wait(…)", "Lectura del DOM.  Las que devuelven contenido esperan a que lo haya; las que informan del estado responden sobre el instante actual y no esperan nunca."));
     v.push(f("browser", "text", "browser.text(…)", "Función del módulo browser."));
     v.push(f("browser", "html", "browser.html(…)", "Función del módulo browser."));

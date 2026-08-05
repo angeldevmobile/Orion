@@ -123,6 +123,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "scroll"     => do_scroll(&args),
         "type"       => do_type(&args),
         "press"      => do_press(&args),
+        "select"     => do_select(&args),
+
+        // Modales y ventanas
+        "dialogs"     => do_dialogs(&args),
+        "click_opens" => do_click_opens(&args),
 
         // Lectura del DOM.
         //
@@ -419,6 +424,182 @@ fn do_press(args: &[EvalValue]) -> Result<EvalValue, String> {
     let (conn, session, timeout) = page_ctx(p)?;
     input::press(&conn, &session, &k, timeout)?;
     Ok(EvalValue::Bool(true))
+}
+
+/// Elige una opción de un `<select>` nativo.
+///
+/// Un `<select>` abre un desplegable del **sistema operativo**, fuera del DOM:
+/// ningún clic sintético ni real puede navegarlo, y por eso Selenium tiene una
+/// clase `Select` aparte. Aquí se asigna el valor y se emiten `input` y `change`
+/// como haría el navegador, que es lo que el sitio está escuchando.
+///
+/// Acepta el `value`, el texto visible o el índice: quien escribe el scraper ve
+/// el texto en pantalla, no el `value` del HTML.
+fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.select(pestaña, selector, opción)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.select: falta el selector")?;
+    let opt = args.get(2).map(to_str).ok_or("browser.select: falta la opción")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+
+    let quiere = serde_json::Value::String(opt.clone()).to_string();
+    let cuerpo = format!(r#"
+    const el = __find(sel);
+    if (!el) return {{ ok: false, why: 'no existe' }};
+    if (el.tagName !== 'SELECT') return {{ ok: false, why: 'no es un <select> (es <' + el.tagName.toLowerCase() + '>)' }};
+    const q = {quiere};
+    const ops = Array.from(el.options);
+    let i = ops.findIndex(o => o.value === q);
+    if (i < 0) i = ops.findIndex(o => (o.textContent || '').trim() === q);
+    if (i < 0 && /^[0-9]+$/.test(q)) i = parseInt(q, 10);
+    if (i < 0 || i >= ops.length) {{
+      return {{ ok: false, why: 'no hay opción ' + JSON.stringify(q),
+                opciones: ops.map(o => (o.textContent || '').trim()) }};
+    }}
+    el.selectedIndex = i;
+    el.dispatchEvent(new Event('input',  {{ bubbles: true }}));
+    el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+    return {{ ok: true, value: ops[i].value, text: (ops[i].textContent || '').trim() }};
+    "#);
+
+    let ms = espera_ms(args, 3);
+    let v = evaluate_awaiting(
+        &conn, &session,
+        &dom::expr_waiting(&sel, &cuerpo, ms),
+        Duration::from_millis(ms + 5_000), true,
+    )?;
+    let _ = timeout;
+
+    if let EvalValue::Dict(m) = &v {
+        if !matches!(m.get("ok"), Some(EvalValue::Bool(true))) {
+            let why = m.get("why").map(to_str).unwrap_or_default();
+            let ops = match m.get("opciones") {
+                Some(EvalValue::List(l)) if !l.is_empty() => format!(
+                    "\n  Opciones: {}",
+                    l.iter().map(to_str).collect::<Vec<_>>().join(", ")
+                ),
+                _ => String::new(),
+            };
+            return Err(format!("browser.select '{sel}': {why}{ops}"));
+        }
+        return Ok(m.get("value").cloned().unwrap_or(EvalValue::Bool(true)));
+    }
+    Ok(v)
+}
+
+/// Espera a que una pestaña termine de cargar.
+///
+/// Se pregunta por `readyState` en vez de esperar el evento de carga porque el
+/// evento puede haber pasado ya antes de que nos adjuntáramos, y entonces la
+/// espera no terminaría nunca.
+fn wait_ready(conn: &Conn, session: &str, ms: u64) -> Result<(), String> {
+    let js = format!(r#"(() => {{
+      return new Promise((resolve) => {{
+        if (document.readyState === 'complete') return resolve(true);
+        const limite = Date.now() + {ms};
+        const t = setInterval(() => {{
+          if (document.readyState === 'complete' || Date.now() >= limite) {{
+            clearInterval(t); resolve(true);
+          }}
+        }}, 30);
+      }});
+    }})()"#);
+    conn.call(
+        "Runtime.evaluate",
+        serde_json::json!({ "expression": js, "returnByValue": true, "awaitPromise": true }),
+        Some(session), Duration::from_millis(ms + 5_000),
+    )?;
+    Ok(())
+}
+
+/// Política para los diálogos nativos de una pestaña.
+///
+/// `accept`, `dismiss`, o `answer:<texto>` para un `prompt`. Se declara una vez
+/// y vale para toda la sesión, en vez del registro previo a cada acción que usan
+/// Playwright y Selenium: un diálogo abierto por un temporizador de la página no
+/// tiene ninguna llamada tuya a la que engancharse.
+fn do_dialogs(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.dialogs(pestaña, política)")?;
+    let (conn, session, _) = page_ctx(p)?;
+
+    let pol = args.get(1).map(to_str);
+    match pol.as_deref() {
+        None | Some("") | Some("off") | Some("none") => {
+            conn.set_dialog_policy(&session, None);
+        }
+        Some(v) => {
+            let valido = matches!(v, "accept" | "aceptar" | "dismiss" | "rechazar" | "yes" | "ok")
+                || v.starts_with("answer:") || v.starts_with("responder:");
+            if !valido {
+                return Err(format!(
+                    "browser.dialogs: política '{v}' desconocida.\n  Admitidas: accept, dismiss, answer:<texto>, off"
+                ));
+            }
+            conn.set_dialog_policy(&session, Some(v.to_string()));
+        }
+    }
+    Ok(EvalValue::Bool(true))
+}
+
+/// Clic que abre una pestaña nueva; devuelve el handle de la que se abrió.
+///
+/// Playwright necesita envolver el clic en `expect_popup` **antes** de hacerlo, y
+/// Selenium te hace listar los handles de ventana y adivinar cuál es la nueva.
+/// Aquí es una llamada, y la carrera entre el clic y la aparición de la pestaña
+/// la resuelve el módulo: la marca de eventos se toma antes de clicar.
+fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.click_opens(pestaña, selector)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.click_opens: falta el selector")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+    let browser = match handles().lock().unwrap().get(&p) {
+        Some(Handle::Page(ps)) => ps.browser,
+        _ => return Err(format!("browser.click_opens: la pestaña {p} no existe")),
+    };
+
+    // Descubrir targets antes de clicar: si se activa después, el evento de la
+    // pestaña recién creada ya habrá pasado.
+    conn.call("Target.setDiscoverTargets", serde_json::json!({ "discover": true }),
+              None, timeout)?;
+    let marca = conn.event_mark();
+
+    input::click(&conn, &session, &sel, "left", 1,
+                 espera_ms(args, 2), force_de(args, 2), timeout)?;
+
+    let ms = espera_ms(args, 2);
+    let ev = conn.wait_event("Target.targetCreated", None, marca, Duration::from_millis(ms))?
+        .filter(|e| e.params.get("targetInfo")
+            .and_then(|t| t.get("type")).and_then(|t| t.as_str()) == Some("page"))
+        .ok_or_else(|| format!(
+            "browser.click_opens '{sel}': el clic no abrió ninguna pestaña en {ms} ms"
+        ))?;
+
+    let target_id = ev.params["targetInfo"]["targetId"].as_str()
+        .ok_or("browser.click_opens: la pestaña nueva no trae targetId")?
+        .to_string();
+
+    let adjunto = conn.call(
+        "Target.attachToTarget",
+        serde_json::json!({ "targetId": target_id, "flatten": true }),
+        None, timeout,
+    )?;
+    let nueva_ses = adjunto["sessionId"].as_str()
+        .ok_or("browser.click_opens: no se pudo adjuntar a la pestaña nueva")?
+        .to_string();
+    conn.call("Page.enable", serde_json::json!({}), Some(&nueva_ses), timeout)?;
+
+    // Nos enganchamos en `targetCreated`, que ocurre antes de que la pestaña
+    // tenga contenido. Sin esperar a que termine de cargar, el primer `title`
+    // o `text` sobre ella devolvería vacío y parecería que la página está mal.
+    wait_ready(&conn, &nueva_ses, ms)?;
+
+    let id = new_id();
+    let mut reg = handles().lock().unwrap();
+    reg.insert(id, Handle::Page(PageState {
+        browser, target_id, session: nueva_ses,
+    }));
+    if let Some(Handle::Browser(bs)) = reg.get_mut(&browser) {
+        bs.pages.push(id);
+    }
+    Ok(EvalValue::Int(id as i64))
 }
 
 //    Lectura del DOM

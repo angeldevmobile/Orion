@@ -67,6 +67,9 @@ struct State {
 pub struct Conn {
     socket:  Mutex<Socket>,
     state:   Mutex<State>,
+    /// Política de diálogos por pestaña. Vive fuera de `state` para que el
+    /// hilo lector pueda consultarla sin tomar el candado del estado.
+    dialogs: Mutex<HashMap<String, String>>,
     cv:      Condvar,
     next_id: AtomicU64,
     pending: AtomicU64,
@@ -92,6 +95,7 @@ impl Conn {
         let conn = Arc::new(Conn {
             socket:  Mutex::new(socket),
             state:   Mutex::new(State::default()),
+            dialogs: Mutex::new(HashMap::new()),
             cv:      Condvar::new(),
             next_id: AtomicU64::new(1),
             pending: AtomicU64::new(0),
@@ -147,9 +151,64 @@ impl Conn {
         }
     }
 
+    /// Fija qué hacer con los `alert`/`confirm`/`prompt` de una pestaña.
+    ///
+    /// Se declara una vez y vale para siempre, en vez de registrar un handler
+    /// antes de cada acción que pudiera abrir uno. Un diálogo nativo **congela**
+    /// la página hasta que alguien responde: si nadie lo hace, el síntoma es que
+    /// todo deja de responder sin ningún error, que es lo peor que puede pasar.
+    pub fn set_dialog_policy(&self, session: &str, politica: Option<String>) {
+        let mut p = self.dialogs.lock().unwrap();
+        match politica {
+            Some(v) => { p.insert(session.to_string(), v); }
+            None    => { p.remove(session); }
+        }
+    }
+
+    /// Responde a un diálogo sin esperar confirmación.
+    ///
+    /// Lo llama el hilo lector, que no puede bloquearse esperando una respuesta:
+    /// si lo hiciera, dejaría de repartir mensajes y la respuesta que espera
+    /// nunca llegaría.
+    fn answer_dialog(&self, session: Option<&str>, politica: &str) {
+        let (accept, texto) = match politica.split_once(':') {
+            Some(("answer" | "responder", t)) => (true, Some(t.to_string())),
+            _ => (matches!(politica, "accept" | "aceptar" | "yes" | "ok"), None),
+        };
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let mut params = serde_json::json!({ "accept": accept });
+        if let Some(t) = texto {
+            params["promptText"] = serde_json::Value::String(t);
+        }
+        let mut msg = serde_json::json!({
+            "id": id, "method": "Page.handleJavaScriptDialog", "params": params,
+        });
+        if let Some(s) = session {
+            msg["sessionId"] = serde_json::Value::String(s.to_string());
+        }
+        let _ = self.send_text(msg.to_string());
+    }
+
     /// Coloca un mensaje entrante donde corresponda y despierta a quien espere.
     fn dispatch(&self, txt: &str) {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(txt) else { return };
+
+        // Los diálogos se atienden aquí y no en quien llamó: el que abre el
+        // diálogo puede ser un temporizador de la página, sin ninguna llamada
+        // de Orion en curso a la que colgarlo.
+        if v.get("method").and_then(|m| m.as_str()) == Some("Page.javascriptDialogOpening") {
+            let ses = v.get("sessionId").and_then(|s| s.as_str());
+            let pol = {
+                let p = self.dialogs.lock().unwrap();
+                ses.and_then(|s| p.get(s).cloned())
+            };
+            if let Some(pol) = pol {
+                // El candado del estado NO está tomado todavía: enviar desde
+                // aquí no puede cruzarse con `dispatch`.
+                self.answer_dialog(ses, &pol);
+            }
+        }
+
         let mut st = self.state.lock().unwrap();
 
         if let Some(id) = v.get("id").and_then(|x| x.as_u64()) {
@@ -342,6 +401,7 @@ mod tests {
                          tungstenite::protocol::Role::Client,
                          None)),
             state:   Mutex::new(State::default()),
+            dialogs: Mutex::new(HashMap::new()),
             cv:      Condvar::new(),
             next_id: AtomicU64::new(1),
             pending: AtomicU64::new(0),
