@@ -852,6 +852,18 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("validate", "alphanumeric", "validate.alphanumeric(s)", "Alias de validate.alfanumerico."));
     v.push(f("validate", "todo", "validate.todo(datos_dict, reglas_dict)", "{valido, errores} Reglas: \"requerido|email|min:5|max:100|numero|alfa\""));
     v.push(f("validate", "all", "validate.all(datos_dict, reglas_dict)", "Alias de validate.todo."));
+    // browser (browser.rs)
+    v.push(f("browser", "open", "browser.open(…)", "Función del módulo browser."));
+    v.push(f("browser", "page", "browser.page(…)", "Función del módulo browser."));
+    v.push(f("browser", "goto", "browser.goto(…)", "Función del módulo browser."));
+    v.push(f("browser", "title", "browser.title(…)", "Función del módulo browser."));
+    v.push(f("browser", "url", "browser.url(…)", "Función del módulo browser."));
+    v.push(f("browser", "eval", "browser.eval(…)", "Función del módulo browser."));
+    v.push(f("browser", "content", "browser.content(…)", "Función del módulo browser."));
+    v.push(f("browser", "pages", "browser.pages(…)", "Función del módulo browser."));
+    v.push(f("browser", "free", "browser.free(…)", "`close` y `free` son lo mismo: `free` existe porque es el nombre que invoca el desugar de `with`, y `close` porque es el que la gente escribe cuando cierra a mano."));
+    v.push(f("browser", "close", "browser.close(…)", "Alias de browser.free."));
+    v.push(f("browser", "info", "browser.info(…)", "Función del módulo browser."));
     // ws (ws_mod.rs)
     v.push(f("ws", "conectar", "ws.conectar(url)", "Id Int"));
     v.push(f("ws", "connect", "ws.connect(url)", "Alias de ws.conectar."));

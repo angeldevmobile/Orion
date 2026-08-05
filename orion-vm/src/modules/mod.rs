@@ -76,6 +76,7 @@ pub mod watch_mod;
 pub mod validate_mod;
 
 //   Utilidades modernas                             
+pub mod browser;
 pub mod ws_mod;
 pub mod template_mod;
 pub mod formato_mod;
@@ -134,6 +135,7 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         // Validación
         "validate" => validate_mod::call(function, args),
         // Utilidades modernas
+        "browser"  => browser::call(function, args),
         "ws"       => ws_mod::call(function, args),
         "template" => template_mod::call(function, args),
         "formato"  => formato_mod::call(function, args),
@@ -183,7 +185,7 @@ pub fn is_known_module(name: &str) -> bool {
         // Validación
         "validate" |
         // Utilidades modernas
-        "ws" | "template" | "formato" | "grafo" | "pdf" |
+        "ws" | "browser" | "template" | "formato" | "grafo" | "pdf" |
         // Bloque D
         "log" | "config" | "secret" | "zip" | "stream" | "crypto2" |
         // Bloque B

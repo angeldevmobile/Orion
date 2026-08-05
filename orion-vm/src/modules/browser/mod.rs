@@ -1,0 +1,536 @@
+//! Módulo `browser` — automatización web sobre CDP.
+//!
+//! API en inglés y de un solo nivel: funciones del módulo con el handle como
+//! primer argumento, igual que `db`, `frame` o `ws`. No hay builders, ni
+//! cadenas de acciones, ni contextos anidados.
+//!
+//! ```orion
+//! use "browser" as web
+//!
+//! with b = web.open() {
+//!     p = web.page(b)
+//!     web.goto(p, "https://ejemplo.dev")
+//!     show(web.title(p))
+//! }
+//! ```
+//!
+//! El `with` funciona sin nada extra: desugara a `web.free(b)` incluso si el
+//! cuerpo lanza un error, y `free` cierra en cascada las pestañas del navegador.
+//!
+//! Esta es la primera entrega: transporte, arranque y navegación. La extracción
+//! declarativa, la interacción (click/type) y las ventanas emergentes se apoyan
+//! sobre esto y llegan después.
+
+pub mod cdp;
+pub mod launch;
+
+use crate::eval_value::EvalValue;
+use indexmap::IndexMap;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+
+use cdp::Conn;
+use launch::{LaunchOpts, Launched};
+
+//    Registro de handles
+//
+// Navegadores y pestañas comparten numeración y mapa: así `free(h)` funciona
+// con cualquiera de los dos, que es lo que necesita `with` para no obligar al
+// programa a saber qué clase de cosa está soltando.
+
+struct BrowserState {
+    conn:      Arc<Conn>,
+    proc:      std::process::Child,
+    exe:       String,
+    user_data: std::path::PathBuf,
+    temporal:  bool,
+    timeout:   Duration,
+    pages:     Vec<u64>,
+}
+
+struct PageState {
+    browser:   u64,
+    target_id: String,
+    session:   String,
+}
+
+enum Handle {
+    Browser(BrowserState),
+    Page(PageState),
+}
+
+static HANDLES: OnceLock<Mutex<HashMap<u64, Handle>>> = OnceLock::new();
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn handles() -> &'static Mutex<HashMap<u64, Handle>> {
+    HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn new_id() -> u64 { NEXT_ID.fetch_add(1, Ordering::SeqCst) }
+
+/// Datos de una pestaña más la conexión de su navegador.
+///
+/// Se devuelven copiados en vez de mantener el candado: una llamada CDP puede
+/// tardar segundos y bloquear el registro mientras tanto dejaría clavado a
+/// cualquier otra tarea que solo quisiera abrir una pestaña.
+fn page_ctx(h: u64) -> Result<(Arc<Conn>, String, Duration), String> {
+    let reg = handles().lock().unwrap();
+    let Some(Handle::Page(p)) = reg.get(&h) else {
+        return Err(match reg.get(&h) {
+            Some(Handle::Browser(_)) => format!("browser: {h} es un navegador, no una pestaña"),
+            _ => format!("browser: la pestaña {h} no existe (¿ya se cerró?)"),
+        });
+    };
+    let session = p.session.clone();
+    let Some(Handle::Browser(b)) = reg.get(&p.browser) else {
+        return Err(format!("browser: el navegador de la pestaña {h} ya no existe"));
+    };
+    Ok((Arc::clone(&b.conn), session, b.timeout))
+}
+
+fn browser_ctx(h: u64) -> Result<(Arc<Conn>, Duration), String> {
+    let reg = handles().lock().unwrap();
+    match reg.get(&h) {
+        Some(Handle::Browser(b)) => Ok((Arc::clone(&b.conn), b.timeout)),
+        Some(Handle::Page(_))    => Err(format!("browser: {h} es una pestaña, no un navegador")),
+        None                     => Err(format!("browser: el navegador {h} no existe")),
+    }
+}
+
+//    Dispatch
+
+pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
+    match function {
+        "open"    => open(&args),
+        "page"    => page(&args),
+        "goto"    => goto(&args),
+        "title"   => read_str(&args, "document.title", "browser.title"),
+        "url"     => read_str(&args, "location.href", "browser.url"),
+        "eval"    => eval(&args),
+        "content" => read_str(&args, "document.documentElement.outerHTML", "browser.content"),
+        "pages"   => pages(&args),
+        // `close` y `free` son lo mismo: `free` existe porque es el nombre que
+        // invoca el desugar de `with`, y `close` porque es el que la gente
+        // escribe cuando cierra a mano.
+        "free" | "close" => free(&args),
+        "info"    => info(),
+        f => Err(format!("browser.{f}() no existe")),
+    }
+}
+
+//    open(opts?) → handle del navegador
+
+fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let opts = parse_opts(args.first())?;
+    let timeout = opts.timeout;
+
+    let Launched { child, ws_url, exe, user_data, temporal } = launch::launch(&opts)?;
+    let conn = match Conn::connect(&ws_url) {
+        Ok(c) => c,
+        Err(e) => {
+            // Si no se puede hablar con él, no dejarlo suelto comiendo memoria.
+            let mut c = child;
+            let _ = c.kill();
+            let _ = c.wait();
+            if temporal { let _ = std::fs::remove_dir_all(&user_data); }
+            return Err(e);
+        }
+    };
+
+    let id = new_id();
+    handles().lock().unwrap().insert(id, Handle::Browser(BrowserState {
+        conn, proc: child, exe, user_data, temporal, timeout, pages: Vec::new(),
+    }));
+    Ok(EvalValue::Int(id as i64))
+}
+
+//    page(browser) → handle de pestaña
+
+fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let b = arg_handle(args, 0, "browser.page(navegador)")?;
+    let (conn, timeout) = browser_ctx(b)?;
+
+    let creado = conn.call(
+        "Target.createTarget",
+        serde_json::json!({ "url": "about:blank" }),
+        None, timeout,
+    )?;
+    let target_id = creado["targetId"].as_str()
+        .ok_or("browser.page: el navegador no devolvió targetId")?
+        .to_string();
+
+    // `flatten` multiplexa la sesión sobre el mismo socket; sin él haría falta
+    // una conexión por pestaña.
+    let adjunto = conn.call(
+        "Target.attachToTarget",
+        serde_json::json!({ "targetId": target_id, "flatten": true }),
+        None, timeout,
+    )?;
+    let session = adjunto["sessionId"].as_str()
+        .ok_or("browser.page: el navegador no devolvió sessionId")?
+        .to_string();
+
+    // Los eventos de página hacen falta para saber cuándo terminó de cargar.
+    conn.call("Page.enable", serde_json::json!({}), Some(&session), timeout)?;
+
+    let id = new_id();
+    let mut reg = handles().lock().unwrap();
+    reg.insert(id, Handle::Page(PageState { browser: b, target_id, session }));
+    if let Some(Handle::Browser(bs)) = reg.get_mut(&b) {
+        bs.pages.push(id);
+    }
+    Ok(EvalValue::Int(id as i64))
+}
+
+//    goto(page, url) → url final
+
+fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.goto(pestaña, url)")?;
+    let url = args.get(1).map(to_str)
+        .ok_or("browser.goto(pestaña, url): falta la url")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+
+    // La marca se toma ANTES de navegar: si no, una carga anterior podría
+    // hacerse pasar por esta y `goto` volvería antes de tiempo.
+    let marca = conn.event_mark();
+
+    let r = conn.call(
+        "Page.navigate",
+        serde_json::json!({ "url": url }),
+        Some(&session), timeout,
+    )?;
+    if let Some(err) = r.get("errorText").and_then(|e| e.as_str()) {
+        return Err(format!("browser.goto '{url}': {err}"));
+    }
+
+    // Que la carga no termine no es un error por sí solo: hay páginas que dejan
+    // peticiones abiertas para siempre y su contenido ya está ahí.
+    let cargo = conn.wait_event("Page.loadEventFired", Some(&session), marca, timeout)?;
+
+    // Pero hay una causa concreta que sí conviene delatar: un alert/confirm
+    // durante la carga deja la página congelada y sin nadie que lo atienda. Sin
+    // este aviso, el síntoma es un timeout genérico imposible de diagnosticar.
+    if cargo.is_none() {
+        if let Some(ev) = conn.wait_event(
+            "Page.javascriptDialogOpening", Some(&session), marca, Duration::from_millis(0)
+        )? {
+            let texto = ev.params.get("message").and_then(|m| m.as_str()).unwrap_or("");
+            let tipo  = ev.params.get("type").and_then(|t| t.as_str()).unwrap_or("dialog");
+            // Se descarta para no dejar el navegador clavado esperando a nadie.
+            let _ = conn.call(
+                "Page.handleJavaScriptDialog",
+                serde_json::json!({ "accept": false }),
+                Some(&session), Duration::from_secs(2),
+            );
+            return Err(format!(
+                "browser.goto '{url}': la página abrió un {tipo} ({texto:?}) y quedó bloqueada."
+            ));
+        }
+    }
+
+    match evaluate(&conn, &session, "location.href", timeout) {
+        Ok(EvalValue::Str(s)) => Ok(EvalValue::Str(s)),
+        _ => Ok(EvalValue::Str(url)),
+    }
+}
+
+//    title / url / content
+
+fn read_str(args: &[EvalValue], expr: &str, quien: &str) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, &format!("{quien}(pestaña)"))?;
+    let (conn, session, timeout) = page_ctx(p)?;
+    evaluate(&conn, &session, expr, timeout)
+}
+
+//    eval(page, js)
+
+fn eval(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.eval(pestaña, js)")?;
+    let js = args.get(1).map(to_str)
+        .ok_or("browser.eval(pestaña, js): falta el código")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+    evaluate(&conn, &session, &js, timeout)
+}
+
+/// Evalúa JavaScript en la página y trae el resultado ya convertido.
+///
+/// `returnByValue` es lo que evita traerse referencias a objetos del DOM: solo
+/// cruza el socket el valor final, serializado. Es la decisión que mantiene la
+/// memoria de Orion proporcional a los datos pedidos y no al peso de la página.
+fn evaluate(conn: &Conn, session: &str, expr: &str, timeout: Duration) -> Result<EvalValue, String> {
+    let r = conn.call(
+        "Runtime.evaluate",
+        serde_json::json!({
+            "expression": expr,
+            "returnByValue": true,
+            "awaitPromise": true,
+        }),
+        Some(session), timeout,
+    )?;
+
+    // Una excepción del JS llega como resultado correcto de CDP con un
+    // `exceptionDetails` dentro; si no se mira, los errores del usuario se
+    // convierten en `null` silenciosos.
+    if let Some(ex) = r.get("exceptionDetails") {
+        let msg = ex.get("exception").and_then(|e| e.get("description")).and_then(|d| d.as_str())
+            .or_else(|| ex.get("text").and_then(|t| t.as_str()))
+            .unwrap_or("error de JavaScript");
+        return Err(format!("browser.eval: {msg}"));
+    }
+
+    Ok(json_to_eval(r.get("result").and_then(|x| x.get("value")).cloned()
+        .unwrap_or(serde_json::Value::Null)))
+}
+
+//    pages(browser) → lista de handles
+
+fn pages(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let b = arg_handle(args, 0, "browser.pages(navegador)")?;
+    let reg = handles().lock().unwrap();
+    match reg.get(&b) {
+        Some(Handle::Browser(bs)) => Ok(EvalValue::List(
+            bs.pages.iter().map(|p| EvalValue::Int(*p as i64)).collect()
+        )),
+        _ => Err(format!("browser.pages: el navegador {b} no existe")),
+    }
+}
+
+//    free(handle) — cierra pestaña o navegador
+
+fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let h = match args.first() {
+        Some(v) => match to_u64(v) { Ok(h) => h, Err(_) => return Ok(EvalValue::Bool(false)) },
+        None => return Ok(EvalValue::Bool(false)),
+    };
+
+    let sacado = handles().lock().unwrap().remove(&h);
+    match sacado {
+        None => Ok(EvalValue::Bool(false)),
+
+        Some(Handle::Page(p)) => {
+            // Cerrar la pestaña es lo que libera la memoria del renderer, que
+            // es la parte cara: dejarla abierta y olvidada es RAM que nadie
+            // reclama hasta que muere el navegador.
+            let mut reg = handles().lock().unwrap();
+            if let Some(Handle::Browser(b)) = reg.get_mut(&p.browser) {
+                b.pages.retain(|x| *x != h);
+                let conn = Arc::clone(&b.conn);
+                let timeout = b.timeout;
+                drop(reg);
+                let _ = conn.call(
+                    "Target.closeTarget",
+                    serde_json::json!({ "targetId": p.target_id }),
+                    None, timeout,
+                );
+            }
+            Ok(EvalValue::Bool(true))
+        }
+
+        Some(Handle::Browser(mut b)) => {
+            // Las pestañas se van con él: sus handles quedarían apuntando a un
+            // navegador muerto.
+            {
+                let mut reg = handles().lock().unwrap();
+                for p in &b.pages { reg.remove(p); }
+            }
+            let _ = b.conn.call("Browser.close", serde_json::json!({}), None,
+                                Duration::from_secs(2));
+            b.conn.close();
+            // `Browser.close` es una petición amable; si no la atendió, se
+            // termina el proceso a mano para no dejarlo huérfano.
+            let _ = b.proc.kill();
+            let _ = b.proc.wait();
+            if b.temporal {
+                let _ = std::fs::remove_dir_all(&b.user_data);
+            }
+            Ok(EvalValue::Bool(true))
+        }
+    }
+}
+
+//    info() — diagnóstico
+
+/// Qué navegador se usaría y de dónde sale. Sin esto, "no me funciona" es
+/// indepurable: no se sabe si falta el navegador, si se eligió otro, o si el
+/// problema está en la página.
+fn info() -> Result<EvalValue, String> {
+    let mut m: IndexMap<String, EvalValue> = IndexMap::new();
+    match launch::resolve_browser(None) {
+        Ok(p) => {
+            m.insert("found".into(), EvalValue::Bool(true));
+            m.insert("path".into(), EvalValue::Str(p.display().to_string()));
+        }
+        Err(e) => {
+            m.insert("found".into(), EvalValue::Bool(false));
+            m.insert("error".into(), EvalValue::Str(e));
+        }
+    }
+    m.insert("env".into(), EvalValue::Str(
+        std::env::var("ORION_CHROME").unwrap_or_else(|_| String::new())
+    ));
+    let abiertos = handles().lock().unwrap();
+    let en_uso: Vec<EvalValue> = abiertos.values()
+        .filter_map(|h| match h {
+            // Se informa del ejecutable REAL de cada navegador abierto, no del
+            // que se resolvería ahora: pueden no coincidir si el programa pasó
+            // una ruta distinta en `open`, y ahí es donde está el malentendido.
+            Handle::Browser(b) => Some(EvalValue::Str(b.exe.clone())),
+            Handle::Page(_) => None,
+        })
+        .collect();
+    m.insert("open_browsers".into(), EvalValue::Int(en_uso.len() as i64));
+    m.insert("in_use".into(), EvalValue::List(en_uso));
+    m.insert("open_pages".into(), EvalValue::Int(
+        abiertos.values().filter(|h| matches!(h, Handle::Page(_))).count() as i64
+    ));
+    Ok(EvalValue::Dict(m))
+}
+
+//    Conversión de argumentos
+
+fn parse_opts(v: Option<&EvalValue>) -> Result<LaunchOpts, String> {
+    let mut o = LaunchOpts::default();
+    let Some(EvalValue::Dict(m)) = v else { return Ok(o) };
+
+    if let Some(x) = m.get("chrome").or_else(|| m.get("browser")) {
+        o.chrome = Some(to_str(x));
+    }
+    if let Some(x) = m.get("user_data") { o.user_data = Some(to_str(x)); }
+    if let Some(x) = m.get("headless")  { o.headless = truthy(x); }
+    if let Some(x) = m.get("images")    { o.images   = truthy(x); }
+    if let Some(x) = m.get("gpu")       { o.gpu      = truthy(x); }
+    if let Some(x) = m.get("width")     { o.width    = to_u64(x).unwrap_or(1280) as u32; }
+    if let Some(x) = m.get("height")    { o.height   = to_u64(x).unwrap_or(800) as u32; }
+    if let Some(x) = m.get("timeout") {
+        let ms = to_u64(x).unwrap_or(30_000);
+        o.timeout = Duration::from_millis(ms.max(1_000));
+    }
+    if let Some(EvalValue::List(xs)) = m.get("args") {
+        o.extra = xs.iter().map(to_str).collect();
+    }
+    Ok(o)
+}
+
+fn arg_handle(args: &[EvalValue], i: usize, uso: &str) -> Result<u64, String> {
+    let v = args.get(i).ok_or_else(|| format!("{uso}: falta el handle"))?;
+    to_u64(v).map_err(|_| format!("{uso}: esperaba un handle, recibió {}", v.type_name()))
+}
+
+fn to_u64(v: &EvalValue) -> Result<u64, String> {
+    match v {
+        EvalValue::Int(n) if *n > 0 => Ok(*n as u64),
+        other => Err(format!("esperaba un handle positivo, recibió {}", other.type_name())),
+    }
+}
+
+fn to_str(v: &EvalValue) -> String {
+    match v { EvalValue::Str(s) => s.clone(), other => format!("{other}") }
+}
+
+fn truthy(v: &EvalValue) -> bool {
+    match v {
+        EvalValue::Bool(b) => *b,
+        EvalValue::Int(n)  => *n != 0,
+        EvalValue::Str(s)  => matches!(s.to_lowercase().as_str(), "yes" | "true" | "si" | "sí" | "1"),
+        _ => false,
+    }
+}
+
+fn json_to_eval(v: serde_json::Value) -> EvalValue {
+    match v {
+        serde_json::Value::Null => EvalValue::Null,
+        serde_json::Value::Bool(b) => EvalValue::Bool(b),
+        serde_json::Value::Number(n) => match n.as_i64() {
+            Some(i) => EvalValue::Int(i),
+            None => EvalValue::Float(n.as_f64().unwrap_or(0.0)),
+        },
+        serde_json::Value::String(s) => EvalValue::Str(s),
+        serde_json::Value::Array(a) => EvalValue::List(a.into_iter().map(json_to_eval).collect()),
+        serde_json::Value::Object(o) => {
+            let mut m: IndexMap<String, EvalValue> = IndexMap::new();
+            for (k, val) in o { m.insert(k, json_to_eval(val)); }
+            EvalValue::Dict(m)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn las_opciones_por_defecto_ahorran_memoria() {
+        let o = parse_opts(None).unwrap();
+        assert!(o.headless, "por defecto debería ser headless");
+        assert!(!o.images, "las imágenes deberían venir desactivadas");
+        assert!(!o.gpu);
+    }
+
+    #[test]
+    fn las_opciones_se_leen_del_dict() {
+        let mut m: IndexMap<String, EvalValue> = IndexMap::new();
+        m.insert("headless".into(), EvalValue::Bool(false));
+        m.insert("images".into(),   EvalValue::Bool(true));
+        m.insert("width".into(),    EvalValue::Int(1920));
+        m.insert("timeout".into(),  EvalValue::Int(5_000));
+        let o = parse_opts(Some(&EvalValue::Dict(m))).unwrap();
+        assert!(!o.headless);
+        assert!(o.images);
+        assert_eq!(o.width, 1920);
+        assert_eq!(o.timeout, Duration::from_millis(5_000));
+    }
+
+    #[test]
+    fn yes_del_lenguaje_se_entiende_como_cierto() {
+        // En Orion los booleanos se escriben yes/no; si además llegan como
+        // texto desde un config, deben significar lo mismo.
+        assert!(truthy(&EvalValue::Str("yes".into())));
+        assert!(truthy(&EvalValue::Bool(true)));
+        assert!(!truthy(&EvalValue::Str("no".into())));
+    }
+
+    #[test]
+    fn un_timeout_ridiculo_se_eleva_a_un_minimo_util() {
+        let mut m: IndexMap<String, EvalValue> = IndexMap::new();
+        m.insert("timeout".into(), EvalValue::Int(5));
+        let o = parse_opts(Some(&EvalValue::Dict(m))).unwrap();
+        assert!(o.timeout >= Duration::from_secs(1), "un timeout de 5 ms no deja arrancar nada");
+    }
+
+    #[test]
+    fn free_de_un_handle_inexistente_no_revienta() {
+        // `with` llama a free en el camino de error: si ahí explotara, taparía
+        // el error original del usuario.
+        for entrada in [vec![EvalValue::Int(999_999)], vec![EvalValue::Null], vec![]] {
+            assert!(matches!(free(&entrada), Ok(EvalValue::Bool(false))),
+                    "free debería devolver no, sin fallar");
+        }
+    }
+
+    #[test]
+    fn un_handle_desconocido_da_un_error_legible() {
+        let e = page_ctx(424_242).err().expect("debería fallar");
+        assert!(e.contains("no existe"), "{e}");
+    }
+
+    #[test]
+    fn info_responde_aunque_no_haya_navegador() {
+        let EvalValue::Dict(m) = info().unwrap() else { panic!("info debería devolver un dict") };
+        assert!(m.contains_key("found"));
+        assert!(m.contains_key("open_browsers"));
+    }
+
+    #[test]
+    fn json_se_convierte_a_valores_de_orion() {
+        let v = serde_json::json!({ "a": 1, "b": [true, null, "x"], "c": 1.5 });
+        let EvalValue::Dict(m) = json_to_eval(v) else { panic!("esperaba dict") };
+        assert!(matches!(m["a"], EvalValue::Int(1)));
+        assert!(matches!(m["c"], EvalValue::Float(f) if (f - 1.5).abs() < 1e-9));
+        let EvalValue::List(l) = &m["b"] else { panic!("esperaba lista") };
+        assert!(matches!(l[0], EvalValue::Bool(true)));
+        assert!(matches!(l[1], EvalValue::Null));
+        assert!(matches!(&l[2], EvalValue::Str(s) if s == "x"));
+    }
+}

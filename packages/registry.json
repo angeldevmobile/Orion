@@ -2,7 +2,8 @@
   "_meta": {
     "version": "1.0",
     "registry": "https://raw.githubusercontent.com/angeldevmobile/Orion/master/packages",
-    "description": "Orion Package Registry — paquetes oficiales y de comunidad"
+    "description": "Orion Package Registry — paquetes oficiales y de comunidad",
+    "source": "https://raw.githubusercontent.com/angeldevmobile/Orion/master/packages"
   },
   "packages": {
     "math": {
@@ -11,7 +12,11 @@
       "author": "orion-core",
       "type": "builtin",
       "file": "math.orx",
-      "tags": ["math", "numbers", "stdlib"]
+      "tags": [
+        "math",
+        "numbers",
+        "stdlib"
+      ]
     },
     "strings": {
       "version": "1.0.0",
@@ -19,7 +24,11 @@
       "author": "orion-core",
       "type": "builtin",
       "file": "strings.orx",
-      "tags": ["strings", "text", "stdlib"]
+      "tags": [
+        "strings",
+        "text",
+        "stdlib"
+      ]
     },
     "list": {
       "version": "1.0.0",
@@ -27,7 +36,11 @@
       "author": "orion-core",
       "type": "builtin",
       "file": "list.orx",
-      "tags": ["list", "collections", "stdlib"]
+      "tags": [
+        "list",
+        "collections",
+        "stdlib"
+      ]
     },
     "http": {
       "version": "0.9.0",
@@ -35,7 +48,11 @@
       "author": "orion-core",
       "type": "community",
       "file": "http.orx",
-      "tags": ["http", "network", "web"]
+      "tags": [
+        "http",
+        "network",
+        "web"
+      ]
     },
     "colors": {
       "version": "1.0.0",
@@ -43,7 +60,11 @@
       "author": "orion-core",
       "type": "community",
       "file": "colors.orx",
-      "tags": ["colors", "terminal", "ui"]
+      "tags": [
+        "colors",
+        "terminal",
+        "ui"
+      ]
     },
     "dates": {
       "version": "0.9.0",
@@ -51,7 +72,11 @@
       "author": "orion-core",
       "type": "community",
       "file": "dates.orx",
-      "tags": ["dates", "time", "datetime"]
+      "tags": [
+        "dates",
+        "time",
+        "datetime"
+      ]
     },
     "validate": {
       "version": "1.0.0",
@@ -59,7 +84,11 @@
       "author": "orion-core",
       "type": "community",
       "file": "validate.orx",
-      "tags": ["validation", "forms", "data"]
+      "tags": [
+        "validation",
+        "forms",
+        "data"
+      ]
     },
     "uuid": {
       "version": "1.0.0",
@@ -67,7 +96,11 @@
       "author": "orion-core",
       "type": "community",
       "file": "uuid.orx",
-      "tags": ["uuid", "id", "unique"]
+      "tags": [
+        "uuid",
+        "id",
+        "unique"
+      ]
     }
   }
 }

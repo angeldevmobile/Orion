@@ -102,13 +102,23 @@ pub fn section(title: &str) {
     println!("  {DIM}{BBLUE}{}{RESET}", " ".repeat(title.chars().count() + 2));
 }
 
+/// Ancho de la columna de etiquetas. Con 26 la etiqueta más larga que existe
+/// ("Pipeline lex+parse+codegen") ocupaba justo el ancho y se pegaba al valor.
+const LABEL_W: usize = 28;
+
 pub fn row(label: &str, value: &str, good: bool) {
     let icon = if good {
         format!("{BOLD}{GREEN}✓{RESET}")
     } else {
         format!("{BOLD}{RED}✗{RESET}")
     };
-    println!("  {icon}  {DIM}{label:<26}{RESET}{BWHITE}{value}{RESET}");
+    println!("  {icon}  {DIM}{label:<LABEL_W$}{RESET}{BWHITE}{value}{RESET}");
+}
+
+/// Fila de algo opcional: ni bien ni mal, simplemente no está configurado.
+/// Un ✗ rojo aquí haría leer como avería lo que es una ausencia legítima.
+pub fn row_opt(label: &str, value: &str) {
+    println!("  {DIM}·  {label:<LABEL_W$}{value}{RESET}");
 }
 
 pub fn table_header(cols: &[&str]) {

@@ -57,10 +57,11 @@ pub fn run_doctor() {
     // 5. Environment variables
     println!();
     banner::section("Variables de entorno");
-    for var in &["ORION_HOME", "ORION_PKGS", "ORION_DEBUG"] {
+    // Todas son opcionales: no definirlas es lo normal y no es un fallo.
+    for var in &["ORION_HOME", "ORION_PKGS", "ORION_REGISTRY", "ORION_TRUSTED_KEYS", "ORION_DEBUG"] {
         match std::env::var(var) {
-            Ok(v) => banner::row(var, &v, true),
-            Err(_) => banner::row(var, "(no definida)", false),
+            Ok(v) if !v.trim().is_empty() => banner::row(var, &v, true),
+            _ => banner::row_opt(var, "(no definida)"),
         }
     }
 

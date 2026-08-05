@@ -1,0 +1,432 @@
+//! Transporte del Chrome DevTools Protocol.
+//!
+//! CDP es WebSocket + JSON, así que no hace falta ningún cliente externo: basta
+//! el `tungstenite` síncrono que Orion ya usa en `ws`. Lo único que hay que
+//! resolver de verdad es el multiplexado.
+//!
+//! Sobre un único socket viajan mezcladas las respuestas a las peticiones
+//! (llevan `id`) y los eventos del navegador (llevan `method`). Si dos tareas de
+//! Orion comparten un navegador, hace falta alguien que reparta:
+//!
+//! ```text
+//!   tarea A  ── id=7 ──┐                     ┌─► responses[7] ─► despierta A
+//!                      ├─►  socket CDP  ─────┤
+//!   tarea B  ── id=8 ──┘     (1 hilo lector) └─► responses[8] ─► despierta B
+//!                                            └─► events[] ─────► quien espere
+//! ```
+//!
+//! Un hilo lector por conexión desencola mensajes y deja cada respuesta donde
+//! su emisor la espera; el emisor duerme en una `Condvar` en vez de girar en
+//! vacío. Es el mismo patrón de parking que usa `await` en `task_pool`, así que
+//! no se introduce un segundo modelo de concurrencia junto al que ya existe.
+//!
+//! El socket se pone en modo no bloqueante: así el hilo lector retiene el
+//! candado solo microsegundos por sondeo y los emisores no se quedan esperando
+//! detrás de una lectura bloqueada.
+
+use std::collections::HashMap;
+use std::io::ErrorKind;
+use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use tungstenite::stream::MaybeTlsStream;
+use tungstenite::{Message, WebSocket};
+
+type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
+
+/// Tope de eventos retenidos. Un navegador activo emite miles por minuto y
+/// nadie los consume todos: sin tope, una sesión larga se come la RAM en un
+/// historial que no sirve para nada. Se descartan los más antiguos.
+const MAX_EVENTS: usize = 512;
+
+/// Sondeo del hilo lector: parte de cero mientras hay peticiones en vuelo (para
+/// no añadir latencia a la respuesta) y se relaja hasta este techo cuando no
+/// hay nada esperando, para no calentar la CPU en vacío.
+const IDLE_POLL_MAX: Duration = Duration::from_millis(5);
+
+#[derive(Debug, Clone)]
+pub struct Event {
+    pub seq:     u64,
+    pub method:  String,
+    pub session: Option<String>,
+    pub params:  serde_json::Value,
+}
+
+#[derive(Default)]
+struct State {
+    responses: HashMap<u64, serde_json::Value>,
+    events:    Vec<Event>,
+    next_seq:  u64,
+    /// Se rellena si el socket muere: convierte una espera eterna en un error.
+    dead:      Option<String>,
+}
+
+pub struct Conn {
+    socket:  Mutex<Socket>,
+    state:   Mutex<State>,
+    cv:      Condvar,
+    next_id: AtomicU64,
+    pending: AtomicU64,
+    closed:  AtomicBool,
+}
+
+impl Conn {
+    /// Conecta al endpoint CDP y arranca el hilo lector.
+    pub fn connect(url: &str) -> Result<Arc<Conn>, String> {
+        let (mut socket, _) = tungstenite::connect(url)
+            .map_err(|e| format!("no se pudo conectar a CDP en {url}: {e}"))?;
+
+        // No bloqueante: el lector sondea y suelta el candado enseguida, así que
+        // un `call` concurrente no espera detrás de una lectura parada.
+        match socket.get_mut() {
+            MaybeTlsStream::Plain(s) => s.set_nonblocking(true)
+                .map_err(|e| format!("no se pudo poner el socket CDP en no bloqueante: {e}"))?,
+            // CDP siempre es ws:// contra localhost; si algún día no lo fuera,
+            // se sigue funcionando (con el lector bloqueándose más tiempo).
+            _ => {}
+        }
+
+        let conn = Arc::new(Conn {
+            socket:  Mutex::new(socket),
+            state:   Mutex::new(State::default()),
+            cv:      Condvar::new(),
+            next_id: AtomicU64::new(1),
+            pending: AtomicU64::new(0),
+            closed:  AtomicBool::new(false),
+        });
+
+        let lector = Arc::clone(&conn);
+        thread::Builder::new()
+            .name("orion-cdp".into())
+            .spawn(move || lector.read_loop())
+            .map_err(|e| format!("no se pudo arrancar el lector CDP: {e}"))?;
+
+        Ok(conn)
+    }
+
+    /// Bucle del hilo lector: reparte respuestas y eventos hasta que se cierra.
+    fn read_loop(self: Arc<Self>) {
+        let mut espera = Duration::from_millis(0);
+
+        while !self.closed.load(Ordering::Relaxed) {
+            let leido = { self.socket.lock().unwrap().read() };
+
+            match leido {
+                Ok(Message::Text(txt)) => {
+                    espera = Duration::from_millis(0);
+                    self.dispatch(&txt);
+                }
+                Ok(Message::Close(_)) => {
+                    self.die("el navegador cerró la conexión CDP");
+                    return;
+                }
+                // Ping/Pong/Binary: irrelevantes para CDP.
+                Ok(_) => espera = Duration::from_millis(0),
+
+                Err(tungstenite::Error::Io(e))
+                    if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                {
+                    // Con peticiones en vuelo no se duerme: la respuesta puede
+                    // llegar en cualquier momento y la latencia se nota.
+                    if self.pending.load(Ordering::Relaxed) > 0 {
+                        thread::yield_now();
+                        espera = Duration::from_millis(0);
+                    } else {
+                        if !espera.is_zero() { thread::sleep(espera); }
+                        espera = (espera + Duration::from_millis(1)).min(IDLE_POLL_MAX);
+                    }
+                }
+                Err(e) => {
+                    self.die(&format!("conexión CDP perdida: {e}"));
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Coloca un mensaje entrante donde corresponda y despierta a quien espere.
+    fn dispatch(&self, txt: &str) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(txt) else { return };
+        let mut st = self.state.lock().unwrap();
+
+        if let Some(id) = v.get("id").and_then(|x| x.as_u64()) {
+            st.responses.insert(id, v);
+        } else if let Some(method) = v.get("method").and_then(|x| x.as_str()) {
+            let seq = st.next_seq;
+            st.next_seq += 1;
+            let ev = Event {
+                seq,
+                method:  method.to_string(),
+                session: v.get("sessionId").and_then(|s| s.as_str()).map(str::to_string),
+                params:  v.get("params").cloned().unwrap_or(serde_json::Value::Null),
+            };
+            st.events.push(ev);
+            if st.events.len() > MAX_EVENTS {
+                let sobran = st.events.len() - MAX_EVENTS;
+                st.events.drain(..sobran);
+            }
+        }
+        drop(st);
+        self.cv.notify_all();
+    }
+
+    /// Marca la conexión como muerta y despierta a todos los que esperaban:
+    /// sin esto, una caída del navegador dejaría hilos dormidos para siempre.
+    fn die(&self, motivo: &str) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.state.lock().unwrap().dead = Some(motivo.to_string());
+        self.cv.notify_all();
+    }
+
+    /// Número de secuencia actual: se toma antes de provocar algo para después
+    /// esperar solo los eventos posteriores y no uno viejo que ya estaba ahí.
+    pub fn event_mark(&self) -> u64 {
+        self.state.lock().unwrap().next_seq
+    }
+
+    /// Envía un comando y espera su respuesta.
+    ///
+    /// `session` es el `sessionId` de la pestaña; sin él, el comando va dirigido
+    /// al navegador entero.
+    pub fn call(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+        session: Option<&str>,
+        timeout: Duration,
+    ) -> Result<serde_json::Value, String> {
+        if self.closed.load(Ordering::Relaxed) {
+            return Err(self.death_reason());
+        }
+
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let mut msg = serde_json::json!({ "id": id, "method": method, "params": params });
+        if let Some(s) = session {
+            msg["sessionId"] = serde_json::Value::String(s.to_string());
+        }
+
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        let enviado = self.send_text(msg.to_string());
+        let resultado = match enviado {
+            Ok(()) => self.await_response(id, method, timeout),
+            Err(e) => Err(e),
+        };
+        self.pending.fetch_sub(1, Ordering::SeqCst);
+        resultado
+    }
+
+    fn send_text(&self, texto: String) -> Result<(), String> {
+        let mut sock = self.socket.lock().unwrap();
+        // En un socket no bloqueante el envío puede quedarse a medias; para los
+        // mensajes diminutos de CDP contra localhost es rarísimo, pero
+        // reintentar es más barato que perseguir un fallo intermitente.
+        let limite = Instant::now() + Duration::from_secs(5);
+        loop {
+            match sock.send(Message::Text(texto.clone())) {
+                Ok(()) => return Ok(()),
+                Err(tungstenite::Error::Io(e))
+                    if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                {
+                    if Instant::now() > limite {
+                        return Err("CDP: el envío no progresó en 5 s".into());
+                    }
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(e) => return Err(format!("CDP: no se pudo enviar '{}': {e}", texto.len())),
+            }
+        }
+    }
+
+    fn await_response(
+        &self,
+        id: u64,
+        method: &str,
+        timeout: Duration,
+    ) -> Result<serde_json::Value, String> {
+        let limite = Instant::now() + timeout;
+        let mut st = self.state.lock().unwrap();
+
+        loop {
+            if let Some(resp) = st.responses.remove(&id) {
+                if let Some(err) = resp.get("error") {
+                    let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("error CDP");
+                    let detalle = err.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                    return Err(if detalle.is_empty() {
+                        format!("{method}: {msg}")
+                    } else {
+                        format!("{method}: {msg} ({detalle})")
+                    });
+                }
+                return Ok(resp.get("result").cloned().unwrap_or(serde_json::Value::Null));
+            }
+            if let Some(motivo) = &st.dead {
+                return Err(motivo.clone());
+            }
+            let restante = limite.saturating_duration_since(Instant::now());
+            if restante.is_zero() {
+                return Err(format!("{method}: sin respuesta en {} ms", timeout.as_millis()));
+            }
+            let (guard, _) = self.cv.wait_timeout(st, restante).unwrap();
+            st = guard;
+        }
+    }
+
+    /// Espera un evento posterior a `desde`, opcionalmente de una pestaña
+    /// concreta. Devuelve `Ok(None)` si vence el plazo.
+    pub fn wait_event(
+        &self,
+        method: &str,
+        session: Option<&str>,
+        desde: u64,
+        timeout: Duration,
+    ) -> Result<Option<Event>, String> {
+        let limite = Instant::now() + timeout;
+        let mut st = self.state.lock().unwrap();
+
+        loop {
+            if let Some(ev) = st.events.iter().find(|e| {
+                e.seq >= desde
+                    && e.method == method
+                    && match (session, &e.session) {
+                        (None, _) => true,
+                        (Some(s), Some(es)) => s == es,
+                        (Some(_), None) => false,
+                    }
+            }) {
+                return Ok(Some(ev.clone()));
+            }
+            if let Some(motivo) = &st.dead {
+                return Err(motivo.clone());
+            }
+            let restante = limite.saturating_duration_since(Instant::now());
+            if restante.is_zero() { return Ok(None); }
+            let (guard, _) = self.cv.wait_timeout(st, restante).unwrap();
+            st = guard;
+        }
+    }
+
+    fn death_reason(&self) -> String {
+        self.state.lock().unwrap().dead.clone()
+            .unwrap_or_else(|| "la conexión CDP está cerrada".into())
+    }
+
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        let _ = self.socket.lock().unwrap().close(None);
+        self.cv.notify_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// El reparto de mensajes no necesita un navegador: se puede comprobar
+    /// contra una conexión construida a mano.
+    fn conn_de_prueba() -> Conn {
+        // Un socket real no hace falta para probar `dispatch`; se usa un
+        // listener local para obtener un stream válido y nunca se lee de él.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let cliente = std::thread::spawn(move || TcpStream::connect(addr).unwrap());
+        let _servidor = listener.accept().unwrap();
+        let stream = cliente.join().unwrap();
+        stream.set_nonblocking(true).unwrap();
+
+        Conn {
+            socket:  Mutex::new(WebSocket::from_raw_socket(
+                         MaybeTlsStream::Plain(stream),
+                         tungstenite::protocol::Role::Client,
+                         None)),
+            state:   Mutex::new(State::default()),
+            cv:      Condvar::new(),
+            next_id: AtomicU64::new(1),
+            pending: AtomicU64::new(0),
+            closed:  AtomicBool::new(false),
+        }
+    }
+
+    #[test]
+    fn una_respuesta_va_a_su_peticion() {
+        let c = conn_de_prueba();
+        c.dispatch(r#"{"id":7,"result":{"value":"siete"}}"#);
+        c.dispatch(r#"{"id":8,"result":{"value":"ocho"}}"#);
+
+        let r8 = c.await_response(8, "X", Duration::from_millis(50)).unwrap();
+        assert_eq!(r8["value"], "ocho");
+        // La del 7 sigue disponible: no se pisan entre sí.
+        let r7 = c.await_response(7, "X", Duration::from_millis(50)).unwrap();
+        assert_eq!(r7["value"], "siete");
+    }
+
+    #[test]
+    fn un_error_cdp_se_convierte_en_error_de_orion() {
+        let c = conn_de_prueba();
+        c.dispatch(r#"{"id":1,"error":{"message":"Cannot find context","data":"id 42"}}"#);
+        let e = c.await_response(1, "Runtime.evaluate", Duration::from_millis(50)).unwrap_err();
+        assert!(e.contains("Runtime.evaluate"), "{e}");
+        assert!(e.contains("Cannot find context"), "{e}");
+        assert!(e.contains("id 42"), "{e}");
+    }
+
+    #[test]
+    fn sin_respuesta_vence_el_plazo_en_vez_de_colgarse() {
+        let c = conn_de_prueba();
+        let inicio = Instant::now();
+        let e = c.await_response(99, "Page.navigate", Duration::from_millis(60)).unwrap_err();
+        assert!(e.contains("sin respuesta"), "{e}");
+        assert!(inicio.elapsed() < Duration::from_secs(2), "tardó demasiado en rendirse");
+    }
+
+    #[test]
+    fn los_eventos_se_filtran_por_metodo_y_sesion() {
+        let c = conn_de_prueba();
+        let marca = c.event_mark();
+        c.dispatch(r#"{"method":"Page.loadEventFired","sessionId":"A","params":{}}"#);
+        c.dispatch(r#"{"method":"Page.loadEventFired","sessionId":"B","params":{}}"#);
+
+        let a = c.wait_event("Page.loadEventFired", Some("A"), marca, Duration::from_millis(50))
+                 .unwrap().expect("evento de A");
+        assert_eq!(a.session.as_deref(), Some("A"));
+
+        // Una sesión que no emitió nada no debe recoger el evento de otra.
+        let c2 = c.wait_event("Page.loadEventFired", Some("C"), marca, Duration::from_millis(30)).unwrap();
+        assert!(c2.is_none(), "se coló un evento de otra pestaña");
+    }
+
+    #[test]
+    fn la_marca_descarta_eventos_anteriores() {
+        let c = conn_de_prueba();
+        c.dispatch(r#"{"method":"Page.loadEventFired","params":{}}"#);
+        // Marca tomada DESPUÉS del evento: no debe verlo.
+        let marca = c.event_mark();
+        let visto = c.wait_event("Page.loadEventFired", None, marca, Duration::from_millis(30)).unwrap();
+        assert!(visto.is_none(), "se devolvió un evento anterior a la marca");
+    }
+
+    #[test]
+    fn el_historial_de_eventos_esta_acotado() {
+        let c = conn_de_prueba();
+        for _ in 0..(MAX_EVENTS + 200) {
+            c.dispatch(r#"{"method":"Network.dataReceived","params":{}}"#);
+        }
+        assert_eq!(c.state.lock().unwrap().events.len(), MAX_EVENTS);
+    }
+
+    #[test]
+    fn una_conexion_muerta_despierta_a_quien_espera() {
+        let c = Arc::new(conn_de_prueba());
+        let esperando = Arc::clone(&c);
+        let h = thread::spawn(move || {
+            esperando.await_response(1, "X", Duration::from_secs(30))
+        });
+        thread::sleep(Duration::from_millis(30));
+        c.die("el navegador se cerró");
+
+        let e = h.join().unwrap().unwrap_err();
+        assert!(e.contains("se cerró"), "{e}");
+    }
+}
