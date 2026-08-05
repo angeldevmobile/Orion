@@ -22,6 +22,8 @@
 //! sobre esto y llegan después.
 
 pub mod cdp;
+pub mod dom;
+pub mod input;
 pub mod launch;
 
 use crate::eval_value::EvalValue;
@@ -111,6 +113,42 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "eval"    => eval(&args),
         "content" => read_str(&args, "document.documentElement.outerHTML", "browser.content"),
         "pages"   => pages(&args),
+
+        // Interacción
+        "click"      => do_click(&args, "left", 1),
+        "dblclick"   => do_click(&args, "left", 2),
+        "rightclick" => do_click(&args, "right", 1),
+        "hover"      => do_hover(&args),
+        "drag"       => do_drag(&args),
+        "scroll"     => do_scroll(&args),
+        "type"       => do_type(&args),
+        "press"      => do_press(&args),
+
+        // Lectura del DOM.
+        //
+        // Las que devuelven contenido esperan a que lo haya; las que informan
+        // del estado responden sobre el instante actual y no esperan nunca.
+        "wait"    => do_wait(&args),
+        "text"    => query(&args, "browser.text", Espera::Si,
+                        "const e = __find(sel); return e ? (e.innerText || e.textContent || '').trim() : null;"),
+        "html"    => query(&args, "browser.html", Espera::Si,
+                        "const e = __find(sel); return e ? e.innerHTML : null;"),
+        "texts"   => query(&args, "browser.texts", Espera::Si,
+                        "return __findAll(sel).map(e => (e.innerText || e.textContent || '').trim());"),
+        "exists"  => query(&args, "browser.exists", Espera::No, "return !!__find(sel);"),
+        "count"   => query(&args, "browser.count", Espera::No, "return __findAll(sel).length;"),
+        "visible" => query(&args, "browser.visible", Espera::No, r#"
+                        const e = __find(sel);
+                        if (!e) return false;
+                        const r = e.getBoundingClientRect();
+                        const s = getComputedStyle(e);
+                        return r.width > 0 && r.height > 0
+                            && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+                     "#),
+        "attr"    => do_attr(&args),
+
+        // Captura
+        "screenshot" => do_screenshot(&args),
         // `close` y `free` son lo mismo: `free` existe porque es el nombre que
         // invoca el desugar de `with`, y `close` porque es el que la gente
         // escribe cuando cierra a mano.
@@ -260,12 +298,18 @@ fn eval(args: &[EvalValue]) -> Result<EvalValue, String> {
 /// cruza el socket el valor final, serializado. Es la decisión que mantiene la
 /// memoria de Orion proporcional a los datos pedidos y no al peso de la página.
 fn evaluate(conn: &Conn, session: &str, expr: &str, timeout: Duration) -> Result<EvalValue, String> {
+    evaluate_awaiting(conn, session, expr, timeout, true)
+}
+
+fn evaluate_awaiting(
+    conn: &Conn, session: &str, expr: &str, timeout: Duration, await_promise: bool,
+) -> Result<EvalValue, String> {
     let r = conn.call(
         "Runtime.evaluate",
         serde_json::json!({
             "expression": expr,
             "returnByValue": true,
-            "awaitPromise": true,
+            "awaitPromise": await_promise,
         }),
         Some(session), timeout,
     )?;
@@ -282,6 +326,181 @@ fn evaluate(conn: &Conn, session: &str, expr: &str, timeout: Duration) -> Result
 
     Ok(json_to_eval(r.get("result").and_then(|x| x.get("value")).cloned()
         .unwrap_or(serde_json::Value::Null)))
+}
+
+//    Interacción
+//
+// Todas esperan al selector antes de actuar. La espera implícita no es una
+// comodidad: un scraper que exige acordarse de poner `wait` es un scraper que
+// falla de forma intermitente, y esos son los que nadie consigue depurar.
+
+/// Milisegundos de espera de un selector.
+///
+/// El argumento admite un número (los milisegundos) o un dict de opciones, para
+/// que el caso simple siga siendo `click(p, sel)` y el complicado no necesite
+/// una función aparte.
+fn espera_ms(args: &[EvalValue], i: usize) -> u64 {
+    match args.get(i) {
+        Some(EvalValue::Dict(m)) => m.get("wait").and_then(|v| to_u64(v).ok()).unwrap_or(10_000),
+        Some(v) => to_u64(v).unwrap_or(10_000),
+        None => 10_000,
+    }
+}
+
+/// ¿Se pidió atravesar lo que tape el elemento?
+fn force_de(args: &[EvalValue], i: usize) -> input::Force {
+    match args.get(i) {
+        Some(EvalValue::Dict(m)) => match m.get("force").map(truthy) {
+            Some(true) => input::Force::Si,
+            _ => input::Force::No,
+        },
+        _ => input::Force::No,
+    }
+}
+
+fn do_click(args: &[EvalValue], boton: &str, veces: i64) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.click(pestaña, selector)")?;
+    let sel = args.get(1).map(to_str)
+        .ok_or("browser.click(pestaña, selector): falta el selector")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+    input::click(&conn, &session, &sel, boton, veces,
+                 espera_ms(args, 2), force_de(args, 2), timeout)?;
+    Ok(EvalValue::Bool(true))
+}
+
+fn do_hover(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.hover(pestaña, selector)")?;
+    let sel = args.get(1).map(to_str)
+        .ok_or("browser.hover(pestaña, selector): falta el selector")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+    input::hover(&conn, &session, &sel, espera_ms(args, 2), timeout)?;
+    Ok(EvalValue::Bool(true))
+}
+
+fn do_drag(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.drag(pestaña, origen, destino)")?;
+    let a = args.get(1).map(to_str).ok_or("browser.drag: falta el origen")?;
+    let z = args.get(2).map(to_str).ok_or("browser.drag: falta el destino")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+    input::drag(&conn, &session, &a, &z, espera_ms(args, 3), timeout)?;
+    Ok(EvalValue::Bool(true))
+}
+
+fn do_scroll(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.scroll(pestaña, dx, dy)")?;
+    let dx = args.get(1).and_then(|v| to_f64(v)).unwrap_or(0.0);
+    let dy = args.get(2).and_then(|v| to_f64(v)).unwrap_or(0.0);
+    let (conn, session, timeout) = page_ctx(p)?;
+    input::scroll(&conn, &session, dx, dy, timeout)?;
+    Ok(EvalValue::Bool(true))
+}
+
+fn do_type(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.type(pestaña, selector, texto)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.type: falta el selector")?;
+    let txt = args.get(2).map(to_str).ok_or("browser.type: falta el texto")?;
+    // Limpiar antes de escribir es lo que casi siempre se quiere; lo contrario
+    // se pide con `{ clear: no }`.
+    let limpiar = match args.get(3) {
+        Some(EvalValue::Dict(m)) => m.get("clear").map(truthy).unwrap_or(true),
+        Some(v) => truthy(v),
+        None => true,
+    };
+    let (conn, session, timeout) = page_ctx(p)?;
+    input::type_text(&conn, &session, &sel, &txt, limpiar,
+                     espera_ms(args, 3), force_de(args, 3), timeout)?;
+    Ok(EvalValue::Bool(true))
+}
+
+fn do_press(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.press(pestaña, tecla)")?;
+    let k = args.get(1).map(to_str)
+        .ok_or_else(|| format!("browser.press(pestaña, tecla): falta la tecla.\n  Admitidas: {}", input::TECLAS))?;
+    let (conn, session, timeout) = page_ctx(p)?;
+    input::press(&conn, &session, &k, timeout)?;
+    Ok(EvalValue::Bool(true))
+}
+
+//    Lectura del DOM
+
+fn do_wait(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.wait(pestaña, selector, ms?)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.wait: falta el selector")?;
+    let (conn, session, _) = page_ctx(p)?;
+    let ms = espera_ms(args, 2);
+    if !dom::wait_for(&conn, &session, &sel, ms)? {
+        return Err(format!("browser.wait: '{sel}' no apareció en {ms} ms"));
+    }
+    Ok(EvalValue::Bool(true))
+}
+
+/// ¿Esta lectura debe esperar a que haya contenido?
+#[derive(Clone, Copy, PartialEq)]
+enum Espera { Si, No }
+
+/// Ejecuta una consulta sobre el DOM con el selector ya inyectado.
+///
+/// Toda la lectura pasa por aquí y por tanto por **una** evaluación: es lo que
+/// evita el patrón de Selenium de una petición HTTP por cada atributo leído.
+fn query(args: &[EvalValue], quien: &str, espera: Espera, cuerpo: &str) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, &format!("{quien}(pestaña, selector)"))?;
+    let sel = args.get(1).map(to_str)
+        .ok_or_else(|| format!("{quien}(pestaña, selector): falta el selector"))?;
+    let (conn, session, timeout) = page_ctx(p)?;
+
+    let (js, limite) = match espera {
+        Espera::No => (dom::expr(&sel, cuerpo), timeout),
+        Espera::Si => {
+            let ms = espera_ms(args, 2);
+            (dom::expr_waiting(&sel, cuerpo, ms), Duration::from_millis(ms + 5_000))
+        }
+    };
+    evaluate_awaiting(&conn, &session, &js, limite, espera == Espera::Si)
+}
+
+fn do_attr(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.attr(pestaña, selector, atributo)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.attr: falta el selector")?;
+    let at  = args.get(2).map(to_str).ok_or("browser.attr: falta el nombre del atributo")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+
+    // El nombre del atributo también se serializa: puede traer comillas.
+    let a = serde_json::Value::String(at).to_string();
+    let cuerpo = format!("const e = __find(sel); return e ? e.getAttribute({a}) : null;");
+
+    let ms = espera_ms(args, 3);
+    let _ = timeout;
+    evaluate_awaiting(
+        &conn, &session,
+        &dom::expr_waiting(&sel, &cuerpo, ms),
+        Duration::from_millis(ms + 5_000),
+        true,
+    )
+}
+
+//    Captura
+
+fn do_screenshot(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.screenshot(pestaña, ruta)")?;
+    let ruta = args.get(1).map(to_str)
+        .ok_or("browser.screenshot(pestaña, ruta): falta la ruta")?;
+    let (conn, session, timeout) = page_ctx(p)?;
+
+    let r = conn.call(
+        "Page.captureScreenshot",
+        serde_json::json!({ "format": "png", "captureBeyondViewport": false }),
+        Some(&session), timeout,
+    )?;
+    let b64 = r.get("data").and_then(|d| d.as_str())
+        .ok_or("browser.screenshot: el navegador no devolvió imagen")?;
+
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+    let bytes = B64.decode(b64)
+        .map_err(|e| format!("browser.screenshot: imagen ilegible ({e})"))?;
+    std::fs::write(&ruta, &bytes)
+        .map_err(|e| format!("browser.screenshot: no se pudo escribir '{ruta}': {e}"))?;
+
+    Ok(EvalValue::Str(ruta))
 }
 
 //    pages(browser) → lista de handles
@@ -343,11 +562,27 @@ fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
             let _ = b.proc.kill();
             let _ = b.proc.wait();
             if b.temporal {
-                let _ = std::fs::remove_dir_all(&b.user_data);
+                remove_profile(&b.user_data);
             }
             Ok(EvalValue::Bool(true))
         }
     }
+}
+
+/// Borra el perfil temporal, reintentando.
+///
+/// `wait()` solo espera al proceso principal, pero Chrome deja hijos (renderer,
+/// GPU, red) que tardan un instante en soltar los archivos del perfil. En
+/// Windows eso hace fallar el borrado inmediato, y un intento único dejaba
+/// varios MB por sesión tirados en el temporal.
+fn remove_profile(dir: &std::path::Path) {
+    for intento in 0..12 {
+        if !dir.exists() || std::fs::remove_dir_all(dir).is_ok() { return; }
+        std::thread::sleep(Duration::from_millis(50 + intento * 25));
+    }
+    // Si tras un segundo largo sigue bloqueado, no se insiste: perder el
+    // directorio temporal es mucho menos grave que colgar el programa del
+    // usuario al cerrar un navegador.
 }
 
 //    info() — diagnóstico
@@ -427,6 +662,14 @@ fn to_u64(v: &EvalValue) -> Result<u64, String> {
 
 fn to_str(v: &EvalValue) -> String {
     match v { EvalValue::Str(s) => s.clone(), other => format!("{other}") }
+}
+
+fn to_f64(v: &EvalValue) -> Option<f64> {
+    match v {
+        EvalValue::Int(n) => Some(*n as f64),
+        EvalValue::Float(f) => Some(*f),
+        _ => None,
+    }
 }
 
 fn truthy(v: &EvalValue) -> bool {
