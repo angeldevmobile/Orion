@@ -1,0 +1,55 @@
+-- Formularios y tablas contra sitios reales.
+--
+-- Las dos operaciones que son la mitad de cualquier automatización: meter datos
+-- en una página y sacarlos de una rejilla. Las dos en UNA llamada cada una.
+--
+--   orion run demo/demo_browser_formulario.orx
+
+use "browser" as web
+
+fn main() {
+    with b = web.open() {
+        p = web.page(b)
+
+        show("1. FORMULARIO -------------------------------------------")
+        web.goto(p, "https://the-internet.herokuapp.com/login")
+        -- Un formulario entero de una vez. El tipo de cada control lo decide la
+        -- página: aquí son textos, pero valdría igual con select o casillas.
+        web.fill(p, {
+            "#username": "tomsmith",
+            "#password": "SuperSecretPassword!"
+        })
+        show("   escrito: " + web.value(p, "#username"))
+        -- attr lee el ATRIBUTO del HTML, que no cambia al escribir. Es la
+        -- confusión que hace creer que el fill no funcionó.
+        show("   attr('value'): " + str(web.attr(p, "#username", "value")) + "   <- no es lo mismo")
+        web.click(p, "button[type=submit]")
+        show("   " + web.text(p, "#flash").split("\n")[0])
+
+        show("")
+        show("2. TABLA REAL -------------------------------------------")
+        -- Wikipedia: sin <thead>, con <th> de fila en el cuerpo y con celdas
+        -- combinadas. Las tres cosas que rompen a un lector ingenuo.
+        web.goto(p, "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)")
+        filas = web.table(p, "table.wikitable")
+        show("   " + str(len(filas)) + " filas")
+        show("   columnas: " + str(keys(filas[0])))
+        for i in range(1, 4) {
+            f = filas[i]
+            show("   " + f["Country/Territory"] + " -> " + f["IMF (2026)[1]"])
+        }
+
+        show("")
+        show("3. MULTI-VALOR ------------------------------------------")
+        web.goto(p, "https://quotes.toscrape.com/")
+        citas = web.extract(p, ".quote", {
+            autor: ".author",
+            tags:  ".tags a.tag|list"      -- todas, no solo la primera
+        })
+        for i in range(0, 3) {
+            show("   " + citas[i]["autor"] + ": " + str(citas[i]["tags"]))
+        }
+    }
+}
+
+main()

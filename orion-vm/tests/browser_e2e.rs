@@ -1395,3 +1395,449 @@ with b = web.open() {{
     assert!(!salida.contains("navigated or closed"),
             "asomó el error crudo de CDP:\n{salida}");
 }
+
+//    Formularios y tablas
+
+/// Formulario con los cuatro tipos de control y un rastreador estilo React.
+///
+/// El rastreador no es decorado: es lo que separa "el campo se ve relleno" de
+/// "la aplicación se ha enterado". React instala un descriptor sobre `value` y
+/// descarta el evento si el valor coincide con el que él anotó, así que una
+/// asignación directa deja el formulario visualmente correcto y funcionalmente
+/// vacío. Sin esto en la página, un `fill` roto pasaría el test.
+const PAGINA_FORM: &str = r#"<!doctype html>
+<html><head><title>Formulario</title></head><body>
+<form id="f">
+  <input id="nombre">
+  <textarea id="notas"></textarea>
+  <select id="pais">
+    <option value="es">España</option>
+    <option value="pt">Portugal</option>
+  </select>
+  <input type="checkbox" id="acepto">
+  <input type="radio" name="plan" id="plan_a" value="a">
+  <input type="radio" name="plan" id="plan_b" value="b">
+  <div id="bio" contenteditable="true"></div>
+</form>
+<div id="app">-</div>
+<div id="eventos">0</div>
+<script>
+  var desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+  var el = document.getElementById('nombre');
+  var ultimo = el.value;
+  Object.defineProperty(el, 'value', {
+    configurable: true,
+    get: function () { return desc.get.call(this); },
+    set: function (v) { ultimo = String(v); desc.set.call(this, v); }
+  });
+  el.addEventListener('input', function () {
+    var actual = desc.get.call(el);
+    if (actual === ultimo) return;          // React: "ya lo sabía", no propaga
+    ultimo = actual;
+    document.getElementById('app').textContent = 'app:' + actual;
+  });
+  document.getElementById('f').addEventListener('change', function () {
+    var n = document.getElementById('eventos');
+    n.textContent = String(parseInt(n.textContent, 10) + 1);
+  });
+</script>
+</body></html>"#;
+
+#[test]
+fn rellena_un_formulario_entero_de_una_vez() {
+    let dir = tmp_dir("fill");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_FORM);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    n = web.fill(p, {{
+        "#nombre":  "Ana Torres",
+        "#notas":   "dos lineas",
+        "#pais":    "Portugal",
+        "#acepto":  yes,
+        "#plan_b":  yes,
+        "#bio":     "editable"
+    }})
+    show("N=" + str(n))
+    show("NOMBRE=" + web.value(p, "#nombre"))
+    show("NOTAS=" + web.eval(p, "document.querySelector('#notas').value"))
+    show("PAIS=" + web.eval(p, "document.querySelector('#pais').value"))
+    show("ACEPTO=" + str(web.eval(p, "document.querySelector('#acepto').checked")))
+    show("PLAN=" + str(web.eval(p, "document.querySelector('#plan_b').checked")))
+    show("BIO=" + web.text(p, "#bio"))
+    -- attr lee el ATRIBUTO del HTML, que no cambia al escribir: es la
+    -- confusión que hace creer que el fill no funcionó.
+    show("ATTR=" + str(web.attr(p, "#nombre", "value")))
+    show("SEL=" + str(web.value(p, "#pais")))
+    show("CHK=" + str(web.value(p, "#acepto")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=6"), "no rellenó los seis campos:\n{salida}");
+    assert!(salida.contains("NOMBRE=Ana Torres"), "{salida}");
+    assert!(salida.contains("ATTR=null"),
+            "attr('value') debe seguir leyendo el atributo del HTML:
+{salida}");
+    assert!(salida.contains("SEL=pt"), "{salida}");
+    assert!(salida.contains("CHK=yes"), "{salida}");
+    assert!(salida.contains("NOTAS=dos lineas"), "el textarea usa otro prototipo:\n{salida}");
+    // El desplegable se pidió por texto visible y el value es el código.
+    assert!(salida.contains("PAIS=pt"), "no eligió por texto visible:\n{salida}");
+    assert!(salida.contains("ACEPTO=yes"), "{salida}");
+    assert!(salida.contains("PLAN=yes"), "{salida}");
+    assert!(salida.contains("BIO=editable"), "{salida}");
+}
+
+#[test]
+fn el_valor_llega_a_la_aplicacion_no_solo_a_la_pantalla() {
+    let dir = tmp_dir("fill_react");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_FORM);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.fill(p, {{ "#nombre": "Ana Torres" }})
+    show("APP=" + web.text(p, "#app"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // Con `el.value = x` esto seguiría diciendo "-": el campo se vería relleno
+    // y el formulario se enviaría vacío.
+    assert!(salida.contains("APP=app:Ana Torres"),
+            "el valor no llegó a la aplicación, solo a la pantalla:\n{salida}");
+}
+
+#[test]
+fn un_campo_que_no_existe_no_se_traga_en_silencio() {
+    let dir = tmp_dir("fill_estricto");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_FORM);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{
+        web.fill(p, {{ "#nombre": "Ana", "#telefono_viejo": "600" }}, {{ wait: 800 }})
+    }} handle e {{ show("E=" + e) }}
+    -- Y con strict: no se acepta lo que sí existe.
+    n = web.fill(p, {{ "#nombre": "Ana", "#telefono_viejo": "600" }},
+                 {{ strict: no, wait: 800 }})
+    show("N=" + str(n))
+}}
+"##));
+    assert!(salida.contains("E=") && salida.contains("#telefono_viejo"),
+            "debería delatar el selector que no existe:\n{salida}");
+    assert!(salida.contains("N=1"), "con strict: no debería rellenar el que sí está:\n{salida}");
+}
+
+#[test]
+fn una_opcion_inexistente_de_un_select_lista_las_que_hay() {
+    let dir = tmp_dir("fill_select");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_FORM);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.fill(p, {{ "#pais": "Marte" }}) }}
+    handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(salida.contains("E="), "{salida}");
+    assert!(salida.contains("España") && salida.contains("Portugal"),
+            "el error no dice qué opciones hay:\n{salida}");
+}
+
+#[test]
+fn fill_con_teclas_reales_dispara_los_eventos_de_teclado() {
+    let dir = tmp_dir("fill_teclas");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_VIVA);
+
+    // La página VIVA cuenta pulsaciones: es la prueba de que `{ keys: yes }` no
+    // se limita a asignar el valor.
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.fill(p, {{ "#q": "hola" }}, {{ keys: yes }})
+    web.click(p, "#ir")
+    show("S=" + web.text(p, "#salida"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("v=hola"), "no escribió el texto:\n{salida}");
+    assert!(!salida.contains("teclas=0"),
+            "con keys: yes tienen que llegar pulsaciones reales:\n{salida}");
+}
+
+#[test]
+fn marcar_una_casilla_es_idempotente() {
+    let dir = tmp_dir("check");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_FORM);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.check(p, "#acepto")
+    web.check(p, "#acepto")
+    web.check(p, "#acepto")
+    show("A=" + str(web.eval(p, "document.querySelector('#acepto').checked")))
+    web.uncheck(p, "#acepto")
+    show("B=" + str(web.eval(p, "document.querySelector('#acepto').checked")))
+    attempt {{ web.uncheck(p, "#plan_a") }} handle e {{ show("E=" + e) }}
+    attempt {{ web.check(p, "#nombre") }} handle e2 {{ show("F=" + e2) }}
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // Tres check seguidos la dejan marcada: si se limitara a pulsar, el tercero
+    // la habría desmarcado.
+    assert!(salida.contains("A=yes"), "check no es idempotente:\n{salida}");
+    assert!(salida.contains("B=no"), "uncheck no la desmarcó:\n{salida}");
+    assert!(salida.contains("E=") && salida.contains("radio"),
+            "desmarcar un radio debería explicarse:\n{salida}");
+    assert!(salida.contains("F=") && salida.contains("no es una casilla"),
+            "check sobre un campo de texto debería explicarse:\n{salida}");
+}
+
+/// Tabla como las de verdad: SIN `<thead>`, con `<th>` de fila en el cuerpo,
+/// con celdas combinadas y con otra tabla dentro.
+///
+/// Las cuatro cosas salieron de mirar tablas reales, no de imaginarlas: de 13
+/// tablas en tres páginas de Wikipedia, ninguna tenía `<thead>`, diez llevaban
+/// `<th>` en el cuerpo, cuatro usaban colspan/rowspan y una estaba anidada.
+const PAGINA_TABLA: &str = r#"<!doctype html>
+<html><head><title>Tablas</title></head><body>
+<table id="real">
+  <tr><th>Pais</th><th>Capital</th><th>PIB</th></tr>
+  <tr><th>España</th><td>Madrid</td><td>1.400</td></tr>
+  <tr><th>Portugal</th><td>Lisboa</td><td>250</td></tr>
+</table>
+
+<table id="combinada">
+  <tr><th>Zona</th><th>Q1</th><th>Q2</th></tr>
+  <tr><td rowspan="2">Norte</td><td>10</td><td>20</td></tr>
+  <tr><td>30</td><td>40</td></tr>
+  <tr><td>Sur</td><td colspan="2">sin datos</td></tr>
+</table>
+
+<table id="padre">
+  <tr><th>A</th><th>B</th></tr>
+  <tr><td>1</td><td>
+    <table id="hija"><tr><td>oculto</td></tr></table>
+  </td></tr>
+</table>
+
+<table id="conthead">
+  <thead><tr><th>X</th><th>Y</th></tr></thead>
+  <tbody><tr><td>7</td><td>8</td></tr></tbody>
+</table>
+
+<table id="repes">
+  <tr><th>n</th><th>n</th><th></th><th>PIB<br>(2026)</th></tr>
+  <tr><td>a</td><td>b</td><td>c</td><td>x</td></tr>
+</table>
+
+<div id="nodable">no soy una tabla</div>
+</body></html>"#;
+
+#[test]
+fn lee_una_tabla_sin_thead_con_th_en_el_cuerpo() {
+    let dir = tmp_dir("tabla_real");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TABLA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    f = web.table(p, "#real")
+    show("N=" + str(len(f)))
+    show("R0=" + str(f[0]))
+    show("R1=" + str(f[1]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // Dos filas de datos: la primera es la cabecera y las que empiezan por <th>
+    // NO son cabeceras, son encabezados de fila.
+    assert!(salida.contains("N=2"), "confundió la cabecera con los datos:\n{salida}");
+    assert!(salida.contains("Pais: España") && salida.contains("Capital: Madrid"),
+            "no nombró las columnas con la primera fila:\n{salida}");
+    assert!(salida.contains("Portugal"), "{salida}");
+}
+
+#[test]
+fn expande_las_celdas_combinadas() {
+    let dir = tmp_dir("tabla_span");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TABLA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    f = web.table(p, "#combinada")
+    show("N=" + str(len(f)))
+    show("R0=" + str(f[0]))
+    show("R1=" + str(f[1]))
+    show("R2=" + str(f[2]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=3"), "{salida}");
+    // Sin expandir el rowspan, la segunda fila tendría 30 en la columna Zona y
+    // todo lo demás correría un puesto a la izquierda.
+    assert!(salida.contains("R1={Zona: Norte, Q1: 30, Q2: 40}"),
+            "el rowspan no se propagó a la fila siguiente:\n{salida}");
+    assert!(salida.contains("R2={Zona: Sur, Q1: sin datos, Q2: sin datos}"),
+            "el colspan no se repartió:\n{salida}");
+}
+
+#[test]
+fn una_tabla_anidada_no_cuela_sus_filas() {
+    let dir = tmp_dir("tabla_anidada");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TABLA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    f = web.table(p, "#padre")
+    show("N=" + str(len(f)))
+    show("R0=" + str(f[0]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=1"), "se colaron las filas de la tabla de dentro:\n{salida}");
+}
+
+#[test]
+fn thead_columnas_repetidas_y_lo_que_no_es_tabla() {
+    let dir = tmp_dir("tabla_varios");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TABLA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("T=" + str(web.table(p, "#conthead")))
+    -- Dos columnas con el mismo nombre y una sin nombre: si se dejaran igual,
+    -- una clave pisaría a la otra y la vacía sería impedible de pedir.
+    show("R=" + str(web.table(p, "#repes")[0]))
+    -- Sin cabecera, todo son datos.
+    show("S=" + str(len(web.table(p, "#real", {{ header: no }}))))
+    attempt {{ web.table(p, "#nodable") }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("T=[{X: 7, Y: 8}]"), "el thead no se usó como cabecera:\n{salida}");
+    assert!(salida.contains("n: a") && salida.contains("n_2: b") && salida.contains("col_3: c"),
+            "no desambiguó las columnas repetidas o vacías:\n{salida}");
+    // Una cabecera con un <br> dentro —en Wikipedia son casi todas— daría una
+    // clave con un salto de línea, y esa clave no hay quien la escriba para
+    // pedir la columna.
+    assert!(salida.contains("PIB (2026): x"),
+            "no colapsó el salto de línea del nombre de columna:\n{salida}");
+    assert!(salida.contains("S=3"), "con header: no deberían salir las tres filas:\n{salida}");
+    assert!(salida.contains("E=") && salida.contains("no es una <table>"),
+            "debería decir que eso no es una tabla:\n{salida}");
+}
+
+#[test]
+fn un_campo_de_varios_valores_se_recoge_entero() {
+    let dir = tmp_dir("extract_list");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_LISTA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    r = web.extract(p, ".card", {{
+        titulo:  ".t",
+        tags:    ".tag|list",
+        precios: ".p|list:num",
+        urls:    "a@href|list"
+    }})
+    show("R0=" + str(r[0]))
+    show("R1=" + str(r[1]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // Antes devolvía solo "rojo" y las demás se perdían sin decir nada.
+    assert!(salida.contains("tags: [rojo, azul, verde]"),
+            "no recogió todas las etiquetas:\n{salida}");
+    assert!(salida.contains("precios: [10.5, 3]"),
+            "la conversión detrás de list no se aplicó:\n{salida}");
+    assert!(salida.contains("urls: [/a, /b]"), "no recogió los atributos:\n{salida}");
+    assert!(salida.contains("tags: []"), "la segunda tarjeta no tiene etiquetas:\n{salida}");
+}
+
+#[test]
+fn un_list_con_el_selector_equivocado_se_delata() {
+    let dir = tmp_dir("extract_list_muerto");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_LISTA);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.extract(p, ".card", {{ t: ".t", tags: ".etiqueta-vieja|list" }}) }}
+    handle e {{ show("E=" + e) }}
+}}
+"##));
+    // Una lista vacía en TODAS las filas es un selector muerto, no un dato que
+    // falta: sin esto el aviso se perdía justo donde más sirve.
+    assert!(salida.contains("E=") && salida.contains("etiqueta-vieja"),
+            "un list muerto debería delatarse igual que un campo simple:\n{salida}");
+}
+
+const PAGINA_LISTA: &str = r#"<!doctype html>
+<html><head><title>Lista</title></head><body>
+<div class="card">
+  <div class="t">Primero</div>
+  <span class="tag">rojo</span><span class="tag">azul</span><span class="tag">verde</span>
+  <span class="p">10,50 €</span><span class="p">3 €</span>
+  <a href="/a">uno</a><a href="/b">dos</a>
+</div>
+<div class="card">
+  <div class="t">Segundo</div>
+  <a href="/c">tres</a>
+</div>
+</body></html>"#;

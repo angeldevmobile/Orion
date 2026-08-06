@@ -870,6 +870,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "type", "browser.type(…)", "Función del módulo browser."));
     v.push(f("browser", "press", "browser.press(…)", "Función del módulo browser."));
     v.push(f("browser", "select", "browser.select(…)", "Función del módulo browser."));
+    v.push(f("browser", "fill", "browser.fill(pestaña, campos, opts?)", "Rellena un formulario entero en UNA llamada; detecta si cada control es texto, desplegable o casilla"));
+    v.push(f("browser", "check", "browser.check(pestaña, selector)", "Marca una casilla con un clic real; no hace nada si ya estaba marcada"));
+    v.push(f("browser", "uncheck", "browser.uncheck(pestaña, selector)", "Desmarca una casilla; un radio no se puede desmarcar"));
     v.push(f("browser", "dialogs", "browser.dialogs(…)", "Modales y ventanas"));
     v.push(f("browser", "click_opens", "browser.click_opens(…)", "Función del módulo browser."));
     v.push(f("browser", "wait", "browser.wait(…)", "Lectura del DOM.  Las que devuelven contenido esperan a que lo haya; las que informan del estado responden sobre el instante actual y no esperan nunca."));
@@ -880,11 +883,13 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "count", "browser.count(…)", "Función del módulo browser."));
     v.push(f("browser", "visible", "browser.visible(…)", "Función del módulo browser."));
     v.push(f("browser", "attr", "browser.attr(…)", "Función del módulo browser."));
+    v.push(f("browser", "value", "browser.value(pestaña, selector)", "Lo que un campo contiene AHORA; distinto de attr(\"value\"), que lee el atributo del HTML y no cambia al escribir"));
+    v.push(f("browser", "table", "browser.table(pestaña, selector, opts?)", "Lee una <table> entera como lista de registros, con la cabecera deducida y las celdas combinadas expandidas"));
     v.push(f("browser", "extract", "browser.extract(…)", "Función del módulo browser."));
     v.push(f("browser", "extract_to", "browser.extract_to(…)", "Función del módulo browser."));
-    v.push(f("browser", "upload", "browser.upload(…)", "Archivos. Las tres ventanas del sistema operativo que el navegador abriría por su cuenta se interceptan antes de que existan."));
-    v.push(f("browser", "download", "browser.download(…)", "Función del módulo browser."));
-    v.push(f("browser", "pdf", "browser.pdf(…)", "Función del módulo browser."));
+    v.push(f("browser", "upload", "browser.upload(pestaña, selector, archivos)", "Adjunta sin que se abra la ventana del sistema; el selector puede ser el <input type=file> o el botón que lo abre"));
+    v.push(f("browser", "download", "browser.download(pestaña, selector, opts?)", "Pulsa y espera a que la descarga TERMINE; devuelve {path, name, bytes, url} y no hay diálogo \"Guardar como\""));
+    v.push(f("browser", "pdf", "browser.pdf(pestaña, ruta, opts?)", "Imprime la página a PDF sin abrir el diálogo de impresión"));
     v.push(f("browser", "screenshot", "browser.screenshot(…)", "Captura"));
     v.push(f("browser", "free", "browser.free(…)", "`close` y `free` son lo mismo: `free` existe porque es el nombre que invoca el desugar de `with`, y `close` porque es el que la gente escribe cuando cierra a mano."));
     v.push(f("browser", "close", "browser.close(…)", "Alias de browser.free."));

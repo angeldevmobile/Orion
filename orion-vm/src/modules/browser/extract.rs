@@ -76,9 +76,20 @@ pub fn parse_campo(nombre: &str, spec: &str) -> Result<Campo, String> {
                 return Err(format!("campo '{nombre}': falta la conversión después de '|'"));
             }
             const VALIDAS: [&str; 6] = ["num", "int", "bool", "html", "text", "trim"];
-            if !VALIDAS.contains(&c.as_str()) {
+            // `list` recoge TODAS las coincidencias en vez de la primera, y
+            // admite una conversión detrás para el contenido: `list:num`.
+            let sub = match c.strip_prefix("list") {
+                Some(r) => Some(r.trim_start_matches(':')),
+                None => None,
+            };
+            let valida = match sub {
+                Some("")  => true,
+                Some(s)   => VALIDAS.contains(&s),
+                None      => VALIDAS.contains(&c.as_str()),
+            };
+            if !valida {
                 return Err(format!(
-                    "campo '{nombre}': conversión '{c}' desconocida.\n  Admitidas: {}",
+                    "campo '{nombre}': conversión '{c}' desconocida.\n  Admitidas: {}, list, list:<conversión>",
                     VALIDAS.join(", ")
                 ));
             }
@@ -151,24 +162,74 @@ const __aNumero = (s) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const __valor = (fila, c) => {
-  const el = __enFila(fila, c.sel);
-  if (!el) return null;
+// Como `__enFila` pero en plural, para los campos `|list`.
+//
+// Un campo que recoge varios valores —las etiquetas de un producto, las
+// imágenes de una galería— es habitual, y con la versión singular devolvía la
+// primera coincidencia y las demás se perdían en silencio.
+const __todosEnFila = (fila, sel) => {
+  if (!sel) return [fila];
+  if (sel.startsWith('/') || sel.startsWith('(/') || sel.startsWith('./')) {
+    let x = sel;
+    if (x.startsWith('/'))  x = '.' + x;
+    if (x.startsWith('(/')) x = '(.' + x.slice(1);
+    const d = fila.ownerDocument;
+    const r = d.evaluate(x, fila, null, 7, null);
+    const out = [];
+    for (let i = 0; i < r.snapshotLength; i++) out.push(r.snapshotItem(i));
+    return out;
+  }
+  if (sel.startsWith('text=')) {
+    const want = sel.slice(5).trim();
+    return Array.from(fila.querySelectorAll('*'))
+      .filter(e => !e.children.length && (e.textContent || '').trim().includes(want));
+  }
+  return Array.from(fila.querySelectorAll(sel));
+};
 
-  let bruto;
-  if (c.attr) bruto = el.getAttribute(c.attr);
-  else if (c.conv === 'html') bruto = el.innerHTML;
-  else bruto = (el.innerText || el.textContent || '');
-  if (bruto === null || bruto === undefined) return null;
-  bruto = String(bruto).trim();
-  if (bruto === '' && !c.attr) return null;
+/// Texto o atributo de un elemento, sin convertir todavía.
+const __bruto = (el, attr, conv) => {
+  let b;
+  if (attr) b = el.getAttribute(attr);
+  else if (conv === 'html') b = el.innerHTML;
+  else b = (el.innerText || el.textContent || '');
+  if (b === null || b === undefined) return null;
+  return String(b).trim();
+};
 
-  switch (c.conv) {
+const __convertir = (bruto, conv) => {
+  switch (conv) {
     case 'num':  return __aNumero(bruto);
     case 'int':  { const n = __aNumero(bruto); return n === null ? null : Math.trunc(n); }
     case 'bool': return !(bruto === '' || /^(no|false|0|off)$/i.test(bruto));
     default:     return bruto;
   }
+};
+
+const __valor = (fila, c) => {
+  const conv = c.conv || '';
+
+  if (conv === 'list' || conv.startsWith('list:')) {
+    const sub = conv.slice(4).replace(/^:/, '');
+    const out = [];
+    for (const el of __todosEnFila(fila, c.sel)) {
+      const b = __bruto(el, c.attr, sub);
+      // Un elemento sin nada dentro es ruido, no un valor: se salta, igual que
+      // en el caso singular. Lo que sí se conserva es un null que venga de la
+      // conversión ("Agotado" con |num), porque ahí sí hubo algo y hace falta
+      // verlo para entender por qué no salió el número.
+      if (b === null || (b === '' && !c.attr)) continue;
+      out.push(__convertir(b, sub));
+    }
+    return out;
+  }
+
+  const el = __enFila(fila, c.sel);
+  if (!el) return null;
+  const bruto = __bruto(el, c.attr, conv);
+  if (bruto === null) return null;
+  if (bruto === '' && !c.attr) return null;
+  return __convertir(bruto, conv);
 };
 "#;
 
@@ -215,7 +276,10 @@ pub fn extract(
           const reg = {{}};
           for (const c of campos) {{
             const v = __valor(fila, c);
-            if (v === null) vacios[c.nombre]++;
+            // Una lista vacía es tan "no encontré nada" como un null: sin esto,
+            // un `|list` con el selector equivocado se saltaría el aviso de
+            // selector muerto, que es justo donde más falta hace.
+            if (v === null || (Array.isArray(v) && v.length === 0)) vacios[c.nombre]++;
             reg[c.nombre] = v;
           }}
           datos.push(reg);
@@ -321,6 +385,18 @@ mod tests {
         let y = c("valor", "|num");
         assert_eq!(y.sel, "");
         assert_eq!(y.conv.as_deref(), Some("num"));
+    }
+
+    #[test]
+    fn list_se_admite_sola_y_con_conversion_detras() {
+        assert_eq!(c("tags", ".tag|list").conv.as_deref(), Some("list"));
+        assert_eq!(c("precios", ".p|list:num").conv.as_deref(), Some("list:num"));
+        assert_eq!(c("urls", "a@href|list").attr.as_deref(), Some("href"));
+
+        // Una conversión inventada detrás de `list` no se cuela.
+        assert!(parse_campo("x", ".p|list:dinero").is_err());
+        // Y `list` no se anida consigo misma.
+        assert!(parse_campo("x", ".p|list:list").is_err());
     }
 
     #[test]

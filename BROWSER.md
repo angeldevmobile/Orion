@@ -17,12 +17,13 @@ with b = web.open() {
 `with` desugara a `web.free(b)` incluso si el cuerpo lanza un error, y `free`
 cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
-> **Estado**: transporte, arranque, navegación, interacción, modales, ventanas,
-> extracción y archivos verificados de punta a punta (41 tests e2e en
+> **Estado**: transporte, arranque, navegación, interacción, formularios,
+> tablas, modales, ventanas, extracción y archivos verificados de punta a punta
+> (53 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Pendiente:
-> cookies/sesión y benchmark completo contra Python.
+> sesión reutilizable, seguridad y benchmark completo contra Python.
 
 ## 1. Arranque
 
@@ -180,6 +181,8 @@ saltan sin romper la búsqueda.
 | `web.type(pestaña, sel, texto, opts?)` | limpia el campo salvo `{ clear: no }` |
 | `web.press(pestaña, tecla)` | ver 4.3 |
 | `web.select(pestaña, sel, opción, ms?)` | `<select>` nativo, ver 4.4 |
+| `web.fill(pestaña, campos, opts?)` | un formulario entero en una llamada, ver 4.5 |
+| `web.check(pestaña, sel)` / `web.uncheck(...)` | casillas, ver 4.6 |
 
 El tercer argumento admite un número (milisegundos de espera) o un diccionario:
 
@@ -255,6 +258,98 @@ web.select(p, "#pais", "1")        -- por índice
 
 Si la opción no existe, el error lista las que hay.
 
+### 4.5 `web.fill(pestaña, campos, opts?)` → cuántos rellenó
+
+Un formulario entero en **una sola llamada**, y el tipo de cada control lo
+decide la página:
+
+```orion
+web.fill(p, {
+    "#nombre":  "Ana Torres",
+    "#notas":   "texto largo",
+    "#pais":    "España",     -- <select>: vale el texto visible, el value o el índice
+    "#acepto":  yes,          -- casilla
+    "#plan_b":  yes,          -- radio
+    "#bio":     "..."         -- contenteditable
+})
+```
+
+Obligar a elegir la función según de qué está hecho el campo —`type` para el
+texto, `select` para el desplegable, `check` para la casilla— significa mirar el
+HTML antes de poder escribir una línea.
+
+**El orden se respeta**, y hace falta: un desplegable de provincia que solo se
+llena al elegir el país tiene que ir después del país.
+
+**Por qué es rápido.** `type` manda dos eventos CDP por carácter. Medido contra
+un sitio real, 51 caracteres tecla a tecla cuestan **221 ms** y la misma
+asignación en una llamada cuesta **1 ms**.
+
+**Por qué `type` sigue existiendo.** Las teclas de verdad hacen falta cuando el
+sitio reacciona a ellas: autocompletados, máscaras de teléfono, buscadores que
+filtran mientras escribes. Para esos, `{ keys: yes }` pasa `fill` al modo lento
+y fiel, campo a campo.
+
+```orion
+web.fill(p, { "#buscador": "madr" }, { keys: yes })   -- dispara el autocompletado
+```
+
+#### La trampa del `value`
+
+Asignar `el.value = x` y lanzar un evento **no llega a la aplicación** si el
+sitio usa React. React instala un rastreador sobre el descriptor `value` del
+elemento y, cuando llega el evento, compara con lo último que él anotó: si
+coincide, da el cambio por visto y no avisa a nadie.
+
+El resultado es el peor fallo posible: **el campo se ve relleno en pantalla y el
+formulario se envía vacío.** Comprobado sobre el mismo mecanismo que usa React:
+
+| Cómo se rellena | ¿Se entera la aplicación? |
+|---|---|
+| `el.value = x` + evento | **No** |
+| setter nativo del prototipo + evento | Sí |
+| teclas reales | Sí |
+
+`fill` escribe por el setter nativo del prototipo, que el rastreador no
+intercepta. Y usa el prototipo correcto: el de `HTMLInputElement` no sirve para
+un `<textarea>` y la asignación se perdería sin decir nada.
+
+Además hace `blur` al terminar cada campo, porque muchos formularios validan al
+perder el foco y si no el campo queda relleno pero marcado en rojo, con el botón
+de enviar deshabilitado.
+
+#### Lo que no encuentra, lo dice
+
+Un campo que no se rellena casi nunca es un dato que faltaba: es el selector
+equivocado, o el formulario que cambió. Callarlo deja el envío incompleto y el
+fallo aparece en el servidor de otro.
+
+```
+browser.fill: 1 campo(s) no existen en la página:
+    #telefono_viejo
+    #pais  ->  no hay opción "Marte"
+  Opciones: España, Portugal
+  Revisa esos selectores, o usa { strict: no } si de verdad pueden faltar.
+```
+
+Se espera a que estén **todos** antes de tocar ninguno: parar a medio rellenar
+deja el formulario en un estado que nadie escribió.
+
+### 4.6 `web.check(pestaña, sel)` / `web.uncheck(pestaña, sel)`
+
+Marca o desmarca con un **clic real**, y solo si hace falta:
+
+```orion
+web.check(p, "#acepto")
+web.check(p, "#acepto")   -- ya estaba: no hace nada
+```
+
+La idempotencia no es un detalle. Si se limitara a pulsar, un reintento inocente
+—o un bucle que revisa la casilla— la dejaría en el contrario de lo que se pedía.
+
+Un `<input type="radio">` no se puede desmarcar pulsándolo, y `uncheck` lo dice
+en vez de fallar en silencio: hay que marcar otro del grupo.
+
 ## 5. Lectura del DOM
 
 | Función | ¿Espera? |
@@ -263,6 +358,8 @@ Si la opción no existe, el error lista las que hay.
 | `web.texts(pestaña, sel, ms?)` | sí |
 | `web.html(pestaña, sel, ms?)` | sí |
 | `web.attr(pestaña, sel, atributo, ms?)` | sí |
+| `web.value(pestaña, sel)` | sí — lo que el campo contiene AHORA, ver 5.1 |
+| `web.table(pestaña, sel, opts?)` | sí — una `<table>` entera, ver 5.2 |
 | `web.exists(pestaña, sel)` | **no** |
 | `web.count(pestaña, sel)` | **no** |
 | `web.visible(pestaña, sel)` | **no** |
@@ -274,6 +371,72 @@ Devolver `null` porque el contenido aún no había llegado convierte un problema
 de tiempo en un dato perdido en silencio — el fallo que hace que un scraper
 funcione en el portátil y no en el servidor. Al revés, hacer esperar a `exists`
 convertiría un "no está" legítimo en diez segundos de bloqueo.
+
+### 5.1 `web.value(pestaña, sel)` → lo que el campo contiene ahora
+
+```orion
+web.fill(p, { "#nombre": "Ana" })
+show(web.value(p, "#nombre"))          -- Ana
+show(web.attr(p, "#nombre", "value"))  -- null
+```
+
+Las dos líneas de arriba no se contradicen, y confundirlas es un clásico:
+`attr` lee el **atributo del HTML** —el que venía escrito en la página— y ese no
+cambia cuando alguien escribe en el campo. Un `<input>` sin `value=` en el HTML
+devuelve `null` por ahí aunque tenga texto dentro, que es justo el momento en el
+que uno cree que su `fill` no funcionó.
+
+`value` devuelve además lo que corresponde a cada control: el valor de la opción
+elegida en un `<select>`, `yes`/`no` en una casilla, y el texto en un
+`contenteditable`.
+
+### 5.2 `web.table(pestaña, sel, opts?)` → lista de registros
+
+```orion
+filas = web.table(p, "table.wikitable")
+show(len(filas))       -- 222
+show(filas[1])
+-- {Country/Territory: United States, IMF (2026)[1]: 32,383,920, ...}
+```
+
+Una tabla entera en una llamada, con la cabecera deducida y las columnas ya
+nombradas. Se puede encadenar directamente con el motor de datos.
+
+**Las reglas de aquí salen de mirar tablas reales, no de imaginarlas.** De 13
+tablas en tres páginas de Wikipedia:
+
+| | Cuántas |
+|---|---|
+| Sin `<thead>` | **13 de 13** |
+| Con `<th>` dentro del cuerpo (encabezados de fila) | 10 |
+| Con `colspan` o `rowspan` | 4 |
+| Con otra tabla dentro | 1 |
+
+Un lector que dé por hecho el `<thead>` —que es como sale la primera versión—
+funciona perfecto en el sitio de demostración y falla en el 100% de las tablas
+de verdad. De ahí las cuatro decisiones:
+
+1. **La cabecera se busca en cascada**: `<thead>`, o la primera fila si
+   **todas** sus celdas son `<th>`, o nombres generados `col_1`, `col_2`…
+2. **Exigir que sean *todas* `<th>`** es lo que evita confundir una fila de
+   datos que empieza con un encabezado de fila con la cabecera de la tabla.
+   Es el caso de 10 de las 13.
+3. **`colspan` y `rowspan` se expanden.** Sin eso, las columnas se desalinean a
+   partir de la primera celda combinada y todo lo que sigue queda corrido un
+   puesto, con pinta de dato bueno.
+4. **Las filas de una tabla anidada pertenecen a la de dentro**, no a esta.
+
+Con cabeceras a varios pisos manda la de abajo, que es la que nombra columnas.
+
+**Los nombres de columna se limpian** porque son claves: se colapsan los
+espacios (una cabecera con un `<br>` daría una clave con un salto de línea, y esa
+no hay quien la escriba), los vacíos pasan a `col_N` y los repetidos se numeran
+(`n`, `n_2`). Los **valores no se tocan**: ahí un salto de línea puede ser parte
+del dato.
+
+`{ header: no }` no interpreta ninguna fila como cabecera y devuelve todo como
+datos con nombres generados. Hace falta para las tablas que se usan como
+maquetación, donde la primera fila ya es un dato.
 
 ## 6. Modales y ventanas
 
@@ -359,10 +522,24 @@ Las tres partes son opcionales: `<selector> @<atributo> |<conversión>`
 | `.price\|num` | texto convertido a número |
 | `//td[2]\|num` | XPath **relativo a la fila** |
 | `\|num` | el texto de la fila entera, como número |
+| `.tag\|list` | **todas** las coincidencias, no la primera |
+| `.p\|list:num` | todas, convertidas a número |
+| `a@href\|list` | todos los enlaces de la fila |
 
-Conversiones: `num`, `int`, `bool`, `html`, `text`, `trim`.
+Conversiones: `num`, `int`, `bool`, `html`, `text`, `trim`, `list`,
+`list:<conversión>`.
 
-Dos detalles que evitan errores silenciosos:
+Tres detalles que evitan errores silenciosos:
+
+**`list` recoge todas.** Sin él, un campo con varios valores —las etiquetas de un
+producto, las imágenes de una galería— devolvía la primera coincidencia y las
+demás se perdían sin decir nada. Una lista vacía en **todas** las filas cuenta
+como selector muerto igual que un `null`, así que el aviso de 7.3 sigue
+funcionando ahí, que es donde más falta hace.
+
+Dentro de una lista se conserva el `null` que venga de la conversión (`"Agotado"`
+con `list:num`), porque ahí sí había algo y hace falta verlo para entender por
+qué no salió el número. Lo que se salta son los elementos sin nada dentro.
 
 **Los XPath se relativizan.** `//td[1]` es absoluto y buscaría desde la raíz del
 documento, devolviendo **la misma fila repetida** con datos que parecen buenos.

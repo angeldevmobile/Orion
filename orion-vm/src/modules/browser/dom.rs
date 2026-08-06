@@ -129,6 +129,16 @@ pub fn expr(sel: &str, cuerpo: &str, t: &Tuning) -> String {
     format!("(() => {{ const __PROF = {prof};\n {FIND_JS}\n const sel = {s};\n {cuerpo} }})()")
 }
 
+/// Como `expr`, pero sin fijar un selector concreto.
+///
+/// `expr` inyecta `const sel = "..."` porque casi todo opera sobre un elemento.
+/// `fill` no: recibe un formulario entero y necesita el mismo buscador —con sus
+/// iframes y sus tres sintaxis— para varios selectores en la misma evaluación.
+pub fn expr_multi(cuerpo: &str, t: &Tuning) -> String {
+    let prof = t.iframe_depth;
+    format!("(() => {{ const __PROF = {prof};\n {FIND_JS}\n {cuerpo} }})()")
+}
+
 /// Como `expr`, pero reintentando hasta obtener algo o agotar el plazo.
 ///
 /// Las lecturas que devuelven contenido (`text`, `html`, `attr`, `texts`) tienen

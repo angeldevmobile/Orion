@@ -25,6 +25,7 @@ pub mod cdp;
 pub mod dom;
 pub mod extract;
 pub mod files;
+pub mod form;
 pub mod input;
 pub mod launch;
 
@@ -127,6 +128,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "type"       => do_type(&args),
         "press"      => do_press(&args),
         "select"     => do_select(&args),
+        // fill(pestaña, campos, opts?) → rellena un formulario entero en UNA llamada; detecta si cada control es texto, desplegable o casilla
+        "fill"       => do_fill(&args),
+        // check(pestaña, selector) → marca una casilla con un clic real; no hace nada si ya estaba marcada
+        "check"      => do_check(&args, true),
+        // uncheck(pestaña, selector) → desmarca una casilla; un radio no se puede desmarcar
+        "uncheck"    => do_check(&args, false),
 
         // Modales y ventanas
         "dialogs"     => do_dialogs(&args),
@@ -154,13 +161,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                             && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
                      "#),
         "attr"    => do_attr(&args),
+        // value(pestaña, selector) → lo que un campo contiene AHORA; distinto de attr("value"), que lee el atributo del HTML y no cambia al escribir
+        "value"   => do_value(&args),
+        // table(pestaña, selector, opts?) → lee una <table> entera como lista de registros, con la cabecera deducida y las celdas combinadas expandidas
+        "table"   => do_table(&args),
         "extract"    => do_extract(&args),
         "extract_to" => do_extract_to(&args),
 
         // Archivos. Las tres ventanas del sistema operativo que el navegador
         // abriría por su cuenta se interceptan antes de que existan.
+        //
+        // upload(pestaña, selector, archivos) → adjunta sin que se abra la ventana del sistema; el selector puede ser el <input type=file> o el botón que lo abre
         "upload"   => do_upload(&args),
+        // download(pestaña, selector, opts?) → pulsa y espera a que la descarga TERMINE; devuelve {path, name, bytes, url} y no hay diálogo "Guardar como"
         "download" => do_download(&args),
+        // pdf(pestaña, ruta, opts?) → imprime la página a PDF sin abrir el diálogo de impresión
         "pdf"      => do_pdf(&args),
 
         // Captura
@@ -542,6 +557,190 @@ fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
         return Ok(m.get("value").cloned().unwrap_or(EvalValue::Bool(true)));
     }
     Ok(v)
+}
+
+/// Rellena un formulario entero en una sola llamada.
+///
+/// El tipo de cada control lo decide la página: un texto, un desplegable y una
+/// casilla se escriben igual. Obligar a elegir la función según de qué está
+/// hecho el campo significa mirar el HTML antes de poder escribir una línea.
+fn do_fill(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.fill(pestaña, campos, opts?)")?;
+    let EvalValue::Dict(campos) = args.get(1)
+        .ok_or("browser.fill(pestaña, campos, opts?): faltan los campos")?
+    else {
+        return Err("browser.fill: los campos son un diccionario { selector: valor }".into());
+    };
+    if campos.is_empty() {
+        return Err("browser.fill: el diccionario de campos está vacío".into());
+    }
+    let (conn, session, _timeout, t) = page_ctx(p)?;
+    let ms = espera_de(args, 2, &t);
+
+    let opts = match args.get(2) { Some(EvalValue::Dict(m)) => Some(m), _ => None };
+    let estricto = opts.and_then(|m| m.get("strict")).map(truthy).unwrap_or(true);
+    let por_teclas = opts.and_then(|m| m.get("keys")).map(truthy).unwrap_or(false);
+
+    // El orden del diccionario se conserva (es un IndexMap) y hace falta: un
+    // desplegable de provincia que solo se llena al elegir el país tiene que ir
+    // después del país.
+    let lista: Vec<(String, serde_json::Value)> = campos.iter()
+        .map(|(k, v)| (k.clone(), json_de(v)))
+        .collect();
+
+    if por_teclas {
+        return fill_con_teclas(&conn, &session, &lista, ms, &t, estricto);
+    }
+
+    let r = form::fill(&conn, &session, &lista, ms, &t)?;
+    if estricto {
+        if let Some(q) = form::queja(&r) { return Err(q); }
+    }
+    Ok(EvalValue::Int(r.puestos as i64))
+}
+
+/// Variante lenta y fiel: teclas de verdad, campo a campo.
+///
+/// Existe porque hay sitios que solo reaccionan a las pulsaciones —
+/// autocompletados, máscaras, buscadores que filtran mientras escribes—, y en
+/// esos la asignación directa deja el campo relleno y la aplicación sin
+/// enterarse. Cuesta unas 4 ms por carácter, así que es la excepción.
+fn fill_con_teclas(
+    conn: &Conn, session: &str, lista: &[(String, serde_json::Value)],
+    ms: u64, t: &Tuning, estricto: bool,
+) -> Result<EvalValue, String> {
+    let mut puestos = 0usize;
+    let mut ausentes = Vec::new();
+    for (sel, val) in lista {
+        let texto = match val {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Bool(b) => {
+                // Una casilla no se escribe, se pulsa.
+                match form::estado_casilla(conn, session, sel, ms, t) {
+                    Ok((actual, _)) => {
+                        if actual != *b {
+                            input::click(conn, session, sel, "left", 1, ms,
+                                         input::Force::No, t, Duration::from_millis(ms + t.cdp_margin_ms))?;
+                        }
+                        puestos += 1;
+                        continue;
+                    }
+                    Err(e) => { ausentes.push(format!("{sel}  ->  {e}")); continue; }
+                }
+            }
+            otro => otro.to_string(),
+        };
+        match input::type_text(conn, session, sel, &texto, true, ms,
+                               input::Force::No, t, Duration::from_millis(ms + t.cdp_margin_ms)) {
+            Ok(()) => puestos += 1,
+            Err(e) => ausentes.push(format!("{sel}  ->  {e}")),
+        }
+    }
+    if estricto && !ausentes.is_empty() {
+        return Err(format!("browser.fill: no se pudieron rellenar {} campo(s):\n    {}",
+                           ausentes.len(), ausentes.join("\n    ")));
+    }
+    Ok(EvalValue::Int(puestos as i64))
+}
+
+/// Marca o desmarca una casilla, con un clic real y sin repetirlo si ya estaba.
+///
+/// Es idempotente a propósito: `check` sobre una casilla ya marcada la dejaría
+/// desmarcada si se limitase a pulsar, que es el error que convierte un
+/// reintento inocente en el contrario de lo que se pedía.
+fn do_check(args: &[EvalValue], querer: bool) -> Result<EvalValue, String> {
+    let quien = if querer { "check" } else { "uncheck" };
+    let p = arg_handle(args, 0, &format!("browser.{quien}(pestaña, selector)"))?;
+    let sel = args.get(1).map(to_str)
+        .ok_or_else(|| format!("browser.{quien}(pestaña, selector): falta el selector"))?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
+    let ms = espera_de(args, 2, &t);
+
+    let (actual, tipo) = form::estado_casilla(&conn, &session, &sel, ms, &t)
+        .map_err(|e| format!("browser.{quien}: {e}"))?;
+
+    if tipo == "radio" && !querer {
+        return Err(format!(
+            "browser.uncheck: '{sel}' es un radio y un radio no se desmarca; marca otro del grupo"
+        ));
+    }
+    if actual != querer {
+        input::click(&conn, &session, &sel, "left", 1, ms, force_de(args, 2), &t, timeout)
+            .map_err(|e| e.replace("browser.click", &format!("browser.{quien}")))?;
+    }
+    Ok(EvalValue::Bool(querer))
+}
+
+/// Lo que un campo contiene ahora mismo.
+///
+/// Hace falta aparte de `attr` porque no son lo mismo, y confundirlos es un
+/// clásico: `attr(p, sel, "value")` lee el **atributo** del HTML —el que venía
+/// escrito en la página— y ese no cambia cuando alguien escribe en el campo.
+/// Un `<input>` sin `value=` en el HTML devuelve `null` por ahí aunque tenga
+/// texto dentro, que es exactamente el momento en el que uno cree que su
+/// `fill` no funcionó.
+///
+/// Devuelve además lo que corresponde a cada control: el texto de un `<select>`
+/// no está en el elemento sino en la opción elegida, y una casilla no tiene
+/// texto sino estado.
+fn do_value(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.value(pestaña, selector)")?;
+    let sel = args.get(1).map(to_str)
+        .ok_or("browser.value(pestaña, selector): falta el selector")?;
+    let (conn, session, _timeout, t) = page_ctx(p)?;
+    let ms = espera_de(args, 2, &t);
+
+    let cuerpo = r#"
+    const e = __find(sel);
+    if (!e) return null;
+    const tipo = (e.type || '').toLowerCase();
+    if (tipo === 'checkbox' || tipo === 'radio') return !!e.checked;
+    if (e.tagName === 'SELECT') {
+      const o = e.options[e.selectedIndex];
+      return o ? o.value : null;
+    }
+    if (e.isContentEditable) return e.textContent;
+    if ('value' in e) return e.value;
+    return (e.innerText || e.textContent || '');
+    "#;
+
+    evaluate_awaiting(
+        &conn, &session,
+        &dom::expr_waiting(&sel, cuerpo, ms, &t),
+        Duration::from_millis(ms + t.cdp_margin_ms), true,
+    )
+}
+
+/// Lee una `<table>` completa.
+fn do_table(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.table(pestaña, selector, opts?)")?;
+    let sel = args.get(1).map(to_str)
+        .ok_or("browser.table(pestaña, selector, opts?): falta el selector")?;
+    let (conn, session, _timeout, t) = page_ctx(p)?;
+    let ms = espera_de(args, 2, &t);
+
+    // Con `{ header: no }` no se interpreta ninguna fila como cabecera y todo
+    // sale como datos con columnas `col_1`, `col_2`… Hace falta para las tablas
+    // que se usan como maquetación, donde la primera fila ya es un dato.
+    let con_cabecera = match args.get(2) {
+        Some(EvalValue::Dict(m)) => m.get("header").map(truthy).unwrap_or(true),
+        _ => true,
+    };
+
+    let v = form::table(&conn, &session, &sel, con_cabecera, ms, &t)?;
+    Ok(json_to_eval(v.get("filas").cloned().unwrap_or(serde_json::Value::Null)))
+}
+
+/// Convierte un valor de Orion a JSON para mandarlo a la página.
+fn json_de(v: &EvalValue) -> serde_json::Value {
+    match v {
+        EvalValue::Str(s)   => serde_json::Value::String(s.clone()),
+        EvalValue::Int(i)   => serde_json::Value::from(*i),
+        EvalValue::Float(f) => serde_json::Value::from(*f),
+        EvalValue::Bool(b)  => serde_json::Value::Bool(*b),
+        EvalValue::Null     => serde_json::Value::Null,
+        otro                => serde_json::Value::String(to_str(otro)),
+    }
 }
 
 /// Espera a que una pestaña termine de cargar.
