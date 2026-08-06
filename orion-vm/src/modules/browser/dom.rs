@@ -160,6 +160,15 @@ pub fn expr_waiting(sel: &str, cuerpo: &str, ms: u64, t: &Tuning) -> String {
     expr(sel, &envuelto, t)
 }
 
+/// Como `expr`, para cuerpos que ya traen su propia espera.
+///
+/// `expr_waiting` envuelve el cuerpo en un reintento genérico "hasta que
+/// devuelva algo"; la extracción necesita esperar por otro criterio —que haya
+/// filas— y devolver además su diagnóstico, así que se monta su propio bucle.
+pub fn expr_waiting_raw(sel: &str, cuerpo: &str, t: &Tuning) -> String {
+    expr(sel, cuerpo, t)
+}
+
 /// Espera a que un selector aparezca.
 ///
 /// No hay sondeo desde Orion: la espera ocurre en la página con un

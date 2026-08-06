@@ -23,6 +23,7 @@
 
 pub mod cdp;
 pub mod dom;
+pub mod extract;
 pub mod input;
 pub mod launch;
 
@@ -152,6 +153,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                             && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
                      "#),
         "attr"    => do_attr(&args),
+        "extract"    => do_extract(&args),
+        "extract_to" => do_extract_to(&args),
 
         // Captura
         "screenshot" => do_screenshot(&args),
@@ -703,6 +706,185 @@ fn do_attr(args: &[EvalValue]) -> Result<EvalValue, String> {
         Duration::from_millis(ms + t.cdp_margin_ms),
         true,
     )
+}
+
+//    Extracción declarativa
+
+/// `extract(pestaña, selector_de_fila, esquema, opts?)` → lista de dicts.
+///
+/// El esquema entero se compila a una sola evaluación dentro de la página. Ver
+/// `extract.rs` para la gramática de las especificaciones.
+fn do_extract(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.extract(pestaña, selector, esquema)")?;
+    let fila_sel = args.get(1).map(to_str)
+        .ok_or("browser.extract(pestaña, selector, esquema): falta el selector de fila")?;
+
+    let Some(EvalValue::Dict(esquema)) = args.get(2) else {
+        return Err(concat!(
+            "browser.extract: el esquema debe ser un diccionario campo → especificación.
+",
+            "  Ejemplo: { nombre: \".title\", precio: \".price|num\" }"
+        ).to_string());
+    };
+    if esquema.is_empty() {
+        return Err("browser.extract: el esquema está vacío".into());
+    }
+
+    let campos: Vec<extract::Campo> = esquema.iter()
+        .map(|(k, v)| extract::parse_campo(k, &to_str(v)))
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("browser.extract: {e}"))?;
+
+    let (conn, session, _to, t) = page_ctx(p)?;
+    let ms = espera_de(args, 3, &t);
+    let r = extract::extract(&conn, &session, &fila_sel, &campos, ms, &t)?;
+
+    // Un campo vacío en TODAS las filas es casi siempre un selector equivocado,
+    // no un dato ausente. Callarlo devolvería una lista de nulls que parece
+    // buena y revienta mucho más adelante, que es el fallo clásico de
+    // BeautifulSoup. Con `strict: no` se acepta y se sigue.
+    let estricto = match args.get(3) {
+        Some(EvalValue::Dict(m)) => m.get("strict").map(truthy).unwrap_or(true),
+        _ => true,
+    };
+    if estricto && !r.muertos.is_empty() {
+        let detalle: Vec<String> = r.muertos.iter()
+            .map(|(campo, spec)| format!("    {campo}  ←  {spec}"))
+            .collect();
+        return Err(format!(
+            "browser.extract: {} campo(s) no encontraron nada en ninguna de las {} filas:
+{}
+  Revisa esos selectores, o usa {{ strict: no }} si de verdad pueden faltar.",
+            r.muertos.len(), r.filas, detalle.join("
+")
+        ));
+    }
+
+    Ok(json_to_eval(r.json))
+}
+
+/// `extract_to(pestaña, urls, selector, esquema, salida, opts?)` → resumen.
+///
+/// Recorre las URLs **reutilizando una sola pestaña** y vuelca lo extraído a
+/// disco según se obtiene. Las dos cosas son deliberadas: abrir una pestaña por
+/// URL multiplica la memoria del navegador, y acumular el listado entero antes
+/// de guardar es lo que hace que un scraper de Python se coma la RAM en cuanto
+/// el volumen crece.
+fn do_extract_to(args: &[EvalValue]) -> Result<EvalValue, String> {
+    const USO: &str = "browser.extract_to(pestaña, urls, selector, esquema, salida)";
+    let p = arg_handle(args, 0, USO)?;
+
+    // Una sola URL también vale: obligar a envolverla en una lista sería
+    // ceremonia por nada.
+    let urls: Vec<String> = match args.get(1) {
+        Some(EvalValue::List(l)) => l.iter().map(to_str).collect(),
+        Some(v) => vec![to_str(v)],
+        None => return Err(format!("{USO}: faltan las urls")),
+    };
+    if urls.is_empty() { return Err("browser.extract_to: la lista de urls está vacía".into()); }
+
+    let fila_sel = args.get(2).map(to_str).ok_or(format!("{USO}: falta el selector de fila"))?;
+    let Some(EvalValue::Dict(esquema)) = args.get(3) else {
+        return Err(format!("{USO}: el esquema debe ser un diccionario campo → especificación"));
+    };
+    let salida = args.get(4).map(to_str).ok_or(format!("{USO}: falta la ruta de salida"))?;
+
+    let campos: Vec<extract::Campo> = esquema.iter()
+        .map(|(k, v)| extract::parse_campo(k, &to_str(v)))
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("browser.extract_to: {e}"))?;
+
+    let (conn, session, timeout, t) = page_ctx(p)?;
+    let ms = espera_de(args, 5, &t);
+    let chunk = match args.get(5) {
+        Some(EvalValue::Dict(m)) => m.get("chunk").and_then(|v| to_u64(v).ok()).unwrap_or(50_000),
+        _ => 50_000,
+    } as usize;
+
+    let headers: Vec<String> = campos.iter().map(|c| c.nombre.clone()).collect();
+    let mut volcador = extract::Volcador::nuevo(&salida, headers.clone(), chunk)
+        .map_err(|e| format!("browser.extract_to: {e}"))?;
+
+    let mut errores: Vec<EvalValue> = Vec::new();
+    let mut vacias: Vec<EvalValue> = Vec::new();
+    let mut ok = 0usize;
+    let mut muertos_globales: Vec<(String, String)> = Vec::new();
+
+    for url in &urls {
+        // Un fallo en una URL no aborta el recorrido: en una tanda de veinte,
+        // morir por un 404 tira el trabajo de las diecinueve buenas. Se anota y
+        // se sigue, y el resumen dice exactamente qué pasó.
+        if let Err(e) = navegar(&conn, &session, url, timeout) {
+            errores.push(EvalValue::Str(format!("{url}: {e}")));
+            continue;
+        }
+        match extract::extract(&conn, &session, &fila_sel, &campos, ms, &t) {
+            Ok(r) => {
+                if r.filas > 0 && !r.muertos.is_empty() && muertos_globales.is_empty() {
+                    muertos_globales = r.muertos.clone();
+                }
+                // Una página que carga pero no da filas no es un error de red y
+                // por eso pasa desapercibida: un 404 con plantilla, un redirect
+                // al login, o el selector que dejó de valer en esa sección. Se
+                // anota aparte para que un recorrido no pierda páginas en
+                // silencio, que es el fallo que nadie detecta hasta que faltan
+                // datos en el informe.
+                if r.filas == 0 { vacias.push(EvalValue::Str(url.clone())); }
+                if let Some(arr) = r.json.as_array() {
+                    for reg in arr {
+                        let fila: Vec<String> = headers.iter()
+                            .map(|h| extract::a_texto(reg.get(h).unwrap_or(&serde_json::Value::Null)))
+                            .collect();
+                        volcador.escribir(fila).map_err(|e| format!("browser.extract_to: {e}"))?;
+                    }
+                }
+                ok += 1;
+            }
+            Err(e) => errores.push(EvalValue::Str(format!("{url}: {e}"))),
+        }
+    }
+
+    let (filas, archivos) = volcador.cerrar().map_err(|e| format!("browser.extract_to: {e}"))?;
+
+    let estricto = match args.get(5) {
+        Some(EvalValue::Dict(m)) => m.get("strict").map(truthy).unwrap_or(true),
+        _ => true,
+    };
+    if estricto && !muertos_globales.is_empty() {
+        let detalle: Vec<String> = muertos_globales.iter()
+            .map(|(campo, spec)| format!("    {campo}  ←  {spec}"))
+            .collect();
+        return Err(format!(
+            "browser.extract_to: {} campo(s) no encontraron nada en ninguna fila:
+{}
+  Los datos ya se escribieron en {salida}. Revisa esos selectores, o usa {{ strict: no }}.",
+            muertos_globales.len(), detalle.join("
+")
+        ));
+    }
+
+    let mut m: IndexMap<String, EvalValue> = IndexMap::new();
+    m.insert("rows".into(),   EvalValue::Int(filas as i64));
+    m.insert("urls".into(),   EvalValue::Int(urls.len() as i64));
+    m.insert("ok".into(),     EvalValue::Int(ok as i64));
+    m.insert("failed".into(), EvalValue::Int(errores.len() as i64));
+    m.insert("empty".into(),  EvalValue::List(vacias));
+    m.insert("files".into(),  EvalValue::List(
+        archivos.into_iter().map(EvalValue::Str).collect()));
+    m.insert("errors".into(), EvalValue::List(errores));
+    Ok(EvalValue::Dict(m))
+}
+
+/// Navega y espera la carga. Extraído de `goto` para poder reutilizarlo en el
+/// recorrido sin pasar por la conversión de argumentos de Orion.
+fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(), String> {
+    let marca = conn.event_mark();
+    let r = conn.call("Page.navigate", serde_json::json!({ "url": url }), Some(session), timeout)?;
+    if let Some(err) = r.get("errorText").and_then(|e| e.as_str()) {
+        return Err(err.to_string());
+    }
+    let _ = conn.wait_event("Page.loadEventFired", Some(session), marca, timeout)?;
+    Ok(())
 }
 
 //    Captura

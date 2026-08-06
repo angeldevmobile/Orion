@@ -880,6 +880,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "count", "browser.count(…)", "Función del módulo browser."));
     v.push(f("browser", "visible", "browser.visible(…)", "Función del módulo browser."));
     v.push(f("browser", "attr", "browser.attr(…)", "Función del módulo browser."));
+    v.push(f("browser", "extract", "browser.extract(…)", "Función del módulo browser."));
+    v.push(f("browser", "extract_to", "browser.extract_to(…)", "Función del módulo browser."));
     v.push(f("browser", "screenshot", "browser.screenshot(…)", "Captura"));
     v.push(f("browser", "free", "browser.free(…)", "`close` y `free` son lo mismo: `free` existe porque es el nombre que invoca el desugar de `with`, y `close` porque es el que la gente escribe cuando cierra a mano."));
     v.push(f("browser", "close", "browser.close(…)", "Alias de browser.free."));

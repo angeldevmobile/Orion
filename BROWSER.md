@@ -17,13 +17,12 @@ with b = web.open() {
 `with` desugara a `web.free(b)` incluso si el cuerpo lanza un error, y `free`
 cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
-> **Estado**: transporte, arranque, navegación, interacción, modales y ventanas
-> verificados de punta a punta (24 tests e2e en
+> **Estado**: transporte, arranque, navegación, interacción, modales, ventanas y
+> extracción verificados de punta a punta (32 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Pendiente:
-> extracción declarativa (`extract`), streaming a `.odf`, cookies/sesión y
-> benchmark contra Python.
+> cookies/sesión y benchmark completo contra Python.
 
 ## 1. Arranque
 
@@ -314,13 +313,139 @@ No necesitan nada especial: son HTML. Además el fondo bloqueante se comporta
 bien — con el modal abierto, un clic fuera falla nombrando al culpable en vez de
 colarse por debajo.
 
-## 7. Captura
+## 7. Extracción
+
+### 7.1 `web.extract(pestaña, selector_de_fila, esquema, opts?)` → lista
+
+El esquema es un diccionario de campo a especificación, y **todo él se compila a
+una sola llamada** que corre dentro de la página.
+
+```orion
+esquema = {
+    id:     "@data-id",
+    nombre: ".title",
+    precio: ".price|num",
+    stock:  "[data-qty]@data-qty|int",
+    url:    "a@href",
+    hay:    ".disp|bool"
+}
+items = web.extract(p, ".card", esquema)
+```
+
+```
+{id: 1, nombre: Laptop Pro, precio: 1299,  stock: 7,  url: /p/1, hay: yes}
+{id: 2, nombre: Mouse,      precio: 24.99, stock: 0,  url: /p/2, hay: no}
+```
+
+Ahí está la diferencia de fondo con Selenium: allí **cada lectura de un atributo
+es una petición HTTP al driver**, así que 500 productos por 3 campos son unas
+1.500 idas y vueltas más las 500 de localizar las filas. Esto es una. Y como se
+usa `returnByValue`, lo que cruza el socket son los datos pedidos, no el HTML.
+
+`extract` espera a que haya filas antes de rendirse: el listado suele llegar
+después de la acción que lo pidió, y devolver una lista vacía convertiría un
+problema de tiempo en un resultado vacío silencioso.
+
+### 7.2 Gramática de una especificación
+
+Las tres partes son opcionales: `<selector> @<atributo> |<conversión>`
+
+| Ejemplo | Significa |
+|---|---|
+| `.price` | texto del elemento |
+| `a@href` | atributo de un descendiente |
+| `@data-id` | atributo de la propia fila |
+| `.price\|num` | texto convertido a número |
+| `//td[2]\|num` | XPath **relativo a la fila** |
+| `\|num` | el texto de la fila entera, como número |
+
+Conversiones: `num`, `int`, `bool`, `html`, `text`, `trim`.
+
+Dos detalles que evitan errores silenciosos:
+
+**Los XPath se relativizan.** `//td[1]` es absoluto y buscaría desde la raíz del
+documento, devolviendo **la misma fila repetida** con datos que parecen buenos.
+Como una especificación de campo describe por definición algo dentro de la fila,
+se convierte en relativo.
+
+**Los números entienden los dos formatos.** `1.299,00 €` y `$1,234.56` conviven
+en la misma página. Manda el separador que aparece más a la derecha; con una
+coma sola, es decimal si separa uno o dos dígitos finales y miles si no. Un
+valor no numérico como `Agotado` da `null`, no un número inventado.
+
+### 7.3 Selectores muertos
+
+Un campo vacío en **todas** las filas casi nunca es un dato ausente: es un
+selector equivocado, o el sitio que cambió de estructura. Callarlo devuelve una
+lista que parece buena y revienta cien líneas después — el fallo clásico de
+BeautifulSoup.
+
+```
+browser.extract: 2 campo(s) no encontraron nada en ninguna de las 3 filas:
+    precio  ←  .precio-viejo
+    sku  ←  @data-sku
+  Revisa esos selectores, o usa { strict: no } si de verdad pueden faltar.
+```
+
+Con `{ strict: no }` se acepta y esos campos vienen como `null`.
+
+### 7.4 `web.extract_to(pestaña, urls, selector, esquema, salida, opts?)` → resumen
+
+Recorre varias URLs y **vuelca a disco según extrae**.
+
+```orion
+r = web.extract_to(p, urls, ".card", esquema, "productos.csv")
+show(r)
+-- {rows: 8000, urls: 40, ok: 40, failed: 0, empty: [], files: [productos.csv], errors: []}
+```
+
+Dos decisiones deliberadas: se **reutiliza una sola pestaña** para todas las URLs
+(abrir una por página multiplica la memoria del navegador) y **no se acumula el
+listado** antes de guardar, que es lo que hace que un scraper de Python se coma
+la RAM en cuanto el volumen crece.
+
+Medido con 200 filas por página:
+
+| Páginas | Filas | Pico de RAM de Orion |
+|---|---|---|
+| 5 | 1.000 | 18,4 MB |
+| 40 | 8.000 | 18,9 MB |
+
+Ocho veces más datos, medio megabyte más. La medida es del proceso de Orion; la
+memoria del navegador va aparte y es la grande, por eso las imágenes vienen
+desactivadas.
+
+El límite honesto: la memoria queda acotada por **la página más grande**, no por
+el total del recorrido, porque cada página se extrae de una vez.
+
+**Formatos**, según la extensión:
+
+- `.csv` — se escribe fila a fila, un solo archivo, memoria constante de verdad.
+- `.odf` — el formato binario lleva el número de filas en la cabecera y no admite
+  añadir al final, así que se vuelca por bloques (`chunk`, 50.000 por defecto)
+  liberando cada uno. El primero conserva el nombre pedido y los siguientes se
+  numeran. Lo lee `frame` directamente, con los tipos ya inferidos:
+
+```orion
+h = fr.open("productos.odf")
+show(fr.schema(h))    -- {id: int, nombre: string, precio: float, stock: int}
+```
+
+**Una URL que falla no aborta el recorrido.** En una tanda de veinte, morir por
+un 404 tira el trabajo de las diecinueve buenas: se anota en `errors` y se sigue.
+
+**Una página que carga pero no da filas se reporta en `empty`.** Un 404 con
+plantilla, un redirect al login o un selector que dejó de valer en esa sección
+cargan bien y no producen nada. Sin esto, un recorrido pierde páginas en
+silencio y nadie lo nota hasta que faltan datos en el informe.
+
+## 8. Captura
 
 `web.screenshot(pestaña, ruta)` → escribe un PNG y devuelve la ruta.
 
 Requiere `images: yes` en `open` si quieres que salgan las imágenes.
 
-## 8. JavaScript
+## 9. JavaScript
 
 `web.eval(pestaña, js)` evalúa y devuelve el valor ya convertido a Orion.
 
@@ -331,7 +456,7 @@ n = web.eval(p, "document.querySelectorAll('.card').length")
 Una excepción del JavaScript se convierte en error de Orion, no en un `null`
 silencioso.
 
-## 9. Memoria
+## 10. Memoria
 
 Decisiones tomadas con el consumo como criterio, no como consecuencia:
 
@@ -350,7 +475,7 @@ Decisiones tomadas con el consumo como criterio, no como consecuencia:
 - **Las pestañas se cierran de verdad** al hacer `free`: es lo que libera la
   memoria del proceso de render.
 
-## 10. Arquitectura
+## 11. Arquitectura
 
 ```
 orion-vm/src/modules/browser/
@@ -372,9 +497,9 @@ vuelve a medir **inmediatamente antes** de cada despacho, no al empezar una
 cadena de acciones: ahí está la diferencia práctica con `ActionChains`, que
 entre localizar y clicar deja que la página mueva el elemento.
 
-## 11. Despliegue
+## 12. Despliegue
 
-### 11.1 Qué entregas
+### 12.1 Qué entregas
 
 ```powershell
 orion --build app.orx -o app.exe
@@ -390,13 +515,13 @@ ningún `orion.exe` cerca y con el `PATH` reducido a `C:\Windows\system32`.
 
 Tu usuario recibe `app.exe` y no necesita saber que Orion existe.
 
-### 11.2 Qué necesita la máquina del usuario
+### 12.2 Qué necesita la máquina del usuario
 
 **Un navegador basado en Chromium, y nada más.** En Windows ya está: Edge viene
 con el sistema. Si su instalación está en una ruta poco habitual, se resuelve
 sin recompilar con la variable `ORION_CHROME` o pasando `chrome:` en `open()`.
 
-### 11.3 Comparado con Python
+### 12.3 Comparado con Python
 
 | | Python + Selenium | Orion |
 |---|---|---|
@@ -410,7 +535,7 @@ La última fila es la que más cuesta en la práctica: en Python cada actualizac
 de Chrome obliga a volver a empaquetar. Aquí el ejecutable que entregaste hace
 seis meses sigue funcionando.
 
-### 11.4 Redes corporativas
+### 12.4 Redes corporativas
 
 Este es el escenario donde la diferencia deja de ser comodidad y pasa a ser
 "puedo o no puedo".
@@ -442,7 +567,7 @@ navegador:
 web.open({ args: ["--proxy-server=http://proxy.empresa:8080"] })
 ```
 
-### 11.5 Lo que conviene saber
+### 12.5 Lo que conviene saber
 
 **Tamaño.** El ejecutable ronda los 58 MB. Es el binario completo de Orion:
 lleva GUI, TUI, tres motores de base de datos, OCR con sus modelos… todo, se use
@@ -456,7 +581,7 @@ probado compilar con el CRT estático.
 lo importante, pero un Windows recién instalado sin herramientas de desarrollo
 es la comprobación definitiva y cuesta cinco minutos.
 
-## 12. Diagnóstico
+## 13. Diagnóstico
 
 | Síntoma | Qué mirar |
 |---|---|

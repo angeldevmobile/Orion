@@ -801,3 +801,291 @@ with b = web.open({{ sin: ["--disable-extensions", "--mute-audio"] }}) {{
     assert!(ok, "quitar banderas dejó el navegador inservible:\n{salida}");
     assert!(salida.contains("T=Pagina de prueba"), "salida inesperada:\n{salida}");
 }
+
+/// Listado con los dos formatos de precio del mundo real y una tabla, para
+/// ejercitar la extracción de punta a punta.
+const PAGINA_TIENDA: &str = r##"<!doctype html><html><head><meta charset="utf-8"><title>Tienda</title></head><body>
+<div id="lista"></div>
+<table id="t"><tbody>
+ <tr><td>Fila A</td><td>1.234,56 EUR</td></tr>
+ <tr><td>Fila B</td><td>$1,234.56</td></tr>
+ <tr><td>Fila C</td><td>Agotado</td></tr>
+</tbody></table>
+<script>
+setTimeout(() => {
+ document.getElementById('lista').innerHTML = [
+  {n:'Laptop Pro', p:'1.299,00 EUR', q:7,  u:'/p/1', d:'si'},
+  {n:'Mouse',      p:'$24.99',       q:0,  u:'/p/2', d:'no'},
+  {n:'Teclado',    p:'89,50 EUR',    q:12, u:'/p/3', d:'si'}
+ ].map(x => '<div class="card" data-id="' + x.u.slice(3) + '">'
+    + '<h3 class="title">' + x.n + '</h3>'
+    + '<span class="price">' + x.p + '</span>'
+    + '<b data-qty="' + x.q + '">stock</b>'
+    + '<a href="' + x.u + '">ver</a>'
+    + '<em class="disp">' + x.d + '</em></div>').join('');
+}, 500);
+</script></body></html>"##;
+
+#[test]
+fn extract_saca_un_listado_completo_en_una_llamada() {
+    let dir = tmp_dir("extract_listado");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TIENDA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    items = web.extract(p, ".card", {{
+        id: "@data-id", nombre: ".title", precio: ".price|num",
+        stock: "[data-qty]@data-qty|int", url: "a@href", hay: ".disp|bool"
+    }})
+    show("N=" + str(len(items)))
+    for it in items {{ show("R=" + str(it)) }}
+}}
+"##));
+
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=3"), "no salieron las 3 filas:\n{salida}");
+    // Formato europeo: 1.299,00 debe ser 1299, no 129900.
+    assert!(salida.contains("precio: 1299"), "el precio europeo se malinterpretó:\n{salida}");
+    // Formato estadounidense en la misma página.
+    assert!(salida.contains("precio: 24.99"), "el precio con coma de miles falló:\n{salida}");
+    assert!(salida.contains("precio: 89.5"), "el decimal con coma falló:\n{salida}");
+    // Atributos, enlaces y conversiones.
+    assert!(salida.contains("stock: 7") && salida.contains("stock: 0"),
+            "no se leyeron los atributos numéricos:\n{salida}");
+    assert!(salida.contains("url: /p/1"), "no se leyó el href:\n{salida}");
+    assert!(salida.contains("hay: yes") && salida.contains("hay: no"),
+            "la conversión a booleano falló:\n{salida}");
+}
+
+#[test]
+fn un_xpath_absoluto_en_un_campo_se_relativiza() {
+    // Regresión: `//td[1]` busca desde la raíz del documento y devuelve el
+    // MISMO nodo para todas las filas — el listado sale repetido con datos que
+    // parecen buenos. Es el fallo silencioso que hay que evitar.
+    let dir = tmp_dir("extract_xpath");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TIENDA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    filas = web.extract(p, "#t tbody tr", {{ que: "//td[1]", cuanto: "//td[2]|num" }}, {{ strict: no }})
+    for f in filas {{ show("F=" + str(f)) }}
+}}
+"##));
+
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("Fila A") && salida.contains("Fila B") && salida.contains("Fila C"),
+            "el XPath absoluto devolvió la misma fila repetida:\n{salida}");
+    assert!(salida.contains("cuanto: null"),
+            "'Agotado' debería dar null, no un número inventado:\n{salida}");
+}
+
+#[test]
+fn un_selector_muerto_se_delata_en_vez_de_devolver_nulls() {
+    // La diferencia con BeautifulSoup: un campo vacío en TODAS las filas es un
+    // selector equivocado, no un dato ausente. Callarlo devuelve una lista que
+    // parece buena y revienta cien líneas más adelante.
+    let dir = tmp_dir("extract_muerto");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TIENDA);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{
+        web.extract(p, ".card", {{ nombre: ".title", precio: ".precio-viejo|num" }})
+    }} handle e {{ show("E=" + e) }}
+    r = web.extract(p, ".card", {{ nombre: ".title", precio: ".precio-viejo|num" }}, {{ strict: no }})
+    show("LAXO=" + str(r[0]))
+}}
+"##));
+
+    assert!(salida.contains("E="), "debería haber fallado:\n{salida}");
+    assert!(salida.contains("precio"), "el error no nombra el campo roto:\n{salida}");
+    assert!(salida.contains(".precio-viejo"), "el error no muestra el selector:\n{salida}");
+    assert!(salida.contains("strict: no"), "el error no dice cómo seguir:\n{salida}");
+    // Y el campo que sí funciona no se ve afectado.
+    assert!(salida.contains("LAXO=") && salida.contains("Laptop Pro"),
+            "con strict:no debería devolver lo que sí encontró:\n{salida}");
+}
+
+#[test]
+fn extract_espera_a_que_haya_filas() {
+    // El listado llega 500 ms después de cargar. Devolver una lista vacía
+    // convertiría un problema de tiempo en un resultado vacío silencioso.
+    let dir = tmp_dir("extract_espera");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TIENDA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    items = web.extract(p, ".card", {{ nombre: ".title" }})
+    show("N=" + str(len(items)))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=3"), "no esperó a que apareciera el listado:\n{salida}");
+}
+
+/// Sirve varias páginas distintas en el mismo puerto, para probar recorridos.
+fn serve_paginas(paginas: Vec<(String, String)>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
+    let port = listener.local_addr().unwrap().port();
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 2048];
+            let _ = s.read(&mut buf);
+            let req = String::from_utf8_lossy(&buf).to_string();
+            let ruta = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+
+            let cuerpo = paginas.iter().find(|(p, _)| *p == ruta).map(|(_, h)| h.clone());
+            let resp = match cuerpo {
+                Some(h) => format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    h.len(), h),
+                // Un 404 con plantilla HTML: carga bien y simplemente no tiene
+                // filas, que es justo el caso que no debe pasar desapercibido.
+                None => {
+                    let h = "<!doctype html><html><head><title>404</title></head><body><h1>No existe</h1></body></html>";
+                    format!("HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", h.len(), h)
+                }
+            };
+            let _ = s.write_all(resp.as_bytes());
+            let _ = s.flush();
+        }
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
+fn pagina_de(n: u32, filas: u32) -> String {
+    let cards: String = (1..=filas).map(|i| format!(
+        r#"<div class="card" data-id="{n}-{i}"><h3 class="title">Producto {n}-{i}</h3><span class="price">{i}.{i:03}0,50</span><b data-qty="{i}">s</b></div>"#
+    )).collect();
+    format!(r#"<!doctype html><html><head><meta charset="utf-8"><title>P{n}</title></head><body>{cards}</body></html>"#)
+}
+
+#[test]
+fn extract_to_recorre_varias_paginas_y_escribe_csv() {
+    let dir = tmp_dir("extract_to_csv");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let base = serve_paginas((1..=3).map(|n| (format!("/p{n}"), pagina_de(n, 5))).collect());
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+esquema = {{ id: "@data-id", nombre: ".title", precio: ".price|num" }}
+urls = ["{base}/p1", "{base}/p2", "{base}/p3"]
+with b = web.open() {{
+    p = web.page(b)
+    r = web.extract_to(p, urls, ".card", esquema, "salida.csv")
+    show("RES=" + str(r))
+}}
+"##));
+
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("rows: 15"), "no salieron las 15 filas:\n{salida}");
+    assert!(salida.contains("ok: 3"), "no recorrió las 3 páginas:\n{salida}");
+
+    let csv = fs::read_to_string(dir.join("salida.csv")).expect("no se escribió el csv");
+    assert_eq!(csv.lines().count(), 16, "faltan filas o la cabecera:\n{csv}");
+    assert!(csv.starts_with("id,nombre,precio"), "cabecera incorrecta:\n{csv}");
+    assert!(csv.contains("Producto 3-5"), "falta la última fila:\n{csv}");
+}
+
+#[test]
+fn una_pagina_sin_filas_se_reporta_en_vez_de_perderse() {
+    // Un 404 con plantilla, un redirect al login o un selector que dejó de
+    // valer cargan bien y no dan filas. Sin reportarlo, el recorrido pierde
+    // páginas en silencio y nadie lo nota hasta que faltan datos.
+    let dir = tmp_dir("extract_to_vacia");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let base = serve_paginas(vec![("/p1".to_string(), pagina_de(1, 4))]);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open({{ wait: 1500 }}) {{
+    p = web.page(b)
+    r = web.extract_to(p, ["{base}/p1", "{base}/no-existe"], ".card",
+                       {{ nombre: ".title" }}, "s.csv")
+    show("RES=" + str(r))
+}}
+"##));
+
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("rows: 4"), "no extrajo la página buena:\n{salida}");
+    assert!(salida.contains("no-existe"),
+            "la página sin filas no aparece en el resumen:\n{salida}");
+}
+
+#[test]
+fn extract_to_en_odf_escribe_por_bloques_y_lo_lee_el_motor_de_datos() {
+    // El .odf lleva el número de filas en la cabecera, así que se vuelca por
+    // bloques liberando cada uno: es lo que mantiene la memoria acotada.
+    let dir = tmp_dir("extract_to_odf");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let base = serve_paginas((1..=3).map(|n| (format!("/p{n}"), pagina_de(n, 5))).collect());
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+use "frame" as fr
+esquema = {{ id: "@data-id", nombre: ".title", precio: ".price|num" }}
+urls = ["{base}/p1", "{base}/p2", "{base}/p3"]
+with b = web.open() {{
+    p = web.page(b)
+    r = web.extract_to(p, urls, ".card", esquema, "d.odf", {{ chunk: 6 }})
+    show("FILES=" + str(r["files"]))
+}}
+h = fr.open("d.odf")
+show("SIZE=" + str(fr.size(h)))
+show("SCHEMA=" + str(fr.schema(h)))
+"##));
+
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("d.odf") && salida.contains("d_2.odf"),
+            "no se partió en bloques:\n{salida}");
+    // Lo escrito por el scraper tiene que poder leerlo el motor de datos, con
+    // los tipos ya inferidos: es lo que encadena scraping con análisis.
+    assert!(salida.contains("rows: 6"), "el primer bloque no tiene 6 filas:\n{salida}");
+    assert!(salida.contains("precio: float"), "no infirió el tipo numérico:\n{salida}");
+}
+
+#[test]
+fn una_extension_no_soportada_dice_cuales_valen() {
+    let dir = tmp_dir("extract_to_ext");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let base = serve_paginas(vec![("/p1".to_string(), pagina_de(1, 2))]);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    attempt {{
+        web.extract_to(p, ["{base}/p1"], ".card", {{ n: ".title" }}, "datos.xlsx")
+    }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(salida.contains("E="), "debería fallar con una extensión no soportada:\n{salida}");
+    assert!(salida.contains(".csv") && salida.contains(".odf"),
+            "el error no dice qué formatos valen:\n{salida}");
+}

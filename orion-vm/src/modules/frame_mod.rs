@@ -1169,6 +1169,22 @@ fn serialize_odf(cols: &[(String, Col)], rows: usize) -> Vec<u8> {
     buf
 }
 
+/// Escribe un bloque de filas de texto como `.odf`, infiriendo los tipos de
+/// columna del propio bloque.
+///
+/// Existe para que otros módulos escriban en el formato binario sin duplicar ni
+/// la inferencia de tipos ni el serializador. Lo usa `browser.extract_to`, que
+/// vuelca lo extraído por bloques para mantener la memoria acotada.
+pub(crate) fn escribir_odf_filas(
+    ruta: &str, headers: &[String], filas: &[Vec<String>],
+) -> Result<usize, String> {
+    let cols = infer_columns(headers, filas);
+    let buf = serialize_odf(&cols, filas.len());
+    std::fs::write(ruta, &buf)
+        .map_err(|e| format!("no se pudo escribir '{ruta}': {e}"))?;
+    Ok(buf.len())
+}
+
 fn fn_save_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.save_odf(handle, ruta)".into()); }
     let id   = arg_handle(&args, 0)?;
