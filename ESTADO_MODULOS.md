@@ -86,6 +86,12 @@ Anunciar como "soporta X" con esa salvedad:
 | `gui` | ✅ Árbol de widgets verificado headless (`smoke_gui_headless_widgets`) + render confirmado con capturas. Tema configurable, estilo por widget, 20+ widgets, charts. Ver [GUI.md](GUI.md). El render abre ventana, así que no se automatiza el pixel-perfect. |
 | `tui` | 🚧 UI de terminal (requiere TTY/interacción) — sin tests aún |
 
+## 🌐 Automatización web
+
+| Módulo | Estado |
+|---|---|
+| `browser` | ✅ Automatización web sobre CDP, sin driver externo ni dependencias nuevas. 21 tests e2e en [`browser_e2e.rs`](orion-vm/tests/browser_e2e.rs) contra servidor local, más 27 unitarios. Verificado: arranque y detección de Chrome/Chromium/Brave/Edge, navegación, clic con espera de accionabilidad (tapado temporal, parcial y permanente con `force`), teclado real (eventos, no asignación de `value`), `<select>` nativo, diálogos `alert`/`confirm`/`prompt` por política, iframes accesibles, pestañas nuevas, capturas PNG, selectores CSS/XPath/`text=` unificados. Ver [BROWSER.md](BROWSER.md). **Falta**: extracción declarativa (`extract`), streaming a `.odf`, cookies/sesión, benchmark contra Python. Requiere un navegador basado en Chromium instalado; los tests se saltan si no lo hay. |
+
 ---
 
 ## Recomendación para el anuncio del MVP
