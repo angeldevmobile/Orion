@@ -372,7 +372,91 @@ vuelve a medir **inmediatamente antes** de cada despacho, no al empezar una
 cadena de acciones: ahí está la diferencia práctica con `ActionChains`, que
 entre localizar y clicar deja que la página mueva el elemento.
 
-## 11. Diagnóstico
+## 11. Despliegue
+
+### 11.1 Qué entregas
+
+```powershell
+orion --build app.orx -o app.exe
+```
+
+**Un solo archivo.** `--build` no empaqueta el intérprete al lado: compila tu
+programa a nativo con Cranelift y lo enlaza contra el runtime de Orion como
+librería estática. El resultado no es un lanzador que busca `orion.exe`, es un
+ejecutable de verdad con el runtime dentro.
+
+Verificado ejecutándolo en una carpeta que contenía **solo** `app.exe`, sin
+ningún `orion.exe` cerca y con el `PATH` reducido a `C:\Windows\system32`.
+
+Tu usuario recibe `app.exe` y no necesita saber que Orion existe.
+
+### 11.2 Qué necesita la máquina del usuario
+
+**Un navegador basado en Chromium, y nada más.** En Windows ya está: Edge viene
+con el sistema. Si su instalación está en una ruta poco habitual, se resuelve
+sin recompilar con la variable `ORION_CHROME` o pasando `chrome:` en `open()`.
+
+### 11.3 Comparado con Python
+
+| | Python + Selenium | Orion |
+|---|---|---|
+| `chromedriver.exe` | hay que entregarlo, y de la versión correcta | **no existe** |
+| Runtime | Python instalado, o PyInstaller | dentro del `.exe` |
+| Dependencias | selenium + webdriver-manager + transitivas | ninguna |
+| Archivos a entregar | carpeta o instalador | **uno** |
+| Cuando Chrome se actualiza | rebajar el driver, reempaquetar, redistribuir | **nada** |
+
+La última fila es la que más cuesta en la práctica: en Python cada actualización
+de Chrome obliga a volver a empaquetar. Aquí el ejecutable que entregaste hace
+seis meses sigue funcionando.
+
+### 11.4 Redes corporativas
+
+Este es el escenario donde la diferencia deja de ser comodidad y pasa a ser
+"puedo o no puedo".
+
+`webdriver-manager` **descarga chromedriver** desde dominios de Google en tiempo
+de ejecución. En una red corporativa eso choca con tres cosas a la vez: el
+egreso suele estar bloqueado (y seguridad no whitelistea la descarga de
+ejecutables), PyPI está cerrado o tras un espejo interno, y el problema se
+repite en cada actualización que empuja el departamento de sistemas.
+
+El módulo `browser` **no hace ni una llamada de red propia**. Lo único que abre
+es un WebSocket a `127.0.0.1`. Comprobado con un scraper contra una intranet
+local sin salida a internet en ningún momento.
+
+Ventajas concretas:
+
+- **Funciona sin egreso** salvo hacia el sitio que automatizas.
+- **Usa el navegador que la empresa ya administra** — Edge en un Windows
+  corporativo está instalado y gestionado por política, no hay que aprobar nada.
+- **CI determinista**: desaparece el paso de "bajar el driver", fuente clásica
+  de fallos intermitentes ajenos a tu código.
+- **Una sola cosa que auditar**: un binario, en vez de un árbol de dependencias
+  que se resuelve en tiempo de instalación.
+
+El proxy corporativo se indica como a cualquier otra herramienta, y llega al
+navegador:
+
+```orion
+web.open({ args: ["--proxy-server=http://proxy.empresa:8080"] })
+```
+
+### 11.5 Lo que conviene saber
+
+**Tamaño.** El ejecutable ronda los 58 MB. Es el binario completo de Orion:
+lleva GUI, TUI, tres motores de base de datos, OCR con sus modelos… todo, se use
+o no. Hoy no hay forma de adelgazarlo.
+
+**Runtime de C.** El binario enlaza el CRT de MSVC de forma dinámica, así que
+depende de `vcruntime140.dll`, presente en cualquier Windows moderno. No está
+probado compilar con el CRT estático.
+
+**Pruébalo en una máquina limpia** antes de entregarlo. Aislar el `PATH` descarta
+lo importante, pero un Windows recién instalado sin herramientas de desarrollo
+es la comprobación definitiva y cuesta cinco minutos.
+
+## 12. Diagnóstico
 
 | Síntoma | Qué mirar |
 |---|---|
