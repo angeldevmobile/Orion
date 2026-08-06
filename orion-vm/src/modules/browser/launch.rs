@@ -89,6 +89,10 @@ pub struct Tuning {
     pub iframe_depth:  u32,
     /// Margen en píxeles al probar puntos dentro de un elemento.
     pub hit_inset:     f64,
+    /// Cuánto se tolera que la página esté cambiando de documento antes de dar
+    /// por perdida una lectura. Cubre el hueco entre que un clic tira el
+    /// documento actual y el navegador monta el siguiente.
+    pub nav_settle_ms: u64,
 
     //   Mecanismo: uso de recursos
     /// Eventos CDP retenidos. Más historial es más RAM.
@@ -119,6 +123,7 @@ impl Default for Tuning {
             force_layers:  12,
             iframe_depth:  8,
             hit_inset:     24.0,
+            nav_settle_ms: 5_000,
             max_events:    512,
             idle_poll_ms:  5,
             close_ms:      2_000,

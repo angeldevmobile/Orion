@@ -1355,3 +1355,43 @@ with b = web.open() {{
     assert!(bytes.len() > 500, "el PDF está vacío ({} bytes)", bytes.len());
     assert_eq!(&bytes[..5], b"%PDF-", "no es un PDF válido");
 }
+
+/// Página que se va a otra al pulsar: el caso que rompe una lectura posterior.
+///
+/// La navegación se retrasa a propósito. Sin retraso el documento nuevo llega
+/// antes de la siguiente instrucción y el test pasaría siempre, incluso con el
+/// fallo puesto — que es exactamente por lo que este fallo sobrevive tanto
+/// tiempo en un scraper: en local no se reproduce.
+const PAGINA_QUE_NAVEGA: &str = r#"<!doctype html>
+<html><head><title>Origen</title></head><body>
+<button id="enviar">Enviar</button>
+<script>
+  document.getElementById('enviar').onclick = () => {
+    setTimeout(() => { location.href = '/destino'; }, 250);
+  };
+</script>
+</body></html>"#;
+
+#[test]
+fn una_lectura_justo_despues_de_navegar_no_se_pierde() {
+    let dir = tmp_dir("nav_en_curso");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_rutas(PAGINA_QUE_NAVEGA, b"x", "f.txt");
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.click(p, "#enviar")
+    -- Sin reintento esto revienta con "Inspected target navigated or closed":
+    -- el documento viejo ya no está y el nuevo aún no ha llegado.
+    show("T=" + web.title(p))
+}}
+"##));
+    assert!(ok, "una lectura tras navegar no debería fallar:\n{salida}");
+    assert!(salida.contains("T="), "no se leyó nada:\n{salida}");
+    assert!(!salida.contains("navigated or closed"),
+            "asomó el error crudo de CDP:\n{salida}");
+}

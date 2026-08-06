@@ -52,6 +52,11 @@ pub struct Limits {
     pub idle_poll:  Duration,
     /// Plazo para que un envío por el socket progrese.
     pub send:       Duration,
+    /// Cuánto se espera a que la página termine de cambiar de documento antes
+    /// de dar por perdida una evaluación. Ver `reintentable`.
+    pub nav_settle: Duration,
+    /// Pausa entre reintentos de una evaluación.
+    pub retry:      Duration,
 }
 
 impl Default for Limits {
@@ -60,8 +65,33 @@ impl Default for Limits {
             max_events: 512,
             idle_poll:  Duration::from_millis(5),
             send:       Duration::from_secs(5),
+            nav_settle: Duration::from_secs(5),
+            retry:      Duration::from_millis(50),
         }
     }
+}
+
+/// ¿Este fallo es "la página está cambiando de documento ahora mismo"?
+///
+/// Es el fallo intermitente clásico de la automatización web. Al pulsar
+/// "Enviar", el navegador tira el documento actual y monta el siguiente; entre
+/// una cosa y la otra no hay ningún contexto donde evaluar JavaScript, y todo
+/// lo que llegue en ese hueco muere con uno de estos mensajes.
+///
+/// Lo que lo hace tan traicionero es que depende del tiempo: en local la página
+/// nueva llega antes de la siguiente instrucción y no pasa nada, y en el
+/// servidor —o el día que la red va peor— revienta. Es el motivo de fondo de
+/// que un scraper "funcione en mi máquina".
+///
+/// Reintentar es seguro precisamente porque el contexto ya no existía: la
+/// evaluación **no llegó a ejecutarse**, así que no hay ningún efecto a medias
+/// que repetir. Solo se aplica a `Runtime.evaluate`; un evento de ratón sí se
+/// duplicaría, y un clic de más no es un reintento, es otra acción.
+fn reintentable(method: &str, error: &str) -> bool {
+    method == "Runtime.evaluate"
+        && (error.contains("Inspected target navigated or closed")
+            || error.contains("Execution context was destroyed")
+            || error.contains("Cannot find context with specified id"))
 }
 
 #[derive(Debug, Clone)]
@@ -270,6 +300,37 @@ impl Conn {
     /// `session` es el `sessionId` de la pestaña; sin él, el comando va dirigido
     /// al navegador entero.
     pub fn call(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+        session: Option<&str>,
+        timeout: Duration,
+    ) -> Result<serde_json::Value, String> {
+        let limite = Instant::now() + self.limits.nav_settle;
+        loop {
+            let r = self.call_once(method, params.clone(), session, timeout);
+
+            match r {
+                Err(e) if reintentable(method, &e) => {
+                    if Instant::now() >= limite {
+                        // El mensaje crudo de CDP no le dice nada a quien
+                        // escribió el programa: habla de un "inspected target"
+                        // que él nunca ha visto.
+                        return Err(format!(
+                            "la página siguió cambiando de documento durante {} ms y no se pudo leer.\n  \
+                             Suele ser una redirección en cadena; sube el plazo con \
+                             open({{ nav_settle: ms }}) si el sitio es así de lento.",
+                            self.limits.nav_settle.as_millis()
+                        ));
+                    }
+                    thread::sleep(self.limits.retry);
+                }
+                otro => return otro,
+            }
+        }
+    }
+
+    fn call_once(
         &self,
         method: &str,
         params: serde_json::Value,
@@ -513,6 +574,29 @@ mod tests {
             c.dispatch(r#"{"method":"Network.dataReceived","params":{}}"#);
         }
         assert_eq!(c.state.lock().unwrap().events.len(), Limits::default().max_events);
+    }
+
+    #[test]
+    fn se_reintenta_solo_lo_que_es_seguro_reintentar() {
+        // El hueco entre documentos, en sus tres redacciones.
+        for e in [
+            "Runtime.evaluate: Inspected target navigated or closed",
+            "Runtime.evaluate: Execution context was destroyed.",
+            "Runtime.evaluate: Cannot find context with specified id",
+        ] {
+            assert!(reintentable("Runtime.evaluate", e), "debería reintentarse: {e}");
+        }
+
+        // Un error de verdad no se reintenta: repetirlo solo retrasa el
+        // diagnóstico el tiempo del plazo entero.
+        assert!(!reintentable("Runtime.evaluate", "Runtime.evaluate: SyntaxError"));
+
+        // Y sobre todo: un clic NO se repite. Duplicarlo no es reintentar una
+        // lectura, es comprar dos veces.
+        assert!(!reintentable(
+            "Input.dispatchMouseEvent",
+            "Input.dispatchMouseEvent: Inspected target navigated or closed"
+        ));
     }
 
     #[test]

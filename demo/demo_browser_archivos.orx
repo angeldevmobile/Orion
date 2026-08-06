@@ -1,0 +1,55 @@
+-- Automatización web con archivos, contra sitios reales de internet.
+--
+-- Las tres cosas que el navegador delega en el sistema operativo —elegir un
+-- archivo, guardar una descarga, imprimir— abren una ventana nativa que está
+-- fuera del DOM. Ningún clic ni ninguna tecla la alcanza, y ahí es donde se
+-- atasca la automatización web de verdad.
+--
+-- Aquí no se maneja ninguna de esas ventanas: se impide que existan.
+--
+--   orion run demo/demo_browser_archivos.orx
+
+use "browser" as web
+use "fs"
+
+const SITIO = "https://the-internet.herokuapp.com"
+
+fn main() {
+    -- Un archivo cualquiera para subir.
+    fs.write("adjunto_demo.txt", "documento generado por Orion")
+
+    with b = web.open() {
+        p = web.page(b)
+
+        show("1. SUBIR ------------------------------------------------")
+        web.goto(p, SITIO + "/upload")
+        -- El sitio tiene el <input type=file> a la vista. Cuando está oculto
+        -- tras un botón de diseño propio, se le pasa el botón y funciona igual:
+        -- la ventana del sistema se intercepta antes de abrirse.
+        rutas = web.upload(p, "#file-upload", "adjunto_demo.txt")
+        show("   adjuntado: " + str(rutas))
+        web.click(p, "#file-submit")
+        show("   el sitio confirma: " + web.text(p, "#uploaded-files"))
+
+        show("")
+        show("2. DESCARGAR --------------------------------------------")
+        web.goto(p, SITIO + "/download")
+        show("   el sitio ofrece " + str(web.count(p, ".example a")) + " archivos")
+        -- Selector por texto: se busca el enlace que se ve, no un nth-child
+        -- que se rompe en cuanto el sitio añade una fila.
+        d = web.download(p, "text=some-file.txt", { dir: "bajadas" })
+        -- Se vuelve de aquí cuando el archivo está ENTERO, no cuando empieza:
+        -- sin esperar el final se lee un .crdownload a medias.
+        show("   " + d["name"] + " — " + str(d["bytes"]) + " bytes")
+        show("   en " + d["path"])
+
+        show("")
+        show("3. IMPRIMIR A PDF ---------------------------------------")
+        web.goto(p, SITIO + "/tables")
+        web.pdf(p, "tabla.pdf", { margin: 0.4 })
+        show("   tabla.pdf — " + str(fs.size("tabla.pdf")) + " bytes")
+        show("   (documento paginado con el texto seleccionable, no una foto)")
+    }
+}
+
+main()

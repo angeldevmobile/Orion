@@ -17,8 +17,8 @@ with b = web.open() {
 `with` desugara a `web.free(b)` incluso si el cuerpo lanza un error, y `free`
 cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
-> **Estado**: transporte, arranque, navegación, interacción, modales, ventanas y
-> extracción verificados de punta a punta (32 tests e2e en
+> **Estado**: transporte, arranque, navegación, interacción, modales, ventanas,
+> extracción y archivos verificados de punta a punta (41 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Pendiente:
@@ -92,6 +92,7 @@ niveles según lo que sean:
 | `force_layers` | 12 | capas superpuestas que `force` atraviesa |
 | `iframe_depth` | 8 | profundidad de iframes anidados que se recorre |
 | `hit_inset` | 24 | margen en píxeles al probar puntos de un elemento |
+| `nav_settle` | 5000 | cuánto se tolera que la página esté cambiando de documento |
 
 **Mecanismo** — uso de recursos, bajo `tuning` para no ensuciar la API diaria:
 
@@ -439,13 +440,118 @@ plantilla, un redirect al login o un selector que dejó de valer en esa sección
 cargan bien y no producen nada. Sin esto, un recorrido pierde páginas en
 silencio y nadie lo nota hasta que faltan datos en el informe.
 
-## 8. Captura
+## 8. Archivos
+
+Las tres cosas que el navegador **delega en el sistema operativo**: elegir un
+archivo para subir, guardar uno que se descarga, e imprimir. Las tres abren una
+ventana nativa que está fuera del DOM, así que ningún clic ni ninguna tecla la
+alcanza. Es donde se atasca la automatización web de verdad.
+
+Aquí no se maneja ninguna de esas ventanas: **se impide que existan**. CDP
+permite interceptar las tres antes de que el navegador se las pida al sistema,
+así que nada de esto depende del idioma del Windows, de la resolución, ni de
+que haya escritorio. Funciona igual en headless y en un servidor sin pantalla.
+
+### 8.1 `web.upload(pestaña, selector, archivos)` → rutas absolutas
+
+```orion
+web.upload(p, "#adjunto", "contrato.pdf")            -- uno
+web.upload(p, "#adjunto", ["a.pdf", "b.pdf"])        -- varios
+```
+
+El selector puede apuntar a dos cosas distintas, y las dos funcionan:
+
+1. **El propio `<input type="file">`.** Se le asignan los archivos y ya está.
+2. **Cualquier cosa que abra el selector al pulsarla** — el botón "Examinar",
+   una zona de arrastrar y soltar, un `<label>`. El `<input>` real suele estar
+   oculto tras el diseño del sitio y a veces ni siquiera es alcanzable con un
+   selector.
+
+El caso 2 es el que no cubre Selenium: su receta es `send_keys` sobre el input,
+que exige que el input exista y sea alcanzable. Aquí se activa la interceptación,
+se pulsa, y cuando el navegador anuncia que iba a abrir la ventana se le contesta
+con los archivos. La ventana no llega a aparecer.
+
+Las rutas relativas se resuelven contra el directorio del programa, no contra el
+del navegador, que es otro proceso y está en otro sitio. Se devuelven las
+absolutas ya resueltas porque sin verlas es imposible entender por qué el
+navegador dice que un archivo que existe no existe.
+
+**Un archivo que no existe se dice antes de tocar la página.** El navegador
+acepta en silencio una ruta inventada: el formulario se envía sin adjunto y el
+fallo aparece mucho después, en el servidor de otro.
+
+```
+browser.upload: el archivo 'contrato.pdf' no existe
+  se buscó en: C:\trabajo\facturas\contrato.pdf
+```
+
+### 8.2 `web.download(pestaña, selector, opts?)` → dict
+
+```orion
+d = web.download(p, "#descargar", { dir: "facturas" })
+show(d)
+-- {path: C:\trabajo\facturas\factura-042.pdf, name: factura-042.pdf, bytes: 51234, url: https://...}
+```
+
+Descargar con un navegador automatizado tiene dos problemas, no uno:
+
+**El diálogo "Guardar como"**, que se evita fijando el comportamiento de descarga
+antes de pulsar.
+
+**Saber cuándo ha terminado.** El navegador escribe primero un archivo temporal
+`.crdownload` y lo renombra al acabar. Sin un aviso, la receta habitual es dormir
+unos segundos y cruzar los dedos: si la red va lenta se lee un archivo a medias,
+y si va rápida se pierde el tiempo. Aquí se espera el evento de finalización, así
+que la llamada vuelve exactamente cuando el archivo está entero — y `bytes` lo
+confirma.
+
+| Opción | Qué hace |
+|---|---|
+| `dir` | Carpeta destino. Se crea si no está. Por defecto, la del programa. |
+| `name` | Renombra al terminar. Por defecto, el que proponga el servidor. |
+| `overwrite` | Permite pisar un archivo existente. Por defecto **no**. |
+| `wait` | Plazo, en ms, para archivos grandes. |
+
+**Dos descargas con el mismo nombre no se pisan.** La segunda queda como
+`informe (2).txt` y la ruta real viene en `path`. Sobrescribir en silencio es lo
+que hace perder una tanda entera de facturas sin que nadie se entere hasta el
+cierre del mes; se pide explícitamente con `{ overwrite: yes }`.
+
+**Un elemento que no descarga lo dice**, en vez de quedarse esperando:
+
+```
+browser.download: pulsar '#ver' no inició ninguna descarga en 10000 ms.
+  Comprueba que el elemento sea el que descarga, y no un enlace que abre el
+  archivo en una pestaña.
+```
+
+### 8.3 `web.pdf(pestaña, ruta, opts?)` → ruta
+
+```orion
+web.pdf(p, "justificante.pdf", { margin: 0.4, landscape: no })
+```
+
+No es una captura: es el documento entero paginado y con el texto seleccionable.
+Para guardar un justificante o una factura de un portal web es lo que hace falta,
+y es justo lo que obliga a pelearse con el diálogo de impresión si se hace a mano.
+
+Opciones: `landscape`, `background`, `headers`, `scale`, `width`, `height`,
+`margin`, `pages`. Las medidas van en pulgadas, que es la unidad del navegador —
+un A4 son 8,27 × 11,69. Lo que no se indique lo decide el navegador con el mismo
+default que aplicaría el diálogo.
+
+El fondo se imprime por defecto, al revés que en el diálogo: el navegador lo
+quita para ahorrar tinta, y en un PDF que nadie va a imprimir eso solo hace que
+las tablas con filas alternas salgan en blanco.
+
+## 9. Captura
 
 `web.screenshot(pestaña, ruta)` → escribe un PNG y devuelve la ruta.
 
 Requiere `images: yes` en `open` si quieres que salgan las imágenes.
 
-## 9. JavaScript
+## 10. JavaScript
 
 `web.eval(pestaña, js)` evalúa y devuelve el valor ya convertido a Orion.
 
@@ -456,7 +562,7 @@ n = web.eval(p, "document.querySelectorAll('.card').length")
 Una excepción del JavaScript se convierte en error de Orion, no en un `null`
 silencioso.
 
-## 10. Memoria
+## 11. Memoria
 
 Decisiones tomadas con el consumo como criterio, no como consecuencia:
 
@@ -475,7 +581,7 @@ Decisiones tomadas con el consumo como criterio, no como consecuencia:
 - **Las pestañas se cierran de verdad** al hacer `free`: es lo que libera la
   memoria del proceso de render.
 
-## 11. Arquitectura
+## 12. Arquitectura
 
 ```
 orion-vm/src/modules/browser/
@@ -497,9 +603,9 @@ vuelve a medir **inmediatamente antes** de cada despacho, no al empezar una
 cadena de acciones: ahí está la diferencia práctica con `ActionChains`, que
 entre localizar y clicar deja que la página mueva el elemento.
 
-## 12. Despliegue
+## 13. Despliegue
 
-### 12.1 Qué entregas
+### 13.1 Qué entregas
 
 ```powershell
 orion --build app.orx -o app.exe
@@ -515,13 +621,13 @@ ningún `orion.exe` cerca y con el `PATH` reducido a `C:\Windows\system32`.
 
 Tu usuario recibe `app.exe` y no necesita saber que Orion existe.
 
-### 12.2 Qué necesita la máquina del usuario
+### 13.2 Qué necesita la máquina del usuario
 
 **Un navegador basado en Chromium, y nada más.** En Windows ya está: Edge viene
 con el sistema. Si su instalación está en una ruta poco habitual, se resuelve
 sin recompilar con la variable `ORION_CHROME` o pasando `chrome:` en `open()`.
 
-### 12.3 Comparado con Python
+### 13.3 Comparado con Python
 
 | | Python + Selenium | Orion |
 |---|---|---|
@@ -535,7 +641,7 @@ La última fila es la que más cuesta en la práctica: en Python cada actualizac
 de Chrome obliga a volver a empaquetar. Aquí el ejecutable que entregaste hace
 seis meses sigue funcionando.
 
-### 12.4 Redes corporativas
+### 13.4 Redes corporativas
 
 Este es el escenario donde la diferencia deja de ser comodidad y pasa a ser
 "puedo o no puedo".
@@ -567,7 +673,7 @@ navegador:
 web.open({ args: ["--proxy-server=http://proxy.empresa:8080"] })
 ```
 
-### 12.5 Lo que conviene saber
+### 13.5 Lo que conviene saber
 
 **Tamaño.** El ejecutable ronda los 58 MB. Es el binario completo de Orion:
 lleva GUI, TUI, tres motores de base de datos, OCR con sus modelos… todo, se use
@@ -581,7 +687,7 @@ probado compilar con el CRT estático.
 lo importante, pero un Windows recién instalado sin herramientas de desarrollo
 es la comprobación definitiva y cuesta cinco minutos.
 
-## 13. Diagnóstico
+## 14. Diagnóstico
 
 | Síntoma | Qué mirar |
 |---|---|

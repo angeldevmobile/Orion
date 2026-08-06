@@ -186,6 +186,8 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
         max_events: tuning.max_events,
         idle_poll:  Duration::from_millis(tuning.idle_poll_ms),
         send:       Duration::from_millis(tuning.send_ms),
+        nav_settle: Duration::from_millis(tuning.nav_settle_ms),
+        retry:      Duration::from_millis(tuning.retry_ms),
     };
     let conn = match Conn::connect(&ws_url, limits) {
         Ok(c) => c,
@@ -394,6 +396,7 @@ fn parse_tuning(v: Option<&EvalValue>) -> Tuning {
     if let Some(x) = u64_de(m, "drag_steps")    { t.drag_steps    = x.max(1) as u32; }
     if let Some(x) = u64_de(m, "force_layers")  { t.force_layers  = x as u32; }
     if let Some(x) = u64_de(m, "iframe_depth")  { t.iframe_depth  = x as u32; }
+    if let Some(x) = u64_de(m, "nav_settle")    { t.nav_settle_ms = x; }
     if let Some(x) = m.get("hit_inset").and_then(to_f64) { t.hit_inset = x.max(0.0); }
 
     // Mecanismo — bajo `tuning`.
