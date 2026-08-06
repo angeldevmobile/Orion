@@ -49,6 +49,48 @@ fn serve_html(html: &'static str) -> String {
     format!("http://127.0.0.1:{port}/")
 }
 
+/// Sirve varias rutas: la página, y un archivo que se descarga de verdad.
+///
+/// El servidor de arriba contesta lo mismo a cualquier ruta, y una descarga
+/// necesita justo lo contrario: una ruta que devuelva `Content-Disposition:
+/// attachment`, que es lo que hace que el navegador descargue en vez de mostrar.
+/// Sin esa cabecera no se prueba nada de lo que se quiere probar.
+fn serve_rutas(pagina: &'static str, archivo: &'static [u8], nombre: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
+    let port = listener.local_addr().unwrap().port();
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let peticion = String::from_utf8_lossy(&buf[..n]).to_string();
+            let ruta = peticion.split_whitespace().nth(1).unwrap_or("/").to_string();
+
+            if ruta.starts_with("/descarga") {
+                let cab = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\
+                     Content-Disposition: attachment; filename=\"{nombre}\"\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n",
+                    archivo.len()
+                );
+                let _ = s.write_all(cab.as_bytes());
+                let _ = s.write_all(archivo);
+            } else {
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    pagina.len(), pagina
+                );
+                let _ = s.write_all(resp.as_bytes());
+            }
+            let _ = s.flush();
+        }
+    });
+
+    format!("http://127.0.0.1:{port}/")
+}
+
 /// Ejecuta un programa Orion y devuelve su salida.
 fn run_orion(dir: &PathBuf, fuente: &str) -> (String, bool) {
     let f = dir.join("prog.orx");
@@ -1088,4 +1130,228 @@ with b = web.open() {{
     assert!(salida.contains("E="), "debería fallar con una extensión no soportada:\n{salida}");
     assert!(salida.contains(".csv") && salida.contains(".odf"),
             "el error no dice qué formatos valen:\n{salida}");
+}
+
+//    Archivos: las tres ventanas del sistema operativo
+//
+// Lo que se comprueba aquí no es que se escriba un archivo, es que **no aparece
+// ninguna ventana nativa**. Si apareciera, el test se colgaría hasta el plazo:
+// no hay nadie que pueda cerrarla, y esa es exactamente la situación en la que
+// se queda un scraper de Selenium en un servidor sin escritorio.
+
+/// Página con los dos casos de subida que existen en la vida real.
+const PAGINA_ARCHIVOS: &str = r#"<!doctype html>
+<html><head><title>Archivos</title></head><body>
+  <!-- Caso 1: el campo es alcanzable -->
+  <input type="file" id="visible">
+  <div id="v1">nada</div>
+
+  <!-- Caso 2: el campo está oculto y se abre desde un botón. Es lo que hacen
+       todos los sitios con un diseño propio, y lo que no cubre send_keys. -->
+  <input type="file" id="oculto" style="display:none" multiple>
+  <button id="examinar">Adjuntar documento</button>
+  <div id="v2">nada</div>
+
+  <a id="baja" href="/descarga">Descargar informe</a>
+<script>
+  const pinta = (inp, salida) => inp.addEventListener('change', () => {
+    document.getElementById(salida).textContent =
+      Array.from(inp.files).map(f => f.name + ':' + f.size).join(',');
+  });
+  pinta(document.getElementById('visible'), 'v1');
+  pinta(document.getElementById('oculto'), 'v2');
+  document.getElementById('examinar').onclick = () =>
+    document.getElementById('oculto').click();
+</script>
+</body></html>"#;
+
+#[test]
+fn sube_un_archivo_al_campo_directamente() {
+    let dir = tmp_dir("upload_directo");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_rutas(PAGINA_ARCHIVOS, b"contenido", "informe.txt");
+    fs::write(dir.join("carta.txt"), b"hola mundo").unwrap();
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.upload(p, "#visible", "carta.txt")
+    show("V1=" + web.text(p, "#v1"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // El evento `change` del sitio confirma que el archivo llegó a la página
+    // con su tamaño real, no que la llamada devolviera sin quejarse.
+    assert!(salida.contains("V1=carta.txt:10"),
+            "la página no recibió el archivo:\n{salida}");
+}
+
+#[test]
+fn sube_por_el_boton_cuando_el_campo_esta_oculto() {
+    let dir = tmp_dir("upload_boton");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_rutas(PAGINA_ARCHIVOS, b"contenido", "informe.txt");
+    fs::write(dir.join("a.txt"), b"aaa").unwrap();
+    fs::write(dir.join("b.txt"), b"bbbb").unwrap();
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.upload(p, "#examinar", ["a.txt", "b.txt"])
+    show("V2=" + web.text(p, "#v2"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("V2=a.txt:3,b.txt:4"),
+            "no se adjuntaron los dos archivos por el botón:\n{salida}");
+}
+
+#[test]
+fn un_archivo_que_no_existe_se_dice_antes_de_tocar_la_pagina() {
+    let dir = tmp_dir("upload_inexistente");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_rutas(PAGINA_ARCHIVOS, b"x", "informe.txt");
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.upload(p, "#visible", "no_esta.txt") }}
+    handle e {{ show("E=" + e) }}
+    -- La página tiene que haber quedado intacta: si se hubiera pulsado, el
+    -- diálogo del sistema estaría abierto y lo siguiente se colgaría.
+    show("V1=" + web.text(p, "#v1"))
+}}
+"##));
+    assert!(salida.contains("E=") && salida.contains("no existe"),
+            "debería decir que el archivo no existe:\n{salida}");
+    assert!(salida.contains("se buscó en:"),
+            "el error no dice dónde buscó, que es lo único que resuelve el caso:\n{salida}");
+    assert!(salida.contains("V1=nada"), "la página no quedó intacta:\n{salida}");
+}
+
+#[test]
+fn descarga_un_archivo_y_espera_a_que_termine() {
+    let dir = tmp_dir("descarga");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_rutas(PAGINA_ARCHIVOS, b"REPORTE-2026", "informe.txt");
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    d = web.download(p, "#baja", {{ dir: "bajadas" }})
+    show("NAME=" + d["name"])
+    show("BYTES=" + str(d["bytes"]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("NAME=informe.txt"), "nombre incorrecto:\n{salida}");
+    // El tamaño exacto prueba lo que de verdad importa: se volvió cuando el
+    // archivo estaba entero, no mientras aún era un .crdownload.
+    assert!(salida.contains("BYTES=12"), "no esperó al final de la descarga:\n{salida}");
+    let f = dir.join("bajadas").join("informe.txt");
+    assert!(f.is_file(), "no está el archivo descargado:\n{salida}");
+    assert_eq!(fs::read(&f).unwrap(), b"REPORTE-2026", "el contenido no coincide");
+}
+
+#[test]
+fn dos_descargas_iguales_no_se_pisan() {
+    let dir = tmp_dir("descarga_doble");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_rutas(PAGINA_ARCHIVOS, b"REPORTE-2026", "informe.txt");
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    a = web.download(p, "#baja", {{ dir: "bajadas" }})
+    c = web.download(p, "#baja", {{ dir: "bajadas" }})
+    show("A=" + a["name"])
+    show("C=" + c["name"])
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("A=informe.txt"), "{salida}");
+    // Sobrescribir en silencio es lo que hace perder una tanda entera de
+    // facturas sin que nadie se entere hasta el cierre del mes.
+    assert!(salida.contains("C=informe (2).txt"),
+            "la segunda descarga pisó a la primera:\n{salida}");
+}
+
+#[test]
+fn renombra_la_descarga_si_se_le_pide() {
+    let dir = tmp_dir("descarga_nombre");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_rutas(PAGINA_ARCHIVOS, b"12345", "informe.txt");
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    d = web.download(p, "#baja", {{ dir: ".", name: "factura-042.txt" }})
+    show("P=" + d["path"])
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(dir.join("factura-042.txt").is_file(), "no se renombró:\n{salida}");
+    assert!(salida.contains("P=") && salida.contains("factura-042.txt"),
+            "la ruta devuelta no es la real:\n{salida}");
+}
+
+#[test]
+fn un_elemento_que_no_descarga_lo_dice_en_vez_de_colgarse() {
+    let dir = tmp_dir("descarga_falsa");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_rutas(PAGINA_ARCHIVOS, b"x", "informe.txt");
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.download(p, "#examinar", {{ wait: 2000 }}) }}
+    handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(salida.contains("E=") && salida.contains("no inició ninguna descarga"),
+            "debería explicar que ese elemento no descarga:\n{salida}");
+}
+
+#[test]
+fn imprime_la_pagina_a_pdf_sin_dialogo() {
+    let dir = tmp_dir("pdf");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.pdf(p, "salida.pdf", {{ landscape: yes, margin: 0.4 }})
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    let f = dir.join("salida.pdf");
+    assert!(f.is_file(), "no se escribió el PDF:\n{salida}");
+    let bytes = fs::read(&f).unwrap();
+    assert!(bytes.len() > 500, "el PDF está vacío ({} bytes)", bytes.len());
+    assert_eq!(&bytes[..5], b"%PDF-", "no es un PDF válido");
 }

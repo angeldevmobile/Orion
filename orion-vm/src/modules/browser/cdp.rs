@@ -361,6 +361,24 @@ impl Conn {
         desde: u64,
         timeout: Duration,
     ) -> Result<Option<Event>, String> {
+        self.wait_event_where(method, session, desde, timeout, |_| true)
+    }
+
+    /// Como `wait_event`, pero además el evento tiene que cumplir `cond`.
+    ///
+    /// Hace falta porque hay flujos que emiten el mismo método varias veces y
+    /// solo interesa uno: una descarga manda un `downloadProgress` por cada
+    /// trozo recibido, y quedarse con el primero daría por terminada una
+    /// descarga que acaba de empezar. Con el predicado, la espera se acaba
+    /// cuando el estado dice `completed` y no cuando el nombre coincide.
+    pub fn wait_event_where(
+        &self,
+        method: &str,
+        session: Option<&str>,
+        desde: u64,
+        timeout: Duration,
+        cond: impl Fn(&Event) -> bool,
+    ) -> Result<Option<Event>, String> {
         let limite = Instant::now() + timeout;
         let mut st = self.state.lock().unwrap();
 
@@ -373,6 +391,7 @@ impl Conn {
                         (Some(s), Some(es)) => s == es,
                         (Some(_), None) => false,
                     }
+                    && cond(e)
             }) {
                 return Ok(Some(ev.clone()));
             }

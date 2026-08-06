@@ -24,6 +24,7 @@
 pub mod cdp;
 pub mod dom;
 pub mod extract;
+pub mod files;
 pub mod input;
 pub mod launch;
 
@@ -155,6 +156,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "attr"    => do_attr(&args),
         "extract"    => do_extract(&args),
         "extract_to" => do_extract_to(&args),
+
+        // Archivos. Las tres ventanas del sistema operativo que el navegador
+        // abriría por su cuenta se interceptan antes de que existan.
+        "upload"   => do_upload(&args),
+        "download" => do_download(&args),
+        "pdf"      => do_pdf(&args),
 
         // Captura
         "screenshot" => do_screenshot(&args),
@@ -885,6 +892,94 @@ fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(
     }
     let _ = conn.wait_event("Page.loadEventFired", Some(session), marca, timeout)?;
     Ok(())
+}
+
+//    Archivos
+
+/// Rutas de archivo de un argumento: admite una sola o una lista.
+///
+/// Adjuntar un archivo es lo normal y adjuntar varios la excepción, así que
+/// obligar a escribir `["f.pdf"]` en el caso común sería cobrar a todos el
+/// precio de unos pocos.
+fn rutas_de(v: Option<&EvalValue>) -> Vec<String> {
+    match v {
+        Some(EvalValue::List(l)) => l.iter().map(to_str).collect(),
+        Some(x) => vec![to_str(x)],
+        None => vec![],
+    }
+}
+
+fn do_upload(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.upload(pestaña, selector, archivos)")?;
+    let sel = args.get(1).map(to_str)
+        .ok_or("browser.upload(pestaña, selector, archivos): falta el selector")?;
+    let rutas = rutas_de(args.get(2));
+    if rutas.is_empty() {
+        return Err("browser.upload(pestaña, selector, archivos): falta el archivo".into());
+    }
+    let (conn, session, timeout, t) = page_ctx(p)?;
+    let puestos = files::upload(&conn, &session, &sel, &rutas,
+                                espera_de(args, 3, &t), &t, timeout)?;
+    // Se devuelven las rutas absolutas de verdad: la conversión de relativa a
+    // absoluta ocurre por dentro, y sin verla es imposible entender por qué el
+    // navegador dice que un archivo que existe no existe.
+    Ok(EvalValue::List(puestos.into_iter().map(EvalValue::Str).collect()))
+}
+
+fn do_download(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.download(pestaña, selector, opts?)")?;
+    let sel = args.get(1).map(to_str)
+        .ok_or("browser.download(pestaña, selector, opts?): falta el selector")?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
+
+    let m = match args.get(2) { Some(EvalValue::Dict(d)) => Some(d), _ => None };
+    let o = files::DescargaOpts {
+        dir:       m.and_then(|d| d.get("dir")).map(to_str),
+        name:      m.and_then(|d| d.get("name")).map(to_str),
+        overwrite: m.and_then(|d| d.get("overwrite")).map(truthy).unwrap_or(false),
+        wait_ms:   espera_de(args, 2, &t),
+    };
+
+    let d = files::download(&conn, &session, &sel, &o, espera_de(args, 2, &t), &t, timeout)?;
+    let mut r: IndexMap<String, EvalValue> = IndexMap::new();
+    r.insert("path".into(),  EvalValue::Str(d.path));
+    r.insert("name".into(),  EvalValue::Str(d.name));
+    r.insert("bytes".into(), EvalValue::Int(d.bytes as i64));
+    r.insert("url".into(),   EvalValue::Str(d.url));
+    Ok(EvalValue::Dict(r))
+}
+
+fn do_pdf(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.pdf(pestaña, ruta, opts?)")?;
+    let ruta = args.get(1).map(to_str)
+        .ok_or("browser.pdf(pestaña, ruta, opts?): falta la ruta")?;
+    let (conn, session, timeout, _t) = page_ctx(p)?;
+
+    // Nada fijado: lo que no se indique lo decide el navegador con su propio
+    // default, que es el mismo que aplica el diálogo de impresión.
+    let mut o = serde_json::Map::new();
+    if let Some(EvalValue::Dict(m)) = args.get(2) {
+        if let Some(v) = m.get("landscape")  { o.insert("landscape".into(), truthy(v).into()); }
+        if let Some(v) = m.get("background") { o.insert("printBackground".into(), truthy(v).into()); }
+        if let Some(v) = m.get("headers")    { o.insert("displayHeaderFooter".into(), truthy(v).into()); }
+        if let Some(x) = m.get("scale").and_then(to_f64)  { o.insert("scale".into(), x.into()); }
+        // En pulgadas, que es la unidad de CDP; A4 son 8,27 × 11,69.
+        if let Some(x) = m.get("width").and_then(to_f64)  { o.insert("paperWidth".into(), x.into()); }
+        if let Some(x) = m.get("height").and_then(to_f64) { o.insert("paperHeight".into(), x.into()); }
+        if let Some(x) = m.get("margin").and_then(to_f64) {
+            for lado in ["marginTop", "marginBottom", "marginLeft", "marginRight"] {
+                o.insert(lado.into(), x.into());
+            }
+        }
+        if let Some(v) = m.get("pages") { o.insert("pageRanges".into(), to_str(v).into()); }
+    }
+    // Sin esto, un fondo de color o una tabla con filas alternas salen en
+    // blanco: el navegador los quita al imprimir para ahorrar tinta, que en un
+    // PDF que nadie va a imprimir es justo lo contrario de lo que se quiere.
+    o.entry("printBackground").or_insert(true.into());
+
+    let escrito = files::pdf(&conn, &session, &ruta, serde_json::Value::Object(o), timeout)?;
+    Ok(EvalValue::Str(escrito))
 }
 
 //    Captura
