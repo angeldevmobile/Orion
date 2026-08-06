@@ -28,6 +28,7 @@ pub mod files;
 pub mod form;
 pub mod input;
 pub mod launch;
+pub mod state;
 
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap;
@@ -115,6 +116,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "title"   => read_str(&args, "document.title", "browser.title"),
         "url"     => read_str(&args, "location.href", "browser.url"),
         "eval"    => eval(&args),
+        // reload(pestaña, opts?) → recarga; { cache: no } fuerza traerlo todo del servidor
+        "reload"  => do_history(&args, 0),
+        // back(pestaña) → vuelve a la página anterior; falla claro si no hay ninguna
+        "back"    => do_history(&args, -1),
+        // forward(pestaña) → avanza en el historial
+        "forward" => do_history(&args, 1),
         "content" => read_str(&args, "document.documentElement.outerHTML", "browser.content"),
         "pages"   => pages(&args),
 
@@ -178,6 +185,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // pdf(pestaña, ruta, opts?) → imprime la página a PDF sin abrir el diálogo de impresión
         "pdf"      => do_pdf(&args),
 
+        // Sesión reutilizable: loguearse una vez en vez de en cada ejecución.
+        //
+        // save_state(pestaña, ruta) → guarda cookies y almacenamiento en un JSON; ese archivo VALE COMO CREDENCIAL
+        "save_state" => do_save_state(&args),
+        // load_state(pestaña, ruta) → restaura la sesión guardada; el almacenamiento solo se aplica estando en su origen
+        "load_state" => do_load_state(&args),
+        // blocked(navegador) → URLs que la lista blanca de open({allow}) ha cortado
+        "blocked"    => do_blocked(&args),
+
         // Captura
         "screenshot" => do_screenshot(&args),
         // `close` y `free` son lo mismo: `free` existe porque es el nombre que
@@ -216,6 +232,23 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
         }
     };
 
+    // La lista blanca se fija antes de que exista ninguna pestaña: si se
+    // pusiera después, la primera navegación ya habría salido sin control.
+    if let Some(EvalValue::Dict(m)) = args.first() {
+        if let Some(v) = m.get("allow") {
+            let lista: Vec<String> = match v {
+                EvalValue::List(l) => l.iter().map(to_str).collect(),
+                otro => vec![to_str(otro)],
+            };
+            let lista: Vec<String> = lista.into_iter().filter(|s| !s.trim().is_empty()).collect();
+            if lista.is_empty() {
+                return Err("browser.open: `allow` está vacío. Quítalo si no quieres restringir; \
+                            una lista vacía bloquearía todo y es casi seguro un descuido.".into());
+            }
+            conn.set_allowlist(lista);
+        }
+    }
+
     let id = new_id();
     handles().lock().unwrap().insert(id, Handle::Browser(BrowserState {
         conn, proc: child, exe, user_data, temporal, timeout, tuning, pages: Vec::new(),
@@ -251,6 +284,13 @@ fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
 
     // Los eventos de página hacen falta para saber cuándo terminó de cargar.
     conn.call("Page.enable", serde_json::json!({}), Some(&session), timeout)?;
+
+    // La interceptación solo se activa si hay lista blanca. Encenderla siempre
+    // saldría caro para nada: con `Fetch` puesto, el navegador para en CADA
+    // petición y espera una respuesta por el socket.
+    if conn.hay_allowlist() {
+        conn.call("Fetch.enable", serde_json::json!({}), Some(&session), timeout)?;
+    }
 
     let id = new_id();
     let mut reg = handles().lock().unwrap();
@@ -592,7 +632,25 @@ fn do_fill(args: &[EvalValue]) -> Result<EvalValue, String> {
         return fill_con_teclas(&conn, &session, &lista, ms, &t, estricto);
     }
 
-    let r = form::fill(&conn, &session, &lista, ms, &t)?;
+    let mut r = form::fill(&conn, &session, &lista, ms, &t)?;
+
+    // Un error de `fill` puede repetir el valor que no se admitió —el de un
+    // desplegable, por ejemplo— y ese error acaba en un log o en una consola
+    // compartida. Los campos marcados como secretos no cuentan lo suyo.
+    if let Some(secretos) = opts.and_then(|m| m.get("secret")) {
+        let marcados: Vec<String> = match secretos {
+            EvalValue::List(l) => l.iter().map(to_str).collect(),
+            // `{ secret: yes }` tapa todos los campos de la llamada.
+            EvalValue::Bool(true) => lista.iter().map(|(s, _)| s.clone()).collect(),
+            otro => vec![to_str(otro)],
+        };
+        for (sel, why) in r.fallidos.iter_mut() {
+            if marcados.iter().any(|m| m == sel) {
+                *why = "el valor no fue admitido (oculto por secret)".into();
+            }
+        }
+    }
+
     if estricto {
         if let Some(q) = form::queja(&r) { return Err(q); }
     }
@@ -864,6 +922,21 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 fn do_wait(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.wait(pestaña, selector, ms?)")?;
+
+    // `wait` con un diccionario espera una condición de la página en vez de un
+    // selector. Va aquí y no en una función aparte porque es la misma idea
+    // —parar hasta que algo esté listo— y separarlas obligaría a recordar dos
+    // nombres para lo mismo.
+    if let Some(EvalValue::Dict(m)) = args.get(1) {
+        let (conn, session, _to, t) = page_ctx(p)?;
+        if let Some(v) = m.get("idle") {
+            let quieto = to_u64(v).unwrap_or(t.retry_ms.max(500));
+            let tope = m.get("wait").and_then(|x| to_u64(x).ok()).unwrap_or(t.wait_ms);
+            return do_wait_idle(&conn, &session, quieto, tope, &t);
+        }
+        return Err("browser.wait: el diccionario admite { idle: ms }".into());
+    }
+
     let sel = args.get(1).map(to_str).ok_or("browser.wait: falta el selector")?;
     let (conn, session, _to, t) = page_ctx(p)?;
     let ms = espera_de(args, 2, &t);
@@ -871,6 +944,119 @@ fn do_wait(args: &[EvalValue]) -> Result<EvalValue, String> {
         return Err(format!("browser.wait: '{sel}' no apareció en {ms} ms"));
     }
     Ok(EvalValue::Bool(true))
+}
+
+/// Espera a que la red se calme.
+///
+/// Sirve para lo que ningún selector resuelve: no sabes **qué** va a aparecer,
+/// solo que la página aún está trayendo cosas. Es el caso del panel que se monta
+/// con tres llamadas encadenadas, o del listado que se recarga al filtrar.
+///
+/// La alternativa que usa todo el mundo es dormir dos segundos, y tiene los dos
+/// defectos a la vez: si la red va lenta se lee a medias, y si va rápida se
+/// tiran dos segundos por petición.
+///
+/// Se cuentan las peticiones en vuelo **dentro de la página**, interceptando
+/// `fetch` y `XMLHttpRequest`, en vez de contar eventos CDP desde fuera. Así es
+/// una sola llamada y no depende de que el historial de eventos —que está
+/// acotado— haya conservado los que hacían falta.
+fn do_wait_idle(
+    conn: &Conn, session: &str, quieto_ms: u64, tope_ms: u64, t: &Tuning,
+) -> Result<EvalValue, String> {
+    let js = format!(r#"(() => {{
+      // El contador se instala una sola vez y sobrevive a varias llamadas; en
+      // una navegación la página nueva lo pierde y se vuelve a instalar sola.
+      if (!window.__orionRed) {{
+        const R = {{ vuelo: 0, ultima: Date.now() }};
+        window.__orionRed = R;
+        const marca = () => {{ R.ultima = Date.now(); }};
+        const f = window.fetch;
+        if (f) {{
+          window.fetch = function (...a) {{
+            R.vuelo++; marca();
+            return f.apply(this, a).finally(() => {{ R.vuelo--; marca(); }});
+          }};
+        }}
+        const abrir = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (...a) {{
+          this.addEventListener('loadstart', () => {{ R.vuelo++; marca(); }});
+          const fin = () => {{ R.vuelo--; marca(); }};
+          this.addEventListener('loadend', fin);
+          return abrir.apply(this, a);
+        }};
+      }}
+      const R = window.__orionRed;
+      return new Promise((resolve) => {{
+        const limite = Date.now() + {tope_ms};
+        const mira = () => {{
+          if (R.vuelo <= 0 && Date.now() - R.ultima >= {quieto_ms}) return resolve(true);
+          if (Date.now() >= limite) return resolve(false);
+          setTimeout(mira, {retry});
+        }};
+        mira();
+      }});
+    }})()"#, retry = t.retry_ms);
+
+    let v = evaluate_awaiting(
+        conn, session, &js,
+        Duration::from_millis(tope_ms + t.cdp_margin_ms), true,
+    )?;
+    if matches!(v, EvalValue::Bool(false)) {
+        return Err(format!(
+            "browser.wait: la red no se quedó {quieto_ms} ms sin actividad en {tope_ms} ms.\n  \
+             Hay páginas que sondean el servidor para siempre; en esas, espera por un selector."
+        ));
+    }
+    Ok(EvalValue::Bool(true))
+}
+
+/// Recarga, atrás y adelante.
+///
+/// El historial se lee del navegador en vez de contar pasos: `history.back()`
+/// desde JavaScript no dice si había algo a lo que volver, y sin eso un `back`
+/// al principio del historial se queda callado y el programa sigue creyendo que
+/// cambió de página.
+fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
+    let quien = match salto { 0 => "reload", -1 => "back", _ => "forward" };
+    let p = arg_handle(args, 0, &format!("browser.{quien}(pestaña)"))?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
+    let marca = conn.event_mark();
+
+    if salto == 0 {
+        // `ignoreCache` deja recargar de verdad cuando hace falta; por defecto
+        // se respeta la caché, que es lo que hace F5.
+        let duro = match args.get(1) {
+            Some(EvalValue::Dict(m)) => m.get("cache").map(|v| !truthy(v)).unwrap_or(false),
+            _ => false,
+        };
+        conn.call("Page.reload", serde_json::json!({ "ignoreCache": duro }),
+                  Some(&session), timeout)?;
+    } else {
+        let h = conn.call("Page.getNavigationHistory", serde_json::json!({}),
+                          Some(&session), timeout)?;
+        let actual = h.get("currentIndex").and_then(|x| x.as_i64()).unwrap_or(0);
+        let entradas = h.get("entries").and_then(|x| x.as_array())
+            .map(|a| a.len() as i64).unwrap_or(0);
+        let destino = actual + salto;
+        if destino < 0 || destino >= entradas {
+            return Err(format!(
+                "browser.{quien}: no hay {} en el historial de esta pestaña",
+                if salto < 0 { "página anterior" } else { "página siguiente" }
+            ));
+        }
+        let id = h["entries"][destino as usize]["id"].clone();
+        conn.call("Page.navigateToHistoryEntry", serde_json::json!({ "entryId": id }),
+                  Some(&session), timeout)?;
+    }
+
+    // Igual que en `goto`: que no llegue el evento de carga no es un error por
+    // sí solo, hay páginas que dejan peticiones abiertas para siempre.
+    let _ = conn.wait_event("Page.loadEventFired", Some(&session), marca, timeout)?;
+    let _ = t;
+    match evaluate(&conn, &session, "location.href", timeout) {
+        Ok(EvalValue::Str(s)) => Ok(EvalValue::Str(s)),
+        _ => Ok(EvalValue::Bool(true)),
+    }
 }
 
 /// ¿Esta lectura debe esperar a que haya contenido?
@@ -1094,6 +1280,57 @@ fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(
     }
     let _ = conn.wait_event("Page.loadEventFired", Some(session), marca, timeout)?;
     Ok(())
+}
+
+//    Sesión
+
+fn do_save_state(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.save_state(pestaña, ruta)")?;
+    let ruta = args.get(1).map(to_str)
+        .ok_or("browser.save_state(pestaña, ruta): falta la ruta")?;
+    let (conn, session, timeout, _t) = page_ctx(p)?;
+
+    let g = state::save(&conn, &session, &ruta, timeout)?;
+    let mut r: IndexMap<String, EvalValue> = IndexMap::new();
+    r.insert("path".into(),    EvalValue::Str(ruta));
+    r.insert("cookies".into(), EvalValue::Int(g.cookies as i64));
+    r.insert("local".into(),   EvalValue::Int(g.local as i64));
+    r.insert("session".into(), EvalValue::Int(g.session as i64));
+    r.insert("origin".into(),  EvalValue::Str(g.origin));
+    Ok(EvalValue::Dict(r))
+}
+
+fn do_load_state(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.load_state(pestaña, ruta)")?;
+    let ruta = args.get(1).map(to_str)
+        .ok_or("browser.load_state(pestaña, ruta): falta la ruta")?;
+    let (conn, session, timeout, _t) = page_ctx(p)?;
+
+    let c = state::load(&conn, &session, &ruta, timeout)?;
+    let mut r: IndexMap<String, EvalValue> = IndexMap::new();
+    r.insert("cookies".into(), EvalValue::Int(c.cookies as i64));
+    r.insert("local".into(),   EvalValue::Int(c.local as i64));
+    r.insert("session".into(), EvalValue::Int(c.session as i64));
+    // Se informa de los orígenes que NO se aplicaron en vez de callarlos: el
+    // navegador no deja escribir el almacenamiento de otro dominio, así que
+    // cargar el estado estando en la página equivocada restaura las cookies y
+    // deja fuera lo demás — y el síntoma sería una sesión a medias sin motivo
+    // aparente.
+    r.insert("skipped".into(), EvalValue::List(
+        c.omitidos.into_iter().map(EvalValue::Str).collect()
+    ));
+    Ok(EvalValue::Dict(r))
+}
+
+fn do_blocked(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let h = arg_handle(args, 0, "browser.blocked(navegador)")?;
+    // Vale con el handle del navegador o el de una pestaña: quien depura no
+    // tiene por qué acordarse de cuál de los dos tenía a mano.
+    let conn = match browser_ctx(h) {
+        Ok((c, _, _)) => c,
+        Err(_) => page_ctx(h)?.0,
+    };
+    Ok(EvalValue::List(conn.bloqueadas().into_iter().map(EvalValue::Str).collect()))
 }
 
 //    Archivos

@@ -1841,3 +1841,252 @@ const PAGINA_LISTA: &str = r#"<!doctype html>
   <a href="/c">tres</a>
 </div>
 </body></html>"#;
+
+//    Estabilidad y sesión
+
+/// Página que guarda algo en localStorage y muestra una cookie.
+const PAGINA_SESION: &str = r#"<!doctype html>
+<html><head><title>Sesion</title></head><body>
+<div id="quien">anonimo</div>
+<div id="ruta">-</div>
+<script>
+  document.getElementById('ruta').textContent = location.pathname;
+  const t = localStorage.getItem('token');
+  if (t) document.getElementById('quien').textContent = 'sesion:' + t;
+</script>
+</body></html>"#;
+
+#[test]
+fn la_sesion_se_guarda_y_se_restaura() {
+    let dir = tmp_dir("estado");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SESION);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    -- Se "inicia sesión": una cookie y una marca en el almacenamiento local.
+    web.eval(p, "document.cookie = 'sid=abc123; path=/'; localStorage.setItem('token', 'XYZ'); true")
+    g = web.save_state(p, "sesion.json")
+    show("G=" + str(g["local"]) + "/" + str(g["cookies"] > 0))
+}}
+
+-- Navegador NUEVO: sin nada compartido con el anterior.
+with b2 = web.open() {{
+    p2 = web.page(b2)
+    web.goto(p2, "{url}")
+    show("ANTES=" + web.text(p2, "#quien"))
+    c = web.load_state(p2, "sesion.json")
+    show("C=" + str(c["cookies"] > 0) + "/" + str(c["local"]))
+    web.reload(p2)
+    show("DESPUES=" + web.text(p2, "#quien"))
+    show("COOKIE=" + web.eval(p2, "document.cookie"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("G=1/yes"), "no se guardó el estado:\n{salida}");
+    assert!(salida.contains("ANTES=anonimo"), "el navegador nuevo no estaba limpio:\n{salida}");
+    assert!(salida.contains("C=yes/1"), "no se restauró:\n{salida}");
+    // Esto es lo que ahorra el login diario: la página ve la sesión de la
+    // ejecución anterior sin que nadie haya vuelto a escribir la contraseña.
+    assert!(salida.contains("DESPUES=sesion:XYZ"),
+            "el almacenamiento no sobrevivió al viaje:\n{salida}");
+    assert!(salida.contains("sid=abc123"), "la cookie no se restauró:\n{salida}");
+}
+
+#[test]
+fn cargar_un_estado_en_otro_origen_lo_dice() {
+    let dir = tmp_dir("estado_origen");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let a = serve_html(PAGINA_SESION);
+    let b = serve_html(PAGINA_SESION);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with nav = web.open() {{
+    p = web.page(nav)
+    web.goto(p, "{a}")
+    web.eval(p, "localStorage.setItem('token', 'XYZ'); true")
+    web.save_state(p, "s.json")
+
+    -- Otro puerto es otro origen: el navegador no deja escribir su
+    -- almacenamiento desde aquí, y callarlo dejaría una sesión a medias.
+    web.goto(p, "{b}")
+    c = web.load_state(p, "s.json")
+    show("SKIP=" + str(len(c["skipped"])))
+    show("LOCAL=" + str(c["local"]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("SKIP=1"), "no avisó del origen que no aplicó:\n{salida}");
+    assert!(salida.contains("LOCAL=0"), "no debería haber aplicado nada:\n{salida}");
+}
+
+#[test]
+fn un_estado_que_no_existe_lo_explica() {
+    let dir = tmp_dir("estado_ausente");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SESION);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.load_state(p, "no_esta.json") }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(salida.contains("E=") && salida.contains("save_state"),
+            "el error debería apuntar a cómo se crea el archivo:\n{salida}");
+}
+
+#[test]
+fn atras_y_adelante_recorren_el_historial() {
+    let dir = tmp_dir("historial");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SESION);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}uno")
+    web.goto(p, "{url}dos")
+    show("A=" + web.text(p, "#ruta"))
+    web.back(p)
+    show("B=" + web.text(p, "#ruta"))
+    web.forward(p)
+    show("C=" + web.text(p, "#ruta"))
+    web.reload(p)
+    show("D=" + web.text(p, "#ruta"))
+    web.back(p)
+    -- Ya no queda historial hacia atrás: tiene que decirlo en vez de callarse.
+    attempt {{ web.back(p) }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("A=/dos"), "{salida}");
+    assert!(salida.contains("B=/uno"), "back no volvió:\n{salida}");
+    assert!(salida.contains("C=/dos"), "forward no avanzó:\n{salida}");
+    assert!(salida.contains("D=/dos"), "reload cambió de página:\n{salida}");
+    assert!(salida.contains("E=") && salida.contains("historial"),
+            "un back sin historial debería explicarse:\n{salida}");
+}
+
+/// Página que trae datos por fetch con retraso, sin nada que anuncie el final.
+const PAGINA_RED: &str = r#"<!doctype html>
+<html><head><title>Red</title></head><body>
+<button id="pide">Pedir</button>
+<div id="n">0</div>
+<script>
+  let n = 0;
+  document.getElementById('pide').onclick = () => {
+    for (let i = 0; i < 3; i++) {
+      setTimeout(() => {
+        fetch('/dato?i=' + i).then(() => {
+          n++;
+          document.getElementById('n').textContent = String(n);
+        });
+      }, i * 120);
+    }
+  };
+</script>
+</body></html>"#;
+
+#[test]
+fn esperar_a_que_la_red_se_calme() {
+    let dir = tmp_dir("red_idle");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_RED);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.click(p, "#pide")
+    -- No hay ningún selector que esperar: no se sabe QUÉ va a aparecer, solo
+    -- que la página sigue trayendo cosas.
+    web.wait(p, {{ idle: 300 }})
+    show("N=" + web.text(p, "#n"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=3"),
+            "volvió antes de que terminaran las tres peticiones:\n{salida}");
+}
+
+#[test]
+fn la_lista_blanca_corta_lo_que_no_esta_en_ella() {
+    let dir = tmp_dir("allow");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SESION);
+
+    // 127.0.0.1 está permitido; cualquier otro dominio no. Un proceso
+    // automático lleva encima la sesión de la empresa: si una página
+    // comprometida lo redirige, va con ella puesta.
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open({{ allow: ["127.0.0.1"] }}) {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("OK=" + web.text(p, "#quien"))
+    attempt {{ web.goto(p, "https://example.com/") }} handle e {{ show("E=1") }}
+    show("BLOQ=" + str(len(web.blocked(b)) > 0))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("OK=anonimo"), "bloqueó el dominio permitido:\n{salida}");
+    assert!(salida.contains("BLOQ=yes"), "no registró ningún bloqueo:\n{salida}");
+}
+
+#[test]
+fn una_lista_blanca_vacia_no_se_acepta() {
+    let dir = tmp_dir("allow_vacia");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+
+    let (salida, _) = run_orion(&dir, r##"
+use "browser" as web
+attempt {
+    b = web.open({ allow: [] })
+    web.free(b)
+} handle e { show("E=" + e) }
+"##);
+    // Una lista vacía bloquearía absolutamente todo: es un descuido, no una
+    // política, y aceptarlo en silencio daría un navegador inútil sin motivo.
+    assert!(salida.contains("E=") && salida.contains("allow"),
+            "debería rechazar la lista vacía:\n{salida}");
+}
+
+#[test]
+fn un_campo_secreto_no_aparece_en_el_error() {
+    let dir = tmp_dir("secreto");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_FORM);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    -- Un <select> delata el valor que no admitió, y ese error acaba en un log.
+    attempt {{
+        web.fill(p, {{ "#pais": "clave-secreta-real" }}, {{ secret: ["#pais"] }})
+    }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(salida.contains("E="), "{salida}");
+    assert!(!salida.contains("clave-secreta-real"),
+            "el valor secreto se filtró al error:\n{salida}");
+    assert!(salida.contains("oculto"), "debería decir que lo ocultó:\n{salida}");
+}

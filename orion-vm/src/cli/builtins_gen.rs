@@ -859,6 +859,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "title", "browser.title(…)", "Función del módulo browser."));
     v.push(f("browser", "url", "browser.url(…)", "Función del módulo browser."));
     v.push(f("browser", "eval", "browser.eval(…)", "Función del módulo browser."));
+    v.push(f("browser", "reload", "browser.reload(pestaña, opts?)", "Recarga; { cache: no } fuerza traerlo todo del servidor"));
+    v.push(f("browser", "back", "browser.back(pestaña)", "Vuelve a la página anterior; falla claro si no hay ninguna"));
+    v.push(f("browser", "forward", "browser.forward(pestaña)", "Avanza en el historial"));
     v.push(f("browser", "content", "browser.content(…)", "Función del módulo browser."));
     v.push(f("browser", "pages", "browser.pages(…)", "Función del módulo browser."));
     v.push(f("browser", "click", "browser.click(…)", "Interacción"));
@@ -890,6 +893,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "upload", "browser.upload(pestaña, selector, archivos)", "Adjunta sin que se abra la ventana del sistema; el selector puede ser el <input type=file> o el botón que lo abre"));
     v.push(f("browser", "download", "browser.download(pestaña, selector, opts?)", "Pulsa y espera a que la descarga TERMINE; devuelve {path, name, bytes, url} y no hay diálogo \"Guardar como\""));
     v.push(f("browser", "pdf", "browser.pdf(pestaña, ruta, opts?)", "Imprime la página a PDF sin abrir el diálogo de impresión"));
+    v.push(f("browser", "save_state", "browser.save_state(pestaña, ruta)", "Guarda cookies y almacenamiento en un JSON; ese archivo VALE COMO CREDENCIAL"));
+    v.push(f("browser", "load_state", "browser.load_state(pestaña, ruta)", "Restaura la sesión guardada; el almacenamiento solo se aplica estando en su origen"));
+    v.push(f("browser", "blocked", "browser.blocked(navegador)", "URLs que la lista blanca de open({allow}) ha cortado"));
     v.push(f("browser", "screenshot", "browser.screenshot(…)", "Captura"));
     v.push(f("browser", "free", "browser.free(…)", "`close` y `free` son lo mismo: `free` existe porque es el nombre que invoca el desugar de `with`, y `close` porque es el que la gente escribe cuando cierra a mano."));
     v.push(f("browser", "close", "browser.close(…)", "Alias de browser.free."));

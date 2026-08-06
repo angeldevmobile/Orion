@@ -117,6 +117,10 @@ pub struct Conn {
     /// Política de diálogos por pestaña. Vive fuera de `state` para que el
     /// hilo lector pueda consultarla sin tomar el candado del estado.
     dialogs: Mutex<HashMap<String, String>>,
+    /// Dominios a los que se permite ir. Vacía significa sin restricción.
+    allow:   Mutex<Vec<String>>,
+    /// URLs que se han cortado por no estar en la lista.
+    blocked: Mutex<Vec<String>>,
     limits:  Limits,
     cv:      Condvar,
     next_id: AtomicU64,
@@ -144,6 +148,8 @@ impl Conn {
             socket:  Mutex::new(socket),
             state:   Mutex::new(State::default()),
             dialogs: Mutex::new(HashMap::new()),
+            allow:   Mutex::new(Vec::new()),
+            blocked: Mutex::new(Vec::new()),
             limits,
             cv:      Condvar::new(),
             next_id: AtomicU64::new(1),
@@ -214,6 +220,54 @@ impl Conn {
         }
     }
 
+    /// Fija a qué dominios puede ir esta conexión. Lista vacía: sin límite.
+    pub fn set_allowlist(&self, lista: Vec<String>) {
+        *self.allow.lock().unwrap() = lista;
+    }
+
+    /// ¿Hay lista blanca puesta?
+    pub fn hay_allowlist(&self) -> bool {
+        !self.allow.lock().unwrap().is_empty()
+    }
+
+    /// Qué se ha bloqueado, para poder contarlo en un error o un diagnóstico.
+    pub fn bloqueadas(&self) -> Vec<String> {
+        self.blocked.lock().unwrap().clone()
+    }
+
+    /// Deja pasar o corta una petición interceptada.
+    ///
+    /// Lo contesta el hilo lector por el mismo motivo que los diálogos: con
+    /// `Fetch` activo el navegador **para cada petición** hasta que alguien
+    /// responde, así que si esto esperase su turno detrás de otra llamada, la
+    /// página entera se quedaría congelada.
+    fn answer_fetch(&self, session: Option<&str>, request_id: &str, url: &str) {
+        let lista = self.allow.lock().unwrap().clone();
+        let ok = super::state::permitida(url, &lista);
+        if !ok {
+            let mut b = self.blocked.lock().unwrap();
+            // Acotado: una página que insista en pedir a un dominio prohibido
+            // no debe hacer crecer esta lista sin fin.
+            if b.len() < self.limits.max_events {
+                b.push(url.to_string());
+            }
+        }
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let mut msg = serde_json::json!({
+            "id": id,
+            "method": if ok { "Fetch.continueRequest" } else { "Fetch.failRequest" },
+            "params": if ok {
+                serde_json::json!({ "requestId": request_id })
+            } else {
+                serde_json::json!({ "requestId": request_id, "errorReason": "BlockedByClient" })
+            },
+        });
+        if let Some(s) = session {
+            msg["sessionId"] = serde_json::Value::String(s.to_string());
+        }
+        let _ = self.send_text(msg.to_string());
+    }
+
     /// Responde a un diálogo sin esperar confirmación.
     ///
     /// Lo llama el hilo lector, que no puede bloquearse esperando una respuesta:
@@ -245,6 +299,21 @@ impl Conn {
         // Los diálogos se atienden aquí y no en quien llamó: el que abre el
         // diálogo puede ser un temporizador de la página, sin ninguna llamada
         // de Orion en curso a la que colgarlo.
+        // Con `Fetch` activo el navegador PARA cada petición hasta que se le
+        // contesta. Si esto se atendiera desde quien llamó, la página se
+        // quedaría congelada esperando a un programa que a su vez espera a la
+        // página. Se responde aquí, igual que los diálogos.
+        if v.get("method").and_then(|m| m.as_str()) == Some("Fetch.requestPaused") {
+            let ses = v.get("sessionId").and_then(|s| s.as_str());
+            let id  = v.get("params").and_then(|p| p.get("requestId"))
+                       .and_then(|x| x.as_str()).unwrap_or("");
+            let url = v.get("params").and_then(|p| p.get("request"))
+                       .and_then(|r| r.get("url")).and_then(|x| x.as_str()).unwrap_or("");
+            if !id.is_empty() {
+                self.answer_fetch(ses, id, url);
+            }
+        }
+
         if v.get("method").and_then(|m| m.as_str()) == Some("Page.javascriptDialogOpening") {
             let ses = v.get("sessionId").and_then(|s| s.as_str());
             let pol = {
@@ -501,6 +570,8 @@ mod tests {
                          None)),
             state:   Mutex::new(State::default()),
             dialogs: Mutex::new(HashMap::new()),
+            allow:   Mutex::new(Vec::new()),
+            blocked: Mutex::new(Vec::new()),
             limits:  Limits::default(),
             cv:      Condvar::new(),
             next_id: AtomicU64::new(1),
