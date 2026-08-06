@@ -18,10 +18,12 @@ with b = web.open() {
 cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
 > **Estado**: transporte, arranque, navegación, interacción, modales y ventanas
-> verificados de punta a punta (21 tests e2e en
+> verificados de punta a punta (24 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
-> servidor local). Pendiente: extracción declarativa (`extract`), streaming a
-> `.odf`, cookies/sesión y benchmark contra Python.
+> servidor local). **Cero constantes fijadas**: todo lo que decide el
+> comportamiento se puede cambiar desde `open()` — ver 1.2. Pendiente:
+> extracción declarativa (`extract`), streaming a `.odf`, cookies/sesión y
+> benchmark contra Python.
 
 ## 1. Arranque
 
@@ -33,7 +35,19 @@ Localiza el navegador en cascada, **sin nada fijado en el código**:
 2. `ORION_CHROME` — variable de entorno
 3. Detección automática: Chrome, Chromium, Brave o Edge
 
-En Windows importa que acepte Edge: viene instalado de fábrica.
+En Windows importa que acepte Edge: viene instalado de fábrica, así que no hay
+nada que descargar.
+
+**Orion no descarga ningún navegador.** Usa el que ya tienes. Si no hay ninguno
+basado en Chromium, `open()` falla diciendo cuáles sirven y cómo indicar la ruta.
+
+Lo que sí desaparece por completo es `chromedriver`: CDP habla directamente con
+el navegador, así que no hay un segundo binario cuya versión haya que mantener
+sincronizada. Que Chrome se actualice solo deja de ser un problema.
+
+El endpoint se descubre por dos vías, porque no todos los navegadores dan las
+dos: Chrome lo anuncia por su salida de error y además escribe
+`DevToolsActivePort` en el perfil; **Edge solo escribe el archivo**.
 
 ```orion
 b = web.open({
@@ -43,11 +57,17 @@ b = web.open({
     gpu:      no,
     width:    1280,
     height:   800,
-    timeout:  30000,                 -- ms
+    timeout:  30000,                 -- ms, arranque del navegador
     user_data: "C:/perfil",          -- perfil propio (persiste sesiones)
-    args:     ["--proxy-server=x:1"] -- banderas extra, van al final
+    args:     ["--proxy-server=x:1"],   -- banderas extra, van al final
+    sin:      ["--disable-extensions"]  -- banderas por defecto a quitar
 })
 ```
+
+`args` **añade** y `sin` **quita**. Hacen falta las dos: en Chrome una bandera
+posterior no siempre revierte a la anterior, así que sin `sin` un sitio que
+necesitara extensiones no tenía forma de deshacer `--disable-extensions`.
+Se quita por nombre, sin repetir el valor: `sin: ["--blink-settings"]`.
 
 **Las imágenes vienen desactivadas por defecto.** Son el grueso del consumo de
 memoria y de red de una página, y casi ningún scraper las necesita. Se
@@ -57,15 +77,58 @@ Sin `user_data` se crea un perfil temporal que se borra al cerrar. Con
 `user_data` el perfil es tuyo y no se toca: es la forma de conservar sesiones
 entre ejecuciones.
 
-### 1.2 `web.page(navegador)` → pestaña
+### 1.2 Afinado
 
-### 1.3 `web.free(handle)` / `web.close(handle)`
+Nada del motor está fijado en el código. Los parámetros se agrupan en dos
+niveles según lo que sean:
+
+**Política** — decisiones sobre *tu* problema, en la raíz de las opciones:
+
+| Opción | Default | Qué controla |
+|---|---|---|
+| `wait` | 10000 | espera de acciones y lecturas, en ms |
+| `retry` | 50 | cada cuánto se reintenta dentro de la página |
+| `cdp_margin` | 5000 | margen del plazo de transporte sobre el de espera |
+| `drag_steps` | 10 | pasos intermedios de un arrastre |
+| `force_layers` | 12 | capas superpuestas que `force` atraviesa |
+| `iframe_depth` | 8 | profundidad de iframes anidados que se recorre |
+| `hit_inset` | 24 | margen en píxeles al probar puntos de un elemento |
+
+**Mecanismo** — uso de recursos, bajo `tuning` para no ensuciar la API diaria:
+
+| Opción | Default | Qué controla |
+|---|---|---|
+| `max_events` | 512 | eventos CDP retenidos (más historial es más RAM) |
+| `idle_poll` | 5 | techo del sondeo en reposo (subirlo baja la CPU) |
+| `close_timeout` | 2000 | plazo de las operaciones de cierre |
+| `send_timeout` | 5000 | plazo para que un envío progrese |
+| `cleanup_tries` | 12 | intentos de borrar el perfil temporal |
+| `stale_profile_mins` | 60 | edad a partir de la cual se barre un perfil abandonado |
+
+```orion
+b = web.open({
+    wait: 4000,
+    drag_steps: 25,
+    tuning: { max_events: 64, idle_poll: 20 }
+})
+```
+
+El `wait` tiene **tres niveles**, del más concreto al más general: lo que diga
+la llamada, lo que se fijó al abrir, y el default.
+
+```orion
+web.text(p, "#tarde", 6000)   -- manda sobre el wait del navegador
+```
+
+### 1.3 `web.page(navegador)` → pestaña
+
+### 1.4 `web.free(handle)` / `web.close(handle)`
 
 Vale para navegador o pestaña; es el nombre que invoca `with`.
 
-### 1.4 `web.pages(navegador)` → lista de handles
+### 1.5 `web.pages(navegador)` → lista de handles
 
-### 1.5 `web.info()` → diccionario de diagnóstico
+### 1.6 `web.info()` → diccionario de diagnóstico
 
 Qué navegador se usaría, de dónde sale y cuántos hay abiertos. Sin esto, un
 "no me funciona" es indepurable.

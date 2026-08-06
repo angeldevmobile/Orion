@@ -711,3 +711,93 @@ with b = web.open() {{
     assert!(salida.contains("F=IFRAME-OK"),
             "el clic no llegó al botón del iframe:\n{salida}");
 }
+
+/// El contenido llega tarde a propósito: sirve para comprobar que el plazo de
+/// espera es el que se pidió y no uno fijado en el código.
+const PAGINA_LENTA: &str = r##"<!doctype html><html><head><meta charset="utf-8"><title>Lenta</title></head>
+<body><div id="zona"></div>
+<script>setTimeout(()=>{document.getElementById('zona').innerHTML='<b id="tarde">llegue tarde</b>'},2500)</script>
+</body></html>"##;
+
+#[test]
+fn el_wait_se_puede_fijar_al_abrir_y_manda_la_llamada() {
+    // Antes el plazo estaba fijado en 10 s y solo se podía cambiar repitiéndolo
+    // en cada llamada. Ahora hay tres niveles: llamada > open() > default.
+    let dir = tmp_dir("wait_global");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_LENTA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+
+with b = web.open({{ wait: 800 }}) {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("CORTO=" + str(web.text(p, "#tarde")))
+}}
+with b2 = web.open({{ wait: 6000 }}) {{
+    p2 = web.page(b2)
+    web.goto(p2, "{url}")
+    show("LARGO=" + str(web.text(p2, "#tarde")))
+}}
+with b3 = web.open({{ wait: 300 }}) {{
+    p3 = web.page(b3)
+    web.goto(p3, "{url}")
+    show("LLAMADA=" + str(web.text(p3, "#tarde", 6000)))
+}}
+"##));
+
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("CORTO=null"),
+            "con wait corto no debería haber esperado al contenido:\n{salida}");
+    assert!(salida.contains("LARGO=llegue tarde"),
+            "el wait global de open() no se respetó:\n{salida}");
+    assert!(salida.contains("LLAMADA=llegue tarde"),
+            "el plazo de la llamada debería mandar sobre el global:\n{salida}");
+}
+
+#[test]
+fn el_afinado_de_mecanismo_se_acepta_y_no_estorba() {
+    // Los parámetros de recursos van bajo `tuning` para no ensuciar la API de
+    // uso diario, pero tienen que existir y no romper nada.
+    let dir = tmp_dir("tuning_mecanismo");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open({{
+    wait: 4000, retry: 20, drag_steps: 3, iframe_depth: 2, hit_inset: 8,
+    tuning: {{ max_events: 64, idle_poll: 20, close_timeout: 3000, cleanup_tries: 4 }}
+}}) {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("T=" + web.title(p))
+}}
+"##));
+    assert!(ok, "un afinado completo no debería romper nada:\n{salida}");
+    assert!(salida.contains("T=Pagina de prueba"), "salida inesperada:\n{salida}");
+}
+
+#[test]
+fn se_pueden_quitar_banderas_de_arranque() {
+    // `extra` solo añadía. Sin poder quitar, un sitio que necesite extensiones
+    // no tenía forma de deshacer `--disable-extensions`.
+    let dir = tmp_dir("sin_banderas");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open({{ sin: ["--disable-extensions", "--mute-audio"] }}) {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("T=" + web.title(p))
+}}
+"##));
+    assert!(ok, "quitar banderas dejó el navegador inservible:\n{salida}");
+    assert!(salida.contains("T=Pagina de prueba"), "salida inesperada:\n{salida}");
+}

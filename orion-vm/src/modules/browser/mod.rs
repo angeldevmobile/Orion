@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use cdp::Conn;
-use launch::{LaunchOpts, Launched};
+use launch::{LaunchOpts, Launched, Tuning};
 
 //    Registro de handles
 //
@@ -49,6 +49,7 @@ struct BrowserState {
     user_data: std::path::PathBuf,
     temporal:  bool,
     timeout:   Duration,
+    tuning:    Tuning,
     pages:     Vec<u64>,
 }
 
@@ -77,7 +78,7 @@ fn new_id() -> u64 { NEXT_ID.fetch_add(1, Ordering::SeqCst) }
 /// Se devuelven copiados en vez de mantener el candado: una llamada CDP puede
 /// tardar segundos y bloquear el registro mientras tanto dejaría clavado a
 /// cualquier otra tarea que solo quisiera abrir una pestaña.
-fn page_ctx(h: u64) -> Result<(Arc<Conn>, String, Duration), String> {
+fn page_ctx(h: u64) -> Result<(Arc<Conn>, String, Duration, Tuning), String> {
     let reg = handles().lock().unwrap();
     let Some(Handle::Page(p)) = reg.get(&h) else {
         return Err(match reg.get(&h) {
@@ -89,13 +90,13 @@ fn page_ctx(h: u64) -> Result<(Arc<Conn>, String, Duration), String> {
     let Some(Handle::Browser(b)) = reg.get(&p.browser) else {
         return Err(format!("browser: el navegador de la pestaña {h} ya no existe"));
     };
-    Ok((Arc::clone(&b.conn), session, b.timeout))
+    Ok((Arc::clone(&b.conn), session, b.timeout, b.tuning.clone()))
 }
 
-fn browser_ctx(h: u64) -> Result<(Arc<Conn>, Duration), String> {
+fn browser_ctx(h: u64) -> Result<(Arc<Conn>, Duration, Tuning), String> {
     let reg = handles().lock().unwrap();
     match reg.get(&h) {
-        Some(Handle::Browser(b)) => Ok((Arc::clone(&b.conn), b.timeout)),
+        Some(Handle::Browser(b)) => Ok((Arc::clone(&b.conn), b.timeout, b.tuning.clone())),
         Some(Handle::Page(_))    => Err(format!("browser: {h} es una pestaña, no un navegador")),
         None                     => Err(format!("browser: el navegador {h} no existe")),
     }
@@ -167,10 +168,16 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
     let opts = parse_opts(args.first())?;
+    let tuning = parse_tuning(args.first());
     let timeout = opts.timeout;
 
-    let Launched { child, ws_url, exe, user_data, temporal } = launch::launch(&opts)?;
-    let conn = match Conn::connect(&ws_url) {
+    let Launched { child, ws_url, exe, user_data, temporal } = launch::launch(&opts, &tuning)?;
+    let limits = cdp::Limits {
+        max_events: tuning.max_events,
+        idle_poll:  Duration::from_millis(tuning.idle_poll_ms),
+        send:       Duration::from_millis(tuning.send_ms),
+    };
+    let conn = match Conn::connect(&ws_url, limits) {
         Ok(c) => c,
         Err(e) => {
             // Si no se puede hablar con él, no dejarlo suelto comiendo memoria.
@@ -184,7 +191,7 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
 
     let id = new_id();
     handles().lock().unwrap().insert(id, Handle::Browser(BrowserState {
-        conn, proc: child, exe, user_data, temporal, timeout, pages: Vec::new(),
+        conn, proc: child, exe, user_data, temporal, timeout, tuning, pages: Vec::new(),
     }));
     Ok(EvalValue::Int(id as i64))
 }
@@ -193,7 +200,7 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
     let b = arg_handle(args, 0, "browser.page(navegador)")?;
-    let (conn, timeout) = browser_ctx(b)?;
+    let (conn, timeout, _t) = browser_ctx(b)?;
 
     let creado = conn.call(
         "Target.createTarget",
@@ -233,7 +240,7 @@ fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.goto(pestaña, url)")?;
     let url = args.get(1).map(to_str)
         .ok_or("browser.goto(pestaña, url): falta la url")?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
 
     // La marca se toma ANTES de navegar: si no, una carga anterior podría
     // hacerse pasar por esta y `goto` volvería antes de tiempo.
@@ -265,7 +272,7 @@ fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
             let _ = conn.call(
                 "Page.handleJavaScriptDialog",
                 serde_json::json!({ "accept": false }),
-                Some(&session), Duration::from_secs(2),
+                Some(&session), Duration::from_millis(t.close_ms),
             );
             return Err(format!(
                 "browser.goto '{url}': la página abrió un {tipo} ({texto:?}) y quedó bloqueada."
@@ -283,7 +290,7 @@ fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 fn read_str(args: &[EvalValue], expr: &str, quien: &str) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, &format!("{quien}(pestaña)"))?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, _t) = page_ctx(p)?;
     evaluate(&conn, &session, expr, timeout)
 }
 
@@ -293,7 +300,7 @@ fn eval(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.eval(pestaña, js)")?;
     let js = args.get(1).map(to_str)
         .ok_or("browser.eval(pestaña, js): falta el código")?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, _t) = page_ctx(p)?;
     evaluate(&conn, &session, &js, timeout)
 }
 
@@ -341,15 +348,53 @@ fn evaluate_awaiting(
 
 /// Milisegundos de espera de un selector.
 ///
+/// Tres niveles, del más concreto al más general: lo que diga esta llamada, lo
+/// que se fijó al abrir el navegador, y el default. Antes solo existía el
+/// primero y el último, así que quien quisiera otro plazo tenía que repetirlo en
+/// **cada** llamada — que es la forma más cansada de tener una constante fijada.
+///
 /// El argumento admite un número (los milisegundos) o un dict de opciones, para
 /// que el caso simple siga siendo `click(p, sel)` y el complicado no necesite
 /// una función aparte.
-fn espera_ms(args: &[EvalValue], i: usize) -> u64 {
+fn espera_de(args: &[EvalValue], i: usize, t: &Tuning) -> u64 {
     match args.get(i) {
-        Some(EvalValue::Dict(m)) => m.get("wait").and_then(|v| to_u64(v).ok()).unwrap_or(10_000),
-        Some(v) => to_u64(v).unwrap_or(10_000),
-        None => 10_000,
+        Some(EvalValue::Dict(m)) => m.get("wait").and_then(|v| to_u64(v).ok()).unwrap_or(t.wait_ms),
+        Some(v) => to_u64(v).unwrap_or(t.wait_ms),
+        None => t.wait_ms,
     }
+}
+
+/// Afinado leído de las opciones de `open`.
+///
+/// Los parámetros de política viven en la raíz (`wait`, `drag_steps`…) porque se
+/// tocan de verdad; los de mecanismo van bajo `tuning` para no ensuciar la API
+/// de uso diario. Lo que no se indique conserva su default.
+fn parse_tuning(v: Option<&EvalValue>) -> Tuning {
+    let mut t = Tuning::default();
+    let Some(EvalValue::Dict(m)) = v else { return t };
+
+    let u64_de = |d: &IndexMap<String, EvalValue>, k: &str| -> Option<u64> {
+        d.get(k).and_then(|x| to_u64(x).ok())
+    };
+
+    // Política — en la raíz de las opciones.
+    if let Some(x) = u64_de(m, "wait")          { t.wait_ms       = x; }
+    if let Some(x) = u64_de(m, "retry")         { t.retry_ms      = x.max(1); }
+    if let Some(x) = u64_de(m, "cdp_margin")    { t.cdp_margin_ms = x; }
+    if let Some(x) = u64_de(m, "drag_steps")    { t.drag_steps    = x.max(1) as u32; }
+    if let Some(x) = u64_de(m, "force_layers")  { t.force_layers  = x as u32; }
+    if let Some(x) = u64_de(m, "iframe_depth")  { t.iframe_depth  = x as u32; }
+    if let Some(x) = m.get("hit_inset").and_then(to_f64) { t.hit_inset = x.max(0.0); }
+
+    // Mecanismo — bajo `tuning`.
+    if let Some(EvalValue::Dict(g)) = m.get("tuning") {
+        if let Some(x) = u64_de(g, "max_events")    { t.max_events    = x.max(1) as usize; }
+        if let Some(x) = u64_de(g, "idle_poll")     { t.idle_poll_ms  = x.max(1); }
+        if let Some(x) = u64_de(g, "close_timeout") { t.close_ms      = x; }
+        if let Some(x) = u64_de(g, "send_timeout")  { t.send_ms       = x; }
+        if let Some(x) = u64_de(g, "cleanup_tries") { t.cleanup_tries = x as u32; }
+    }
+    t
 }
 
 /// ¿Se pidió atravesar lo que tape el elemento?
@@ -367,9 +412,9 @@ fn do_click(args: &[EvalValue], boton: &str, veces: i64) -> Result<EvalValue, St
     let p = arg_handle(args, 0, "browser.click(pestaña, selector)")?;
     let sel = args.get(1).map(to_str)
         .ok_or("browser.click(pestaña, selector): falta el selector")?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
     input::click(&conn, &session, &sel, boton, veces,
-                 espera_ms(args, 2), force_de(args, 2), timeout)?;
+                 espera_de(args, 2, &t), force_de(args, 2), &t, timeout)?;
     Ok(EvalValue::Bool(true))
 }
 
@@ -377,8 +422,8 @@ fn do_hover(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.hover(pestaña, selector)")?;
     let sel = args.get(1).map(to_str)
         .ok_or("browser.hover(pestaña, selector): falta el selector")?;
-    let (conn, session, timeout) = page_ctx(p)?;
-    input::hover(&conn, &session, &sel, espera_ms(args, 2), timeout)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
+    input::hover(&conn, &session, &sel, espera_de(args, 2, &t), &t, timeout)?;
     Ok(EvalValue::Bool(true))
 }
 
@@ -386,8 +431,8 @@ fn do_drag(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.drag(pestaña, origen, destino)")?;
     let a = args.get(1).map(to_str).ok_or("browser.drag: falta el origen")?;
     let z = args.get(2).map(to_str).ok_or("browser.drag: falta el destino")?;
-    let (conn, session, timeout) = page_ctx(p)?;
-    input::drag(&conn, &session, &a, &z, espera_ms(args, 3), timeout)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
+    input::drag(&conn, &session, &a, &z, espera_de(args, 3, &t), &t, timeout)?;
     Ok(EvalValue::Bool(true))
 }
 
@@ -395,7 +440,7 @@ fn do_scroll(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.scroll(pestaña, dx, dy)")?;
     let dx = args.get(1).and_then(|v| to_f64(v)).unwrap_or(0.0);
     let dy = args.get(2).and_then(|v| to_f64(v)).unwrap_or(0.0);
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, _t) = page_ctx(p)?;
     input::scroll(&conn, &session, dx, dy, timeout)?;
     Ok(EvalValue::Bool(true))
 }
@@ -411,9 +456,9 @@ fn do_type(args: &[EvalValue]) -> Result<EvalValue, String> {
         Some(v) => truthy(v),
         None => true,
     };
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
     input::type_text(&conn, &session, &sel, &txt, limpiar,
-                     espera_ms(args, 3), force_de(args, 3), timeout)?;
+                     espera_de(args, 3, &t), force_de(args, 3), &t, timeout)?;
     Ok(EvalValue::Bool(true))
 }
 
@@ -421,7 +466,7 @@ fn do_press(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.press(pestaña, tecla)")?;
     let k = args.get(1).map(to_str)
         .ok_or_else(|| format!("browser.press(pestaña, tecla): falta la tecla.\n  Admitidas: {}", input::TECLAS))?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, _t) = page_ctx(p)?;
     input::press(&conn, &session, &k, timeout)?;
     Ok(EvalValue::Bool(true))
 }
@@ -439,7 +484,7 @@ fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.select(pestaña, selector, opción)")?;
     let sel = args.get(1).map(to_str).ok_or("browser.select: falta el selector")?;
     let opt = args.get(2).map(to_str).ok_or("browser.select: falta la opción")?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
 
     let quiere = serde_json::Value::String(opt.clone()).to_string();
     let cuerpo = format!(r#"
@@ -461,11 +506,11 @@ fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
     return {{ ok: true, value: ops[i].value, text: (ops[i].textContent || '').trim() }};
     "#);
 
-    let ms = espera_ms(args, 3);
+    let ms = espera_de(args, 3, &t);
     let v = evaluate_awaiting(
         &conn, &session,
-        &dom::expr_waiting(&sel, &cuerpo, ms),
-        Duration::from_millis(ms + 5_000), true,
+        &dom::expr_waiting(&sel, &cuerpo, ms, &t),
+        Duration::from_millis(ms + t.cdp_margin_ms), true,
     )?;
     let _ = timeout;
 
@@ -491,22 +536,23 @@ fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
 /// Se pregunta por `readyState` en vez de esperar el evento de carga porque el
 /// evento puede haber pasado ya antes de que nos adjuntáramos, y entonces la
 /// espera no terminaría nunca.
-fn wait_ready(conn: &Conn, session: &str, ms: u64) -> Result<(), String> {
+fn wait_ready(conn: &Conn, session: &str, ms: u64, t: &Tuning) -> Result<(), String> {
+    let reintento = t.retry_ms;
     let js = format!(r#"(() => {{
       return new Promise((resolve) => {{
         if (document.readyState === 'complete') return resolve(true);
         const limite = Date.now() + {ms};
-        const t = setInterval(() => {{
+        const iv = setInterval(() => {{
           if (document.readyState === 'complete' || Date.now() >= limite) {{
-            clearInterval(t); resolve(true);
+            clearInterval(iv); resolve(true);
           }}
-        }}, 30);
+        }}, {reintento});
       }});
     }})()"#);
     conn.call(
         "Runtime.evaluate",
         serde_json::json!({ "expression": js, "returnByValue": true, "awaitPromise": true }),
-        Some(session), Duration::from_millis(ms + 5_000),
+        Some(session), Duration::from_millis(ms + t.cdp_margin_ms),
     )?;
     Ok(())
 }
@@ -519,7 +565,7 @@ fn wait_ready(conn: &Conn, session: &str, ms: u64) -> Result<(), String> {
 /// tiene ninguna llamada tuya a la que engancharse.
 fn do_dialogs(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.dialogs(pestaña, política)")?;
-    let (conn, session, _) = page_ctx(p)?;
+    let (conn, session, _to, _t) = page_ctx(p)?;
 
     let pol = args.get(1).map(to_str);
     match pol.as_deref() {
@@ -549,7 +595,7 @@ fn do_dialogs(args: &[EvalValue]) -> Result<EvalValue, String> {
 fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.click_opens(pestaña, selector)")?;
     let sel = args.get(1).map(to_str).ok_or("browser.click_opens: falta el selector")?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
     let browser = match handles().lock().unwrap().get(&p) {
         Some(Handle::Page(ps)) => ps.browser,
         _ => return Err(format!("browser.click_opens: la pestaña {p} no existe")),
@@ -562,9 +608,9 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
     let marca = conn.event_mark();
 
     input::click(&conn, &session, &sel, "left", 1,
-                 espera_ms(args, 2), force_de(args, 2), timeout)?;
+                 espera_de(args, 2, &t), force_de(args, 2), &t, timeout)?;
 
-    let ms = espera_ms(args, 2);
+    let ms = espera_de(args, 2, &t);
     let ev = conn.wait_event("Target.targetCreated", None, marca, Duration::from_millis(ms))?
         .filter(|e| e.params.get("targetInfo")
             .and_then(|t| t.get("type")).and_then(|t| t.as_str()) == Some("page"))
@@ -589,7 +635,7 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
     // Nos enganchamos en `targetCreated`, que ocurre antes de que la pestaña
     // tenga contenido. Sin esperar a que termine de cargar, el primer `title`
     // o `text` sobre ella devolvería vacío y parecería que la página está mal.
-    wait_ready(&conn, &nueva_ses, ms)?;
+    wait_ready(&conn, &nueva_ses, ms, &t)?;
 
     let id = new_id();
     let mut reg = handles().lock().unwrap();
@@ -607,9 +653,9 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
 fn do_wait(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.wait(pestaña, selector, ms?)")?;
     let sel = args.get(1).map(to_str).ok_or("browser.wait: falta el selector")?;
-    let (conn, session, _) = page_ctx(p)?;
-    let ms = espera_ms(args, 2);
-    if !dom::wait_for(&conn, &session, &sel, ms)? {
+    let (conn, session, _to, t) = page_ctx(p)?;
+    let ms = espera_de(args, 2, &t);
+    if !dom::wait_for(&conn, &session, &sel, ms, &t)? {
         return Err(format!("browser.wait: '{sel}' no apareció en {ms} ms"));
     }
     Ok(EvalValue::Bool(true))
@@ -627,13 +673,13 @@ fn query(args: &[EvalValue], quien: &str, espera: Espera, cuerpo: &str) -> Resul
     let p = arg_handle(args, 0, &format!("{quien}(pestaña, selector)"))?;
     let sel = args.get(1).map(to_str)
         .ok_or_else(|| format!("{quien}(pestaña, selector): falta el selector"))?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
 
     let (js, limite) = match espera {
-        Espera::No => (dom::expr(&sel, cuerpo), timeout),
+        Espera::No => (dom::expr(&sel, cuerpo, &t), timeout),
         Espera::Si => {
-            let ms = espera_ms(args, 2);
-            (dom::expr_waiting(&sel, cuerpo, ms), Duration::from_millis(ms + 5_000))
+            let ms = espera_de(args, 2, &t);
+            (dom::expr_waiting(&sel, cuerpo, ms, &t), Duration::from_millis(ms + t.cdp_margin_ms))
         }
     };
     evaluate_awaiting(&conn, &session, &js, limite, espera == Espera::Si)
@@ -643,18 +689,18 @@ fn do_attr(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.attr(pestaña, selector, atributo)")?;
     let sel = args.get(1).map(to_str).ok_or("browser.attr: falta el selector")?;
     let at  = args.get(2).map(to_str).ok_or("browser.attr: falta el nombre del atributo")?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
 
     // El nombre del atributo también se serializa: puede traer comillas.
     let a = serde_json::Value::String(at).to_string();
     let cuerpo = format!("const e = __find(sel); return e ? e.getAttribute({a}) : null;");
 
-    let ms = espera_ms(args, 3);
+    let ms = espera_de(args, 3, &t);
     let _ = timeout;
     evaluate_awaiting(
         &conn, &session,
-        &dom::expr_waiting(&sel, &cuerpo, ms),
-        Duration::from_millis(ms + 5_000),
+        &dom::expr_waiting(&sel, &cuerpo, ms, &t),
+        Duration::from_millis(ms + t.cdp_margin_ms),
         true,
     )
 }
@@ -665,7 +711,7 @@ fn do_screenshot(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.screenshot(pestaña, ruta)")?;
     let ruta = args.get(1).map(to_str)
         .ok_or("browser.screenshot(pestaña, ruta): falta la ruta")?;
-    let (conn, session, timeout) = page_ctx(p)?;
+    let (conn, session, timeout, _t) = page_ctx(p)?;
 
     let r = conn.call(
         "Page.captureScreenshot",
@@ -736,14 +782,14 @@ fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
                 for p in &b.pages { reg.remove(p); }
             }
             let _ = b.conn.call("Browser.close", serde_json::json!({}), None,
-                                Duration::from_secs(2));
+                                Duration::from_millis(b.tuning.close_ms));
             b.conn.close();
             // `Browser.close` es una petición amable; si no la atendió, se
             // termina el proceso a mano para no dejarlo huérfano.
             let _ = b.proc.kill();
             let _ = b.proc.wait();
             if b.temporal {
-                remove_profile(&b.user_data);
+                remove_profile(&b.user_data, b.tuning.cleanup_tries);
             }
             Ok(EvalValue::Bool(true))
         }
@@ -756,8 +802,8 @@ fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
 /// GPU, red) que tardan un instante en soltar los archivos del perfil. En
 /// Windows eso hace fallar el borrado inmediato, y un intento único dejaba
 /// varios MB por sesión tirados en el temporal.
-fn remove_profile(dir: &std::path::Path) {
-    for intento in 0..12 {
+fn remove_profile(dir: &std::path::Path, intentos: u32) {
+    for intento in 0..intentos.max(1) as u64 {
         if !dir.exists() || std::fs::remove_dir_all(dir).is_ok() { return; }
         std::thread::sleep(Duration::from_millis(50 + intento * 25));
     }

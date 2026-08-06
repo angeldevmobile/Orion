@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use super::cdp::Conn;
 use super::dom;
+use super::launch::Tuning;
 pub use super::dom::Force;
 
 /// Teclas con nombre. La lista es corta a propósito: cubre lo que se usa de
@@ -62,12 +63,12 @@ fn mouse(
 /// Clic sobre un selector. `veces` es 1 o 2 (doble clic).
 pub fn click(
     conn: &Conn, session: &str, sel: &str,
-    boton: &str, veces: i64, espera_ms: u64, force: Force, timeout: Duration,
+    boton: &str, veces: i64, espera_ms: u64, force: Force, t: &Tuning, timeout: Duration,
 ) -> Result<(), String> {
     // La espera está dentro de `box_for_click`: espera a que el elemento sea
     // accionable, no solo a que exista. Un scraper que exige acordarse de poner
     // un `wait` es un scraper que falla de forma intermitente.
-    let b = dom::box_for_click(conn, session, sel, espera_ms, force)
+    let b = dom::box_for_click(conn, session, sel, espera_ms, force, t)
         .map_err(|e| format!("browser.click {e}"))?;
 
     // Un movimiento previo dispara los `hover` de los que dependen muchos menús
@@ -89,30 +90,34 @@ pub fn click(
 
 /// Deja el puntero sobre un elemento.
 pub fn hover(
-    conn: &Conn, session: &str, sel: &str, espera_ms: u64, timeout: Duration,
+    conn: &Conn, session: &str, sel: &str, espera_ms: u64, t: &Tuning, timeout: Duration,
 ) -> Result<(), String> {
-    let b = dom::box_for_click(conn, session, sel, espera_ms, Force::No)
+    let b = dom::box_for_click(conn, session, sel, espera_ms, Force::No, t)
         .map_err(|e| format!("browser.hover {e}"))?;
     mouse(conn, session, "mouseMoved", b.x, b.y, "none", 0, timeout)
 }
 
 /// Arrastra de un elemento a otro con eventos reales de ratón.
 pub fn drag(
-    conn: &Conn, session: &str, desde: &str, hasta: &str, espera_ms: u64, timeout: Duration,
+    conn: &Conn, session: &str, desde: &str, hasta: &str, espera_ms: u64,
+    t: &Tuning, timeout: Duration,
 ) -> Result<(), String> {
-    let a = dom::box_for_click(conn, session, desde, espera_ms, Force::No)
+    let a = dom::box_for_click(conn, session, desde, espera_ms, Force::No, t)
         .map_err(|e| format!("browser.drag origen {e}"))?;
-    let z = dom::box_for_click(conn, session, hasta, espera_ms, Force::No)
+    let z = dom::box_for_click(conn, session, hasta, espera_ms, Force::No, t)
         .map_err(|e| format!("browser.drag destino {e}"))?;
 
     mouse(conn, session, "mouseMoved",   a.x, a.y, "none", 0, timeout)?;
     mouse(conn, session, "mousePressed", a.x, a.y, "left", 1, timeout)?;
     // Pasos intermedios: un salto directo no dispara los `dragover` en los que
     // se apoyan las librerías de arrastrar y soltar.
-    for i in 1..=10 {
-        let t = i as f64 / 10.0;
+    // Cuántos pasos hacen falta depende del sitio, así que es decisión del
+    // programa y no una constante escondida.
+    let pasos = t.drag_steps.max(1);
+    for i in 1..=pasos {
+        let f = i as f64 / pasos as f64;
         mouse(conn, session, "mouseMoved",
-              a.x + (z.x - a.x) * t, a.y + (z.y - a.y) * t, "left", 1, timeout)?;
+              a.x + (z.x - a.x) * f, a.y + (z.y - a.y) * f, "left", 1, timeout)?;
     }
     mouse(conn, session, "mouseReleased", z.x, z.y, "left", 1, timeout)
 }
@@ -139,11 +144,11 @@ pub fn scroll(
 /// `value` puesto a mano queda ignorado al enviar el formulario.
 pub fn type_text(
     conn: &Conn, session: &str, sel: &str, texto: &str,
-    limpiar: bool, espera_ms: u64, force: Force, timeout: Duration,
+    limpiar: bool, espera_ms: u64, force: Force, t: &Tuning, timeout: Duration,
 ) -> Result<(), String> {
     // Enfocar con un clic real: hay campos que solo se activan al recibirlo.
     // El clic ya espera a que el campo sea accionable.
-    click(conn, session, sel, "left", 1, espera_ms, force, timeout)
+    click(conn, session, sel, "left", 1, espera_ms, force, t, timeout)
         .map_err(|e| e.replace("browser.click", "browser.type"))?;
 
     if limpiar {
@@ -154,7 +159,7 @@ pub fn type_text(
         "#;
         conn.call(
             "Runtime.evaluate",
-            serde_json::json!({ "expression": dom::expr(sel, cuerpo), "returnByValue": true }),
+            serde_json::json!({ "expression": dom::expr(sel, cuerpo, t), "returnByValue": true }),
             Some(session), timeout,
         )?;
         press(conn, session, "delete", timeout)?;

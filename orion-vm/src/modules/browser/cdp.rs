@@ -37,15 +37,32 @@ use tungstenite::{Message, WebSocket};
 
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
-/// Tope de eventos retenidos. Un navegador activo emite miles por minuto y
-/// nadie los consume todos: sin tope, una sesión larga se come la RAM en un
-/// historial que no sirve para nada. Se descartan los más antiguos.
-const MAX_EVENTS: usize = 512;
+/// Límites de recursos de la conexión.
+///
+/// Llegan desde `open()` en vez de estar fijados aquí: el historial de eventos
+/// es RAM y el sondeo es CPU, y las dos cosas las nota quien ejecuta.
+#[derive(Debug, Clone, Copy)]
+pub struct Limits {
+    /// Tope de eventos retenidos. Un navegador activo emite miles por minuto y
+    /// nadie los consume todos: sin tope, una sesión larga se come la RAM en un
+    /// historial que no sirve para nada. Se descartan los más antiguos.
+    pub max_events: usize,
+    /// Techo del sondeo del hilo lector. Parte de cero mientras hay peticiones
+    /// en vuelo (para no añadir latencia) y se relaja hasta aquí en reposo.
+    pub idle_poll:  Duration,
+    /// Plazo para que un envío por el socket progrese.
+    pub send:       Duration,
+}
 
-/// Sondeo del hilo lector: parte de cero mientras hay peticiones en vuelo (para
-/// no añadir latencia a la respuesta) y se relaja hasta este techo cuando no
-/// hay nada esperando, para no calentar la CPU en vacío.
-const IDLE_POLL_MAX: Duration = Duration::from_millis(5);
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            max_events: 512,
+            idle_poll:  Duration::from_millis(5),
+            send:       Duration::from_secs(5),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Event {
@@ -70,6 +87,7 @@ pub struct Conn {
     /// Política de diálogos por pestaña. Vive fuera de `state` para que el
     /// hilo lector pueda consultarla sin tomar el candado del estado.
     dialogs: Mutex<HashMap<String, String>>,
+    limits:  Limits,
     cv:      Condvar,
     next_id: AtomicU64,
     pending: AtomicU64,
@@ -78,7 +96,7 @@ pub struct Conn {
 
 impl Conn {
     /// Conecta al endpoint CDP y arranca el hilo lector.
-    pub fn connect(url: &str) -> Result<Arc<Conn>, String> {
+    pub fn connect(url: &str, limits: Limits) -> Result<Arc<Conn>, String> {
         let (mut socket, _) = tungstenite::connect(url)
             .map_err(|e| format!("no se pudo conectar a CDP en {url}: {e}"))?;
 
@@ -96,6 +114,7 @@ impl Conn {
             socket:  Mutex::new(socket),
             state:   Mutex::new(State::default()),
             dialogs: Mutex::new(HashMap::new()),
+            limits,
             cv:      Condvar::new(),
             next_id: AtomicU64::new(1),
             pending: AtomicU64::new(0),
@@ -140,7 +159,7 @@ impl Conn {
                         espera = Duration::from_millis(0);
                     } else {
                         if !espera.is_zero() { thread::sleep(espera); }
-                        espera = (espera + Duration::from_millis(1)).min(IDLE_POLL_MAX);
+                        espera = (espera + Duration::from_millis(1)).min(self.limits.idle_poll);
                     }
                 }
                 Err(e) => {
@@ -223,8 +242,8 @@ impl Conn {
                 params:  v.get("params").cloned().unwrap_or(serde_json::Value::Null),
             };
             st.events.push(ev);
-            if st.events.len() > MAX_EVENTS {
-                let sobran = st.events.len() - MAX_EVENTS;
+            if st.events.len() > self.limits.max_events {
+                let sobran = st.events.len() - self.limits.max_events;
                 st.events.drain(..sobran);
             }
         }
@@ -282,7 +301,7 @@ impl Conn {
         // En un socket no bloqueante el envío puede quedarse a medias; para los
         // mensajes diminutos de CDP contra localhost es rarísimo, pero
         // reintentar es más barato que perseguir un fallo intermitente.
-        let limite = Instant::now() + Duration::from_secs(5);
+        let limite = Instant::now() + self.limits.send;
         loop {
             match sock.send(Message::Text(texto.clone())) {
                 Ok(()) => return Ok(()),
@@ -290,7 +309,7 @@ impl Conn {
                     if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
                 {
                     if Instant::now() > limite {
-                        return Err("CDP: el envío no progresó en 5 s".into());
+                        return Err(format!("CDP: el envío no progresó en {:?}", self.limits.send));
                     }
                     thread::sleep(Duration::from_millis(1));
                 }
@@ -402,6 +421,7 @@ mod tests {
                          None)),
             state:   Mutex::new(State::default()),
             dialogs: Mutex::new(HashMap::new()),
+            limits:  Limits::default(),
             cv:      Condvar::new(),
             next_id: AtomicU64::new(1),
             pending: AtomicU64::new(0),
@@ -470,10 +490,10 @@ mod tests {
     #[test]
     fn el_historial_de_eventos_esta_acotado() {
         let c = conn_de_prueba();
-        for _ in 0..(MAX_EVENTS + 200) {
+        for _ in 0..(Limits::default().max_events + 200) {
             c.dispatch(r#"{"method":"Network.dataReceived","params":{}}"#);
         }
-        assert_eq!(c.state.lock().unwrap().events.len(), MAX_EVENTS);
+        assert_eq!(c.state.lock().unwrap().events.len(), Limits::default().max_events);
     }
 
     #[test]

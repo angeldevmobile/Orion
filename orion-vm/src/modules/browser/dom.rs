@@ -21,6 +21,7 @@
 use std::time::Duration;
 
 use super::cdp::Conn;
+use super::launch::Tuning;
 
 /// Helper JS que se inyecta en cada evaluación.
 ///
@@ -55,7 +56,7 @@ const __docs = () => {
 const __offset = (el) => {
   let dx = 0, dy = 0;
   let doc = el.ownerDocument;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < __PROF; i++) {
     const fr = doc && doc.defaultView && doc.defaultView.frameElement;
     if (!fr) break;
     const r = fr.getBoundingClientRect();
@@ -122,9 +123,10 @@ const __findAll = (sel) => {
 /// comillas: un selector con comillas o barras invertidas rompería la
 /// expresión, y ese es el tipo de fallo que aparece en producción con el
 /// selector raro de un solo sitio.
-pub fn expr(sel: &str, cuerpo: &str) -> String {
+pub fn expr(sel: &str, cuerpo: &str, t: &Tuning) -> String {
     let s = serde_json::Value::String(sel.to_string()).to_string();
-    format!("(() => {{ {FIND_JS}\n const sel = {s};\n {cuerpo} }})()")
+    let prof = t.iframe_depth;
+    format!("(() => {{ const __PROF = {prof};\n {FIND_JS}\n const sel = {s};\n {cuerpo} }})()")
 }
 
 /// Como `expr`, pero reintentando hasta obtener algo o agotar el plazo.
@@ -141,7 +143,8 @@ pub fn expr(sel: &str, cuerpo: &str) -> String {
 ///
 /// Se considera "aún no hay nada" un `null`, un `undefined` o una lista vacía.
 /// El bucle vive en la página, así que sigue siendo una única llamada CDP.
-pub fn expr_waiting(sel: &str, cuerpo: &str, ms: u64) -> String {
+pub fn expr_waiting(sel: &str, cuerpo: &str, ms: u64, t: &Tuning) -> String {
+    let reintento = t.retry_ms;
     let envuelto = format!(r#"
     return new Promise((resolve) => {{
       const limite = Date.now() + {ms};
@@ -149,12 +152,12 @@ pub fn expr_waiting(sel: &str, cuerpo: &str, ms: u64) -> String {
         const v = (() => {{ {cuerpo} }})();
         const vacio = v === null || v === undefined || (Array.isArray(v) && v.length === 0);
         if (!vacio || Date.now() >= limite) return resolve(v);
-        setTimeout(intenta, 50);
+        setTimeout(intenta, {reintento});
       }};
       intenta();
     }});
     "#);
-    expr(sel, &envuelto)
+    expr(sel, &envuelto, t)
 }
 
 /// Espera a que un selector aparezca.
@@ -168,6 +171,7 @@ pub fn wait_for(
     session: &str,
     sel: &str,
     ms: u64,
+    t: &Tuning,
 ) -> Result<bool, String> {
     let cuerpo = format!(r#"
     return new Promise((resolve) => {{
@@ -182,11 +186,11 @@ pub fn wait_for(
 
     // El plazo de CDP tiene que ser mayor que el del JS: si vencieran a la vez,
     // el error sería un timeout de transporte en vez del "no apareció" real.
-    let limite = Duration::from_millis(ms + 5_000);
+    let limite = Duration::from_millis(ms + t.cdp_margin_ms);
     let r = conn.call(
         "Runtime.evaluate",
         serde_json::json!({
-            "expression": expr(sel, &cuerpo),
+            "expression": expr(sel, &cuerpo, t),
             "returnByValue": true,
             "awaitPromise": true,
         }),
@@ -238,15 +242,19 @@ pub fn box_for_click(
     sel: &str,
     ms: u64,
     force: Force,
+    t: &Tuning,
 ) -> Result<Box, String> {
     let forzar = if force == Force::Si { "true" } else { "false" };
+    let inset  = t.hit_inset;
+    let capas  = t.force_layers;
+    let reintento = t.retry_ms;
     let cuerpo = format!(r#"
     // Puntos candidatos dentro del elemento. Probar solo el centro es lo que
     // hacen las demás herramientas, y por eso fallan con una cabecera fija que
     // cubre media mitad de un botón: la otra mitad era perfectamente clicable.
     // Una persona pincharía en la parte visible, y esto hace lo mismo.
     const __puntos = (r) => {{
-      const dx = Math.min(r.width / 4, 24), dy = Math.min(r.height / 4, 24);
+      const dx = Math.min(r.width / 4, {inset}), dy = Math.min(r.height / 4, {inset});
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
       return [
         [cx, cy],
@@ -293,7 +301,7 @@ pub fn box_for_click(
           }}
         }}
 
-        if (Date.now() < limite) return setTimeout(intenta, 50);
+        if (Date.now() < limite) return setTimeout(intenta, {reintento});
 
         // Se agotó el plazo. Sin `force` se informa y se acabó.
         if (!{forzar} || !el) return resolve({{ ok: false, why: why }});
@@ -307,7 +315,7 @@ pub fn box_for_click(
         const [x, y] = cands[0];
         const [ox, oy] = __offset(el);
         const tapados = [];
-        for (let i = 0; i < 12; i++) {{
+        for (let i = 0; i < {capas}; i++) {{
           const enc = __enPunto(el, x, y);
           if (__suyo(el, enc) || !enc) break;
           // El valor original se guarda en el propio elemento: así se restaura
@@ -327,11 +335,11 @@ pub fn box_for_click(
     }});
     "#);
 
-    let limite = Duration::from_millis(ms + 5_000);
+    let limite = Duration::from_millis(ms + t.cdp_margin_ms);
     let r = conn.call(
         "Runtime.evaluate",
         serde_json::json!({
-            "expression": expr(sel, &cuerpo),
+            "expression": expr(sel, &cuerpo, t),
             "returnByValue": true,
             "awaitPromise": true,
         }),
@@ -385,7 +393,7 @@ mod tests {
     #[test]
     fn el_selector_se_inyecta_escapado() {
         // Un selector con comillas rompería la expresión si se concatenara.
-        let e = expr(r#"div[title="hola \" mundo"]"#, "return 1;");
+        let e = expr(r#"div[title="hola \" mundo"]"#, "return 1;", &Tuning::default());
         assert!(e.contains(r#"\"hola"#) || e.contains(r#"\\\""#),
                 "el selector no se escapó: {e}");
         // Y debe seguir siendo una expresión JS cerrada.
@@ -427,7 +435,7 @@ mod tests {
         let cuerpo = format!("{}", 1234);
         assert!(!cuerpo.is_empty());
         // El cuerpo real se construye en wait_for; se comprueba su forma aquí.
-        let js = expr("x", "return new Promise((resolve) => { const obs = new MutationObserver(() => {}); });");
+        let js = expr("x", "return new Promise((resolve) => { const obs = new MutationObserver(() => {}); });", &Tuning::default());
         assert!(js.contains("MutationObserver"));
     }
 }
