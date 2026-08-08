@@ -3,6 +3,64 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## 2026-08-08
+
+### Arreglado
+- **`orion build` — las funciones no veían las variables globales (P0)**: el
+  compilador nativo daba a cada función únicamente variables locales de
+  Cranelift, así que un nombre definido fuera de ella llegaba como `null`. Solo
+  afectaba al **ejecutable compilado**; `orion run` nunca estuvo mal, ni
+  siquiera con miles de llamadas calientes, porque ahí manda la VM.
+
+  Lo peligroso era la forma del fallo. A veces se caía y a veces no:
+
+  ```orion
+  IVA = 0.21
+  fn con_iva(base) { return base * (1 + IVA) }
+  show con_iva(100)         -- orion run: 121   |   .exe: otro resultado
+  ```
+
+  Y como `use "modulo"` define un global, **cualquier llamada a un módulo dentro
+  de una función** moría con `[JIT] CallMethod: tipo no soportado (tag=0)`, un
+  mensaje que no apuntaba a la causa: el receptor era el `null` del global que
+  no se encontró. En la práctica ningún programa real compilaba, porque todos
+  envuelven su lógica en funciones.
+
+  Ahora el runtime del JIT tiene una tabla de globales: el nivel superior
+  publica al asignar (y al hacer `use`), y una función lee de ahí los nombres
+  que no son suyos. La regla de qué es local se conserva igual que en la VM —
+  parámetros, lo que la función asigna, y los campos del shape en el cuerpo de
+  un `act`—, así que asignar dentro sigue creando una variable propia sin tocar
+  el global. La tabla es de proceso, no por hilo, para que una tarea lanzada con
+  `spawn` vea lo mismo que el resto.
+
+- **`orion build` — un programa con `fn main()` no compilaba nativo**: el objeto
+  generado comparte espacio de nombres con el `main` de C que arranca el
+  ejecutable, así que el símbolo se declaraba dos veces con firmas distintas
+  (`i64` contra `i32`), la compilación nativa se abortaba y caía al modo
+  bytecode embebido. El binario funcionaba, pero **ninguna aplicación real
+  llegaba a compilarse nativa**, porque `fn main()` es la forma natural de
+  escribirlas. Los símbolos de usuario ahora se prefijan en AOT; el nombre de
+  Orion se conserva para el registro en tiempo de ejecución.
+
+- **`orion build` — un diccionario salía con las claves invertidas**: los pares
+  de un literal salen de la pila al revés que en el código, y la VM los voltea
+  para conservar el orden de escritura. El JIT decía replicar al intérprete y se
+  saltaba justo ese paso, así que `{zeta: 1, alfa: 2}` se convertía en
+  `{alfa: 2, zeta: 1}` **solo en el ejecutable compilado**. De ese orden dependen
+  cosas que se ven: el JSON generado, las columnas de un CSV, lo que imprime un
+  `show` — y el esquema de `browser.extract`, que es un literal y hacía salir los
+  registros con los campos al revés. Dos tests nuevos en `differential.rs`.
+
+### Tests
+- `aot_native.rs`: seis casos nuevos que cubren el hueco por el que se colaron
+  los dos defectos anteriores — un global leído dentro de una función (número,
+  cadena y namespace de módulo), que una asignación local no pise el global, que
+  el valor visto sea el del momento de la llamada, y que `fn main()` compile
+  nativo. La batería anterior solo probaba programas autocontenidos
+  (aritmética, recursión, shapes, cadenas), y por eso nadie se enteró.
+
+
 ## 2026-07-15
 
 ### Añadido

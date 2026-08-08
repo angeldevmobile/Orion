@@ -42,6 +42,10 @@ struct RuntimeIds {
     read_input:         FuncId,
     read_input_choices: FuncId,
     read_file:          FuncId,
+    // Globales: el nivel superior publica al asignar, las funciones leen lo que
+    // no es suyo. Sin esto una función no ve nada definido fuera de ella.
+    store_global:       FuncId,
+    load_global:        FuncId,
     write_file:         FuncId,
     read_env:           FuncId,
     use_module:         FuncId,
@@ -258,6 +262,8 @@ impl CodeGen<JITModule> {
         sym!("rt_write_file",              super::runtime::rt_write_file);
         sym!("rt_read_env",                super::runtime::rt_read_env);
         sym!("rt_use_module",              super::runtime::rt_use_module);
+        sym!("rt_store_global",            super::runtime::rt_store_global);
+        sym!("rt_load_global",             super::runtime::rt_load_global);
         sym!("rt_create_instance_and_init",super::runtime_oop::rt_create_instance_and_init);
         sym!("rt_get_attr",                super::runtime_oop::rt_get_attr);
         sym!("rt_set_attr",                super::runtime_oop::rt_set_attr);
@@ -457,6 +463,10 @@ impl<M: Module> CodeGen<M> {
         let write_file         = decl!("rt_write_file",              [i, i, i], []);
         let read_env           = decl!("rt_read_env",                [i, i],    [i]);
         let use_module         = decl!("rt_use_module",              [i],       [i]);
+        // Globales: el nivel superior publica, las funciones leen. Ver el
+        // comentario de `rt_store_global` en runtime.rs.
+        let store_global       = decl!("rt_store_global",            [i, i],    []);
+        let load_global        = decl!("rt_load_global",             [i],       [i]);
         let create_instance    = decl!("rt_create_instance_and_init",[i, i],    [i]);
         let get_attr           = decl!("rt_get_attr",                [i, i],    [i]);
         let set_attr           = decl!("rt_set_attr",                [i, i, i], []);
@@ -495,6 +505,7 @@ impl<M: Module> CodeGen<M> {
             push_arg, make_list_n, make_dict_n, get_index, set_index,
             set_error, take_error, raise_exit,
             read_input, read_input_choices, read_file, write_file, read_env, use_module,
+            store_global, load_global,
             create_instance, get_attr, set_attr, is_instance,
             get_self, push_self, pop_self, get_self_field, set_self_field, call_method,
             call_builtin,
@@ -578,13 +589,26 @@ impl<M: Module> CodeGen<M> {
         }
 
         // 1. Declarar funciones de usuario
+        //
+        // En AOT el símbolo lleva prefijo. El objeto que se genera comparte
+        // espacio de nombres con el `main` de C que arranca el ejecutable, así
+        // que un programa con `fn main()` —que son casi todos, porque es la
+        // forma natural de escribirlos— chocaba: el mismo símbolo declarado dos
+        // veces con firmas distintas (i64 contra i32). El compilador lo
+        // detectaba y se pasaba al modo bytecode, así que ninguna aplicación
+        // real llegaba a compilarse nativa.
+        //
+        // El nombre de Orion se conserva en `fn_cache` y en el registro en
+        // tiempo de ejecución; lo que cambia es solo la etiqueta del símbolo,
+        // y las llamadas se resuelven por `FuncId`.
         let fn_names: Vec<String> = bc.functions.keys().cloned().collect();
         for name in &fn_names {
             let n_params = bc.functions[name].params.len();
             let mut sig = self.module.make_signature();
             for _ in 0..n_params { sig.params.push(AbiParam::new(types::I64)); }
             sig.returns.push(AbiParam::new(types::I64));
-            let fid = self.module.declare_function(name, Linkage::Local, &sig)
+            let simbolo = if self.aot { format!("orion_fn_{name}") } else { name.clone() };
+            let fid = self.module.declare_function(&simbolo, Linkage::Local, &sig)
                 .map_err(|e| e.to_string())?;
             self.fn_cache.insert(name.clone(), fid);
         }
@@ -738,6 +762,8 @@ impl<M: Module> CodeGen<M> {
         let write_file_ref         = self.module.declare_func_in_func(rt.write_file,         &mut ctx.func);
         let read_env_ref           = self.module.declare_func_in_func(rt.read_env,           &mut ctx.func);
         let use_module_ref         = self.module.declare_func_in_func(rt.use_module,         &mut ctx.func);
+        let store_global_ref       = self.module.declare_func_in_func(rt.store_global,       &mut ctx.func);
+        let load_global_ref        = self.module.declare_func_in_func(rt.load_global,        &mut ctx.func);
         let create_instance_ref    = self.module.declare_func_in_func(rt.create_instance,    &mut ctx.func);
         let get_attr_ref           = self.module.declare_func_in_func(rt.get_attr,           &mut ctx.func);
         let set_attr_ref           = self.module.declare_func_in_func(rt.set_attr,           &mut ctx.func);
@@ -806,6 +832,30 @@ impl<M: Module> CodeGen<M> {
         for p in params {
             if !var_names.contains(p) { var_names.push(p.clone()); }
         }
+
+        // Qué nombres son de ESTA función y cuáles vienen de fuera.
+        //
+        // Local es lo que la función asigna o recibe como parámetro; todo lo
+        // demás que lea es un global. Es la misma regla que aplica la VM —y la
+        // misma que usa Python—, así que el camino compilado no estrena una
+        // semántica propia: asignar dentro crea una variable de la función, y
+        // leer un nombre que no es suyo mira fuera.
+        //
+        // En `main` no hace falta distinguir: ahí todo es global por
+        // definición, y sus asignaciones se publican para que las funciones las
+        // vean.
+        // En el cuerpo de un `act`, los campos del shape también son suyos:
+        // llegan inicializados desde `self` aunque el cuerpo no los asigne, y
+        // mandarlos a la tabla de globales los convertiría en null.
+        let locales: HashSet<String> = instructions.iter()
+            .filter_map(|i| match i {
+                Instruction::StoreVar(n) | Instruction::StoreConst(n) => Some(n.clone()),
+                Instruction::UseModule(_, alias, _) => Some(alias.clone()),
+                _ => None,
+            })
+            .chain(params.iter().cloned())
+            .chain(field_names.unwrap_or(&[]).iter().cloned())
+            .collect();
 
         // Declarar variables Cranelift (todas i64 = puntero a OrionVal)
         let mut var_table: HashMap<String, Variable> = HashMap::new();
@@ -933,14 +983,34 @@ impl<M: Module> CodeGen<M> {
 
                 //    Variables                                                 
                 Instruction::LoadVar(name) => {
-                    let &var = var_table.get(name)
-                        .ok_or_else(|| format!("JIT: variable '{name}' no declarada"))?;
-                    stack.push(builder.use_var(var));
+                    // Un nombre que la función no asigna ni recibe viene de
+                    // fuera: se busca en la tabla de globales en vez de leer una
+                    // variable local que nadie ha inicializado. Antes esto
+                    // devolvía null en silencio, y con `use "fs"` —que también
+                    // define un global— el null acababa siendo el receptor de
+                    // `fs.cwd()`.
+                    if !is_main && !locales.contains(name) {
+                        let name_ptr = self.cstr_ptr(&mut builder, name);
+                        let call = builder.ins().call(load_global_ref, &[name_ptr]);
+                        stack.push(builder.inst_results(call)[0]);
+                    } else {
+                        let &var = var_table.get(name)
+                            .ok_or_else(|| format!("JIT: variable '{name}' no declarada"))?;
+                        stack.push(builder.use_var(var));
+                    }
                 }
                 Instruction::StoreVar(name) | Instruction::StoreConst(name) => {
                     let val = stack.pop().ok_or("StoreVar: pila vacía")?;
                     if let Some(&var) = var_table.get(name) {
                         builder.def_var(var, val);
+                    }
+                    // Lo que se asigna en el nivel superior queda visible para
+                    // las funciones. Se publica en cada asignación y no una vez
+                    // al final porque una función puede llamarse en medio del
+                    // programa, cuando el valor todavía va por la mitad.
+                    if is_main {
+                        let name_ptr = self.cstr_ptr(&mut builder, name);
+                        builder.ins().call(store_global_ref, &[name_ptr, val]);
                     }
                     // JIT-5: si es campo de un act, sincronizar al self activo
                     if let Some(fields) = field_names {
@@ -1133,12 +1203,25 @@ impl<M: Module> CodeGen<M> {
                 }
                 Instruction::MakeDict(n_count) => {
                     let n = *n_count as usize;
-                    // El stack tiene [key0, val0, key1, val1, ...] (bottom→top).
-                    // El intérprete hace: pop val, pop key, insert (n veces).
-                    // Replicamos: por cada par, pop val luego pop key, push ambos al buffer.
+                    // El stack tiene [key0, val0, key1, val1, ...] (bottom→top),
+                    // así que sacar de arriba da los pares **del revés**: el
+                    // último literal primero.
+                    //
+                    // Los pares se recogen y se emiten al derecho, que es lo
+                    // mismo que hace la VM (`pairs.into_iter().rev()`). Sin
+                    // esto, un diccionario salía con las claves invertidas solo
+                    // en el ejecutable compilado: `{zeta, alfa}` se convertía en
+                    // `{alfa, zeta}`. Los dicts de Orion conservan el orden de
+                    // escritura, y de ese orden dependen cosas que se ven — el
+                    // JSON que se genera, las columnas de un CSV, lo que
+                    // imprime un `show`.
+                    let mut pares = Vec::with_capacity(n);
                     for _ in 0..n {
                         let val = stack.pop().ok_or("MakeDict: pila vacía (val)")?;
                         let key = stack.pop().ok_or("MakeDict: pila vacía (key)")?;
+                        pares.push((val, key));
+                    }
+                    for (val, key) in pares.into_iter().rev() {
                         builder.ins().call(push_arg_ref, &[val]);
                         builder.ins().call(push_arg_ref, &[key]);
                     }
@@ -1242,6 +1325,14 @@ impl<M: Module> CodeGen<M> {
                     let path_ptr = self.cstr_ptr(&mut builder, path);
                     let call = builder.ins().call(use_module_ref, &[path_ptr]);
                     let module_val = builder.inst_results(call)[0];
+                    // El namespace del módulo también es un global: sin esto,
+                    // `use "fs"` arriba y `fs.cwd()` dentro de una función no se
+                    // encuentran, que es el caso que más duele porque casi todo
+                    // programa real lo hace.
+                    if is_main {
+                        let alias_ptr = self.cstr_ptr(&mut builder, alias);
+                        builder.ins().call(store_global_ref, &[alias_ptr, module_val]);
+                    }
                     if let Some(&var) = var_table.get(alias) {
                         builder.def_var(var, module_val);
                     }

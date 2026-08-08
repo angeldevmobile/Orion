@@ -107,6 +107,11 @@ pub struct Tuning {
     /// Intentos de borrar el perfil temporal al cerrar. En Windows los procesos
     /// hijos del navegador lo retienen unos instantes.
     pub cleanup_tries: u32,
+    /// Bytes que el navegador guarda del cuerpo de UNA respuesta, para poder
+    /// leerlo después con `capture`. Un listado grande necesita más sitio.
+    pub body_buffer:   u64,
+    /// Bytes que guarda entre todas las respuestas de la pestaña.
+    pub total_buffer:  u64,
     /// Edad, en minutos, a partir de la cual un perfil temporal abandonado se
     /// considera basura y se barre al abrir el siguiente navegador. Cero
     /// desactiva el barrido.
@@ -129,6 +134,8 @@ impl Default for Tuning {
             close_ms:      2_000,
             send_ms:       5_000,
             cleanup_tries: 12,
+            body_buffer:   10 * 1024 * 1024,
+            total_buffer:  50 * 1024 * 1024,
             stale_profile_mins: 60,
         }
     }

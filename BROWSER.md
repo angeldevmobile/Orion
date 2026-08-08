@@ -18,12 +18,12 @@ with b = web.open() {
 cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
 > **Estado**: transporte, arranque, navegación, interacción, formularios,
-> tablas, modales, ventanas, extracción, archivos, sesión y estabilidad
-> verificados de punta a punta (61 tests e2e en
+> tablas, modales, ventanas, extracción, archivos, sesión, estabilidad y
+> captura de red verificados de punta a punta (65 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Medido contra
-> Selenium y Playwright en 15.3, con la metodología en
+> Selenium y Playwright en 16.3, con la metodología en
 > [`bench/web/README.md`](bench/web/README.md).
 
 ## 1. Arranque
@@ -364,6 +364,7 @@ en vez de fallar en silencio: hay que marcar otro del grupo.
 | `web.attr(pestaña, sel, atributo, ms?)` | sí |
 | `web.value(pestaña, sel)` | sí — lo que el campo contiene AHORA, ver 5.1 |
 | `web.table(pestaña, sel, opts?)` | sí — una `<table>` entera, ver 5.2 |
+| `web.watch` + `web.capture` | el JSON que la página pide a su API, ver 12 |
 | `web.exists(pestaña, sel)` | **no** |
 | `web.count(pestaña, sel)` | **no** |
 | `web.visible(pestaña, sel)` | **no** |
@@ -841,13 +842,113 @@ eventos —que está acotado— haya conservado los que hacían falta.
 El límite honesto: hay páginas que sondean el servidor para siempre y nunca se
 quedan quietas. En esas, el error lo dice y hay que esperar por un selector.
 
-## 11. Captura
+## 11. Capturas de pantalla
 
 `web.screenshot(pestaña, ruta)` → escribe un PNG y devuelve la ruta.
 
 Requiere `images: yes` en `open` si quieres que salgan las imágenes.
 
-## 12. JavaScript
+## 12. Captura de red
+
+Casi todo sitio moderno pinta sus listados con JavaScript a partir de un JSON
+que él mismo se descarga. Un scraper clásico espera a que ese JSON se convierta
+en HTML y luego **deshace el trabajo**: busca `div`s, quita etiquetas,
+reconstruye números que ya venían siendo números. Y se rompe el día que alguien
+renombra una clase de CSS.
+
+`watch` + `capture` leen la fuente.
+
+```orion
+web.watch(p, "/api/productos")     -- 1. armar la escucha
+web.click(p, "#cargar")            -- 2. provocar la petición
+r = web.capture(p)                 -- 3. recoger, ya parseado
+```
+
+Son dos llamadas y no una porque hay que armar **antes**: si la escucha se
+encendiera al recoger, la petición ya habría pasado y no quedaría nada que leer.
+
+### 12.1 Qué se gana
+
+En el ejemplo de los tests, la página pinta el nombre de cada producto. Su API
+devuelve esto:
+
+```
+{id: 1, nombre: Teclado, precio: 49.9, stock: 12, margen: 0.31, proveedor: ACME}
+```
+
+`stock`, `margen` y `proveedor` **no llegan al HTML**. No hay selector que los
+saque, porque no están. Y los que sí están llegan ya tipados: `49.9` es un
+número, no `"49,90 EUR"` que haya que convertir.
+
+| | del HTML | de la API |
+|---|---|---|
+| Campos | los que el diseño enseñe | todos |
+| Tipos | texto, a convertir | ya tipados |
+| Se rompe cuando… | cambia una clase de CSS | cambia el contrato de la API |
+
+Lo segundo pasa mucho menos: una clase de CSS la toca cualquier rediseño, y el
+contrato de una API lo defiende el propio equipo del sitio.
+
+### 12.2 `web.watch(pestaña, patrón)`
+
+Sin `*`, el patrón es "contiene" — que es lo que casi siempre se quiere y lo que
+uno escribe primero:
+
+```orion
+web.watch(p, "/api/")
+```
+
+Con `*`, es un comodín que cubre cualquier trozo, para cuando hace falta afinar:
+
+```orion
+web.watch(p, "*/v2/pedidos?*")
+web.watch(p, "*.json")
+```
+
+No son expresiones regulares a propósito: una URL lleva `?`, `.` y `+`, que en
+una regex significan otra cosa, y el patrón obvio daría resultados
+sorprendentes. Aquí esos signos son literales.
+
+El dominio de red del navegador solo se enciende al llamar a `watch`: con él
+puesto se emiten varios eventos por petición, y una página con cien recursos
+serían cientos de mensajes que nadie va a consumir.
+
+### 12.3 `web.capture(pestaña, opts?)` → lista
+
+Cada elemento es `{url, status, json}`. Si el cuerpo no era JSON, `json` viene
+nulo y el texto crudo va en `text`.
+
+```orion
+r = web.capture(p)
+for resp in r {
+    show(resp["url"] + " -> " + str(len(resp["json"]["items"])))
+}
+```
+
+**Espera a que llegue algo que case** en vez de mirar una vez y volver vacía. La
+petición sale después de la acción que la provoca, y una lista vacía convertiría
+un problema de tiempo en "este sitio no usa API" — una conclusión falsa y difícil
+de deshacer. Si de verdad no casa nada, devuelve vacío al agotar el plazo.
+
+Se recogen **todas** las respuestas que casen, no la primera: un panel suele
+pedir tres o cuatro cosas a la vez, y quedarse con una daría un resultado
+incompleto con pinta de completo.
+
+**El cuerpo puede haber desaparecido.** No viaja en el evento: se pide aparte, y
+el navegador lo guarda en un búfer que acaba reciclando. Si pasa, ese elemento
+trae `error` explicándolo en vez de tirar la captura entera. Se sube con:
+
+```orion
+b = web.open({ tuning: { body_buffer: 52428800 } })
+```
+
+### 12.4 Comparado
+
+Playwright tiene `page.on("response")`: un callback donde hay que filtrar a
+mano, pedir el cuerpo con otro `await` y acordarse de que puede no estar.
+Selenium no tiene nada equivalente sin poner un proxy delante.
+
+## 13. JavaScript
 
 `web.eval(pestaña, js)` evalúa y devuelve el valor ya convertido a Orion.
 
@@ -858,7 +959,7 @@ n = web.eval(p, "document.querySelectorAll('.card').length")
 Una excepción del JavaScript se convierte en error de Orion, no en un `null`
 silencioso.
 
-## 13. Memoria
+## 14. Memoria
 
 Decisiones tomadas con el consumo como criterio, no como consecuencia:
 
@@ -877,7 +978,7 @@ Decisiones tomadas con el consumo como criterio, no como consecuencia:
 - **Las pestañas se cierran de verdad** al hacer `free`: es lo que libera la
   memoria del proceso de render.
 
-## 14. Arquitectura
+## 15. Arquitectura
 
 ```
 orion-vm/src/modules/browser/
@@ -899,9 +1000,9 @@ vuelve a medir **inmediatamente antes** de cada despacho, no al empezar una
 cadena de acciones: ahí está la diferencia práctica con `ActionChains`, que
 entre localizar y clicar deja que la página mueva el elemento.
 
-## 15. Despliegue
+## 16. Despliegue
 
-### 15.1 Qué entregas
+### 16.1 Qué entregas
 
 ```powershell
 orion --build app.orx -o app.exe
@@ -912,18 +1013,47 @@ programa a nativo con Cranelift y lo enlaza contra el runtime de Orion como
 librería estática. El resultado no es un lanzador que busca `orion.exe`, es un
 ejecutable de verdad con el runtime dentro.
 
-Verificado ejecutándolo en una carpeta que contenía **solo** `app.exe`, sin
-ningún `orion.exe` cerca y con el `PATH` reducido a `C:\Windows\system32`.
-
 Tu usuario recibe `app.exe` y no necesita saber que Orion existe.
 
-### 15.2 Qué necesita la máquina del usuario
+#### Qué se probó exactamente
+
+Un programa que usa `upload`, `fill`, `table`, `extract`, `save_state`, `pdf` y
+`reload` —es decir, el módulo entero, no un "hola mundo"— compilado a **nativo
+AOT** (61 MB) y ejecutado en una carpeta que contenía **solo `app.exe`**, sin
+ningún `orion.exe` cerca y con el `PATH` reducido a `system32`. Los diez
+resultados correctos y código de salida 0.
+
+Conviene decir cómo llegó a estar bien, porque hasta el 8 de agosto de 2026 esto
+**no funcionaba** y la documentación decía que sí. Dos defectos, los dos
+exclusivos del ejecutable compilado (`orion run` nunca estuvo afectado):
+
+1. **Una función no veía las variables globales.** El compilador daba a cada
+   función solo variables locales, así que un global leído dentro de ella
+   llegaba como `null`. Y como `use "browser"` define un global, cualquier
+   llamada al módulo dentro de una función moría con un error sobre
+   `CallMethod` que no apuntaba a la causa. Peor aún: un cálculo con una
+   constante global daba **otro resultado** sin avisar.
+2. **Llamar `main` a tu función** hacía chocar su símbolo con el `main` de C del
+   ejecutable, y la compilación se pasaba a bytecode embebido. Seguía
+   funcionando, pero ninguna aplicación real —que se escriben así— llegaba a
+   compilarse nativa.
+
+Los dos tienen ahora tests de regresión en
+[`orion-vm/tests/aot_native.rs`](orion-vm/tests/aot_native.rs), que es lo que
+faltaba: la batería anterior solo probaba programas autocontenidos —aritmética,
+recursión, shapes, cadenas— y por eso nadie se enteró.
+
+**La lección para leer esta página**: si aquí pone "verificado", debería decir
+también *con qué programa*. Un "hola mundo" compilado no prueba que tu
+aplicación compile.
+
+### 16.2 Qué necesita la máquina del usuario
 
 **Un navegador basado en Chromium, y nada más.** En Windows ya está: Edge viene
 con el sistema. Si su instalación está en una ruta poco habitual, se resuelve
 sin recompilar con la variable `ORION_CHROME` o pasando `chrome:` en `open()`.
 
-### 15.3 Comparado con Python
+### 16.3 Comparado con Python
 
 | | Python + Selenium | Orion |
 |---|---|---|
@@ -984,7 +1114,7 @@ versión idiomática de Playwright llega a 317 MB porque retiene un handle por
 cada elemento consultado, y aquí son 2.000 vivos a la vez. Eso pesa cuando el
 trabajo corre en un servidor con varias tareas en paralelo.
 
-### 15.4 Redes corporativas
+### 16.4 Redes corporativas
 
 Este es el escenario donde la diferencia deja de ser comodidad y pasa a ser
 "puedo o no puedo".
@@ -1016,7 +1146,7 @@ navegador:
 web.open({ args: ["--proxy-server=http://proxy.empresa:8080"] })
 ```
 
-### 15.5 Lo que conviene saber
+### 16.5 Lo que conviene saber
 
 **Tamaño.** El ejecutable ronda los 58 MB. Es el binario completo de Orion:
 lleva GUI, TUI, tres motores de base de datos, OCR con sus modelos… todo, se use
@@ -1030,7 +1160,7 @@ probado compilar con el CRT estático.
 lo importante, pero un Windows recién instalado sin herramientas de desarrollo
 es la comprobación definitiva y cuesta cinco minutos.
 
-## 16. Diagnóstico
+## 17. Diagnóstico
 
 | Síntoma | Qué mirar |
 |---|---|

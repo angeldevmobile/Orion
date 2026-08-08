@@ -893,6 +893,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "upload", "browser.upload(pestaña, selector, archivos)", "Adjunta sin que se abra la ventana del sistema; el selector puede ser el <input type=file> o el botón que lo abre"));
     v.push(f("browser", "download", "browser.download(pestaña, selector, opts?)", "Pulsa y espera a que la descarga TERMINE; devuelve {path, name, bytes, url} y no hay diálogo \"Guardar como\""));
     v.push(f("browser", "pdf", "browser.pdf(pestaña, ruta, opts?)", "Imprime la página a PDF sin abrir el diálogo de impresión"));
+    v.push(f("browser", "watch", "browser.watch(pestaña, patrón)", "Arma la escucha; hay que llamarlo ANTES de provocar la petición"));
+    v.push(f("browser", "capture", "browser.capture(pestaña, opts?)", "Devuelve lo que la página pidió y casó, con el JSON ya parseado"));
     v.push(f("browser", "save_state", "browser.save_state(pestaña, ruta)", "Guarda cookies y almacenamiento en un JSON; ese archivo VALE COMO CREDENCIAL"));
     v.push(f("browser", "load_state", "browser.load_state(pestaña, ruta)", "Restaura la sesión guardada; el almacenamiento solo se aplica estando en su origen"));
     v.push(f("browser", "blocked", "browser.blocked(navegador)", "URLs que la lista blanca de open({allow}) ha cortado"));

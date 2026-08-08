@@ -749,6 +749,52 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
     }
 }
 
+//     Variables globales
+//
+// El JIT compila cada función con variables **locales** de Cranelift, así que
+// una función no tenía forma de ver algo definido fuera de ella. Al ejecutar
+// con `orion run` no se nota, porque ahí manda la VM; pero un ejecutable
+// compilado va entero por este camino, y un global leído dentro de una función
+// llegaba como null.
+//
+// El síntoma no siempre era un error. `use "fs"` define un global, así que
+// `fs.cwd()` dentro de una función recibía null como receptor y abortaba con un
+// mensaje sobre `CallMethod` que no apuntaba a la causa. Pero un cálculo con una
+// constante global —un tipo de IVA, sin ir más lejos— daba **otro resultado**
+// que en `orion run`, sin avisar. Un binario que miente es peor que uno que se
+// cae.
+//
+// La tabla es de proceso y no por hilo: una tarea lanzada con `spawn` corre en
+// otro hilo del pool y tiene que ver los mismos globales que el resto. Los
+// punteros son a valores del heap del JIT, que no se liberan mientras el
+// programa vive.
+
+static GLOBALS: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+
+fn globals() -> &'static Mutex<HashMap<String, i64>> {
+    GLOBALS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Publica un global. Lo emite el nivel superior del programa al asignar.
+#[no_mangle]
+pub extern "C" fn rt_store_global(name_ptr: i64, val: i64) {
+    let name = unsafe { cstr_to_str(name_ptr) };
+    globals().lock().unwrap().insert(name.to_string(), val);
+}
+
+/// Lee un global. Lo emite una función al usar un nombre que no es suyo.
+///
+/// Si no existe devuelve null, que es lo mismo que hace la VM con una variable
+/// desconocida: el objetivo de esto es la paridad, no inventar una semántica
+/// nueva para el camino compilado.
+#[no_mangle]
+pub extern "C" fn rt_load_global(name_ptr: i64) -> i64 {
+    let name = unsafe { cstr_to_str(name_ptr) };
+    globals().lock().unwrap()
+        .get(name).copied()
+        .unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
+}
+
 //     JIT-6: Tabla global de punteros de funciones JIT
 
 static JIT_FN_TABLE: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();

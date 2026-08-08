@@ -1,0 +1,52 @@
+-- Leer la API de la página en vez de deshacer su HTML.
+--
+-- Casi todo sitio moderno pinta sus listados con JavaScript a partir de un JSON
+-- que él mismo se descarga. Un scraper clásico espera a que ese JSON se
+-- convierta en HTML y luego deshace el trabajo: busca divs, quita etiquetas y
+-- reconstruye números que ya venían siendo números. Y se rompe el día que
+-- alguien renombra una clase de CSS.
+--
+--   orion run demo/demo_browser_api.orx
+
+use "browser" as web
+
+const SITIO = "https://quotes.toscrape.com/scroll"
+
+fn main() {
+    with b = web.open() {
+        p = web.page(b)
+
+        show("1. LO QUE SE VE EN EL HTML -------------------------------")
+        web.goto(p, SITIO)
+        -- Esta variante carga las citas por scroll infinito, contra su API.
+        web.wait(p, ".quote")
+        vistas = web.extract(p, ".quote", { autor: ".author" })
+        show("   " + str(len(vistas)) + " citas pintadas, con los campos que el diseno enseña")
+        show("   " + str(vistas[0]))
+
+        show("")
+        show("2. LO QUE LA PAGINA LE PIDE A SU API ---------------------")
+        -- Armar ANTES de provocar: si se enciende después, la peticion ya pasó.
+        web.watch(p, "/api/quotes")
+        web.scroll(p, 0, 5000)
+        r = web.capture(p)
+        show("   " + str(len(r)) + " respuesta(s) capturada(s)")
+
+        for resp in r {
+            show("   " + resp["url"] + "  status=" + str(resp["status"]))
+            d = resp["json"]
+            show("   pagina " + str(d["page"]) + ", hay mas: " + str(d["has_next"]))
+            cita = d["quotes"][0]
+            -- El JSON trae la estructura entera: el autor es un objeto con su
+            -- fecha y lugar de nacimiento, y las etiquetas ya son una lista.
+            show("   autor:  " + str(cita["author"]))
+            show("   tags:   " + str(cita["tags"]))
+        }
+
+        show("")
+        show("   Nada de eso hay que reconstruirlo del HTML: ya viene tipado,")
+        show("   y con campos que la pagina no llega a pintar.")
+    }
+}
+
+main()

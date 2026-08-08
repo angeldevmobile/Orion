@@ -1,9 +1,4 @@
 -- Orion: la misma tarea, con la extracción declarativa.
---
--- No hay variante "idiomática" y otra "optimizada" porque no hay dos formas: el
--- esquema entero se compila a una sola evaluación dentro de la página. Esa es
--- justamente la comparación — no que Orion ejecute JavaScript más rápido, sino
--- que el camino bueno es el único que hay.
 
 use "browser" as web
 use "datetime"
@@ -13,18 +8,10 @@ use "env"
 
 fn main() {
     ruta = "file:///" + fs.cwd().replace("\\", "/") + "/catalogo.html"
-
     with b = web.open() {
         p = web.page(b)
         web.goto(p, ruta)
 
-        -- Se repite y se coge el MEJOR tiempo, igual que las variantes de
-        -- Python. El ruido —el navegador calentando, otro proceso— solo puede
-        -- sumar tiempo, nunca restarlo, así que el mínimo es el que más se
-        -- acerca al coste real. Medido de una sola vez, esta misma extracción
-        -- daba entre 20 y 430 ms en Selenium según la vuelta.
-        -- Con BENCH_UNA se hace una sola: lo usa la pasada que mide el proceso
-        -- entero, donde repetir falsearía el tiempo de arranque.
         tope = 7
         if env.has("BENCH_UNA") { tope = 1 }
 
@@ -46,12 +33,6 @@ fn main() {
             if vueltas >= 3 and datetime.timestamp_ms() - arranque > 15000 { break }
         }
 
-        -- La misma huella que calculan las variantes de Python: si no coincide,
-        -- alguien extrajo otra cosa y su tiempo no significa nada.
-        --
-        -- En céntimos enteros y no en decimales con formato: "1234.50" y
-        -- "1,234.50" son el mismo número y huellas distintas, y el benchmark
-        -- estaría comparando cómo imprime cada lenguaje.
         total = 0
         texto = ""
         for f in filas {

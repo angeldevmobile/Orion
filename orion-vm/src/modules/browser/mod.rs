@@ -21,6 +21,7 @@
 //! declarativa, la interacción (click/type) y las ventanas emergentes se apoyan
 //! sobre esto y llegan después.
 
+pub mod capture;
 pub mod cdp;
 pub mod dom;
 pub mod extract;
@@ -61,6 +62,12 @@ struct PageState {
     browser:   u64,
     target_id: String,
     session:   String,
+    /// Escucha de red armada: patrón de URL y desde qué evento mirar.
+    ///
+    /// La marca se guarda al armar y no al recoger porque la petición ocurre
+    /// entre las dos llamadas: buscar solo hacia delante desde el momento de
+    /// recoger encontraría siempre una lista vacía.
+    watch:     Option<(String, u64)>,
 }
 
 enum Handle {
@@ -185,6 +192,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // pdf(pestaña, ruta, opts?) → imprime la página a PDF sin abrir el diálogo de impresión
         "pdf"      => do_pdf(&args),
 
+        // Captura de red: leer el JSON que la página le pide a su propia API,
+        // en vez de deshacer el HTML que ese JSON produjo.
+        //
+        // watch(pestaña, patrón) → arma la escucha; hay que llamarlo ANTES de provocar la petición
+        "watch"   => do_watch(&args),
+        // capture(pestaña, opts?) → devuelve lo que la página pidió y casó, con el JSON ya parseado
+        "capture" => do_capture(&args),
+
         // Sesión reutilizable: loguearse una vez en vez de en cada ejecución.
         //
         // save_state(pestaña, ruta) → guarda cookies y almacenamiento en un JSON; ese archivo VALE COMO CREDENCIAL
@@ -304,7 +319,7 @@ fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
 
     let id = new_id();
     let mut reg = handles().lock().unwrap();
-    reg.insert(id, Handle::Page(PageState { browser: b, target_id, session }));
+    reg.insert(id, Handle::Page(PageState { browser: b, target_id, session, watch: None }));
     if let Some(Handle::Browser(bs)) = reg.get_mut(&b) {
         bs.pages.push(id);
     }
@@ -471,6 +486,8 @@ fn parse_tuning(v: Option<&EvalValue>) -> Tuning {
         if let Some(x) = u64_de(g, "close_timeout") { t.close_ms      = x; }
         if let Some(x) = u64_de(g, "send_timeout")  { t.send_ms       = x; }
         if let Some(x) = u64_de(g, "cleanup_tries") { t.cleanup_tries = x as u32; }
+        if let Some(x) = u64_de(g, "body_buffer")   { t.body_buffer   = x; }
+        if let Some(x) = u64_de(g, "total_buffer")  { t.total_buffer  = x; }
     }
     t
 }
@@ -920,7 +937,7 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
     let id = new_id();
     let mut reg = handles().lock().unwrap();
     reg.insert(id, Handle::Page(PageState {
-        browser, target_id, session: nueva_ses,
+        browser, target_id, session: nueva_ses, watch: None,
     }));
     if let Some(Handle::Browser(bs)) = reg.get_mut(&browser) {
         bs.pages.push(id);
@@ -1322,6 +1339,131 @@ fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(
     }
     let _ = conn.wait_event("Page.loadEventFired", Some(session), marca, timeout)?;
     Ok(())
+}
+
+//    Captura de red
+
+/// Arma la escucha: a partir de aquí se anota lo que la página pida y case.
+///
+/// Va antes de provocar la petición, no después. Si se encendiera al recoger,
+/// la llamada ya habría pasado y no quedaría nada que leer — es el mismo
+/// motivo por el que `click_opens` toma la marca de eventos antes de pulsar.
+fn do_watch(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.watch(pestaña, patrón)")?;
+    let patron = args.get(1).map(to_str).unwrap_or_default();
+    let (conn, session, timeout, t) = page_ctx(p)?;
+
+    // El dominio de red solo se enciende si alguien va a escuchar: con él
+    // puesto el navegador emite varios eventos por cada petición, y una página
+    // con cien recursos son cientos de mensajes por el socket que nadie
+    // consumiría.
+    //
+    // Los tamaños de buffer no están fijados en el código: el cuerpo de una
+    // respuesta se lee del búfer del navegador, así que un listado grande
+    // necesita más sitio y quien ejecuta es el que sabe cuánto.
+    conn.call(
+        "Network.enable",
+        serde_json::json!({
+            "maxResourceBufferSize": t.body_buffer,
+            "maxTotalBufferSize":    t.total_buffer,
+        }),
+        Some(&session), timeout,
+    )?;
+
+    let marca = conn.event_mark();
+    let mut reg = handles().lock().unwrap();
+    if let Some(Handle::Page(ps)) = reg.get_mut(&p) {
+        ps.watch = Some((patron, marca));
+    }
+    Ok(EvalValue::Bool(true))
+}
+
+/// Recoge lo que la página pidió desde que se armó la escucha.
+///
+/// Devuelve una lista de `{url, status, method, json}` — el JSON **ya
+/// parseado**, que es el sentido de todo esto: los datos llegan tipados y con
+/// los campos que el sitio no llega a pintar. Si el cuerpo no era JSON, `json`
+/// viene nulo y el texto crudo va en `text`.
+fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.capture(pestaña, opts?)")?;
+    let (conn, session, timeout, t) = page_ctx(p)?;
+    let ms = espera_de(args, 1, &t);
+
+    let (patron, marca) = {
+        let reg = handles().lock().unwrap();
+        match reg.get(&p) {
+            Some(Handle::Page(ps)) => ps.watch.clone().ok_or(
+                "browser.capture: no hay ninguna escucha armada.\n  \
+                 Llama antes a browser.watch(pestaña, patrón), y después provoca la petición."
+            )?,
+            _ => return Err(format!("browser.capture: la pestaña {p} no existe")),
+        }
+    };
+
+    // Se espera a que llegue algo que case, en vez de mirar una vez y volver
+    // vacío: la petición sale después de la acción que la provoca, y devolver
+    // una lista vacía convertiría un problema de tiempo en "este sitio no usa
+    // API", que es una conclusión falsa y difícil de deshacer.
+    let pat = patron.clone();
+    let _ = conn.wait_event_where(
+        "Network.responseReceived", Some(&session), marca,
+        Duration::from_millis(ms),
+        move |e| e.params.get("response").and_then(|r| r.get("url"))
+                  .and_then(|u| u.as_str())
+                  .map(|u| capture::casa(u, &pat))
+                  .unwrap_or(false),
+    )?;
+
+    // Un margen para que terminen de llegar las que salieron a la vez: un
+    // panel suele pedir tres o cuatro cosas de golpe, y quedarse con la
+    // primera daría un resultado incompleto que parece completo.
+    let respuestas = conn.events_where("Network.responseReceived", Some(&session), marca, |e| {
+        e.params.get("response").and_then(|r| r.get("url")).and_then(|u| u.as_str())
+            .map(|u| capture::casa(u, &patron)).unwrap_or(false)
+    });
+
+    let mut salida = Vec::new();
+    for ev in respuestas {
+        let resp = ev.params.get("response").cloned().unwrap_or(serde_json::Value::Null);
+        let url = resp.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
+        let status = resp.get("status").and_then(|s| s.as_i64()).unwrap_or(0);
+        let req_id = ev.params.get("requestId").and_then(|r| r.as_str()).unwrap_or("").to_string();
+
+        let mut m: IndexMap<String, EvalValue> = IndexMap::new();
+        m.insert("url".into(), EvalValue::Str(url));
+        m.insert("status".into(), EvalValue::Int(status));
+
+        // El cuerpo se pide aparte porque no viaja en el evento. Puede haber
+        // desaparecido ya del búfer del navegador —una respuesta enorme, o
+        // muchas peticiones después—: eso no es un error del programa, así que
+        // se anota y se sigue en vez de tirar la captura entera.
+        match conn.call(
+            "Network.getResponseBody",
+            serde_json::json!({ "requestId": req_id }),
+            Some(&session), timeout,
+        ) {
+            Ok(b) => {
+                let cuerpo = b.get("body").and_then(|x| x.as_str()).unwrap_or("");
+                match serde_json::from_str::<serde_json::Value>(cuerpo) {
+                    Ok(v) => { m.insert("json".into(), json_to_eval(v)); }
+                    Err(_) => {
+                        m.insert("json".into(), EvalValue::Null);
+                        m.insert("text".into(), EvalValue::Str(cuerpo.to_string()));
+                    }
+                }
+            }
+            Err(e) => {
+                m.insert("json".into(), EvalValue::Null);
+                m.insert("error".into(), EvalValue::Str(format!(
+                    "el navegador ya no tenía el cuerpo ({e}). Sube el búfer con \
+                     open({{ tuning: {{ body_buffer: bytes }} }}) o captura antes."
+                )));
+            }
+        }
+        salida.push(EvalValue::Dict(m));
+    }
+
+    Ok(EvalValue::List(salida))
 }
 
 //    Sesión

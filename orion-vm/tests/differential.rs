@@ -703,3 +703,28 @@ p = P(1, 2)
 show p.x"#,
     );
 }
+
+#[test]
+fn dict_conserva_el_orden_de_escritura_en_ambos_backends() {
+    // Los pares salen de la pila al revés que en el literal. La VM los voltea;
+    // el JIT decía replicarla y se saltaba justo ese paso, así que un
+    // diccionario salía con las claves invertidas SOLO en el ejecutable
+    // compilado. De ese orden dependen cosas que se ven: el JSON que se genera,
+    // las columnas de un CSV y lo que imprime un `show`.
+    assert_vm_jit_match(
+        r#"d = { zeta: 1, alfa: 2, medio: 3 }
+show d
+show keys(d)"#,
+    );
+}
+
+#[test]
+fn dict_devuelto_por_una_funcion_conserva_el_orden() {
+    assert_vm_jit_match(
+        r#"fn ficha() {
+    return { sku: "X1", nombre: "cosa", precio: 9 }
+}
+show ficha()
+show keys(ficha())"#,
+    );
+}

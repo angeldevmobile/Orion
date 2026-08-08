@@ -2093,3 +2093,156 @@ with b = web.open() {{
             "el valor secreto se filtró al error:\n{salida}");
     assert!(salida.contains("oculto"), "debería decir que lo ocultó:\n{salida}");
 }
+
+//    Captura de red
+
+/// Sirve una página que pinta su listado desde su propia API.
+///
+/// El JSON trae campos que la página **no** llega a pintar (`stock`), que es
+/// justo lo que hace útil capturar la fuente en vez de deshacer el HTML.
+fn serve_api(pagina: &'static str, json: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
+    let port = listener.local_addr().unwrap().port();
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let peticion = String::from_utf8_lossy(&buf[..n]).to_string();
+            let ruta = peticion.split_whitespace().nth(1).unwrap_or("/").to_string();
+
+            let (tipo, cuerpo) = if ruta.starts_with("/api/") {
+                ("application/json", json)
+            } else {
+                ("text/html; charset=utf-8", pagina)
+            };
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\
+                 Connection: close\r\n\r\n{}",
+                tipo, cuerpo.len(), cuerpo
+            );
+            let _ = s.write_all(resp.as_bytes());
+            let _ = s.flush();
+        }
+    });
+
+    format!("http://127.0.0.1:{port}/")
+}
+
+const PAGINA_API: &str = r#"<!doctype html>
+<html><head><meta charset="utf-8"><title>Catalogo</title></head><body>
+<button id="cargar">Cargar</button>
+<div id="lista">nada</div>
+<script>
+document.getElementById('cargar').onclick = async () => {
+  const r = await fetch('/api/productos?pagina=1');
+  const d = await r.json();
+  // Se pinta SOLO el nombre: el stock viaja en el JSON y no llega al HTML.
+  document.getElementById('lista').innerHTML =
+    d.items.map(p => '<div class="card"><span class="t">' + p.nombre + '</span></div>').join('');
+};
+</script>
+</body></html>"#;
+
+const JSON_API: &str =
+    r#"{"pagina":1,"total":2,"items":[{"id":1,"nombre":"Teclado","stock":12},{"id":2,"nombre":"Monitor","stock":3}]}"#;
+
+#[test]
+fn captura_el_json_que_la_pagina_le_pide_a_su_api() {
+    let dir = tmp_dir("capture");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_api(PAGINA_API, JSON_API);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.watch(p, "/api/")
+    web.click(p, "#cargar")
+    r = web.capture(p)
+    show("N=" + str(len(r)))
+    show("STATUS=" + str(r[0]["status"]))
+    d = r[0]["json"]
+    show("TOTAL=" + str(d["total"]))
+    -- El stock NO está en el HTML; solo se puede saber leyendo la fuente.
+    show("STOCK=" + str(d["items"][0]["stock"]))
+    show("HTML=" + str(web.texts(p, ".t")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=1"), "no capturó la respuesta:\n{salida}");
+    assert!(salida.contains("STATUS=200"), "{salida}");
+    assert!(salida.contains("TOTAL=2"), "el JSON no se parseó:\n{salida}");
+    assert!(salida.contains("STOCK=12"),
+            "no llegó un campo que la página no pinta:\n{salida}");
+    assert!(salida.contains("HTML=[Teclado, Monitor]"),
+            "la página debería mostrar solo los nombres:\n{salida}");
+}
+
+#[test]
+fn capturar_sin_armar_la_escucha_lo_dice() {
+    let dir = tmp_dir("capture_sin_watch");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_api(PAGINA_API, JSON_API);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.capture(p) }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    // Armar después de provocar la petición no capturaría nada, así que el
+    // error tiene que decir el orden y no solo que falta algo.
+    assert!(salida.contains("E=") && salida.contains("watch"),
+            "el error debería explicar que hay que armar antes:\n{salida}");
+}
+
+#[test]
+fn un_patron_que_no_casa_devuelve_vacio_sin_colgarse() {
+    let dir = tmp_dir("capture_sin_casar");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_api(PAGINA_API, JSON_API);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.watch(p, "/inventado/")
+    web.click(p, "#cargar")
+    r = web.capture(p, {{ wait: 1500 }})
+    show("N=" + str(len(r)))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=0"), "debería devolver vacío:\n{salida}");
+}
+
+#[test]
+fn el_comodin_afina_el_patron() {
+    let dir = tmp_dir("capture_comodin");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_api(PAGINA_API, JSON_API);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.watch(p, "*/api/productos?*")
+    web.click(p, "#cargar")
+    r = web.capture(p)
+    show("N=" + str(len(r)))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=1"), "el comodín no casó:\n{salida}");
+}

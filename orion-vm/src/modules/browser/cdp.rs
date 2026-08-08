@@ -535,6 +535,38 @@ impl Conn {
         }
     }
 
+    /// Todos los eventos posteriores a `desde` que cumplan la condición.
+    ///
+    /// `wait_event_where` para en el primero, que es lo que hace falta cuando se
+    /// espera a que algo ocurra. Para recoger no sirve: un panel pide tres o
+    /// cuatro cosas a la vez y quedarse con la primera daría un resultado
+    /// incompleto con pinta de completo.
+    ///
+    /// No espera: se usa después de haber esperado, y lo que no esté en el
+    /// historial —acotado por `max_events`— no está.
+    pub fn events_where(
+        &self,
+        method: &str,
+        session: Option<&str>,
+        desde: u64,
+        cond: impl Fn(&Event) -> bool,
+    ) -> Vec<Event> {
+        let st = self.state.lock().unwrap();
+        st.events.iter()
+            .filter(|e| {
+                e.seq >= desde
+                    && e.method == method
+                    && match (session, &e.session) {
+                        (None, _) => true,
+                        (Some(s), Some(es)) => s == es,
+                        (Some(_), None) => false,
+                    }
+                    && cond(e)
+            })
+            .cloned()
+            .collect()
+    }
+
     fn death_reason(&self) -> String {
         self.state.lock().unwrap().dead.clone()
             .unwrap_or_else(|| "la conexión CDP está cerrada".into())
