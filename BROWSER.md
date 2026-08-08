@@ -18,12 +18,12 @@ with b = web.open() {
 cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
 > **Estado**: transporte, arranque, navegación, interacción, formularios,
-> tablas, modales, ventanas, extracción y archivos verificados de punta a punta
-> (53 tests e2e en
+> tablas, modales, ventanas, extracción, archivos, sesión y estabilidad
+> verificados de punta a punta (61 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Pendiente:
-> sesión reutilizable, seguridad y benchmark completo contra Python.
+> benchmark completo contra Python.
 
 ## 1. Arranque
 
@@ -60,7 +60,8 @@ b = web.open({
     timeout:  30000,                 -- ms, arranque del navegador
     user_data: "C:/perfil",          -- perfil propio (persiste sesiones)
     args:     ["--proxy-server=x:1"],   -- banderas extra, van al final
-    sin:      ["--disable-extensions"]  -- banderas por defecto a quitar
+    sin:      ["--disable-extensions"], -- banderas por defecto a quitar
+    allow:    ["*.empresa.com"]       -- lista blanca de dominios, ver 9.2
 })
 ```
 
@@ -147,6 +148,8 @@ show(web.info())
 | `web.title(pestaña)` | título |
 | `web.url(pestaña)` | URL actual |
 | `web.content(pestaña)` | HTML completo |
+| `web.reload(pestaña, opts?)` | recarga, ver 10.1 |
+| `web.back(pestaña)` / `web.forward(pestaña)` | historial, ver 10.1 |
 
 `goto` espera a que la página cargue. Si no carga porque un `alert` la dejó
 congelada, lo dice con el texto del diálogo en vez de un timeout genérico.
@@ -364,6 +367,7 @@ en vez de fallar en silencio: hay que marcar otro del grupo.
 | `web.count(pestaña, sel)` | **no** |
 | `web.visible(pestaña, sel)` | **no** |
 | `web.wait(pestaña, sel, ms?)` | espera explícita |
+| `web.wait(pestaña, { idle: ms })` | espera a que la red se calme, ver 10.2 |
 
 La regla: **lo que devuelve contenido espera; lo que informa del estado no.**
 
@@ -722,13 +726,127 @@ El fondo se imprime por defecto, al revés que en el diálogo: el navegador lo
 quita para ahorrar tinta, y en un PDF que nadie va a imprimir eso solo hace que
 las tablas con filas alternas salgan en blanco.
 
-## 9. Captura
+## 9. Sesión y seguridad
+
+### 9.1 `web.save_state(pestaña, ruta)` / `web.load_state(pestaña, ruta)`
+
+Lo más caro de una automatización que corre a diario no es navegar: es **volver
+a iniciar sesión en cada ejecución**. Es lento, y sobre todo es frágil — cada
+login es un formulario que puede cambiar, un captcha que puede aparecer y un
+doble factor que puede saltar. Un proceso que se loguea cien veces al día
+también es un proceso que parece un ataque.
+
+```orion
+-- una vez
+web.save_state(p, "sesion.json")
+
+-- todos los días
+web.goto(p, "https://portal.empresa.com")
+web.load_state(p, "sesion.json")
+web.reload(p)                        -- ya dentro
+```
+
+`save_state` devuelve qué guardó y `load_state` qué aplicó:
+
+```
+{path: sesion.json, cookies: 5, local: 3, session: 0, origin: https://portal.empresa.com}
+{cookies: 5, local: 3, session: 0, skipped: []}
+```
+
+**Hay que estar en el origen antes de restaurar.** Las cookies van al navegador
+entero, pero el almacenamiento local solo se puede escribir estando en su
+dominio — el navegador no deja tocar el de otro. Los orígenes que no coinciden
+salen en `skipped` en vez de perderse en silencio, porque una sesión restaurada
+a medias no da ningún error y es indepurable.
+
+`user_data` en `open()` resuelve algo parecido guardando el perfil entero, pero
+es una carpeta de cientos de megas atada a una máquina. Esto es un JSON que se
+puede mover, versionar aparte o guardar en un gestor de secretos.
+
+> **Este archivo es una credencial.** Dentro van las cookies de sesión: quien lo
+> tenga entra como tú, sin contraseña y sin segundo factor. No va al
+> repositorio. Vale exactamente lo mismo que la contraseña, con el agravante de
+> que no caduca cuando la cambias.
+
+### 9.2 `open({ allow: [...] })` — lista blanca de dominios
+
+```orion
+b = web.open({ allow: ["*.empresa.com", "cdn.proveedor.net"] })
+```
+
+Un proceso automático lleva encima la sesión de la empresa. Si la página que
+visita está comprometida —o si un anuncio inyectado en ella redirige— el bot se
+va a otro sitio **con esa sesión puesta**. La lista blanca acota a dónde puede
+ir: lo que no esté, no se carga.
+
+`*.empresa.com` cubre los subdominios y el dominio pelado; sin comodín es solo
+ese host exacto. El puerto no cuenta, y lo que va antes de una arroba tampoco:
+`http://empresa.com@malo.net/` es una petición a **malo.net**, y ese truco de
+suplantación no pasa la lista.
+
+`web.blocked(navegador)` devuelve lo que se ha cortado, que es lo primero que
+hace falta cuando un sitio deja de funcionar con la lista puesta.
+
+La interceptación solo se activa si hay lista: con ella, el navegador para en
+cada petición y espera respuesta, y eso no se paga si no se pide.
+
+### 9.3 Credenciales fuera de los registros
+
+```orion
+web.fill(p, { "#usuario": u, "#clave": c }, { secret: ["#clave"] })
+```
+
+Un error de `fill` puede repetir el valor que no se admitió, y ese error acaba
+en un log o en una consola compartida. Los campos marcados no cuentan el suyo.
+`{ secret: yes }` tapa todos los de la llamada.
+
+## 10. Estabilidad
+
+### 10.1 `web.reload(pestaña, opts?)` / `web.back` / `web.forward`
+
+Devuelven la URL en la que quedan. `{ cache: no }` en `reload` fuerza traerlo
+todo del servidor.
+
+Ninguna espera el evento de carga del navegador, y es deliberado: **al volver
+atrás, Chrome suele restaurar la página desde su caché de retroceso sin
+recargarla, y entonces no hay evento de carga**. Esperarlo dejaba cada `back`
+clavado el plazo entero —treinta segundos— para acabar continuando igual. Se
+mira la página, que es quien sabe dónde está.
+
+Un `back` sin historial lo dice en vez de no hacer nada. Ojo con una cosa que
+confunde: toda pestaña empieza en `about:blank`, así que después de una sola
+navegación **sí** queda una página a la que volver.
+
+### 10.2 `web.wait(pestaña, { idle: ms })`
+
+Espera a que la red se calme, para lo que ningún selector resuelve: no sabes
+**qué** va a aparecer, solo que la página sigue trayendo cosas. Es el caso del
+panel que se monta con tres llamadas encadenadas, o del listado que se recarga
+al filtrar.
+
+```orion
+web.click(p, "#filtrar")
+web.wait(p, { idle: 500 })      -- medio segundo sin peticiones
+```
+
+La alternativa que usa todo el mundo es dormir dos segundos, y tiene los dos
+defectos a la vez: si la red va lenta se lee a medias, y si va rápida se tiran
+dos segundos en cada vuelta.
+
+Las peticiones en vuelo se cuentan **dentro de la página**, envolviendo `fetch`
+y `XMLHttpRequest`. Así es una sola llamada y no depende de que el historial de
+eventos —que está acotado— haya conservado los que hacían falta.
+
+El límite honesto: hay páginas que sondean el servidor para siempre y nunca se
+quedan quietas. En esas, el error lo dice y hay que esperar por un selector.
+
+## 11. Captura
 
 `web.screenshot(pestaña, ruta)` → escribe un PNG y devuelve la ruta.
 
 Requiere `images: yes` en `open` si quieres que salgan las imágenes.
 
-## 10. JavaScript
+## 12. JavaScript
 
 `web.eval(pestaña, js)` evalúa y devuelve el valor ya convertido a Orion.
 
@@ -739,7 +857,7 @@ n = web.eval(p, "document.querySelectorAll('.card').length")
 Una excepción del JavaScript se convierte en error de Orion, no en un `null`
 silencioso.
 
-## 11. Memoria
+## 13. Memoria
 
 Decisiones tomadas con el consumo como criterio, no como consecuencia:
 
@@ -758,7 +876,7 @@ Decisiones tomadas con el consumo como criterio, no como consecuencia:
 - **Las pestañas se cierran de verdad** al hacer `free`: es lo que libera la
   memoria del proceso de render.
 
-## 12. Arquitectura
+## 14. Arquitectura
 
 ```
 orion-vm/src/modules/browser/
@@ -780,9 +898,9 @@ vuelve a medir **inmediatamente antes** de cada despacho, no al empezar una
 cadena de acciones: ahí está la diferencia práctica con `ActionChains`, que
 entre localizar y clicar deja que la página mueva el elemento.
 
-## 13. Despliegue
+## 15. Despliegue
 
-### 13.1 Qué entregas
+### 15.1 Qué entregas
 
 ```powershell
 orion --build app.orx -o app.exe
@@ -798,13 +916,13 @@ ningún `orion.exe` cerca y con el `PATH` reducido a `C:\Windows\system32`.
 
 Tu usuario recibe `app.exe` y no necesita saber que Orion existe.
 
-### 13.2 Qué necesita la máquina del usuario
+### 15.2 Qué necesita la máquina del usuario
 
 **Un navegador basado en Chromium, y nada más.** En Windows ya está: Edge viene
 con el sistema. Si su instalación está en una ruta poco habitual, se resuelve
 sin recompilar con la variable `ORION_CHROME` o pasando `chrome:` en `open()`.
 
-### 13.3 Comparado con Python
+### 15.3 Comparado con Python
 
 | | Python + Selenium | Orion |
 |---|---|---|
@@ -818,7 +936,7 @@ La última fila es la que más cuesta en la práctica: en Python cada actualizac
 de Chrome obliga a volver a empaquetar. Aquí el ejecutable que entregaste hace
 seis meses sigue funcionando.
 
-### 13.4 Redes corporativas
+### 15.4 Redes corporativas
 
 Este es el escenario donde la diferencia deja de ser comodidad y pasa a ser
 "puedo o no puedo".
@@ -850,7 +968,7 @@ navegador:
 web.open({ args: ["--proxy-server=http://proxy.empresa:8080"] })
 ```
 
-### 13.5 Lo que conviene saber
+### 15.5 Lo que conviene saber
 
 **Tamaño.** El ejecutable ronda los 58 MB. Es el binario completo de Orion:
 lleva GUI, TUI, tres motores de base de datos, OCR con sus modelos… todo, se use
@@ -864,7 +982,7 @@ probado compilar con el CRT estático.
 lo importante, pero un Windows recién instalado sin herramientas de desarrollo
 es la comprobación definitiva y cuesta cinco minutos.
 
-## 14. Diagnóstico
+## 16. Diagnóstico
 
 | Síntoma | Qué mirar |
 |---|---|

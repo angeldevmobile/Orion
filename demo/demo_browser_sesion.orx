@@ -1,0 +1,76 @@
+-- Sesión reutilizable, historial y lista blanca, contra un sitio real.
+--
+-- Lo caro de una automatización diaria no es navegar: es volver a iniciar
+-- sesión cada vez. Es lento, y es frágil — cada login es un formulario que
+-- puede cambiar, un captcha que puede aparecer y un doble factor que puede
+-- saltar. Loguearse cien veces al día también parece un ataque.
+--
+--   orion run demo/demo_browser_sesion.orx
+
+use "browser" as web
+use "fs"
+
+const SITIO = "https://the-internet.herokuapp.com"
+
+fn main() {
+    show("1. LOGIN UNA VEZ ----------------------------------------")
+    with b = web.open() {
+        p = web.page(b)
+        web.goto(p, SITIO + "/login")
+        web.fill(p, {
+            "#username": "tomsmith",
+            "#password": "SuperSecretPassword!"
+        }, { secret: ["#password"] })
+        web.click(p, "button[type=submit]")
+        show("   " + web.text(p, "#flash").split("\n")[0])
+
+        g = web.save_state(p, "sesion.json")
+        show("   guardadas " + str(g["cookies"]) + " cookies de " + g["origin"])
+    }
+
+    show("")
+    show("2. NAVEGADOR NUEVO, SIN VOLVER A ESCRIBIR LA CLAVE ------")
+    with b2 = web.open() {
+        p2 = web.page(b2)
+        -- Hay que estar en el origen antes de restaurar: el navegador no deja
+        -- escribir el almacenamiento de otro dominio.
+        web.goto(p2, SITIO + "/login")
+        c = web.load_state(p2, "sesion.json")
+        show("   restauradas " + str(c["cookies"]) + " cookies")
+
+        web.goto(p2, SITIO + "/secure")
+        -- Se lee el encabezado y no el mensaje flash: ese es de un solo uso y
+        -- en una visita con la sesión ya puesta no aparece. Sin sesión, esta
+        -- página redirige al login y el h2 diría "Login Page".
+        show("   entrado sin login -> " + web.text(p2, "h2"))
+
+        show("")
+        show("3. HISTORIAL --------------------------------------------")
+        show("   estoy en: " + web.url(p2).split("/")[3])
+        web.back(p2)
+        show("   back  -> " + web.url(p2).split("/")[3])
+        web.forward(p2)
+        show("   fwd   -> " + web.url(p2).split("/")[3])
+    }
+
+    show("")
+    show("4. LISTA BLANCA -----------------------------------------")
+    -- Un proceso automático lleva encima la sesión de la empresa. Si una página
+    -- comprometida lo redirige, va con ella puesta.
+    with b3 = web.open({ allow: ["*.herokuapp.com"] }) {
+        p3 = web.page(b3)
+        web.goto(p3, SITIO + "/login")
+        show("   permitido: " + web.title(p3))
+        attempt {
+            web.goto(p3, "https://example.com/")
+            show("   ERROR: no debería haber llegado")
+        } handle e {
+            show("   cortado el salto fuera de la lista")
+        }
+        show("   bloqueadas: " + str(len(web.blocked(b3))))
+    }
+
+    fs.delete("sesion.json")
+}
+
+main()

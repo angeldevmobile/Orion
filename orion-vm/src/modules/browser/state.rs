@@ -107,6 +107,40 @@ pub fn save(
     })
 }
 
+/// Deja una cookie leída del navegador en forma de poder volver a ponerla.
+///
+/// No es cosmética, arregla el fallo que hacía inútil todo esto: una cookie de
+/// sesión se lee con **`expires: -1`**, que es como el navegador dice "esta
+/// muere al cerrar". Si se le devuelve tal cual, `-1` se interpreta como una
+/// fecha —el 31 de diciembre de 1969— y el navegador acepta la cookie y la
+/// caduca en el mismo instante. El resultado es el peor posible: `load_state`
+/// dice que restauró cinco cookies, no falla nada, y la sesión no existe. Y
+/// justo la de sesión es la que siempre viene así.
+///
+/// Se copian solo los campos que `Network.setCookies` entiende: lo que devuelve
+/// la lectura trae además `size`, `priority` o `partitionKey`, que describen
+/// cómo está guardada y no cómo crearla.
+fn para_poner(c: &serde_json::Value) -> serde_json::Value {
+    let mut o = serde_json::Map::new();
+    for campo in ["name", "value", "domain", "path", "sameSite"] {
+        if let Some(v) = c.get(campo) {
+            if !v.is_null() { o.insert(campo.into(), v.clone()); }
+        }
+    }
+    for campo in ["secure", "httpOnly"] {
+        if let Some(v) = c.get(campo).and_then(|x| x.as_bool()) {
+            o.insert(campo.into(), serde_json::Value::Bool(v));
+        }
+    }
+    // Solo se copia la caducidad si es una de verdad.
+    if let Some(e) = c.get("expires").and_then(|x| x.as_f64()) {
+        if e > 0.0 {
+            o.insert("expires".into(), serde_json::Value::from(e));
+        }
+    }
+    serde_json::Value::Object(o)
+}
+
 pub struct Cargado {
     pub cookies:  usize,
     pub local:    usize,
@@ -132,8 +166,9 @@ pub fn load(
         .map_err(|e| format!("browser.load_state: '{ruta}' no es un estado válido: {e}"))?;
 
     let cookies = doc.get("cookies").and_then(|x| x.as_array()).cloned().unwrap_or_default();
-    if !cookies.is_empty() {
-        conn.call("Network.setCookies", serde_json::json!({ "cookies": cookies }),
+    let listas: Vec<serde_json::Value> = cookies.iter().map(para_poner).collect();
+    if !listas.is_empty() {
+        conn.call("Network.setCookies", serde_json::json!({ "cookies": listas }),
                   Some(sesion_cdp), timeout)
             .map_err(|e| format!("browser.load_state: no se pudieron poner las cookies: {e}"))?;
     }
@@ -245,6 +280,33 @@ mod tests {
     use super::*;
 
     fn lista(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
+
+    #[test]
+    fn una_cookie_de_sesion_no_se_restaura_ya_caducada() {
+        // `expires: -1` es como el navegador dice "muere al cerrar". Devolverlo
+        // tal cual lo convierte en una fecha de 1969 y la cookie se acepta y se
+        // caduca a la vez: load_state diría que restauró y no habría sesión.
+        let c = serde_json::json!({
+            "name": "sid", "value": "abc", "domain": ".x.com", "path": "/",
+            "expires": -1.0, "httpOnly": true, "secure": true,
+            "session": true, "size": 32, "priority": "Medium"
+        });
+        let p = para_poner(&c);
+        assert!(p.get("expires").is_none(), "no debe llevar caducidad: {p}");
+        assert_eq!(p["name"], "sid");
+        assert_eq!(p["httpOnly"], true);
+        // Y no se cuelan campos que describen cómo está guardada, no cómo se crea.
+        assert!(p.get("size").is_none());
+        assert!(p.get("priority").is_none());
+        assert!(p.get("session").is_none());
+    }
+
+    #[test]
+    fn una_caducidad_de_verdad_se_conserva() {
+        let c = serde_json::json!({ "name": "a", "value": "b", "expires": 1893456000.0 });
+        let p = para_poner(&c);
+        assert_eq!(p["expires"], 1893456000.0);
+    }
 
     #[test]
     fn sin_lista_pasa_todo() {

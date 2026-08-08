@@ -212,6 +212,27 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
     let tuning = parse_tuning(args.first());
     let timeout = opts.timeout;
 
+    // La lista blanca se valida ANTES de arrancar nada. Comprobarla después
+    // dejaba un navegador vivo al que ya nadie tenía handle: ni `with` ni
+    // `free` pueden cerrar algo que nunca llegó a registrarse, así que el
+    // proceso se quedaba suelto comiendo memoria hasta el reinicio.
+    let allow: Vec<String> = match args.first() {
+        Some(EvalValue::Dict(m)) => match m.get("allow") {
+            Some(EvalValue::List(l)) => l.iter().map(to_str)
+                .filter(|s| !s.trim().is_empty()).collect(),
+            Some(otro) => vec![to_str(otro)].into_iter()
+                .filter(|s| !s.trim().is_empty()).collect(),
+            None => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    if let Some(EvalValue::Dict(m)) = args.first() {
+        if m.contains_key("allow") && allow.is_empty() {
+            return Err("browser.open: `allow` está vacío. Quítalo si no quieres restringir; \
+                        una lista vacía bloquearía todo y es casi seguro un descuido.".into());
+        }
+    }
+
     let Launched { child, ws_url, exe, user_data, temporal } = launch::launch(&opts, &tuning)?;
     let limits = cdp::Limits {
         max_events: tuning.max_events,
@@ -232,21 +253,10 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
         }
     };
 
-    // La lista blanca se fija antes de que exista ninguna pestaña: si se
-    // pusiera después, la primera navegación ya habría salido sin control.
-    if let Some(EvalValue::Dict(m)) = args.first() {
-        if let Some(v) = m.get("allow") {
-            let lista: Vec<String> = match v {
-                EvalValue::List(l) => l.iter().map(to_str).collect(),
-                otro => vec![to_str(otro)],
-            };
-            let lista: Vec<String> = lista.into_iter().filter(|s| !s.trim().is_empty()).collect();
-            if lista.is_empty() {
-                return Err("browser.open: `allow` está vacío. Quítalo si no quieres restringir; \
-                            una lista vacía bloquearía todo y es casi seguro un descuido.".into());
-            }
-            conn.set_allowlist(lista);
-        }
+    // Se fija antes de que exista ninguna pestaña: puesta después, la primera
+    // navegación ya habría salido sin control.
+    if !allow.is_empty() {
+        conn.set_allowlist(allow);
     }
 
     let id = new_id();
@@ -1020,7 +1030,13 @@ fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
     let quien = match salto { 0 => "reload", -1 => "back", _ => "forward" };
     let p = arg_handle(args, 0, &format!("browser.{quien}(pestaña)"))?;
     let (conn, session, timeout, t) = page_ctx(p)?;
-    let marca = conn.event_mark();
+    let ms = espera_de(args, 1, &t);
+
+    // De dónde se viene, para saber cuándo se ha llegado.
+    let anterior = match evaluate(&conn, &session, "location.href", timeout) {
+        Ok(EvalValue::Str(s)) => s,
+        _ => String::new(),
+    };
 
     if salto == 0 {
         // `ignoreCache` deja recargar de verdad cuando hace falta; por defecto
@@ -1049,13 +1065,39 @@ fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
                   Some(&session), timeout)?;
     }
 
-    // Igual que en `goto`: que no llegue el evento de carga no es un error por
-    // sí solo, hay páginas que dejan peticiones abiertas para siempre.
-    let _ = conn.wait_event("Page.loadEventFired", Some(&session), marca, timeout)?;
-    let _ = t;
-    match evaluate(&conn, &session, "location.href", timeout) {
-        Ok(EvalValue::Str(s)) => Ok(EvalValue::Str(s)),
-        _ => Ok(EvalValue::Bool(true)),
+    // Aquí NO se espera `Page.loadEventFired`, y es deliberado: al volver
+    // atrás, Chrome suele restaurar la página desde su caché de retroceso sin
+    // recargarla, y entonces **no hay evento de carga**. Esperarlo dejaba cada
+    // `back` clavado el plazo entero —treinta segundos— para acabar
+    // continuando igual. Se mira la página, que es quien sabe dónde está.
+    let condicion = if salto == 0 {
+        // Recargar lleva a la misma URL, así que el criterio es que el
+        // documento vuelva a estar completo.
+        "document.readyState === 'complete'".to_string()
+    } else {
+        format!(
+            "location.href !== {} && document.readyState !== 'loading'",
+            serde_json::Value::String(anterior.clone())
+        )
+    };
+    let js = format!(r#"(() => new Promise((resolve) => {{
+      const limite = Date.now() + {ms};
+      const mira = () => {{
+        if ({condicion}) return resolve(location.href);
+        if (Date.now() >= limite) return resolve(null);
+        setTimeout(mira, {retry});
+      }};
+      mira();
+    }}))()"#, retry = t.retry_ms);
+
+    let v = evaluate_awaiting(
+        &conn, &session, &js, Duration::from_millis(ms + t.cdp_margin_ms), true,
+    )?;
+    match v {
+        EvalValue::Str(s) => Ok(EvalValue::Str(s)),
+        _ => Err(format!(
+            "browser.{quien}: la página no terminó de cambiar en {ms} ms"
+        )),
     }
 }
 

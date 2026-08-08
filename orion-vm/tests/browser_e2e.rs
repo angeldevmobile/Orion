@@ -1965,9 +1965,12 @@ with b = web.open() {{
     show("C=" + web.text(p, "#ruta"))
     web.reload(p)
     show("D=" + web.text(p, "#ruta"))
-    web.back(p)
-    -- Ya no queda historial hacia atrás: tiene que decirlo en vez de callarse.
-    attempt {{ web.back(p) }} handle e {{ show("E=" + e) }}
+
+    -- Una pestaña recién abierta no tiene a dónde volver: tiene que decirlo en
+    -- vez de callarse. (En la de arriba SÍ queda historial: toda pestaña
+    -- empieza en about:blank y esa cuenta como página anterior.)
+    q = web.page(b)
+    attempt {{ web.back(q) }} handle e {{ show("E=" + e) }}
 }}
 "##));
     assert!(ok, "falló:\n{salida}");
