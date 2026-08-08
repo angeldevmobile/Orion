@@ -148,6 +148,15 @@ pub fn orion_to_value(ptr: i64) -> Value {
             }
             TAG_DICT => {
                 let entries = &*(v.data_i as *const Vec<(String, i64)>);
+
+                // El namespace de un módulo se representa aquí como un dict con
+                // un marcador, pero para la VM es un `Value::Module`. Sin esta
+                // vuelta, `type(fs)` decía `dict` en el ejecutable compilado y
+                // `module<fs>` con `orion run`.
+                if let Some((_, marca)) = entries.iter().find(|(k, _)| k == "__native_module__") {
+                    return Value::Module(crate::jit::runtime::val_to_display(val_ref(*marca)));
+                }
+
                 let mut map: IndexMap<String, Value> = IndexMap::new();
                 for (k, p) in entries {
                     // Las funciones de módulo (TAG_VMFN) no se convierten a Value.

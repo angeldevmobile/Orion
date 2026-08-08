@@ -728,3 +728,16 @@ show ficha()
 show keys(ficha())"#,
     );
 }
+
+#[test]
+fn el_namespace_de_un_modulo_es_del_mismo_tipo_en_ambos_backends() {
+    // En el JIT el namespace se representa como un dict con un marcador, pero
+    // para la VM es un `Value::Module`. Sin traducirlo de vuelta, `type(fs)`
+    // decía `dict` en el ejecutable compilado y `module<fs>` con `orion run`.
+    assert_vm_jit_match(
+        r#"use "strings"
+fn tipo() { return str(type(strings)) }
+show tipo()
+show type(strings)"#,
+    );
+}
