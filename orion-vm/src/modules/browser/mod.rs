@@ -23,6 +23,7 @@
 
 pub mod capture;
 pub mod cdp;
+pub mod discover;
 pub mod dom;
 pub mod extract;
 pub mod files;
@@ -181,6 +182,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "table"   => do_table(&args),
         "extract"    => do_extract(&args),
         "extract_to" => do_extract_to(&args),
+        // discover(pestaña, opts?) → deduce el esquema solo: {row, count, fields, sample}
+        "discover"   => do_discover(&args),
 
         // Archivos. Las tres ventanas del sistema operativo que el navegador
         // abriría por su cuenta se interceptan antes de que existan.
@@ -1215,6 +1218,62 @@ fn do_extract(args: &[EvalValue]) -> Result<EvalValue, String> {
     }
 
     Ok(json_to_eval(r.json))
+}
+
+/// `discover(pestaña, opts?)` → esquema propuesto.
+///
+/// Analiza la página y propone el selector de fila y un selector por campo, más
+/// una muestra ya extraída. No sustituye a `extract`: te lleva hasta su puerta.
+fn do_discover(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.discover(pestaña, opts?)")?;
+    let (conn, session, _to, t) = page_ctx(p)?;
+    let ms = espera_de(args, 1, &t);
+
+    // Cuántos elementos hermanos hacen falta para considerarlo un "listado".
+    // Tres es lo mínimo para hablar de repetición; algunos sitios lo necesitan
+    // más alto para no enganchar una fila de tres iconos de cabecera.
+    let min = match args.get(1) {
+        Some(EvalValue::Dict(m)) => m.get("min").and_then(|v| to_u64(v).ok()).unwrap_or(3).max(2),
+        _ => 3,
+    };
+    let js = discover::DISCOVER_JS.replace("__MIN__", &min.to_string());
+
+    // Se espera por si el listado llega tras una acción, igual que `extract`.
+    let cuerpo = format!(r#"
+    return new Promise((resolve) => {{
+      const limite = Date.now() + {ms};
+      const intenta = () => {{
+        const r = {js};
+        if (!r.error || Date.now() >= limite) return resolve(r);
+        setTimeout(intenta, {retry});
+      }};
+      intenta();
+    }});
+    "#, retry = t.retry_ms);
+
+    let expr = format!("(() => {{ {cuerpo} }})()");
+    let r = conn.call(
+        "Runtime.evaluate",
+        serde_json::json!({
+            "expression": expr,
+            "returnByValue": true,
+            "awaitPromise": true,
+        }),
+        Some(&session), Duration::from_millis(ms + t.cdp_margin_ms),
+    )?;
+
+    if let Some(ex) = r.get("exceptionDetails") {
+        let msg = ex.get("exception").and_then(|e| e.get("description")).and_then(|d| d.as_str())
+            .or_else(|| ex.get("text").and_then(|x| x.as_str()))
+            .unwrap_or("error de JavaScript");
+        return Err(format!("browser.discover: {msg}"));
+    }
+
+    let v = r.get("result").and_then(|x| x.get("value")).cloned().unwrap_or(serde_json::Value::Null);
+    if let Some(e) = v.get("error").and_then(|x| x.as_str()) {
+        return Err(format!("browser.discover: {e}"));
+    }
+    Ok(json_to_eval(v))
 }
 
 /// `extract_to(pestaña, urls, selector, esquema, salida, opts?)` → resumen.

@@ -1,0 +1,50 @@
+-- discover: que Orion deduzca SOLO el esquema de una pagina.
+--
+-- El problema real de un scraper no es leer datos, es averiguar QUE SELECTOR
+-- usar: abrir las herramientas del navegador, bajar por el arbol, probar una
+-- clase, ver que casa con el menu, probar otra... veinte minutos.
+--
+-- discover mira la pagina y propone: el selector de la fila que se repite y un
+-- selector por cada campo con valor, mas una muestra ya extraida para que veas
+-- de un vistazo que acierta. Nadie lo tiene de serie.
+--
+--   orion run demo/demo_browser_discover.orx
+
+use "browser" as web
+
+fn analizar(p, url) {
+    web.goto(p, url)
+    e = web.discover(p)
+
+    show("=== " + url)
+    show("  fila propuesta: " + e["row"] + "   (" + str(e["count"]) + " filas)")
+    show("  campos deducidos:")
+    for nombre in keys(e["fields"]) {
+        show("    " + nombre + "  ->  " + e["fields"][nombre])
+    }
+    show("  primera fila ya extraida:")
+    show("    " + str(e["sample"][0]))
+    show("")
+}
+
+fn main() {
+    with b = web.open() {
+        p = web.page(b)
+
+        -- Tres sitios con estructuras COMPLETAMENTE distintas, sin decirle nada
+        -- a Orion sobre ninguno.
+        analizar(p, "https://quotes.toscrape.com/")     -- citas
+        analizar(p, "https://books.toscrape.com/")      -- tienda de libros
+        analizar(p, "https://news.ycombinator.com/")    -- noticias
+
+        -- Y la prueba de fondo: lo que discover propuso, se usa tal cual.
+        show("=== discover -> extract, sin tocar nada:")
+        web.goto(p, "https://quotes.toscrape.com/")
+        e = web.discover(p)
+        citas = web.extract(p, e["row"], { frase: ".text", autor: ".author" })
+        show("  " + str(len(citas)) + " citas extraidas con el row que dedujo Orion")
+        show("  " + citas[0]["autor"] + ": " + citas[0]["frase"].slice(0, 50) + "...")
+    }
+}
+
+main()

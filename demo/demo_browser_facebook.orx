@@ -1,0 +1,79 @@
+-- Automatizacion web con Orion sobre el login REAL de Facebook.
+--
+-- Version MOCKUP: las credenciales van en duro y son FALSAS. El objetivo no es
+-- iniciar sesion (eso pide captcha/2FA y una cuenta real), sino demostrar que la
+-- automatizacion rellena ese HTML exacto y que la pagina recibe los valores.
+-- Por eso no se pulsa "Iniciar sesion": se leen los campos de vuelta para
+-- probar que Orion los escribio.
+--
+--   orion run demo/demo_browser_facebook.orx
+--
+-- SELECTORES: se usan los ESTABLES (por `name`), no el id "_R_1h6kqsqppb6amH1_"
+-- ni las clases "x1i10hfl xggy1nq ..." que React regenera entre despliegues.
+
+use "browser" as web
+use "timewarp"
+
+-- Mockup: credenciales, solo para la prueba.
+const EMAIL = "prueba@ejemplo.dev"
+const PASS  = "clave-de-mentira-1234"
+
+-- headless: no  ->  abre una ventana VISIBLE para verlo trabajar.
+--                   Ponlo en yes (o quita el opts) para que corra sin ventana.
+const VER = yes
+
+fn main() {
+    with b = web.open({ headless: not VER }) {
+        p = web.page(b)
+
+        show("1. Abriendo el login real de Facebook...")
+        web.goto(p, "https://www.facebook.com/")
+        show("   titulo: " + web.title(p))
+
+        show("")
+        show("2. Comprobando que los selectores estables existen:")
+        show("   input[name=email]:  " + str(web.exists(p, "input[name=email]")))
+        show("   input[name=pass]:   " + str(web.exists(p, "input[name=pass]")))
+        show("   boton por aria-label: " + str(web.exists(p, "[aria-label='Iniciar sesión']")))
+
+        show("")
+        show("3. Rellenando el formulario (un fill, tres controles):")
+        web.fill(p, {
+            "input[name=email]": EMAIL,
+            "input[name=pass]":  PASS
+        }, { secret: ["input[name=pass]"] })
+
+        show("")
+        show("4. Leyendo de vuelta lo que la pagina recibio:")
+        show("   email en el campo: " + web.value(p, "input[name=email]"))
+        show("   pass en el campo:  " + web.value(p, "input[name=pass]"))
+
+        vale = web.value(p, "input[name=email]") == EMAIL
+        show("")
+        show("   coincide con lo que escribimos: " + str(vale))
+        show("   (no se pulsa Iniciar sesion: es una prueba, no un login real)")
+
+        show("")
+        show("5. Extrayendo el texto del boton (guardado en una variable):")
+        texto_boton = web.text(p, "[aria-label='Iniciar sesión']")
+
+        largo = len(texto_boton)
+
+        show("")
+        show("6. Usando el valor guardado mas abajo:")
+        show("   texto del boton: '" + texto_boton + "'")
+        show("   longitud:        " + str(largo) + " caracteres")
+        show("   en mayusculas:   " + upper(texto_boton))
+        show("   es 'Iniciar sesión': " + str(texto_boton == "Iniciar sesión"))
+
+        -- Con la ventana visible, una pausa para poder mirarla antes de que el
+        -- `with` cierre el navegador al terminar. En headless no hace falta.
+        if VER {
+            show("")
+            show("(ventana abierta 5 s para que la veas; luego se cierra sola)")
+            timewarp.wait("5s")
+        }
+    }
+}
+
+main()

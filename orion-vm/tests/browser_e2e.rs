@@ -2246,3 +2246,101 @@ with b = web.open() {{
     assert!(ok, "falló:\n{salida}");
     assert!(salida.contains("N=1"), "el comodín no casó:\n{salida}");
 }
+
+//    Descubrimiento de estructura
+
+/// Un listado de tarjetas con la estructura tipica: titulo, precio y enlace,
+/// repetido, mas ruido alrededor (cabecera y menu) que NO debe confundirse con
+/// el listado.
+const PAGINA_LISTADO: &str = r#"<!doctype html>
+<html><head><meta charset="utf-8"><title>Tienda</title></head><body>
+<nav><a href="/a">Inicio</a><a href="/b">Ofertas</a></nav>
+<header><h1>Catalogo</h1></header>
+<div id="lista">
+  <div class="card"><span class="titulo">Teclado</span><span class="precio">49,90</span><a href="/p/1">ver</a></div>
+  <div class="card"><span class="titulo">Monitor</span><span class="precio">219,00</span><a href="/p/2">ver</a></div>
+  <div class="card"><span class="titulo">Raton</span><span class="precio">24,50</span><a href="/p/3">ver</a></div>
+  <div class="card"><span class="titulo">Webcam</span><span class="precio">59,00</span><a href="/p/4">ver</a></div>
+</div>
+</body></html>"#;
+
+#[test]
+fn discover_deduce_la_fila_y_los_campos() {
+    let dir = tmp_dir("discover");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_LISTADO);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    e = web.discover(p)
+    show("ROW=" + e["row"])
+    show("COUNT=" + str(e["count"]))
+    show("FRAGIL=" + str(e["fragil"]))
+    show("FIELDS=" + str(e["fields"]))
+    show("S0=" + str(e["sample"][0]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // El menu tiene 2 enlaces y el listado 4 tarjetas ricas: debe elegir las
+    // tarjetas, no el menu.
+    assert!(salida.contains("ROW=.card"), "no encontró la fila correcta:\n{salida}");
+    assert!(salida.contains("COUNT=4"), "no contó las cuatro tarjetas:\n{salida}");
+    assert!(salida.contains("FRAGIL=no"), "la clase .card deberia dar selector estable:\n{salida}");
+    // Los campos con clase legible se nombran con su clase.
+    assert!(salida.contains("titulo:") && salida.contains(".titulo"), "falta el campo titulo:\n{salida}");
+    assert!(salida.contains("precio:") && salida.contains(".precio"), "falta el campo precio:\n{salida}");
+    // La muestra ya trae datos reales.
+    assert!(salida.contains("Teclado"), "la muestra no extrajo el primer titulo:\n{salida}");
+}
+
+#[test]
+fn discover_lo_que_propone_funciona_con_extract() {
+    let dir = tmp_dir("discover_extract");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_LISTADO);
+
+    // La prueba de fondo: el selector de fila que propone `discover` sirve tal
+    // cual en `extract`. Si no, la propuesta seria decorativa.
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    e = web.discover(p)
+    filas = web.extract(p, e["row"], {{ t: ".titulo", pr: ".precio|num" }})
+    show("N=" + str(len(filas)))
+    show("R0=" + str(filas[0]))
+    show("R3=" + str(filas[3]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=4"), "el row de discover no sirvio en extract:\n{salida}");
+    assert!(salida.contains("t: Teclado") && salida.contains("pr: 49.9"), "{salida}");
+    assert!(salida.contains("t: Webcam"), "{salida}");
+}
+
+#[test]
+fn discover_sin_estructura_repetida_lo_dice() {
+    let dir = tmp_dir("discover_vacio");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    // Una pagina sin ningun listado: solo texto suelto.
+    let url = serve_html(r#"<!doctype html><html><head><title>X</title></head>
+<body><h1>Hola</h1><p>Un parrafo suelto y nada mas.</p></body></html>"#);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.discover(p, {{ wait: 800 }}) }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    assert!(salida.contains("E=") && salida.contains("estructura repetida"),
+            "deberia decir que no hay listado:\n{salida}");
+}

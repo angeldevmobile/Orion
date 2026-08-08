@@ -18,8 +18,9 @@ with b = web.open() {
 cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
 > **Estado**: transporte, arranque, navegación, interacción, formularios,
-> tablas, modales, ventanas, extracción, archivos, sesión, estabilidad y
-> captura de red verificados de punta a punta (65 tests e2e en
+> tablas, modales, ventanas, extracción (con descubrimiento de esquema),
+> archivos, sesión, estabilidad y captura de red verificados de punta a punta
+> (68 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Medido contra
@@ -365,6 +366,7 @@ en vez de fallar en silencio: hay que marcar otro del grupo.
 | `web.value(pestaña, sel)` | sí — lo que el campo contiene AHORA, ver 5.1 |
 | `web.table(pestaña, sel, opts?)` | sí — una `<table>` entera, ver 5.2 |
 | `web.watch` + `web.capture` | el JSON que la página pide a su API, ver 12 |
+| `web.discover(pestaña, opts?)` | deduce el esquema de extracción solo, ver 7.5 |
 | `web.exists(pestaña, sel)` | **no** |
 | `web.count(pestaña, sel)` | **no** |
 | `web.visible(pestaña, sel)` | **no** |
@@ -622,6 +624,52 @@ un 404 tira el trabajo de las diecinueve buenas: se anota en `errors` y se sigue
 plantilla, un redirect al login o un selector que dejó de valer en esa sección
 cargan bien y no producen nada. Sin esto, un recorrido pierde páginas en
 silencio y nadie lo nota hasta que faltan datos en el informe.
+
+### 7.5 `web.discover(pestaña, opts?)` → esquema propuesto
+
+El problema de un scraper no es leer datos, es **averiguar qué selector usar**.
+Uno abre las herramientas del navegador, baja por el árbol, prueba una clase, ve
+que también casa con el menú, prueba otra… y veinte minutos después tiene un
+esquema que se rompe en la página siguiente.
+
+`discover` mira la página y lo propone:
+
+```orion
+e = web.discover(p)
+show(e["row"])       -- ".quote"     (el selector de la fila que se repite)
+show(e["fields"])    -- {text: ".text", author: ".author", url: "a@href"}
+show(e["sample"])    -- las primeras filas ya extraídas con esa propuesta
+
+-- y se usa tal cual:
+filas = web.extract(p, e["row"], { frase: ".text", autor: ".author" })
+```
+
+Devuelve `{ row, count, fields, sample, fragil }`. La **muestra** es lo que lo
+hace fiable: no te pide que confíes en la propuesta, te enseña qué extraería.
+
+Cómo lo deduce, para que no sea magia:
+
+- **La fila** es el grupo de elementos hermanos que más se repite con la misma
+  estructura interna, puntuado por cantidad **y riqueza** —texto y número de
+  campos—. Así no confunde un listado de productos con el menú de navegación,
+  que también se repite pero está vacío.
+- La repetición se detecta por **estructura, no por clases**: los sitios
+  modernos generan clases como `x1i10hfl` que no significan nada, así que se
+  mira el tag y los tags de los hijos.
+- **El selector de fila** es la clase común a todas las filas que además
+  selecciona exactamente esas. Si ninguna clase sirve, se cae a un selector
+  estructural (`article > h3 > a`) y `fragil` viene en `yes` para avisarlo.
+- **Los campos** solo se conservan si aparecen en la mayoría de las filas: uno
+  que esté en una sola no es un campo, es una casualidad.
+
+No adivina la intención —no sabe que eso es un "precio", así que un campo sin
+clase legible se llama `campo_1`—. No sustituye a `extract`: te deja a un paso
+de él en vez de a veinte minutos. Nadie lo tiene de serie; en Python te pones a
+leer el HTML a mano.
+
+Medido en tres sitios distintos sin decirle nada de ninguno: en Hacker News saca
+la URL del artículo y su título; en una tienda de libros, el enlace, la miniatura
+y el precio; en un listado de citas, el texto y el autor.
 
 ## 8. Archivos
 
