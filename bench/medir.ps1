@@ -5,11 +5,14 @@
 param(
     [Parameter(Mandatory=$true)][string]$Exe,
     [Parameter(Mandatory=$true)][string]$Args,
-    [Parameter(Mandatory=$true)][string]$Etiqueta
+    [Parameter(Mandatory=$true)][string]$Etiqueta,
+    # Dónde corre y dónde deja su salida. Por defecto, junto a este script:
+    # así los benchmarks que ya existían no cambian de comportamiento.
+    [string]$Dir = $PSScriptRoot
 )
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-$p = Start-Process -FilePath $Exe -ArgumentList $Args -WorkingDirectory $PSScriptRoot `
-     -NoNewWindow -PassThru -RedirectStandardOutput "$PSScriptRoot\out_$Etiqueta.txt"
+$p = Start-Process -FilePath $Exe -ArgumentList $Args -WorkingDirectory $Dir `
+     -NoNewWindow -PassThru -RedirectStandardOutput "$Dir\out_$Etiqueta.txt"
 $peak = 0
 while (-not $p.HasExited) {
     try {
@@ -20,5 +23,8 @@ while (-not $p.HasExited) {
 }
 $sw.Stop()
 $peakMB = [math]::Round($peak / 1MB, 1)
-Write-Host ("[{0}] pared_ms={1} pico_RAM_MB={2}" -f $Etiqueta, $sw.ElapsedMilliseconds, $peakMB)
-Get-Content "$PSScriptRoot\out_$Etiqueta.txt"
+# Al flujo de salida y no a la consola: así un script que orqueste varias
+# medidas puede capturar la línea y montar una tabla. Sin capturar se sigue
+# viendo igual.
+Write-Output ("[{0}] pared_ms={1} pico_RAM_MB={2}" -f $Etiqueta, $sw.ElapsedMilliseconds, $peakMB)
+Get-Content "$Dir\out_$Etiqueta.txt"

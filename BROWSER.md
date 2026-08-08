@@ -22,8 +22,9 @@ cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 > verificados de punta a punta (61 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
-> comportamiento se puede cambiar desde `open()` — ver 1.2. Pendiente:
-> benchmark completo contra Python.
+> comportamiento se puede cambiar desde `open()` — ver 1.2. Medido contra
+> Selenium y Playwright en 15.3, con la metodología en
+> [`bench/web/README.md`](bench/web/README.md).
 
 ## 1. Arranque
 
@@ -935,6 +936,53 @@ sin recompilar con la variable `ORION_CHROME` o pasando `chrome:` en `open()`.
 La última fila es la que más cuesta en la práctica: en Python cada actualización
 de Chrome obliga a volver a empaquetar. Aquí el ejecutable que entregaste hace
 seis meses sigue funcionando.
+
+#### Medido
+
+500 tarjetas × 4 campos, las tres herramientas moviendo **el mismo Chrome**, en
+headless, contra el mismo archivo local, y comprobando que las tres devuelven la
+misma huella de datos. Reproducible con `bench\web\run_web.ps1`; metodología y
+avisos en [`bench/web/README.md`](bench/web/README.md).
+
+| variante | extracción | proceso entero | RAM de la pila | auxiliar |
+|---|---:|---:|---:|---|
+| Selenium, idiomático | 14.132 ms | 24.953 ms | 62,3 MB | chromedriver |
+| Selenium, con JS a mano | 7,7 ms | 8.088 ms | 59,5 MB | chromedriver |
+| Playwright, idiomático | 9.234 ms | 12.175 ms | 317,3 MB | node |
+| Playwright, con JS a mano | 31,0 ms | 1.430 ms | 156,5 MB | node |
+| **Orion `extract`** | **8 ms** | **745 ms** | **16,2 MB** | **ninguno** |
+
+La RAM es la del proceso de automatización **más el auxiliar que arranca**, que
+no es el navegador y no es el mismo en los tres: Selenium necesita
+`chromedriver.exe` y Playwright un `node.exe` porque su driver está escrito en
+JavaScript. Orion no necesita ninguno — habla CDP desde su propio proceso, que
+es la misma razón por la que no hay un segundo binario que mantener
+sincronizado con la versión de Chrome. El navegador se excluye de la cuenta: es
+idéntico para las tres.
+
+Dos lecturas honestas de esta tabla:
+
+**Orion no ejecuta JavaScript más rápido que nadie.** Sus 8 ms están en el mismo
+orden que los 7,7 ms de Selenium mandando JavaScript a mano, y esa diferencia
+cabe en el ruido. El resultado no es ese.
+
+**El resultado es la primera fila contra la última: 14 segundos contra 8
+milisegundos.** Esa primera fila es cómo enseñan a hacerlo las dos
+documentaciones — localizar los elementos y pedirles el texto uno a uno, que con
+500 filas × 4 campos son 2.000 viajes. Lo que aporta `extract` no es velocidad
+bruta: es que **el camino rápido es el único que hay**. En las otras dos hay que
+saber que el problema existe y escribir JavaScript a mano dentro de Python, que
+es justo el trabajo que uno esperaba no tener que hacer.
+
+De los 8 segundos de Selenium, la extracción son 8 ms: el resto es arrancar
+`chromedriver` (~1,4 s), `quit()` (~2,1 s) y **~4,2 s después de la última línea
+del script**, esperando a que su árbol de procesos termine de irse. Para una
+tarea suelta da igual; para un trabajo que corre cada cinco minutos, no.
+
+En memoria la diferencia es de otro orden: **16 MB contra 60 y contra 157**. La
+versión idiomática de Playwright llega a 317 MB porque retiene un handle por
+cada elemento consultado, y aquí son 2.000 vivos a la vez. Eso pesa cuando el
+trabajo corre en un servidor con varias tareas en paralelo.
 
 ### 15.4 Redes corporativas
 
