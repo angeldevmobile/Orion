@@ -1,0 +1,75 @@
+-- crawl: recorrido paralelo web -> datos, en un solo lenguaje y un solo binario.
+--
+-- Esto es lo que en Python son CUATRO herramientas: Scrapy para crawlear (Node
+-- o Python), pandas para procesar, y pegamento entre ellas. Aqui es una llamada
+-- que abre N pestañas en paralelo sobre hilos de sistema de VERDAD (no asyncio),
+-- vuelca a disco en streaming, y reanuda si se corta. Y lo que sale se procesa
+-- en el mismo lenguaje con el motor columnar.
+--
+--   orion run demo/demo_browser_crawl.orx
+
+use "browser" as web
+use "frame" as fr
+use "datetime"
+
+const SITIO = "https://quotes.toscrape.com/page/"
+
+fn paginas(n) {
+    -- quotes.toscrape tiene paginacion /page/1 .. /page/10
+    l = []
+    for i in range(1, n + 1) { l.push(SITIO + str(i) + "/") }
+    return l
+}
+
+fn main() {
+    with b = web.open() {
+        show("1. CRAWL PARALELO ---------------------------------------")
+        show("   10 paginas de citas, 6 pestañas a la vez...")
+        t0 = datetime.timestamp_ms()
+        r = web.crawl(b, {
+            urls:    paginas(10),
+            row:     ".quote",
+            schema:  { autor: ".author", frase: ".text" },
+            out:     "citas.csv",
+            workers: 6,
+            resume:  yes
+        })
+        ms = datetime.timestamp_ms() - t0
+        show("   " + str(r["rows"]) + " citas de " + str(r["ok"]) + " paginas en "
+             + str(ms) + " ms  (con " + str(r["workers"]) + " pestañas)")
+        show("   archivo: " + str(r["files"]))
+    }
+
+    -- 2. Lo que se acaba de crawlear se procesa SIN salir del lenguaje.
+    show("")
+    show("2. PROCESAR LO CRAWLEADO (motor columnar) ---------------")
+    with h = fr.open("citas.csv") {
+        -- frame ingiere el CSV crawleado e infiere el esquema.
+        show("   filas x columnas: " + str(fr.size(h)))
+        show("   esquema inferido: " + str(fr.schema(h)))
+
+        -- Cuantas citas por autor, los mas citados primero.
+        cuenta = {}
+        for fila in fr.to_list(h) {
+            a = fila["autor"]
+            -- Acceder a una clave inexistente da ERROR en Orion (no null), asi
+            -- que se comprueba antes con list.contains sobre las claves.
+            if not keys(cuenta).contains(a) { cuenta[a] = 0 }
+            cuenta[a] = cuenta[a] + 1
+        }
+        show("   autores con mas citas:")
+        mostrados = 0
+        for a in keys(cuenta) {
+            if cuenta[a] >= 2 and mostrados < 4 {
+                show("     " + a + ": " + str(cuenta[a]))
+                mostrados = mostrados + 1
+            }
+        }
+    }
+
+    show("")
+    show("   web -> paralelo -> disco -> columnar -> stats, todo en un .orx.")
+    show("   En Python: Scrapy + pandas + pegamento. Aqui: una llamada y un import.")
+}
+
+main()

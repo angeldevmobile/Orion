@@ -23,6 +23,7 @@
 
 pub mod capture;
 pub mod cdp;
+pub mod crawl;
 pub mod discover;
 pub mod dom;
 pub mod extract;
@@ -184,6 +185,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "extract_to" => do_extract_to(&args),
         // discover(pestaña, opts?) → deduce el esquema solo: {row, count, fields, sample}
         "discover"   => do_discover(&args),
+        // crawl(navegador, opts) → recorre urls en paralelo con N pestañas, vuelca a disco y reanuda
+        "crawl"      => do_crawl(&args),
 
         // Archivos. Las tres ventanas del sistema operativo que el navegador
         // abriría por su cuenta se interceptan antes de que existan.
@@ -1274,6 +1277,86 @@ fn do_discover(args: &[EvalValue]) -> Result<EvalValue, String> {
         return Err(format!("browser.discover: {e}"));
     }
     Ok(json_to_eval(v))
+}
+
+/// `crawl(navegador, opts)` → resumen del recorrido paralelo.
+///
+/// Toma el **navegador**, no una pestaña: abre N por su cuenta y las conduce en
+/// paralelo. Es la versión con músculo de `extract_to` — hilos de sistema de
+/// verdad, streaming a disco y reanudación.
+fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let nav = arg_handle(args, 0, "browser.crawl(navegador, opts)")?;
+    let Some(EvalValue::Dict(o)) = args.get(1) else {
+        return Err("browser.crawl(navegador, opts): las opciones son un diccionario \
+                    con al menos { urls, row, schema, out }".into());
+    };
+
+    let urls: Vec<String> = match o.get("urls") {
+        Some(EvalValue::List(l)) => l.iter().map(to_str).collect(),
+        Some(v) => vec![to_str(v)],
+        None => return Err("browser.crawl: falta `urls` (la lista de páginas a recorrer)".into()),
+    };
+    if urls.is_empty() {
+        return Err("browser.crawl: la lista `urls` está vacía".into());
+    }
+    let fila_sel = o.get("row").map(to_str)
+        .ok_or("browser.crawl: falta `row` (el selector de la fila que se repite)")?;
+    let Some(EvalValue::Dict(esquema)) = o.get("schema") else {
+        return Err("browser.crawl: falta `schema` (el diccionario campo → especificación)".into());
+    };
+    let salida = o.get("out").map(to_str)
+        .ok_or("browser.crawl: falta `out` (la ruta de salida, .csv o .odf)")?;
+
+    let campos: Vec<extract::Campo> = esquema.iter()
+        .map(|(k, v)| extract::parse_campo(k, &to_str(v)))
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("browser.crawl: {e}"))?;
+
+    let (conn, timeout, t) = browser_ctx(nav)?;
+
+    // Reanudar sobre `.odf` no está soportado (numera bloques y lleva el conteo
+    // en la cabecera); se avisa antes de arrancar el navegador en vez de fallar a
+    // la mitad de un recorrido largo.
+    let resume = o.get("resume").map(truthy).unwrap_or(false);
+    if resume && !salida.to_lowercase().ends_with(".csv") {
+        return Err("browser.crawl: `resume` solo funciona con salida .csv; \
+                    el .odf obliga a empezar de cero".into());
+    }
+
+    let opts = crawl::Opciones {
+        urls,
+        fila_sel,
+        campos,
+        salida: salida.clone(),
+        workers: o.get("workers").and_then(|v| to_u64(v).ok()).unwrap_or(4).max(1) as usize,
+        chunk:   o.get("chunk").and_then(|v| to_u64(v).ok()).unwrap_or(50_000) as usize,
+        wait_ms: o.get("wait").and_then(|v| to_u64(v).ok()).unwrap_or(t.wait_ms),
+        resume,
+    };
+
+    let r = crawl::crawl(conn, timeout, t, opts)?;
+
+    // Selectores muertos: como en `extract`, callarlos devolvería columnas
+    // vacías que parecen buenas. Con `{ strict: no }` se acepta.
+    let estricto = o.get("strict").map(truthy).unwrap_or(true);
+    if estricto && !r.muertos.is_empty() {
+        return Err(format!(
+            "browser.crawl: {} campo(s) no trajeron valor en ninguna página:\n    {}\n  \
+             Los datos ya se escribieron en {salida}. Revisa esos selectores, o usa {{ strict: no }}.",
+            r.muertos.len(), r.muertos.join("\n    ")
+        ));
+    }
+
+    let mut m: IndexMap<String, EvalValue> = IndexMap::new();
+    m.insert("rows".into(),     EvalValue::Int(r.filas as i64));
+    m.insert("ok".into(),       EvalValue::Int(r.ok as i64));
+    m.insert("failed".into(),   EvalValue::Int(r.errores.len() as i64));
+    m.insert("skipped".into(),  EvalValue::Int(r.saltadas as i64));
+    m.insert("workers".into(),  EvalValue::Int(r.workers as i64));
+    m.insert("empty".into(),    EvalValue::List(r.vacias.into_iter().map(EvalValue::Str).collect()));
+    m.insert("files".into(),    EvalValue::List(r.archivos.into_iter().map(EvalValue::Str).collect()));
+    m.insert("errors".into(),   EvalValue::List(r.errores.into_iter().map(EvalValue::Str).collect()));
+    Ok(EvalValue::Dict(m))
 }
 
 /// `extract_to(pestaña, urls, selector, esquema, salida, opts?)` → resumen.

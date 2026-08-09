@@ -19,8 +19,8 @@ cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
 > **Estado**: transporte, arranque, navegación, interacción, formularios,
 > tablas, modales, ventanas, extracción (con descubrimiento de esquema),
-> archivos, sesión, estabilidad y captura de red verificados de punta a punta
-> (68 tests e2e en
+> archivos, sesión, estabilidad, captura de red y recorrido paralelo (`crawl`)
+> verificados de punta a punta (72 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Medido contra
@@ -367,6 +367,7 @@ en vez de fallar en silencio: hay que marcar otro del grupo.
 | `web.table(pestaña, sel, opts?)` | sí — una `<table>` entera, ver 5.2 |
 | `web.watch` + `web.capture` | el JSON que la página pide a su API, ver 12 |
 | `web.discover(pestaña, opts?)` | deduce el esquema de extracción solo, ver 7.5 |
+| `web.crawl(navegador, opts)` | recorre urls en paralelo, vuelca y reanuda, ver 7.6 |
 | `web.exists(pestaña, sel)` | **no** |
 | `web.count(pestaña, sel)` | **no** |
 | `web.visible(pestaña, sel)` | **no** |
@@ -670,6 +671,52 @@ leer el HTML a mano.
 Medido en tres sitios distintos sin decirle nada de ninguno: en Hacker News saca
 la URL del artículo y su título; en una tienda de libros, el enlace, la miniatura
 y el precio; en un listado de citas, el texto y el autor.
+
+### 7.6 `web.crawl(navegador, opts)` → resumen
+
+`extract_to` recorre una lista de URLs con **una sola pestaña, en serie**. Sirve,
+pero deja la máquina a un octavo de gas: mientras una página carga —que es
+esperar a la red, no calcular— el resto del navegador está parado.
+
+`web.crawl` abre **N pestañas y las conduce en paralelo desde N hilos de
+sistema**:
+
+```orion
+r = web.crawl(b, {
+    urls:    paginas,                    -- la lista de páginas
+    row:     ".card",
+    schema:  { nombre: ".title", precio: ".price|num" },
+    out:     "catalogo.csv",
+    workers: 8,                          -- 8 pestañas a la vez
+    resume:  yes                         -- retoma si se cortó
+})
+show(r)
+-- {rows: 4000, ok: 40, failed: 0, skipped: 0, workers: 8, empty: [], files: [catalogo.csv], errors: []}
+```
+
+Se le pasa el **navegador**, no una pestaña: las abre él. Toma el `row` y el
+`schema` de `extract`, y escribe a disco con el mismo volcador en streaming de
+`extract_to` (RAM plana, `.csv` o `.odf`).
+
+**El paralelismo es real, y es el músculo que Orion tiene y un scraper de Python
+no**: hilos de sistema de verdad sobre el mismo socket CDP, que el transporte
+multiplexa. No es `asyncio` cooperativo. Medido contra un servidor local de 12
+páginas lentas: `extract_to` en serie **7,9 s**, `crawl` con 8 workers **1,8 s**
+— las mismas 120 filas. El factor depende de cuántas páginas y de la red; la
+forma es la que cambia.
+
+**Reanuda.** Un recorrido de diez mil páginas que se corta en la siete mil no
+puede empezar de cero. Cada URL terminada se anota en `<salida>.progress`, y al
+volver a arrancar con `resume: yes` las hechas se saltan (`skipped` las cuenta).
+Se anota **después** de escribir sus filas: si el proceso muere entre medias, esa
+página se repite al reanudar en vez de perderse. La reanudación es para `.csv`
+—que admite añadir al final—; el `.odf` obliga a empezar de cero y se avisa.
+
+Como `extract`, un campo que no trae valor en **ninguna** página se delata en vez
+de dejar una columna vacía que parece buena; con `{ strict: no }` se acepta.
+
+En Python esto es **Scrapy**: un framework entero, otro fichero de settings, otra
+mentalidad. Aquí es una llamada, apoyada en piezas que ya existían.
 
 ## 8. Archivos
 

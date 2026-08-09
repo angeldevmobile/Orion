@@ -490,6 +490,35 @@ impl Volcador {
         })
     }
 
+    /// Abre para **seguir escribiendo** al final de un archivo que ya existe.
+    ///
+    /// Lo necesita `crawl` al reanudar: un recorrido que se cortó a la mitad ya
+    /// dejó filas en disco, y volver a crear el archivo las borraría. Solo tiene
+    /// sentido en CSV, que admite añadir al final; el `.odf` lleva el número de
+    /// filas en la cabecera y numera bloques, así que reanudar sobre él es otra
+    /// cosa —se rechaza con un mensaje claro en vez de corromper el archivo—.
+    pub fn continuar(ruta: &str, headers: Vec<String>, chunk: usize) -> Result<Volcador, String> {
+        let formato = Formato::de_ruta(ruta)?;
+        if !matches!(formato, Formato::Csv) {
+            return Err(format!(
+                "reanudar solo funciona con salida .csv; '{ruta}' obliga a empezar de cero"
+            ));
+        }
+        // Si no existe todavía, es un primer arranque normal con cabecera.
+        if !std::path::Path::new(ruta).exists() {
+            return Self::nuevo(ruta, headers, chunk);
+        }
+        let f = std::fs::OpenOptions::new().append(true).open(ruta)
+            .map_err(|e| format!("no se pudo abrir '{ruta}' para continuar: {e}"))?;
+        // Sin `write_record` de cabecera: ya está en el archivo.
+        let w = csv::WriterBuilder::new().has_headers(false).from_writer(f);
+        Ok(Volcador {
+            formato, ruta: ruta.to_string(), headers,
+            buffer: Vec::new(), chunk: chunk.max(1), csv: Some(w),
+            filas: 0, archivos: Vec::new(),
+        })
+    }
+
     pub fn escribir(&mut self, fila: Vec<String>) -> Result<(), String> {
         self.filas += 1;
         match self.formato {

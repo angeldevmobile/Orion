@@ -2344,3 +2344,188 @@ with b = web.open() {{
     assert!(salida.contains("E=") && salida.contains("estructura repetida"),
             "deberia decir que no hay listado:\n{salida}");
 }
+
+//    Recorrido paralelo (crawl)
+
+/// Sirve N paginas de catalogo, cada una con un retraso, desde varios hilos.
+/// El retraso y la concurrencia del servidor son lo que hace que el paralelismo
+/// se note: en serie el recorrido tarda N×retraso, en paralelo mucho menos.
+fn serve_catalogo(paginas: usize, retraso_ms: u64) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
+    let port = listener.local_addr().unwrap().port();
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            // Un hilo por conexion: el servidor tiene que poder atender varias a
+            // la vez o mediria su propia serializacion, no la del crawler.
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 2048];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let ruta = req.split_whitespace().nth(1).unwrap_or("/");
+                let pag: usize = ruta.rsplit("page=").next()
+                    .and_then(|x| x.parse().ok()).unwrap_or(0);
+                std::thread::sleep(std::time::Duration::from_millis(retraso_ms));
+                let filas: String = (0..5).map(|i| format!(
+                    "<div class=\"card\"><span class=\"t\">Item {pag}-{i}</span>\
+                     <span class=\"p\">{}.50</span></div>", pag * 10 + i
+                )).collect();
+                let html = format!("<!doctype html><html><head><title>P{pag}</title></head>\
+                    <body><div id=l>{filas}</div></body></html>");
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
+                     Content-Length: {}\r\nConnection: close\r\n\r\n{}", html.len(), html);
+                let _ = s.write_all(resp.as_bytes());
+                let _ = s.flush();
+            });
+        }
+    });
+    let _ = paginas;
+    format!("http://127.0.0.1:{port}/")
+}
+
+#[test]
+fn crawl_recorre_en_paralelo_y_vuelca_a_disco() {
+    let dir = tmp_dir("crawl");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let base = serve_catalogo(12, 150);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+fn urls(base, n) {{
+    l = []
+    for i in range(1, n + 1) {{ l.push(base + "?page=" + str(i)) }}
+    return l
+}}
+with b = web.open() {{
+    r = web.crawl(b, {{
+        urls:    urls("{base}", 12),
+        row:     ".card",
+        schema:  {{ item: ".t", precio: ".p|num" }},
+        out:     "cat.csv",
+        workers: 6
+    }})
+    show("ROWS=" + str(r["rows"]))
+    show("OK=" + str(r["ok"]))
+    show("WORKERS=" + str(r["workers"]))
+    show("FAILED=" + str(r["failed"]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // 12 páginas × 5 filas.
+    assert!(salida.contains("ROWS=60"), "no extrajo todas las filas:\n{salida}");
+    assert!(salida.contains("OK=12"), "{salida}");
+    assert!(salida.contains("WORKERS=6"), "no abrió las seis pestañas:\n{salida}");
+    assert!(salida.contains("FAILED=0"), "{salida}");
+    // El archivo tiene cabecera + 60 filas.
+    let csv = fs::read_to_string(dir.join("cat.csv")).unwrap_or_default();
+    assert_eq!(csv.lines().count(), 61, "el csv no tiene las 60 filas + cabecera:\n{csv}");
+    assert!(csv.contains("Item 1-0") && csv.contains("Item 12-4"), "faltan filas:\n{csv}");
+}
+
+#[test]
+fn crawl_es_mas_rapido_en_paralelo_que_en_serie() {
+    let dir = tmp_dir("crawl_veloc");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    // 12 páginas a 200 ms: en serie ~2.4 s, con 6 workers deberia bajar claro.
+    let base = serve_catalogo(12, 200);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+use "datetime"
+fn urls(base, n) {{
+    l = []
+    for i in range(1, n + 1) {{ l.push(base + "?page=" + str(i)) }}
+    return l
+}}
+with b = web.open() {{
+    p = web.page(b)
+    us = urls("{base}", 12)
+    esq = {{ item: ".t" }}
+
+    t0 = datetime.timestamp_ms()
+    web.extract_to(p, us, ".card", esq, "s.csv")
+    serie = datetime.timestamp_ms() - t0
+
+    t1 = datetime.timestamp_ms()
+    web.crawl(b, {{ urls: us, row: ".card", schema: esq, out: "p.csv", workers: 6 }})
+    par = datetime.timestamp_ms() - t1
+
+    show("SERIE=" + str(serie))
+    show("PAR=" + str(par))
+    show("MAS_RAPIDO=" + str(par < serie))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // No se fija un factor exacto —depende de la máquina—, solo que el paralelo
+    // gana con claridad. En serie son 12×200ms; el paralelo con 6 workers debe
+    // quedar holgadamente por debajo.
+    assert!(salida.contains("MAS_RAPIDO=yes"),
+            "el recorrido paralelo no fue más rápido que el serie:\n{salida}");
+}
+
+#[test]
+fn crawl_reanuda_sin_repetir_lo_hecho() {
+    let dir = tmp_dir("crawl_resume");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let base = serve_catalogo(24, 60);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+fn urls(base, desde, hasta) {{
+    l = []
+    for i in range(desde, hasta + 1) {{ l.push(base + "?page=" + str(i)) }}
+    return l
+}}
+with b = web.open() {{
+    esq = {{ item: ".t" }}
+    -- Primera tanda: 1-12.
+    a = web.crawl(b, {{ urls: urls("{base}", 1, 12), row: ".card", schema: esq,
+                        out: "r.csv", workers: 4, resume: yes }})
+    show("A_OK=" + str(a["ok"]) + " A_SKIP=" + str(a["skipped"]))
+    -- Segunda tanda: 1-24 con resume. Debe saltar las 12 hechas.
+    c = web.crawl(b, {{ urls: urls("{base}", 1, 24), row: ".card", schema: esq,
+                        out: "r.csv", workers: 4, resume: yes }})
+    show("C_OK=" + str(c["ok"]) + " C_SKIP=" + str(c["skipped"]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("A_OK=12 A_SKIP=0"), "la primera tanda no hizo 12:\n{salida}");
+    // La clave: la segunda tanda salta las 12 ya hechas y solo procesa 12 nuevas.
+    assert!(salida.contains("C_OK=12 C_SKIP=12"),
+            "la reanudación no saltó lo ya hecho:\n{salida}");
+    // El csv final tiene las 24 páginas (120 filas) sin duplicados.
+    let csv = fs::read_to_string(dir.join("r.csv")).unwrap_or_default();
+    assert_eq!(csv.lines().count(), 121, "el csv reanudado no tiene 120 filas + cabecera");
+}
+
+#[test]
+fn crawl_un_campo_muerto_en_todas_las_paginas_se_delata() {
+    let dir = tmp_dir("crawl_muerto");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let base = serve_catalogo(4, 30);
+
+    let (salida, _) = run_orion(&dir, &format!(r##"
+use "browser" as web
+fn urls(base, n) {{
+    l = []
+    for i in range(1, n + 1) {{ l.push(base + "?page=" + str(i)) }}
+    return l
+}}
+with b = web.open() {{
+    attempt {{
+        web.crawl(b, {{ urls: urls("{base}", 4), row: ".card",
+                        schema: {{ item: ".t", fantasma: ".no-existe" }}, out: "m.csv", workers: 4 }})
+    }} handle e {{ show("E=" + e) }}
+}}
+"##));
+    // `.no-existe` no aparece en ninguna página: callarlo dejaría una columna
+    // vacía que parece buena, que es el fallo que este aviso evita.
+    assert!(salida.contains("E=") && salida.contains("fantasma"),
+            "un campo muerto en todo el recorrido debería delatarse:\n{salida}");
+}

@@ -891,6 +891,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "extract", "browser.extract(…)", "Función del módulo browser."));
     v.push(f("browser", "extract_to", "browser.extract_to(…)", "Función del módulo browser."));
     v.push(f("browser", "discover", "browser.discover(pestaña, opts?)", "Deduce el esquema solo: {row, count, fields, sample}"));
+    v.push(f("browser", "crawl", "browser.crawl(navegador, opts)", "Recorre urls en paralelo con N pestañas, vuelca a disco y reanuda"));
     v.push(f("browser", "upload", "browser.upload(pestaña, selector, archivos)", "Adjunta sin que se abra la ventana del sistema; el selector puede ser el <input type=file> o el botón que lo abre"));
     v.push(f("browser", "download", "browser.download(pestaña, selector, opts?)", "Pulsa y espera a que la descarga TERMINE; devuelve {path, name, bytes, url} y no hay diálogo \"Guardar como\""));
     v.push(f("browser", "pdf", "browser.pdf(pestaña, ruta, opts?)", "Imprime la página a PDF sin abrir el diálogo de impresión"));
