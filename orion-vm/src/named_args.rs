@@ -122,6 +122,11 @@ fn walk_expr(e: &mut Expr, sigs: &Sigs) -> Result<(), CodegenError> {
             walk_expr(right, sigs)?;
         }
         Expr::UnaryOp { expr, .. } => walk_expr(expr, sigs)?,
+        Expr::Ternary { cond, then_e, else_e } => {
+            walk_expr(cond, sigs)?;
+            walk_expr(then_e, sigs)?;
+            walk_expr(else_e, sigs)?;
+        }
         Expr::List(v) => walk_exprs(v, sigs)?,
         Expr::Dict(pairs) => {
             for (_, v) in pairs.iter_mut() {

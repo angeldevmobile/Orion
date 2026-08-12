@@ -326,11 +326,58 @@ impl Parser {
 
         let mut expr = self.parse_or()?;
 
-        // range: start..end  (e.g. 1..10)
-        if matches!(self.peek(), TokenKind::DotDot) {
+        // pipe: valor |> destino  —  el valor entra como PRIMER argumento.
+        //
+        //   x |> f            =>  f(x)
+        //   x |> f(a, b)      =>  f(x, a, b)
+        //   x |> mod.act(a)   =>  mod.act(x, a)
+        //
+        // Es azúcar puro de parser: lo que sale es la misma `Call` que se
+        // habría escrito a mano, así que VM, JIT, AOT y typechecker lo tratan
+        // sin enterarse. Se encadena por la izquierda —`a |> f |> g` es
+        // `g(f(a))`— y va por debajo de todos los operadores: `a + b |> f` es
+        // `f(a + b)`, que es como se lee.
+        while matches!(self.peek(), TokenKind::PipeOp) {
+            self.pos += 1;
+            let line = self.current_line();
+            let col  = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
+            // Una lambda como etapa (`x |> (n) => n * 2`) hay que reconocerla
+            // aquí: `parse_or` no mira si viene uno, eso solo se comprueba al
+            // entrar a una expresión, y sin esto el `=>` reventaba el paréntesis.
+            let stage = if self.is_lambda_ahead() {
+                self.parse_lambda()?
+            } else {
+                self.parse_or()?
+            };
+            expr = Self::pipe_into(expr, stage, line, col)?;
+        }
+
+        // Rangos. Tres formas, dos semánticas:
+        //
+        //   1..4    exclusivo   [1,2,3]     forma corta de siempre
+        //   1..<4   exclusivo   [1,2,3]     igual, pero dice en el símbolo dónde corta
+        //   1...4   INCLUSIVO   [1,2,3,4]
+        //
+        // `..` se queda exclusivo porque ya lo era —el bucle compara con `Lt`— y
+        // porque coincide con `range()`, que también excluye el extremo. Cambiarlo
+        // habría alterado en silencio los bucles ya escritos, que es justo lo que
+        // no se puede hacer. `..<` existe para quien prefiera no tener que
+        // acordarse, y `...` cubre el caso que hasta ahora obligaba a escribir
+        // `a..(b+1)`.
+        //
+        // Aquí `...` solo puede ser infijo: se llega con `expr` ya parseada. El
+        // `...` prefijo (spread) se resuelve donde empieza un operando, así que
+        // los dos usos del mismo símbolo no se cruzan nunca.
+        let range_op = match self.peek() {
+            TokenKind::DotDot    => Some(".."),
+            TokenKind::DotDotLt  => Some("..<"),
+            TokenKind::DotDotDot => Some("..."),
+            _ => None,
+        };
+        if let Some(op) = range_op {
             self.pos += 1;
             let right = self.parse_or()?;
-            expr = Expr::BinaryOp { op: "..".into(), left: Box::new(expr), right: Box::new(right) };
+            expr = Expr::BinaryOp { op: op.into(), left: Box::new(expr), right: Box::new(right) };
         }
 
         // is-check: expr is ShapeName
@@ -340,7 +387,90 @@ impl Parser {
             expr = Expr::IsCheck { expr: Box::new(expr), shape };
         }
 
+        // Ternario: cond ? si_si : si_no
+        //
+        // Va el último y asocia por la derecha, así que `a ? b : c ? d : e` se
+        // lee `a ? b : (c ? d : e)`, que es la cadena else-if de toda la vida.
+        // Las dos ramas se parsean con `parse_expression` completa: dentro de un
+        // ternario cabe otro, un `|>` o un rango sin tener que poner paréntesis.
+        if matches!(self.peek(), TokenKind::Question) {
+            self.pos += 1;
+            let then_e = self.parse_expression()?;
+            self.expect(&TokenKind::Colon)?;
+            let else_e = self.parse_expression()?;
+            expr = Expr::Ternary {
+                cond:   Box::new(expr),
+                then_e: Box::new(then_e),
+                else_e: Box::new(else_e),
+            };
+        }
+
         Ok(expr)
+    }
+
+    /// Inserta `value` como primer argumento del destino de un `|>`.
+    ///
+    /// Se admiten las cuatro formas que tienen un sitio natural donde meterlo:
+    /// nombre suelto, llamada, método y lambda. Cualquier otra cosa —un número,
+    /// una lista, un `a + b`— no es invocable, y se rechaza aquí con el sitio
+    /// exacto en vez de dejar que el error salga mucho más abajo hablando de
+    /// `__call__`, que no es nada que el programador haya escrito.
+    fn pipe_into(value: Expr, stage: Expr, line: u32, col: u32) -> Result<Expr, ParseError> {
+        let prepend = |args: Vec<Expr>| {
+            let mut v = Vec::with_capacity(args.len() + 1);
+            v.push(value.clone());
+            v.extend(args);
+            v
+        };
+
+        Ok(match stage {
+            // x |> f
+            Expr::Ident(_) => Expr::Call {
+                callee: Box::new(stage),
+                args:   vec![value],
+                kwargs: Vec::new(),
+            },
+
+            // x |> f(a, b)   →  f(x, a, b)
+            Expr::Call { callee, args, kwargs } => Expr::Call {
+                callee,
+                args: prepend(args),
+                kwargs,
+            },
+
+            // x |> obj.act(a)  →  obj.act(x, a)
+            Expr::CallMethod { method, receiver, args, kwargs } => Expr::CallMethod {
+                method,
+                receiver,
+                args: prepend(args),
+                kwargs,
+            },
+
+            // x |> mod.f  (sin paréntesis)  →  mod.f(x)
+            Expr::AttrAccess { object, attr } => Expr::CallMethod {
+                method:   attr,
+                receiver: object,
+                args:     vec![value],
+                kwargs:   Vec::new(),
+            },
+
+            // x |> (n) => n * 2
+            lam @ Expr::Lambda { .. } => Expr::Call {
+                callee: Box::new(lam),
+                args:   vec![value],
+                kwargs: Vec::new(),
+            },
+
+            _ => {
+                return Err(ParseError {
+                    message: "a la derecha de '|>' hace falta algo invocable: \
+                              un nombre de función, una llamada, un método o una lambda"
+                        .to_string(),
+                    line,
+                    col,
+                })
+            }
+        })
     }
 
     fn is_lambda_ahead(&self) -> bool {

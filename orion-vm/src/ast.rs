@@ -43,6 +43,14 @@ pub enum Expr {
     // Comprobación de tipo
     IsCheck { expr: Box<Expr>, shape: String },
 
+    // Condicional como EXPRESIÓN: `cond ? si_si : si_no`.
+    //
+    // En Orion `if` es una declaración, no una expresión, así que hasta ahora
+    // elegir entre dos valores obligaba a declarar la variable antes y
+    // asignarla en las dos ramas. El ternario cubre ese hueco sin convertir
+    // `if` en expresión, que sería un cambio mucho mayor.
+    Ternary { cond: Box<Expr>, then_e: Box<Expr>, else_e: Box<Expr> },
+
     // Async
     Await(Box<Expr>),
 }

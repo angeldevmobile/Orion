@@ -476,6 +476,16 @@ pub fn fmt_expr(expr: &Expr) -> String {
             }
         }
 
+        // Ternario. La condición va entre paréntesis si es otro ternario, que
+        // es el único caso en el que sin ellos se leería al revés al releerlo.
+        Expr::Ternary { cond, then_e, else_e } => {
+            let c = match cond.as_ref() {
+                Expr::Ternary { .. } => format!("({})", fmt_expr(cond)),
+                _ => fmt_expr(cond),
+            };
+            format!("{c} ? {} : {}", fmt_expr(then_e), fmt_expr(else_e))
+        }
+
         Expr::List(items) => {
             if items.is_empty() { return "[]".into(); }
             let parts: Vec<String> = items.iter().map(fmt_expr).collect();

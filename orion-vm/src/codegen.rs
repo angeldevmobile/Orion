@@ -295,7 +295,11 @@ impl Codegen {
                 self.current_line = line;
                 self.emit(Instruction::LoadVar(name.clone()));
                 self.compile_expr_main(&value)?;
-                self.emit(op_instr(&op));
+                let instr = op_instr(&op).ok_or_else(|| CodegenError {
+                    message: format!("operador de asignación no soportado: '{op}='"),
+                    line,
+                })?;
+                self.emit(instr);
                 self.emit(Instruction::StoreVar(name));
             }
             Stmt::AssignIndex { object, index, value, line, .. } => {
@@ -393,9 +397,14 @@ impl Codegen {
                 let ctr = self.for_counter;
                 self.for_counter += 1;
 
-                // range syntax: for i in start..end
+                // range syntax: for i in start..end  (y ..<, ...)
+                //
+                // Recorrer el rango con un contador evita construir la lista, así
+                // que `for i in 0..1000000` no reserva un millón de elementos. La
+                // única diferencia entre las tres formas es el comparador: los
+                // exclusivos paran antes del extremo, el inclusivo lo incluye.
                 if let Expr::BinaryOp { op, left, right } = &iter {
-                    if op == ".." {
+                    if op == ".." || op == "..<" || op == "..." {
                         let cur_var = format!("__cur_{ctr}__");
                         let end_var = format!("__end_{ctr}__");
                         self.compile_expr_main(left)?;
@@ -405,7 +414,7 @@ impl Codegen {
                         let loop_start = self.addr();
                         self.emit(Instruction::LoadVar(cur_var.clone()));
                         self.emit(Instruction::LoadVar(end_var.clone()));
-                        self.emit(Instruction::Lt);
+                        self.emit(if op == "..." { Instruction::LtEq } else { Instruction::Lt });
                         let jf = self.emit(Instruction::JumpIfFalse(0));
                         self.emit(Instruction::LoadVar(cur_var.clone()));
                         self.emit(Instruction::StoreVar(var));
@@ -719,7 +728,11 @@ impl FnCompiler {
                 self.current_line = *line;
                 self.emit(Instruction::LoadVar(name.clone()));
                 self.compile_expr(value, async_fns)?;
-                self.emit(op_instr(op));
+                let instr = op_instr(op).ok_or_else(|| CodegenError {
+                    message: format!("operador de asignación no soportado: '{op}='"),
+                    line: *line,
+                })?;
+                self.emit(instr);
                 self.emit(Instruction::StoreVar(name.clone()));
             }
             Stmt::AssignIndex { object, index, value, line, .. } => {
@@ -814,9 +827,12 @@ impl FnCompiler {
                 let ctr = self.for_counter;
                 self.for_counter += 1;
 
-                // range syntax: for i in start..end
+                // range syntax: for i in start..end  (y ..<, ...)
+                // Mismo criterio que en el camino de `main`: contador en vez de
+                // lista, y el comparador es lo único que separa el inclusivo de
+                // los dos exclusivos.
                 if let Expr::BinaryOp { op, left, right } = iter {
-                    if op == ".." {
+                    if op == ".." || op == "..<" || op == "..." {
                         let cur_var = format!("__cur_{ctr}__");
                         let end_var = format!("__end_{ctr}__");
                         self.compile_expr(left, async_fns)?;
@@ -826,7 +842,7 @@ impl FnCompiler {
                         let loop_start = self.addr();
                         self.emit(Instruction::LoadVar(cur_var.clone()));
                         self.emit(Instruction::LoadVar(end_var.clone()));
-                        self.emit(Instruction::Lt);
+                        self.emit(if op == "..." { Instruction::LtEq } else { Instruction::Lt });
                         let jf = self.emit(Instruction::JumpIfFalse(0));
                         self.emit(Instruction::LoadVar(cur_var.clone()));
                         self.emit(Instruction::StoreVar(var.clone()));
@@ -1126,10 +1142,63 @@ fn compile_expr_into(
             }
         }
 
+        // Un rango como EXPRESIÓN se materializa en la lista `range(a, b)`.
+        //
+        // El `for` tiene su propio camino en `compile_stmt`, que itera con un
+        // contador y no llega aquí: recorrer un rango no reserva la lista. Este
+        // caso cubre todo lo demás (`x = 1..4`, `len(1..n)`, pasarlo a una
+        // función), que hasta ahora caía al operador genérico y, con el
+        // fallback a `Add`, devolvía la SUMA de los extremos en silencio.
+        //
+        // `range` excluye el extremo derecho —`range(1,4)` es `[1,2,3]`—, así
+        // que el inclusivo se pide como `range(a, b+1)`. Está en
+        // `is_jit_builtin`, con lo que este desugar vale igual en VM, JIT y AOT
+        // sin tocar ninguno de los tres.
+        Expr::BinaryOp { op, left, right } if op == ".." || op == "..<" || op == "..." => {
+            recurse!(left);
+            recurse!(right);
+            if op == "..." {
+                emit!(Instruction::LoadInt(1));
+                emit!(Instruction::Add);
+            }
+            emit!(Instruction::Call("range".into(), 2));
+        }
+
         Expr::BinaryOp { op, left, right } => {
             recurse!(left);
             recurse!(right);
-            emit!(op_instr(op));
+            let instr = op_instr(op).ok_or_else(|| CodegenError {
+                message: format!("operador binario no soportado: '{op}'"),
+                line: current_line,
+            })?;
+            emit!(instr);
+        }
+
+        // `cond ? a : b` — solo se evalúa la rama que toca.
+        //
+        // Se baja a los mismos saltos que un if/else, con una diferencia que
+        // importa: aquí las dos ramas dejan un valor en la pila y el bloque de
+        // fusión lo tiene que encontrar. La VM no se inmuta, pero el JIT limpia
+        // la pila en cada frontera de bloque, así que una función con ternario
+        // no compila a nativo y cae al intérprete. Cae con error, no con un
+        // resultado inventado, que es lo que importa; hacerlo nativo pediría
+        // parámetros de bloque en el punto de fusión y eso es un análisis de
+        // flujo que el JIT todavía no hace.
+        Expr::Ternary { cond, then_e, else_e } => {
+            recurse!(cond);
+            let jf = instrs.len();
+            emit!(Instruction::JumpIfFalse(0));
+
+            recurse!(then_e);
+            let jend = instrs.len();
+            emit!(Instruction::Jump(0));
+
+            let else_addr = instrs.len();
+            instrs[jf] = Instruction::JumpIfFalse(else_addr);
+            recurse!(else_e);
+
+            let end = instrs.len();
+            instrs[jend] = Instruction::Jump(end);
         }
 
         Expr::UnaryOp { op, expr } => {
@@ -1378,8 +1447,16 @@ fn compile_sub_expr(
 
 //    Helpers                                                                    
 
-fn op_instr(op: &str) -> Instruction {
-    match op {
+/// Instrucción que implementa un operador binario.
+///
+/// Devuelve `None` para lo que no sea un operador aritmético/lógico. Antes esta
+/// función caía a `Add` para todo lo desconocido, y el efecto no era un error
+/// sino una respuesta equivocada en silencio: `1..4` fuera de un `for` no se
+/// quejaba, devolvía `5`. Cualquier operador que se añada al lexer y no se
+/// cablee aquí vuelve a sumar, así que el caso por defecto tiene que ser un
+/// error del compilador, no una suma.
+fn op_instr(op: &str) -> Option<Instruction> {
+    Some(match op {
         "+"  => Instruction::Add,
         "-"  => Instruction::Sub,
         "*"  => Instruction::Mul,
@@ -1394,8 +1471,8 @@ fn op_instr(op: &str) -> Instruction {
         ">=" => Instruction::GtEq,
         "&&" => Instruction::And,
         "||" => Instruction::Or,
-        _    => Instruction::Add, // fallback
-    }
+        _    => return None,
+    })
 }
 
 //    Tests                                                                      

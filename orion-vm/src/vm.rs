@@ -527,20 +527,38 @@ impl VM {
                     .collect::<Result<Vec<_>, _>>()?;
                 args.reverse();
 
-                // Resolver el valor real: variable local que puede ser Str, Closure o directo
-                let local_val = self.call_stack.last()
-                    .and_then(|f| f.vars.get(&name).cloned())
-                    .or_else(|| {
-                        if self.call_stack.len() > 1 {
-                            self.call_stack.first().and_then(|f| f.vars.get(&name).cloned())
-                        } else { None }
-                    });
+                // `__call__` es la llamada a algo invocable que NO es un nombre:
+                // una lambda invocada al vuelo `((n) => n + 1)(10)`, lo que
+                // devuelva una expresión, o la etapa de un `|>` escrita como
+                // lambda. El codegen la emite desde siempre pero nadie la
+                // atendía, así que esos programas morían con "Función
+                // '__call__' no definida" —el nombre de un símbolo interno que
+                // el programador nunca escribió—. El invocable queda apilado
+                // DEBAJO de los argumentos, que es lo que se acaba de sacar.
+                let (resolved_name, closure_env) = if name == "__call__" {
+                    match self.pop()? {
+                        Value::Closure { fn_name, env } => (fn_name, Some(env)),
+                        Value::Str(s)                   => (s, None),
+                        other => return Err(format!(
+                            "no se puede llamar a un valor de tipo {}", other.type_name()
+                        )),
+                    }
+                } else {
+                    // Resolver el valor real: variable local que puede ser Str, Closure o directo
+                    let local_val = self.call_stack.last()
+                        .and_then(|f| f.vars.get(&name).cloned())
+                        .or_else(|| {
+                            if self.call_stack.len() > 1 {
+                                self.call_stack.first().and_then(|f| f.vars.get(&name).cloned())
+                            } else { None }
+                        });
 
-                // Extraer nombre resuelto y env de closure (si aplica)
-                let (resolved_name, closure_env) = match local_val {
-                    Some(Value::Closure { fn_name, env }) => (fn_name, Some(env)),
-                    Some(Value::Str(s))                   => (s, None),
-                    _                                     => (name.clone(), None),
+                    // Extraer nombre resuelto y env de closure (si aplica)
+                    match local_val {
+                        Some(Value::Closure { fn_name, env }) => (fn_name, Some(env)),
+                        Some(Value::Str(s))                   => (s, None),
+                        _                                     => (name.clone(), None),
+                    }
                 };
 
                 if self.shapes.contains_key(&resolved_name) {
