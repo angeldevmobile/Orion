@@ -181,6 +181,11 @@ pub struct ActDef {
     pub params: Vec<Param>,
     pub ret_type: Option<String>,
     pub body: Vec<Stmt>,
+    /// `static act` — pertenece al shape, no a una instancia, y por tanto no
+    /// recibe `me`. Se llama con `Shape::act(...)`. Sirve para constructores
+    /// alternativos y fábricas, que hasta ahora había que escribir como
+    /// funciones sueltas fuera del shape, sin relación visible con él.
+    pub is_static: bool,
 }
 
 //   Desugar de `with`

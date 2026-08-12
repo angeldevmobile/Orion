@@ -764,6 +764,27 @@ impl Parser {
                         }
                     }
                 }
+                // Acceso estático: `Shape::act`.
+                //
+                // Se resuelve a un identificador con el nombre ya compuesto,
+                // "Shape::act", que es como codegen registra los acts estáticos.
+                // A partir de aquí es un nombre de función corriente: la llamada
+                // la monta el brazo de abajo y ni la VM ni el JIT necesitan
+                // saber que esto vino de un shape. El nombre no puede chocar con
+                // ninguno del usuario porque el lexer nunca mete `::` dentro de
+                // un identificador.
+                TokenKind::DoubleColon => {
+                    self.pos += 1;
+                    let member = self.expect_ident()?;
+                    let shape = match &expr {
+                        Expr::Ident(n) => n.clone(),
+                        _ => return Err(self.err(
+                            "'::' se usa sobre el nombre de un shape: Shape::act(...)".to_string(),
+                        )),
+                    };
+                    expr = Expr::Ident(format!("{shape}::{member}"));
+                }
+
                 // llamada: expr(args)
                 TokenKind::LParen => {
                     let (args, kwargs) = self.parse_call_args()?;
@@ -1277,7 +1298,18 @@ impl Parser {
                             let body = self.parse_block()?;
                             on_error = Some((params, body));
                         }
-                        TokenKind::Act => {
+                        // `act` normal o `static act`. El único cambio es que el
+                        // estático no recibe instancia; el resto se parsea igual.
+                        TokenKind::Act | TokenKind::Static => {
+                            let is_static = matches!(self.peek(), TokenKind::Static);
+                            if is_static {
+                                self.pos += 1; // 'static'
+                                if !matches!(self.peek(), TokenKind::Act) {
+                                    return Err(self.err(
+                                        "después de 'static' se espera 'act'".to_string(),
+                                    ));
+                                }
+                            }
                             self.pos += 1;
                             let act_name = self.expect_ident()?;
                             let params = self.parse_params()?;
@@ -1288,7 +1320,7 @@ impl Parser {
                                 None
                             };
                             let body = self.parse_block()?;
-                            acts.push(ActDef { name: act_name, params, ret_type, body });
+                            acts.push(ActDef { name: act_name, params, ret_type, body, is_static });
                         }
                         TokenKind::Ident(_) => {
                             // campo: name [: type] [= default]  |  name: default_expr

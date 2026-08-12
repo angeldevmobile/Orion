@@ -499,6 +499,7 @@ fn keyword_or_ident(word: &str) -> TokenKind {
 
         "shape"     => TokenKind::Shape,
         "act"       => TokenKind::Act,
+        "static"    => TokenKind::Static,
         "using"     => TokenKind::Using,
         "is"        => TokenKind::Is,
         "on_create" => TokenKind::OnCreate,

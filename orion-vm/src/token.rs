@@ -119,6 +119,7 @@ pub enum TokenKind {
     Dot,        // .
 
     // Special operators
+    Static,      // static  (acts a nivel de shape, sin instancia)
     NullSafe,    // ?.
     PipeOp,      // |>
     DoubleColon, // ::

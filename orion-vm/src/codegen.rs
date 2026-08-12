@@ -124,7 +124,24 @@ impl Codegen {
                     self.async_fns.insert(name.clone());
                 }
                 Stmt::Shape { name, fields, on_create, on_error, acts, using, .. } => {
-                    let shape = self.compile_shape(fields, on_create, on_error, acts, using)?;
+                    // Los `static act` no son métodos: no reciben instancia y no
+                    // se buscan sobre un valor. Se registran como funciones
+                    // normales con el nombre compuesto "Shape::act", que es
+                    // exactamente lo que el parser produce al ver `Shape::act`.
+                    // Así el despacho, los defaults de parámetros y el JIT los
+                    // tratan como a cualquier función, sin un camino aparte.
+                    let (statics, instance_acts): (Vec<&ActDef>, Vec<&ActDef>) =
+                        acts.iter().partition(|a| a.is_static);
+
+                    for act in statics {
+                        let qualified = format!("{name}::{}", act.name);
+                        let f = self.compile_fn_body(&act.params, &act.body)?;
+                        self.functions.insert(qualified, f);
+                    }
+
+                    let instance_acts: Vec<ActDef> =
+                        instance_acts.into_iter().cloned().collect();
+                    let shape = self.compile_shape(fields, on_create, on_error, &instance_acts, using)?;
                     self.shapes.insert(name.clone(), shape);
                 }
                 Stmt::ExternFn { name, params, ret_type, lib, .. } => {
