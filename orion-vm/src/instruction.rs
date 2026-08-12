@@ -24,6 +24,13 @@ pub enum Instruction {
     Pow,
     Neg,                 // unary minus
 
+    //   Bit a bit (solo enteros)
+    BitAnd,              // &
+    BitOr,               // |
+    BitXor,              // ^
+    Shl,                 // <<
+    Shr,                 // >>
+
     //   Comparación                
     Eq,
     NotEq,

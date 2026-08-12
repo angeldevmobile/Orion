@@ -1210,10 +1210,26 @@ fn compile_expr_into(
             }
         }
 
+        Expr::List(elems) if elems.iter().any(|e| matches!(e, Expr::Spread(_))) => {
+            compile_list_with_spread(instrs, lines, current_line, async_fns, extra_fns, elems)?;
+        }
+
         Expr::List(elems) => {
             let n = elems.len();
             for e in elems { recurse!(e); }
             emit!(Instruction::MakeList(n as u8));
+        }
+
+        // Un `...` que llega hasta aquí está fuera de una lista o de unos
+        // argumentos, que son los dos únicos sitios donde expandir significa
+        // algo. El parser ya no lo produce en otras posiciones; esto cubre el
+        // caso por si alguna vez lo hiciera.
+        Expr::Spread(_) => {
+            return Err(CodegenError {
+                message: "'...' solo se puede usar dentro de una lista o de los \
+                          argumentos de una llamada".to_string(),
+                line: current_line,
+            });
         }
 
         Expr::Dict(items) => {
@@ -1237,6 +1253,22 @@ fn compile_expr_into(
                     line: current_line,
                 });
             }
+            // Argumentos con `...`: el número de argumentos deja de conocerse en
+            // compilación, así que no se puede emitir `Call(f, n)`. Se construye
+            // la lista completa —mezclando sueltos y expandidos— y se despacha
+            // por `__apply__`, que en la VM saca los elementos de la lista y
+            // llama con ellos. Un callee con nombre viaja como cadena, que es
+            // una de las formas que `__call__` ya sabe resolver.
+            if args.iter().any(|a| matches!(a, Expr::Spread(_))) {
+                match callee.as_ref() {
+                    Expr::Ident(fn_name) => emit!(Instruction::LoadStr(fn_name.clone())),
+                    other => recurse!(other),
+                }
+                compile_list_with_spread(instrs, lines, current_line, async_fns, extra_fns, args)?;
+                emit!(Instruction::Call("__apply__".into(), 2));
+                return Ok(());
+            }
+
             if let Expr::Ident(fn_name) = callee.as_ref() {
                 if fn_name == "show" {
                     for a in args { recurse!(a); }
@@ -1445,7 +1477,62 @@ fn compile_sub_expr(
     Ok(())
 }
 
-//    Helpers                                                                    
+//    Helpers
+
+/// Construye en la pila una lista con `...` expandidos, concatenando trozos.
+///
+/// `[a, ...b, c]` se compila como `[] + [a] + b + [c]`. Los elementos sueltos
+/// consecutivos se agrupan en un solo `MakeList`, así que solo hay una suma por
+/// expansión, no una por elemento.
+///
+/// Empieza por una lista vacía a propósito: garantiza que el resultado sea
+/// SIEMPRE nuevo. Sin eso, `x = [...b]` compilaría al propio `b`, y como las
+/// listas de Orion van por referencia, escribir en `x` habría escrito en `b`.
+fn compile_list_with_spread(
+    instrs: &mut Vec<Instruction>,
+    lines:  &mut Vec<u32>,
+    current_line: u32,
+    async_fns: &std::collections::HashSet<String>,
+    extra_fns: &mut Vec<(String, FunctionDef)>,
+    elems: &[Expr],
+) -> Result<(), CodegenError> {
+    instrs.push(Instruction::MakeList(0));
+    lines.push(current_line);
+
+    // Se recorre agrupando: cada racha de elementos normales produce un
+    // MakeList(n) seguido de Add; cada `...` produce su lista y un Add.
+    let mut pending: Vec<&Expr> = Vec::new();
+    let mut emit_pending = |instrs: &mut Vec<Instruction>,
+                            lines: &mut Vec<u32>,
+                            extra_fns: &mut Vec<(String, FunctionDef)>,
+                            pending: &mut Vec<&Expr>|
+     -> Result<(), CodegenError> {
+        if pending.is_empty() { return Ok(()); }
+        let n = pending.len();
+        for e in pending.drain(..) {
+            compile_expr_into(instrs, lines, current_line, async_fns, extra_fns, e)?;
+        }
+        instrs.push(Instruction::MakeList(n as u8));
+        lines.push(current_line);
+        instrs.push(Instruction::Add);
+        lines.push(current_line);
+        Ok(())
+    };
+
+    for e in elems {
+        match e {
+            Expr::Spread(inner) => {
+                emit_pending(instrs, lines, extra_fns, &mut pending)?;
+                compile_expr_into(instrs, lines, current_line, async_fns, extra_fns, inner)?;
+                instrs.push(Instruction::Add);
+                lines.push(current_line);
+            }
+            other => pending.push(other),
+        }
+    }
+    emit_pending(instrs, lines, extra_fns, &mut pending)?;
+    Ok(())
+}
 
 /// Instrucción que implementa un operador binario.
 ///
@@ -1471,6 +1558,11 @@ fn op_instr(op: &str) -> Option<Instruction> {
         ">=" => Instruction::GtEq,
         "&&" => Instruction::And,
         "||" => Instruction::Or,
+        "&"  => Instruction::BitAnd,
+        "|"  => Instruction::BitOr,
+        "^"  => Instruction::BitXor,
+        "<<" => Instruction::Shl,
+        ">>" => Instruction::Shr,
         _    => return None,
     })
 }

@@ -166,6 +166,11 @@ impl<'a> Lexer<'a> {
             b'>' if self.peek_at(1) == Some(b'=') => two!(TokenKind::GtEq),
             b'&' if self.peek_at(1) == Some(b'&') => two!(TokenKind::And),
             b'|' if self.peek_at(1) == Some(b'|') => two!(TokenKind::Or),
+            // Desplazamientos. Van DESPUÉS de `<=` y `>=` y antes de los `<`/`>`
+            // sueltos de abajo; los genéricos usan corchetes (`fn f[T]`), así que
+            // un `>>` nunca puede ser el cierre de dos tipos anidados.
+            b'<' if self.peek_at(1) == Some(b'<') => two!(TokenKind::Shl),
+            b'>' if self.peek_at(1) == Some(b'>') => two!(TokenKind::Shr),
 
             //   Single-char operators                    
             b'+' => one!(TokenKind::Plus),
@@ -189,6 +194,8 @@ impl<'a> Lexer<'a> {
             b'.' => one!(TokenKind::Dot),
             b'?' => one!(TokenKind::Question),
             b'&' => one!(TokenKind::Ampersand),
+            b'|' => one!(TokenKind::Pipe),
+            b'^' => one!(TokenKind::Caret),
             b'@' => one!(TokenKind::At),
 
             //   Identifiers and keywords                  

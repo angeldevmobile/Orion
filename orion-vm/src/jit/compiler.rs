@@ -936,6 +936,25 @@ impl<M: Module> CodeGen<M> {
         for (i, instr) in instructions.iter().enumerate() {
             // Cambio de bloque básico
             if i > 0 && block_starts.contains(&i) {
+                // Valores que siguen en la pila al cruzar la frontera están
+                // VIVOS: los produjo el bloque anterior y el siguiente los va a
+                // consumir. Modelar eso pide parámetros de bloque (phi) en el
+                // punto de fusión, y este compilador todavía no los emite.
+                //
+                // Aquí se hacía `stack.clear()` a secas, y eso no perdía la
+                // compilación: perdía los valores. Un `cond ? a : b` compilaba
+                // "nativo" y devolvía null, sin aviso ninguno. Un resultado
+                // equivocado en silencio es peor que no compilar, así que se
+                // rechaza el programa y el que llama cae al intérprete, que da
+                // la respuesta correcta. La comprobación es general: cubre
+                // cualquier construcción futura con esta forma, no solo el
+                // ternario.
+                if !terminated && !stack.is_empty() {
+                    return Err(format!(
+                        "valores vivos al cruzar el bloque en la instrucción {i}: \
+                         el JIT no emite parámetros de bloque todavía"
+                    ));
+                }
                 let next_block = block_map[&i];
                 if !terminated { builder.ins().jump(next_block, &[]); }
                 builder.switch_to_block(next_block);

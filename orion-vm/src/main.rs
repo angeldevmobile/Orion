@@ -518,12 +518,23 @@ fn main() {
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
 
-            match jit::run_program(&bc) {
+            let jit_outcome = jit::run_program(&bc);
+            match jit_outcome {
                 Ok(true) => {
                     eprintln!("[JIT] {:.3} ms — Cranelift nativo", t0.elapsed().as_secs_f64() * 1000.0);
                 }
-                Ok(false) => {
-                    eprintln!("[JIT] Instrucciones no soportadas → fallback al intérprete");
+                // Dos motivos distintos para no compilar, un mismo desenlace: el
+                // programa se ejecuta igual, por el intérprete. `Ok(false)` es
+                // "hay instrucciones que el JIT no cubre"; `Err` es "empezó a
+                // compilar y se topó con algo que no sabe traducir". Ninguno de
+                // los dos es un error DEL PROGRAMA —el fuente es válido y la VM
+                // lo corre—, así que abortar en el segundo caso convertía una
+                // limitación del backend en un fallo de ejecución.
+                other => {
+                    match other {
+                        Err(e) => eprintln!("[JIT] {e} → fallback al intérprete"),
+                        _      => eprintln!("[JIT] Instrucciones no soportadas → fallback al intérprete"),
+                    }
                     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
                     match machine.run() {
                         Ok(_) => {}
@@ -533,10 +544,6 @@ fn main() {
                         }
                     }
                     eprintln!("[Intérprete] {:.3} ms", t0.elapsed().as_secs_f64() * 1000.0);
-                }
-                Err(e) => {
-                    cli::banner::fail(&format!("Error JIT: {e}"));
-                    std::process::exit(1);
                 }
             }
         }

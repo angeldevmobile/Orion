@@ -122,6 +122,7 @@ fn walk_expr(e: &mut Expr, sigs: &Sigs) -> Result<(), CodegenError> {
             walk_expr(right, sigs)?;
         }
         Expr::UnaryOp { expr, .. } => walk_expr(expr, sigs)?,
+        Expr::Spread(inner) => walk_expr(inner, sigs)?,
         Expr::Ternary { cond, then_e, else_e } => {
             walk_expr(cond, sigs)?;
             walk_expr(then_e, sigs)?;

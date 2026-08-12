@@ -441,6 +441,17 @@ impl VM {
                     _ => return Err("Módulo solo soporta enteros".to_string()),
                 }
             }
+            // Bit a bit. Solo enteros a propósito: aplicarlos a un flotante o a
+            // un bool sería reinterpretar su representación, que nunca es lo que
+            // se quiere decir. Los desplazamientos rechazan cuenta negativa y
+            // saturan en 64, en vez de dejar que el shift de Rust entre en
+            // pánico o dé un resultado dependiente de la máquina.
+            Instruction::BitAnd => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "&")?); }
+            Instruction::BitOr  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "|")?); }
+            Instruction::BitXor => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "^")?); }
+            Instruction::Shl    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "<<")?); }
+            Instruction::Shr    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, ">>")?); }
+
             Instruction::Pow => {
                 let b = self.pop()?; let a = self.pop()?;
                 match (a, b) {
@@ -535,6 +546,37 @@ impl VM {
                 // '__call__' no definida" —el nombre de un símbolo interno que
                 // el programador nunca escribió—. El invocable queda apilado
                 // DEBAJO de los argumentos, que es lo que se acaba de sacar.
+                // `__apply__` es la llamada cuyo número de argumentos no se sabe
+                // hasta ejecutar, porque alguno venía de un `...`. El codegen
+                // deja dos cosas: el invocable y UNA lista con todos los
+                // argumentos ya montada. Aquí se deshace esa lista en la lista
+                // de argumentos real y el resto del despacho sigue igual.
+                if name == "__apply__" {
+                    let list = args.pop().ok_or("__apply__ sin lista de argumentos")?;
+                    let callee = args.pop().ok_or("__apply__ sin invocable")?;
+                    args = match list {
+                        Value::List(items) => items.borrow().0.clone(),
+                        other => return Err(format!(
+                            "'...' necesita una lista, no {}", other.type_name()
+                        )),
+                    };
+                    let (rn, ce) = match callee {
+                        Value::Closure { fn_name, env } => (fn_name, Some(env)),
+                        // Un nombre puede ser el de una función global O el de
+                        // una variable local que guarda una closure, y desde
+                        // aquí no se distinguen: hay que resolverlo igual que
+                        // la llamada por nombre. Sin esto, `f(...args)` con `f`
+                        // guardando una lambda buscaba una función llamada "f"
+                        // y no la encontraba.
+                        Value::Str(s)                   => self.resolve_callable(&s),
+                        other => return Err(format!(
+                            "no se puede llamar a un valor de tipo {}", other.type_name()
+                        )),
+                    };
+                    self.dispatch_call(rn, ce, args)?;
+                    return Ok(false);
+                }
+
                 let (resolved_name, closure_env) = if name == "__call__" {
                     match self.pop()? {
                         Value::Closure { fn_name, env } => (fn_name, Some(env)),
@@ -544,51 +586,10 @@ impl VM {
                         )),
                     }
                 } else {
-                    // Resolver el valor real: variable local que puede ser Str, Closure o directo
-                    let local_val = self.call_stack.last()
-                        .and_then(|f| f.vars.get(&name).cloned())
-                        .or_else(|| {
-                            if self.call_stack.len() > 1 {
-                                self.call_stack.first().and_then(|f| f.vars.get(&name).cloned())
-                            } else { None }
-                        });
-
-                    // Extraer nombre resuelto y env de closure (si aplica)
-                    match local_val {
-                        Some(Value::Closure { fn_name, env }) => (fn_name, Some(env)),
-                        Some(Value::Str(s))                   => (s, None),
-                        _                                     => (name.clone(), None),
-                    }
+                    self.resolve_callable(&name)
                 };
 
-                if self.shapes.contains_key(&resolved_name) {
-                    let inst_rc = self.instantiate_shape(&resolved_name, args)?;
-                    self.value_stack.push(Value::Instance(inst_rc));
-                } else if let Some(func) = self.functions.get(&resolved_name).cloned() {
-                    // Hotspot counter: registra cuántas veces se llama cada función
-                    *self.call_counts.entry(resolved_name.clone()).or_insert(0) += 1;
-                    args = self.bind_args_with_defaults(&func, args, &resolved_name)?;
-                    let mut frame = CallFrame::with_args_named(
-                        func.body, func.lines, &resolved_name, &func.params, args
-                    );
-                    // Inyectar env capturado (los params tienen prioridad) y
-                    // guardar la referencia compartida para el write-back al retornar.
-                    if let Some(env_rc) = closure_env {
-                        for (k, v) in env_rc.borrow().iter() {
-                            frame.vars.entry(k.clone()).or_insert_with(|| v.clone());
-                        }
-                        frame.closure_env = Some(env_rc);
-                    }
-                    self.call_stack.push(frame);
-                } else if self.extern_fns.contains_key(&resolved_name) {
-                    let result = self.call_extern_fn(&resolved_name, args)?;
-                    self.value_stack.push(result);
-                } else {
-                    let result = self.call_builtin(&resolved_name, args)?;
-                    if let Some(val) = result {
-                        self.value_stack.push(val);
-                    }
-                }
+                self.dispatch_call(resolved_name, closure_env, args)?;
             }
             Instruction::Return => {
                 let frame = self.call_stack.pop().ok_or("Return sin frame")?;
@@ -1453,6 +1454,78 @@ impl VM {
 
     fn pop(&mut self) -> Result<Value, String> {
         self.value_stack.pop().ok_or_else(|| "Stack vacío".to_string())
+    }
+
+    /// Traduce un nombre al nombre de función que hay que llamar de verdad.
+    ///
+    /// Un identificador puede ser una función global o una variable que guarda
+    /// una closure (o el nombre de otra función). Se mira primero el frame
+    /// actual y, si no está, el global; lo que no sea ninguna de las dos cosas
+    /// se devuelve tal cual para que lo resuelva el despacho.
+    fn resolve_callable(
+        &self,
+        name: &str,
+    ) -> (String, Option<Rc<RefCell<HashMap<String, Value>>>>) {
+        let local_val = self.call_stack.last()
+            .and_then(|f| f.vars.get(name).cloned())
+            .or_else(|| {
+                if self.call_stack.len() > 1 {
+                    self.call_stack.first().and_then(|f| f.vars.get(name).cloned())
+                } else { None }
+            });
+
+        match local_val {
+            Some(Value::Closure { fn_name, env }) => (fn_name, Some(env)),
+            Some(Value::Str(s))                   => (s, None),
+            _                                     => (name.to_string(), None),
+        }
+    }
+
+    /// Llama a `name` con `args`, sea lo que sea: shape, función de usuario,
+    /// función externa o builtin. `closure_env` trae el entorno capturado cuando
+    /// lo que se llama vino de una closure.
+    ///
+    /// Es el cuerpo que antes vivía dentro de `Instruction::Call`. Está aparte
+    /// porque hay tres formas de llegar a una llamada —por nombre, por valor
+    /// invocable (`__call__`) y con los argumentos en una lista (`__apply__`)—
+    /// y las tres tienen que despachar exactamente igual una vez resuelto a qué
+    /// se llama; si no, cada una acabaría con su propia idea de qué es
+    /// llamable.
+    fn dispatch_call(
+        &mut self,
+        name: String,
+        closure_env: Option<Rc<RefCell<HashMap<String, Value>>>>,
+        mut args: Vec<Value>,
+    ) -> Result<(), String> {
+        if self.shapes.contains_key(&name) {
+            let inst_rc = self.instantiate_shape(&name, args)?;
+            self.value_stack.push(Value::Instance(inst_rc));
+        } else if let Some(func) = self.functions.get(&name).cloned() {
+            // Hotspot counter: registra cuántas veces se llama cada función
+            *self.call_counts.entry(name.clone()).or_insert(0) += 1;
+            args = self.bind_args_with_defaults(&func, args, &name)?;
+            let mut frame = CallFrame::with_args_named(
+                func.body, func.lines, &name, &func.params, args
+            );
+            // Inyectar env capturado (los params tienen prioridad) y
+            // guardar la referencia compartida para el write-back al retornar.
+            if let Some(env_rc) = closure_env {
+                for (k, v) in env_rc.borrow().iter() {
+                    frame.vars.entry(k.clone()).or_insert_with(|| v.clone());
+                }
+                frame.closure_env = Some(env_rc);
+            }
+            self.call_stack.push(frame);
+        } else if self.extern_fns.contains_key(&name) {
+            let result = self.call_extern_fn(&name, args)?;
+            self.value_stack.push(result);
+        } else {
+            let result = self.call_builtin(&name, args)?;
+            if let Some(val) = result {
+                self.value_stack.push(val);
+            }
+        }
+        Ok(())
     }
 
     /// Carga un módulo por su path/nombre y devuelve un Value::Dict namespace.
@@ -3459,6 +3532,48 @@ fn resolve_static(dir: &str, rest: &str) -> Option<(Vec<u8>, String)> {
 }
 
 //     Percent-decoding para paths y query strings HTTP
+
+/// Operadores bit a bit sobre enteros.
+///
+/// Se rechaza todo lo que no sea `int` en vez de convertir: un `1.5 & 3` no
+/// tiene una respuesta que el programador quisiera, y truncar en silencio sería
+/// justo el tipo de resultado inventado que no queremos.
+///
+/// En los desplazamientos, una cuenta negativa es error y una cuenta de 64 o
+/// más da 0 (o -1 al desplazar a la derecha un negativo, que es lo que dice el
+/// signo). Rust entra en pánico si se desplaza más que el ancho del tipo, así
+/// que dejarlo pasar habría tumbado el proceso entero.
+fn bit_op(a: Value, b: Value, op: &str) -> Result<Value, String> {
+    let (x, y) = match (&a, &b) {
+        (Value::Int(x), Value::Int(y)) => (*x, *y),
+        _ => return Err(format!(
+            "el operador '{op}' solo trabaja con enteros, no con {} y {}",
+            a.type_name(), b.type_name()
+        )),
+    };
+
+    let shift_amount = || -> Result<u32, String> {
+        if y < 0 {
+            return Err(format!("desplazamiento negativo en '{op}': {y}"));
+        }
+        Ok(y as u32)
+    };
+
+    Ok(Value::Int(match op {
+        "&" => x & y,
+        "|" => x | y,
+        "^" => x ^ y,
+        "<<" => {
+            let n = shift_amount()?;
+            if n >= 64 { 0 } else { x << n }
+        }
+        ">>" => {
+            let n = shift_amount()?;
+            if n >= 64 { if x < 0 { -1 } else { 0 } } else { x >> n }
+        }
+        _ => return Err(format!("operador de bits desconocido: {op}")),
+    }))
+}
 
 fn hex_val(b: u8) -> Option<u8> {
     match b {

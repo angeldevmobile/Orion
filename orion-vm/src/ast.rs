@@ -43,6 +43,14 @@ pub enum Expr {
     // Comprobación de tipo
     IsCheck { expr: Box<Expr>, shape: String },
 
+    // `...expr` — expande una lista en el sitio donde se escribe.
+    //
+    // Solo es válido dentro de un literal de lista o de los argumentos de una
+    // llamada; en cualquier otra posición el parser lo rechaza. No sobrevive a
+    // codegen: allí se convierte en concatenación de listas, así que ni la VM
+    // ni el JIT llegan a ver este nodo.
+    Spread(Box<Expr>),
+
     // Condicional como EXPRESIÓN: `cond ? si_si : si_no`.
     //
     // En Orion `if` es una declaración, no una expresión, así que hasta ahora

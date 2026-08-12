@@ -476,6 +476,8 @@ pub fn fmt_expr(expr: &Expr) -> String {
             }
         }
 
+        Expr::Spread(inner) => format!("...{}", fmt_expr(inner)),
+
         // Ternario. La condición va entre paréntesis si es otro ternario, que
         // es el único caso en el que sin ellos se leería al revés al releerlo.
         Expr::Ternary { cond, then_e, else_e } => {

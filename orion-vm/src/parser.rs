@@ -302,11 +302,31 @@ impl Parser {
                     line, col,
                 });
             }
-            args.push(self.parse_expression()?);
+            args.push(self.parse_spreadable()?);
             if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }
         }
         self.expect(&TokenKind::RParen)?;
         Ok((args, kwargs))
+    }
+
+    /// Un elemento que además admite `...expr` para expandir una lista.
+    ///
+    /// Solo se llama desde los dos sitios donde expandir significa algo: los
+    /// literales de lista y los argumentos de una llamada. En el resto de
+    /// posiciones se sigue parseando con `parse_expression`, así que un `...`
+    /// suelto sigue siendo un error, que es lo correcto.
+    ///
+    /// Aquí `...` está en posición de OPERANDO. El `...` infijo (rango
+    /// inclusivo) se resuelve en `parse_expression`, cuando ya hay una
+    /// expresión a la izquierda. Los dos usos del símbolo no se cruzan porque
+    /// se deciden en momentos distintos del parseo.
+    fn parse_spreadable(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek(), TokenKind::DotDotDot) {
+            self.pos += 1;
+            let inner = self.parse_expression()?;
+            return Ok(Expr::Spread(Box::new(inner)));
+        }
+        self.parse_expression()
     }
 
     // ══════════════════════════════════════════════════════════════════════════
@@ -325,32 +345,6 @@ impl Parser {
         }
 
         let mut expr = self.parse_or()?;
-
-        // pipe: valor |> destino  —  el valor entra como PRIMER argumento.
-        //
-        //   x |> f            =>  f(x)
-        //   x |> f(a, b)      =>  f(x, a, b)
-        //   x |> mod.act(a)   =>  mod.act(x, a)
-        //
-        // Es azúcar puro de parser: lo que sale es la misma `Call` que se
-        // habría escrito a mano, así que VM, JIT, AOT y typechecker lo tratan
-        // sin enterarse. Se encadena por la izquierda —`a |> f |> g` es
-        // `g(f(a))`— y va por debajo de todos los operadores: `a + b |> f` es
-        // `f(a + b)`, que es como se lee.
-        while matches!(self.peek(), TokenKind::PipeOp) {
-            self.pos += 1;
-            let line = self.current_line();
-            let col  = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
-            // Una lambda como etapa (`x |> (n) => n * 2`) hay que reconocerla
-            // aquí: `parse_or` no mira si viene uno, eso solo se comprueba al
-            // entrar a una expresión, y sin esto el `=>` reventaba el paréntesis.
-            let stage = if self.is_lambda_ahead() {
-                self.parse_lambda()?
-            } else {
-                self.parse_or()?
-            };
-            expr = Self::pipe_into(expr, stage, line, col)?;
-        }
 
         // Rangos. Tres formas, dos semánticas:
         //
@@ -560,7 +554,7 @@ impl Parser {
     }
 
     fn parse_compare(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_arith()?;
+        let mut left = self.parse_bit_or()?;
         loop {
             let op = match self.peek() {
                 TokenKind::Eq    => "==",
@@ -572,10 +566,101 @@ impl Parser {
                 _ => break,
             }.to_string();
             self.pos += 1;
-            let right = self.parse_arith()?;
+            let right = self.parse_bit_or()?;
             left = Expr::BinaryOp { op, left: Box::new(left), right: Box::new(right) };
         }
         Ok(left)
+    }
+
+    // Bit a bit, en tres niveles: `|` más suelto que `^`, y `^` más que `&`.
+    //
+    // Van por DEBAJO de la comparación, no por encima como en C. En C
+    // `a & b == c` significa `a & (b == c)`, que sorprende a todo el mundo y es
+    // un error tan clásico que los compiladores avisan de él. Aquí se agrupa
+    // como se lee: `(a & b) == c`.
+
+    fn parse_bit_or(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_bit_xor()?;
+        while matches!(self.peek(), TokenKind::Pipe) {
+            self.pos += 1;
+            let right = self.parse_bit_xor()?;
+            left = Expr::BinaryOp { op: "|".into(), left: Box::new(left), right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    fn parse_bit_xor(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_bit_and()?;
+        while matches!(self.peek(), TokenKind::Caret) {
+            self.pos += 1;
+            let right = self.parse_bit_and()?;
+            left = Expr::BinaryOp { op: "^".into(), left: Box::new(left), right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    fn parse_bit_and(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_shift()?;
+        while matches!(self.peek(), TokenKind::Ampersand) {
+            self.pos += 1;
+            let right = self.parse_shift()?;
+            left = Expr::BinaryOp { op: "&".into(), left: Box::new(left), right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    /// Desplazamientos. Más apretados que los otros operadores de bits y más
+    /// sueltos que la aritmética, así que `a << 2 + 1` es `a << 3`.
+    fn parse_shift(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_pipe()?;
+        loop {
+            let op = match self.peek() {
+                TokenKind::Shl => "<<",
+                TokenKind::Shr => ">>",
+                _ => break,
+            }.to_string();
+            self.pos += 1;
+            let right = self.parse_pipe()?;
+            left = Expr::BinaryOp { op, left: Box::new(left), right: Box::new(right) };
+        }
+        Ok(left)
+    }
+
+    /// Pipe: `valor |> destino` mete el valor como PRIMER argumento del destino.
+    ///
+    ///   x |> f            =>  f(x)
+    ///   x |> f(a, b)      =>  f(x, a, b)
+    ///   x |> mod.act(a)   =>  mod.act(x, a)
+    ///
+    /// Es azúcar puro de parser: sale la misma `Call` que se habría escrito a
+    /// mano, así que VM, JIT, AOT y typechecker lo tratan sin enterarse.
+    ///
+    /// Vive entre la comparación y la aritmética, y esa posición es la que hace
+    /// que se lea como se espera en los dos casos que importan:
+    ///
+    ///   a + b |> f   =>  f(a + b)      (la suma entra entera)
+    ///   x |> len > 3 =>  (x |> len) > 3
+    ///
+    /// Si estuviera más abajo, la segunda intentaría invocar `len > 3`, que no
+    /// es invocable, y habría que poner paréntesis para algo que se lee solo.
+    fn parse_pipe(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.parse_arith()?;
+        while matches!(self.peek(), TokenKind::PipeOp) {
+            self.pos += 1;
+            let line = self.current_line();
+            let col  = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
+            // Una lambda como etapa (`x |> (n) => n * 2`) hay que reconocerla
+            // aquí: los niveles de precedencia no miran si viene una, eso solo
+            // se comprueba al entrar a una expresión, y sin esto el `=>`
+            // reventaba contra el paréntesis de los parámetros.
+            let stage = if self.is_lambda_ahead() {
+                self.parse_lambda()?
+            } else {
+                self.parse_arith()?
+            };
+            expr = Self::pipe_into(expr, stage, line, col)?;
+        }
+        Ok(expr)
     }
 
     fn parse_arith(&mut self) -> Result<Expr, ParseError> {
@@ -728,12 +813,12 @@ impl Parser {
                 Ok(expr)
             }
 
-            // Lista: [a, b, c]
+            // Lista: [a, b, c]  y con expansión: [a, ...otra, c]
             TokenKind::LBracket => {
                 self.pos += 1;
                 let mut elems = Vec::new();
                 while !matches!(self.peek(), TokenKind::RBracket | TokenKind::Eof) {
-                    elems.push(self.parse_expression()?);
+                    elems.push(self.parse_spreadable()?);
                     if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }
                 }
                 self.expect(&TokenKind::RBracket)?;
