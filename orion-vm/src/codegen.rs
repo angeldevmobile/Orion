@@ -7,7 +7,7 @@
 use indexmap::IndexMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::ast::{ActDef, Expr, FieldDef, Handler, Param, Stmt};
+use crate::ast::{ActDef, Expr, FieldDef, Handler, Param, Pattern, Stmt};
 
 static LAMBDA_COUNTER: AtomicUsize = AtomicUsize::new(0);
 use crate::bytecode::{ActDef as BcActDef, ExternFnDef, FieldDef as BcFieldDef, FunctionDef, OrionBytecode, ShapeDef};
@@ -499,15 +499,30 @@ impl Codegen {
                 self.emit(Instruction::StoreVar(subj.clone()));
 
                 let mut end_jumps = Vec::new();
+                let mut tmp_counter = 0usize;
                 for arm in arms {
-                    self.emit(Instruction::LoadVar(subj.clone()));
-                    self.compile_expr_main(&arm.pattern)?;
-                    self.emit(Instruction::Eq);
-                    let skip = self.emit(Instruction::JumpIfFalse(0));
+                    // Cada brazo apunta sus propios fallos y los parchea al
+                    // siguiente: así un patrón con varias comprobaciones (tipo,
+                    // longitud, sub-patrones) sale al mismo sitio falle donde falle.
+                    let mut fail_jumps = Vec::new();
+                    let mut extra_fns: Vec<(String, FunctionDef)> = Vec::new();
+                    compile_pattern_into(
+                        &mut self.main_instrs, &mut self.main_lines, self.current_line,
+                        &self.async_fns, &mut extra_fns,
+                        &arm.pattern, &subj, &mut fail_jumps, &mut tmp_counter,
+                    )?;
+                    for (n, f) in extra_fns { self.functions.insert(n, f); }
+
+                    // La guarda va después de ligar, para que pueda leer lo ligado.
+                    if let Some(g) = &arm.guard {
+                        self.compile_expr_main(g)?;
+                        fail_jumps.push(self.emit(Instruction::JumpIfFalse(0)));
+                    }
+
                     for s in arm.body { self.compile_stmt(s)?; }
                     end_jumps.push(self.emit(Instruction::Jump(0)));
                     let next = self.addr();
-                    self.patch(skip, Instruction::JumpIfFalse(next));
+                    for j in fail_jumps { self.patch(j, Instruction::JumpIfFalse(next)); }
                 }
                 let end = self.addr();
                 for j in end_jumps { self.patch(j, Instruction::Jump(end)); }
@@ -927,15 +942,26 @@ impl FnCompiler {
                 self.emit(Instruction::StoreVar(subj.clone()));
 
                 let mut end_jumps = Vec::new();
+                let mut tmp_counter = 0usize;
                 for arm in arms {
-                    self.emit(Instruction::LoadVar(subj.clone()));
-                    self.compile_expr(&arm.pattern, async_fns)?;
-                    self.emit(Instruction::Eq);
-                    let skip = self.emit(Instruction::JumpIfFalse(0));
+                    // Mismo esquema que en el camino de `main`: los fallos del
+                    // patrón y el de la guarda salen todos al brazo siguiente.
+                    let mut fail_jumps = Vec::new();
+                    compile_pattern_into(
+                        &mut self.instrs, &mut self.lines, self.current_line,
+                        async_fns, &mut self.pending_lambdas,
+                        &arm.pattern, &subj, &mut fail_jumps, &mut tmp_counter,
+                    )?;
+
+                    if let Some(g) = &arm.guard {
+                        self.compile_expr(g, async_fns)?;
+                        fail_jumps.push(self.emit(Instruction::JumpIfFalse(0)));
+                    }
+
                     for s in &arm.body { self.compile_stmt(s, async_fns)?; }
                     end_jumps.push(self.emit(Instruction::Jump(0)));
                     let next = self.addr();
-                    self.patch(skip, Instruction::JumpIfFalse(next));
+                    for j in fail_jumps { self.patch(j, Instruction::JumpIfFalse(next)); }
                 }
                 let end = self.addr();
                 for j in end_jumps { self.patch(j, Instruction::Jump(end)); }
@@ -1494,6 +1520,138 @@ fn compile_sub_expr(
     Ok(())
 }
 
+//    Patrones de `match`
+
+/// Emite las comprobaciones y las ligaduras de un patrón sobre `subj_var`.
+///
+/// Cada comprobación que puede fallar deja un `JumpIfFalse(0)` sin destino y
+/// apunta su índice en `fail_jumps`; el que llama los parchea todos al brazo
+/// siguiente. Las ligaduras se hacen SOBRE LA MARCHA, no al final: un patrón
+/// como `[a, {tipo}]` necesita haber sacado ya el elemento para poder mirar
+/// dentro de él.
+///
+/// Que las ligaduras ocurran aunque el brazo acabe no casando es visible: si
+/// `[a, b]` casa la longitud pero un sub-patrón falla, `a` se queda escrito.
+/// Es el precio de no copiar el sujeto entero por brazo, y no afecta a la
+/// semántica del brazo que sí casa, que es el único cuyo cuerpo se ejecuta.
+///
+/// Ojo con el orden de las comprobaciones: `len()` sobre un entero es un ERROR
+/// de ejecución, no un `no casa`. Por eso todo patrón que mira dentro comprueba
+/// primero el tipo; sin eso, `match 5 { [a] {...} _ {...} }` reventaría en vez
+/// de caer al comodín.
+fn compile_pattern_into(
+    instrs: &mut Vec<Instruction>,
+    lines:  &mut Vec<u32>,
+    current_line: u32,
+    async_fns: &std::collections::HashSet<String>,
+    extra_fns: &mut Vec<(String, FunctionDef)>,
+    pat: &Pattern,
+    subj_var: &str,
+    fail_jumps: &mut Vec<usize>,
+    tmp_counter: &mut usize,
+) -> Result<(), CodegenError> {
+    macro_rules! emit {
+        ($i:expr) => {{ instrs.push($i); lines.push(current_line); }}
+    }
+    // Comprobación que, si sale falsa, manda al brazo siguiente.
+    macro_rules! test {
+        () => {{
+            fail_jumps.push(instrs.len());
+            emit!(Instruction::JumpIfFalse(0));
+        }}
+    }
+
+    match pat {
+        Pattern::Wildcard => {}
+
+        Pattern::Bind(name) => {
+            emit!(Instruction::LoadVar(subj_var.to_string()));
+            emit!(Instruction::StoreVar(name.clone()));
+        }
+
+        Pattern::Value(e) => {
+            emit!(Instruction::LoadVar(subj_var.to_string()));
+            compile_expr_into(instrs, lines, current_line, async_fns, extra_fns, e)?;
+            emit!(Instruction::Eq);
+            test!();
+        }
+
+        Pattern::List(elems) => {
+            emit!(Instruction::LoadVar(subj_var.to_string()));
+            emit!(Instruction::Call("type".into(), 1));
+            emit!(Instruction::LoadStr("list".into()));
+            emit!(Instruction::Eq);
+            test!();
+
+            emit!(Instruction::LoadVar(subj_var.to_string()));
+            emit!(Instruction::Call("len".into(), 1));
+            emit!(Instruction::LoadInt(elems.len() as i64));
+            emit!(Instruction::Eq);
+            test!();
+
+            for (i, p) in elems.iter().enumerate() {
+                let tmp = format!("__pat_{}__", *tmp_counter);
+                *tmp_counter += 1;
+                emit!(Instruction::LoadVar(subj_var.to_string()));
+                emit!(Instruction::LoadInt(i as i64));
+                emit!(Instruction::GetIndex);
+                emit!(Instruction::StoreVar(tmp.clone()));
+                compile_pattern_into(
+                    instrs, lines, current_line, async_fns, extra_fns,
+                    p, &tmp, fail_jumps, tmp_counter,
+                )?;
+            }
+        }
+
+        Pattern::Dict(fields) => {
+            emit!(Instruction::LoadVar(subj_var.to_string()));
+            emit!(Instruction::Call("type".into(), 1));
+            emit!(Instruction::LoadStr("dict".into()));
+            emit!(Instruction::Eq);
+            test!();
+
+            for (key, p) in fields {
+                // La clave tiene que estar ANTES de leerla: en Orion pedir una
+                // clave que no existe es un error, no un null.
+                emit!(Instruction::LoadVar(subj_var.to_string()));
+                emit!(Instruction::LoadStr(key.clone()));
+                emit!(Instruction::Call("has_key".into(), 2));
+                test!();
+
+                let tmp = format!("__pat_{}__", *tmp_counter);
+                *tmp_counter += 1;
+                emit!(Instruction::LoadVar(subj_var.to_string()));
+                emit!(Instruction::LoadStr(key.clone()));
+                emit!(Instruction::GetIndex);
+                emit!(Instruction::StoreVar(tmp.clone()));
+                compile_pattern_into(
+                    instrs, lines, current_line, async_fns, extra_fns,
+                    p, &tmp, fail_jumps, tmp_counter,
+                )?;
+            }
+        }
+
+        Pattern::Shape { name, fields } => {
+            emit!(Instruction::LoadVar(subj_var.to_string()));
+            emit!(Instruction::IsInstance(name.clone()));
+            test!();
+
+            for (field, p) in fields {
+                let tmp = format!("__pat_{}__", *tmp_counter);
+                *tmp_counter += 1;
+                emit!(Instruction::LoadVar(subj_var.to_string()));
+                emit!(Instruction::GetAttr(field.clone()));
+                emit!(Instruction::StoreVar(tmp.clone()));
+                compile_pattern_into(
+                    instrs, lines, current_line, async_fns, extra_fns,
+                    p, &tmp, fail_jumps, tmp_counter,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
 //    Helpers
 
 /// Construye en la pila una lista con `...` expandidos, concatenando trozos.
@@ -1519,7 +1677,7 @@ fn compile_list_with_spread(
     // Se recorre agrupando: cada racha de elementos normales produce un
     // MakeList(n) seguido de Add; cada `...` produce su lista y un Add.
     let mut pending: Vec<&Expr> = Vec::new();
-    let mut emit_pending = |instrs: &mut Vec<Instruction>,
+    let emit_pending = |instrs: &mut Vec<Instruction>,
                             lines: &mut Vec<u32>,
                             extra_fns: &mut Vec<(String, FunctionDef)>,
                             pending: &mut Vec<&Expr>|

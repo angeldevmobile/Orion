@@ -134,25 +134,34 @@ pub fn run_check(path: &str, check_types: bool) {
     };
 
     // Phase 3: type check (antes de codegen para errores más claros)
+    //
+    // El chequeo corre SIEMPRE. Antes estaba detrás de `--types`, y el efecto
+    // era que `orion check` daba "sin errores" en un archivo que `orion run`
+    // se negaba a ejecutar: el comando que existe para validar era más laxo que
+    // el que ejecuta, justo al revés de lo que uno espera de un CI. Nada de lo
+    // que se rechace aquí pasaba antes de verdad; solo pasaba desapercibido.
+    //
+    // `--types` ya no decide SI se chequea, sino cuánto se cuenta: sin él se
+    // muestran los errores, con él también las advertencias.
+    let issues = typechecker::type_check(&stmts);
+    let errors: Vec<_> = issues.iter().filter(|i| i.kind == "error").collect();
+    let warnings: Vec<_> = issues.iter().filter(|i| i.kind == "warning").collect();
+
     if check_types {
-        let issues = typechecker::type_check(&stmts);
+        for w in &warnings {
+            let prefix = if w.line > 0 { format!("línea {} — ", w.line) } else { String::new() };
+            banner::warn(&format!("[advertencia] {}{}", prefix, w.message));
+        }
         if issues.is_empty() {
             banner::ok("Type check — sin errores de tipos");
-        } else {
-            let errors: Vec<_> = issues.iter().filter(|i| i.kind == "error").collect();
-            let warnings: Vec<_> = issues.iter().filter(|i| i.kind == "warning").collect();
-            for w in &warnings {
-                let prefix = if w.line > 0 { format!("línea {} — ", w.line) } else { String::new() };
-                banner::warn(&format!("[advertencia] {}{}", prefix, w.message));
-            }
-            for e in &errors {
-                let prefix = if e.line > 0 { format!("línea {} — ", e.line) } else { String::new() };
-                banner::fail(&format!("[tipo] {}{}", prefix, e.message));
-            }
-            if !errors.is_empty() {
-                std::process::exit(1);
-            }
         }
+    }
+    for e in &errors {
+        let prefix = if e.line > 0 { format!("línea {} — ", e.line) } else { String::new() };
+        banner::fail(&format!("[tipo] {}{}", prefix, e.message));
+    }
+    if !errors.is_empty() {
+        std::process::exit(1);
     }
 
     // Phase 4: codegen (detecta errores semánticos adicionales)

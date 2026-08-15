@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use crate::token::{Token, TokenKind};
-use crate::ast::{ActDef, Expr, FieldDef, Handler, MatchArm, Param, Stmt};
+use crate::ast::{ActDef, Expr, FieldDef, Handler, MatchArm, Param, Pattern, Stmt};
 
 //   Error de parsing                              
 
@@ -467,6 +467,90 @@ impl Parser {
         })
     }
 
+    /// Parsea el patrón de un brazo de `match`.
+    ///
+    /// La forma se decide por el primer token, sin retroceder:
+    ///
+    ///   `_`            comodín
+    ///   `[` ...        lista
+    ///   `{` ...        dict          (la llave del CUERPO viene después)
+    ///   `Ident` `(`    shape
+    ///   `Ident`        ligadura
+    ///   lo demás       valor, se compara por igualdad
+    ///
+    /// El shape va con paréntesis, `Forma(a, b)`, y no con llaves: `Forma {`
+    /// seguido de la llave del cuerpo no se podría distinguir de una ligadura
+    /// llamada `Forma` con su cuerpo detrás.
+    fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
+        match self.peek().clone() {
+            TokenKind::LBracket => {
+                self.pos += 1;
+                let mut elems = Vec::new();
+                while !matches!(self.peek(), TokenKind::RBracket | TokenKind::Eof) {
+                    elems.push(self.parse_pattern()?);
+                    if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }
+                }
+                self.expect(&TokenKind::RBracket)?;
+                Ok(Pattern::List(elems))
+            }
+
+            TokenKind::LBrace => {
+                self.pos += 1;
+                let fields = self.parse_pattern_fields(&TokenKind::RBrace)?;
+                self.expect(&TokenKind::RBrace)?;
+                Ok(Pattern::Dict(fields))
+            }
+
+            TokenKind::Ident(name) => {
+                // `Forma(...)` → shape.  `_` → comodín.  Lo demás → ligadura.
+                if matches!(self.peek_at(1), TokenKind::LParen) {
+                    self.pos += 2; // nombre y '('
+                    let fields = self.parse_pattern_fields(&TokenKind::RParen)?;
+                    self.expect(&TokenKind::RParen)?;
+                    return Ok(Pattern::Shape { name, fields });
+                }
+                self.pos += 1;
+                if name == "_" {
+                    Ok(Pattern::Wildcard)
+                } else {
+                    Ok(Pattern::Bind(name))
+                }
+            }
+
+            _ => Ok(Pattern::Value(self.parse_expression()?)),
+        }
+    }
+
+    /// Campos de un patrón de dict o de shape, hasta `cierre`.
+    ///
+    /// Dos formas por campo: `clave: patrón` y la abreviatura `clave`, que
+    /// significa `clave: clave` — el caso corriente de "sácame ese campo con su
+    /// propio nombre" sin tener que escribirlo dos veces.
+    fn parse_pattern_fields(
+        &mut self,
+        cierre: &TokenKind,
+    ) -> Result<Vec<(String, Pattern)>, ParseError> {
+        let mut fields = Vec::new();
+        while !matches!(self.peek(), TokenKind::Eof) && self.peek() != cierre {
+            let key = match self.peek().clone() {
+                TokenKind::Ident(k) => { self.pos += 1; k }
+                TokenKind::Str(k)   => { self.pos += 1; k }
+                _ => return Err(self.err(
+                    "se esperaba el nombre de un campo en el patrón".to_string(),
+                )),
+            };
+            let pat = if matches!(self.peek(), TokenKind::Colon) {
+                self.pos += 1;
+                self.parse_pattern()?
+            } else {
+                Pattern::Bind(key.clone())
+            };
+            fields.push((key, pat));
+            if matches!(self.peek(), TokenKind::Comma) { self.pos += 1; }
+        }
+        Ok(fields)
+    }
+
     fn is_lambda_ahead(&self) -> bool {
         // ident =>
         if matches!(self.peek(), TokenKind::Ident(_)) && matches!(self.peek_at(1), TokenKind::Arrow) {
@@ -888,6 +972,15 @@ impl Parser {
                 Ok(Expr::Await(Box::new(inner)))
             }
 
+            // `static` solo tiene sentido dentro de un shape. Fuera, el error
+            // genérico ("token inesperado") no dice lo único que hace falta
+            // saber: que una función a secas ya es eso, y se declara con `fn`.
+            TokenKind::Static => Err(self.err(
+                "'static act' solo puede ir dentro de un shape. Una función \
+                 independiente se declara con 'fn'"
+                    .to_string(),
+            )),
+
             kind => Err(self.err(format!("Token inesperado en expresión: {:?}", kind))),
         }
     }
@@ -1063,9 +1156,16 @@ impl Parser {
                 loop {
                     self.skip_newlines();
                     if matches!(self.peek(), TokenKind::RBrace | TokenKind::Eof) { break; }
-                    let pattern = self.parse_expression()?;
+                    let pattern = self.parse_pattern()?;
+                    // Guarda opcional: `patrón if condición { ... }`
+                    let guard = if matches!(self.peek(), TokenKind::If) {
+                        self.pos += 1;
+                        Some(self.parse_expression()?)
+                    } else {
+                        None
+                    };
                     let body = self.parse_block()?;
-                    arms.push(MatchArm { pattern, body });
+                    arms.push(MatchArm { pattern, guard, body });
                 }
                 self.expect(&TokenKind::RBrace)?;
                 Ok(Stmt::Match { expr, arms, line, col })

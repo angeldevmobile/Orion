@@ -371,16 +371,38 @@ translated = ai.translate(text, "english")
 sentiment = ai.sentiment(review)   -- "positivo" / "negativo" / "neutro"
 ```
 
-### Pipe operator - not implemented
+### Pipe operator
 
-`|>` is recognized by the lexer but no parser or codegen path handles it, so
-any program using it fails with `Token inesperado en expresión: PipeOp`. The
-chained style is written with intermediate bindings:
+`|>` feeds the value on its left in as the **first** argument of the call on its
+right. It is parser sugar: the result is the same `Call` you would have written
+by hand, so the VM, the JIT and the type checker see nothing new.
 
 ```orion
-step1 = filter_by(data, "active", yes)
-step2 = sort_by(step1, "date", "desc")
-result = top(step2, 10)
+result = data
+    |> filter_by("active", yes)
+    |> sort_by("date", "desc")
+    |> top(10)
+
+-- Equivalent to:
+result = top(sort_by(filter_by(data, "active", yes), "date", "desc"), 10)
+```
+
+The right side can be a function name, a call, a method, or a lambda:
+
+```orion
+[1, 2, 3] |> len          -- 3
+5 |> double               -- calls double(5)
+5 |> add(10)              -- calls add(5, 10)
+"  hi  " |> trim |> upper -- "HI"
+3 |> (n) => n + 100       -- 103
+```
+
+Precedence sits between comparison and arithmetic, so both of these read the
+way they look, without parentheses:
+
+```orion
+a + b |> f      -- f(a + b)
+x |> len > 3    -- (x |> len) > 3
 ```
 
 ### Concurrency
@@ -1642,7 +1664,8 @@ excel.save(sheet, "custom_report.xlsx")
 ### The full pipeline, in a single API
 
 `excel.compute` is not implemented yet, so it is left out of this example.
-Each step rebinds `data`, since `|>` does not exist.
+Each step rebinds `data`; the same chain can be written with `|>`, since every
+`excel` function takes the table as its first argument.
 
 ```orion
 use "excel" as excel

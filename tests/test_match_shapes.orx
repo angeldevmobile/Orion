@@ -1,0 +1,190 @@
+-- Regresión de `match` con patrones reales, acts estáticos y genéricos.
+--
+-- Antes `match` era un `switch`: el patrón se compilaba a `sujeto == patrón` y
+-- no podía ligar nombres, mirar dentro ni filtrar. Los acts estáticos y el `::`
+-- no existían. Los genéricos sí unificaban, pero el tipo de retorno no se
+-- resolvía y toda función genérica arrastraba un aviso falso.
+
+shape Circulo { r: int }
+shape Rect { w: int, h: int }
+
+--    match: lo básico
+
+fn nombra(n) {
+    match n {
+        0 { return "cero" }
+        1 { return "uno" }
+        _ { return "muchos" }
+    }
+}
+
+fn test_match_literales_y_comodin() {
+    assert_eq(nombra(0), "cero",   "literal 0")
+    assert_eq(nombra(1), "uno",    "literal 1")
+    assert_eq(nombra(7), "muchos", "comodín")
+}
+
+--    match: ligadura y guarda
+
+fn clasifica(n) {
+    match n {
+        x if x < 0   { return "negativo " + str(x) }
+        0            { return "cero" }
+        x if x > 100 { return "enorme " + str(x) }
+        x            { return "normal " + str(x) }
+    }
+}
+
+fn test_match_ligadura_y_guarda() {
+    assert_eq(clasifica(-5),  "negativo -5", "guarda que casa primero")
+    assert_eq(clasifica(0),   "cero",        "literal después de una guarda")
+    assert_eq(clasifica(500), "enorme 500",  "segunda guarda")
+    assert_eq(clasifica(42),  "normal 42",   "ligadura sin guarda, casa siempre")
+}
+
+--    match: destructuring de listas
+
+fn describe(l) {
+    match l {
+        []        { return "vacia" }
+        [x]       { return "uno: " + str(x) }
+        [x, y]    { return "dos: " + str(x) + "," + str(y) }
+        [x, y, z] { return "tres, el del medio " + str(y) }
+        _         { return "otra" }
+    }
+}
+
+fn test_match_listas() {
+    assert_eq(describe([]),        "vacia",                "lista vacía")
+    assert_eq(describe([9]),       "uno: 9",               "un elemento")
+    assert_eq(describe([1, 2]),    "dos: 1,2",             "dos elementos")
+    assert_eq(describe([1, 2, 3]), "tres, el del medio 2", "liga el del medio")
+    assert_eq(describe([1,2,3,4]), "otra",                 "longitud exacta, no prefijo")
+}
+
+fn test_un_patron_que_no_casa_no_revienta() {
+    -- El patrón de lista comprueba el TIPO antes de pedir la longitud. Sin esa
+    -- comprobación, `len(5)` es un error de ejecución y el programa se caía en
+    -- vez de pasar al brazo siguiente.
+    assert_eq(describe(5),      "otra", "un int cae al comodín")
+    assert_eq(describe("hola"), "otra", "una cadena cae al comodín")
+    assert_eq(describe(null),   "otra", "null cae al comodín")
+}
+
+--    match: destructuring de dicts
+
+fn evento(e) {
+    match e {
+        {tipo: "error", msg} { return "ERROR: " + msg }
+        {tipo: "ok"}         { return "todo bien" }
+        {tipo}               { return "otro: " + tipo }
+        _                    { return "no es un evento" }
+    }
+}
+
+fn test_match_dicts() {
+    assert_eq(evento({tipo: "error", msg: "disco lleno"}), "ERROR: disco lleno", "clave fija + abreviatura")
+    assert_eq(evento({tipo: "ok"}),                        "todo bien",          "solo clave fija")
+    assert_eq(evento({tipo: "raro"}),                      "otro: raro",         "abreviatura liga el valor")
+    assert_eq(evento([1, 2]),                              "no es un evento",    "una lista no casa un dict")
+}
+
+fn test_match_dict_exige_la_clave() {
+    -- Un dict SIN la clave del patrón no casa; no puede dar error por pedir una
+    -- clave que no está, que en Orion es un error de ejecución.
+    assert_eq(evento({otra: 1}), "no es un evento", "sin la clave pedida no casa")
+}
+
+fn hondo(x) {
+    match x {
+        {datos: [a, b]} { return "par dentro: " + str(a + b) }
+        {datos: []}     { return "datos vacios" }
+        _               { return "otra cosa" }
+    }
+}
+
+fn test_match_anidado() {
+    assert_eq(hondo({datos: [3, 4]}),    "par dentro: 7", "lista dentro de dict")
+    assert_eq(hondo({datos: []}),        "datos vacios",  "lista vacía dentro de dict")
+    assert_eq(hondo({datos: [1, 2, 3]}), "otra cosa",     "longitud que no casa")
+}
+
+--    match: patrones de shape
+
+fn area(f) {
+    match f {
+        Circulo(r)       { return 3 * r * r }
+        Rect(w: a, h: b) { return a * b }
+        _                { return 0 }
+    }
+}
+
+fn test_match_shapes() {
+    assert_eq(area(Circulo(3)), 27, "casa Circulo y liga r")
+    assert_eq(area(Rect(2, 5)), 10, "casa Rect y renombra los campos")
+    assert_eq(area(99),          0, "lo que no es instancia cae al comodín")
+}
+
+fn lados(f) {
+    match f {
+        Rect(w, h) if w == h { return "cuadrado de " + str(w) }
+        Rect(w, h)           { return "rect " + str(w) + "x" + str(h) }
+        _                    { return "no es rect" }
+    }
+}
+
+fn test_match_shape_con_guarda_y_abreviatura() {
+    assert_eq(lados(Rect(5, 5)),  "cuadrado de 5", "guarda sobre campos ligados")
+    assert_eq(lados(Rect(2, 8)),  "rect 2x8",      "mismo shape, guarda falsa")
+    assert_eq(lados(Circulo(1)),  "no es rect",    "otro shape no casa")
+}
+
+--    acts estáticos
+
+shape Punto {
+    x: int
+    y: int
+
+    static act origen() -> Punto {
+        return Punto(0, 0)
+    }
+
+    static act desde_lista(l) -> Punto {
+        return Punto(l[0], l[1])
+    }
+
+    act suma() -> int {
+        return me.x + me.y
+    }
+}
+
+fn test_acts_estaticos() {
+    o = Punto::origen()
+    assert_eq(o.x, 0, "el estático construye sin instancia previa")
+    assert_eq(o.y, 0, "segundo campo del estático")
+
+    p = Punto::desde_lista([3, 4])
+    assert_eq(p.x, 3,        "constructor alternativo")
+    assert_eq(p.suma(), 7,   "el act de instancia sigue funcionando")
+}
+
+fn test_acts_estaticos_y_de_instancia_conviven() {
+    r = Punto(10, 20)
+    assert_eq(r.suma(), 30, "instancia normal")
+    assert_eq(Punto::origen().suma(), 0, "encadenar estático e instancia")
+}
+
+--    genéricos
+
+fn identidad[T](x: T) -> T {
+    return x
+}
+
+fn test_generico_devuelve_el_tipo_concreto() {
+    -- El retorno se resuelve por unificación: `identidad("hola")` es `string`,
+    -- no `T`. Estas anotaciones son las que fallarían si no se resolviera.
+    s: string = identidad("hola")
+    n: int    = identidad(42)
+    assert_eq(s, "hola", "T ligado a string")
+    assert_eq(n, 42,     "T ligado a int")
+}

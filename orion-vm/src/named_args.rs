@@ -6,7 +6,7 @@
 //! nativo, método, callee dinámico o función desconocida) conserva sus kwargs;
 //! codegen los rechaza luego con un error claro.
 
-use crate::ast::{Expr, Param, Stmt};
+use crate::ast::{Expr, Param, Stmt, Pattern};
 use crate::codegen::CodegenError;
 use indexmap::IndexMap as HashMap;
 
@@ -113,6 +113,25 @@ fn walk_stmts(ss: &mut [Stmt], sigs: &Sigs) -> Result<(), CodegenError> {
     Ok(())
 }
 
+/// Recorre un patrón buscando las expresiones que lleva dentro.
+///
+/// Solo `Value` contiene una expresión que pueda traer argumentos con nombre;
+/// el resto de formas son estructura y ligaduras. Se recorre igual entero para
+/// que un patrón anidado como `{clave: [f(x = 1)]}` no se quede sin pasar.
+fn walk_pattern(p: &mut Pattern, sigs: &Sigs) -> Result<(), CodegenError> {
+    match p {
+        Pattern::Wildcard | Pattern::Bind(_) => {}
+        Pattern::Value(e) => walk_expr(e, sigs)?,
+        Pattern::List(elems) => {
+            for el in elems.iter_mut() { walk_pattern(el, sigs)?; }
+        }
+        Pattern::Dict(fields) | Pattern::Shape { fields, .. } => {
+            for (_, sub) in fields.iter_mut() { walk_pattern(sub, sigs)?; }
+        }
+    }
+    Ok(())
+}
+
 fn walk_expr(e: &mut Expr, sigs: &Sigs) -> Result<(), CodegenError> {
     match e {
         Expr::Int(_) | Expr::Float(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null
@@ -202,7 +221,8 @@ fn walk_stmt(s: &mut Stmt, sigs: &Sigs) -> Result<(), CodegenError> {
         Stmt::Match { expr, arms, .. } => {
             walk_expr(expr, sigs)?;
             for arm in arms.iter_mut() {
-                walk_expr(&mut arm.pattern, sigs)?;
+                walk_pattern(&mut arm.pattern, sigs)?;
+                if let Some(g) = &mut arm.guard { walk_expr(g, sigs)?; }
                 walk_stmts(&mut arm.body, sigs)?;
             }
         }

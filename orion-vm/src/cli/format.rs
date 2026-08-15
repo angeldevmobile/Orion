@@ -1,6 +1,6 @@
 use std::fs;
 use crate::{lexer, parser};
-use crate::ast::{Expr, Stmt, Param, MatchArm, FieldDef, ActDef};
+use crate::ast::{Expr, Stmt, Param, MatchArm, FieldDef, ActDef, Pattern};
 use super::banner;
 
 const INDENT: &str = "    ";
@@ -376,7 +376,11 @@ impl Formatter {
 
     fn write_match_arm(&mut self, arm: &MatchArm) {
         self.ind();
-        self.push(&fmt_expr(&arm.pattern));
+        self.push(&fmt_pattern(&arm.pattern));
+        if let Some(g) = &arm.guard {
+            self.push(" if ");
+            self.push(&fmt_expr(g));
+        }
         if arm.body.len() == 1 {
             self.push(": ");
             let single = fmt_stmt_inline(&arm.body[0]);
@@ -448,6 +452,35 @@ impl Formatter {
 }
 
 //   Formatter de expresiones (puro, sin estado)           
+
+/// Reimprime un patrón de `match` tal y como se escribe.
+///
+/// La abreviatura `{clave}` se reconstruye cuando el sub-patrón es la ligadura
+/// del mismo nombre: reimprimirla como `{clave: clave}` sería correcto pero
+/// ruidoso, y el formatter no está para ensuciar lo que ya estaba limpio.
+pub fn fmt_pattern(p: &Pattern) -> String {
+    let campos = |fields: &[(String, Pattern)]| -> String {
+        fields.iter()
+            .map(|(k, sub)| match sub {
+                Pattern::Bind(b) if b == k => k.clone(),
+                _ => format!("{k}: {}", fmt_pattern(sub)),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    match p {
+        Pattern::Wildcard  => "_".to_string(),
+        Pattern::Bind(n)   => n.clone(),
+        Pattern::Value(e)  => fmt_expr(e),
+        Pattern::List(els) => format!(
+            "[{}]",
+            els.iter().map(fmt_pattern).collect::<Vec<_>>().join(", ")
+        ),
+        Pattern::Dict(fields) => format!("{{{}}}", campos(fields)),
+        Pattern::Shape { name, fields } => format!("{name}({})", campos(fields)),
+    }
+}
 
 pub fn fmt_expr(expr: &Expr) -> String {
     match expr {

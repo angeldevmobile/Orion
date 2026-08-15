@@ -522,6 +522,14 @@ impl TypeChecker {
                 self.push_scope();
                 for tp in type_params {
                     self.scope_set(tp.clone(), "any".to_string());
+                    // Un parámetro de tipo no es una variable: se declara para
+                    // que los hints que lo nombren resuelvan, no para leerlo.
+                    // Sin esto, TODA función genérica arrastraba un
+                    // "Variable 'T' asignada pero nunca usada" que no señalaba
+                    // ningún problema y enseñaba a ignorar los avisos.
+                    if let Some(top) = self.written_not_read.last_mut() {
+                        top.remove(tp);
+                    }
                 }
                 for p in params {
                     let resolved = match &p.type_hint {
@@ -1020,7 +1028,7 @@ impl TypeChecker {
                     // tener que mantener una lista hardcodeada completa de ellos.
                     Expr::Ident(fn_name) => {
                         self.scope_get(fn_name);
-                        self.fn_sigs.get(fn_name).and_then(|s| s.return_type.clone())
+                        self.call_return_type(fn_name, args)
                     }
                     other => { self.infer_type(other); None }
                 }
@@ -1058,6 +1066,28 @@ impl TypeChecker {
     //    Unificación de type params                                              
 
     /// Dado `fn f[T, U](a: T, b: U)` y los args reales, devuelve {T→"int", U→"string"}.
+    /// Tipo que devuelve una llamada, con los genéricos ya resueltos.
+    ///
+    /// `fn primero[T](l: T) -> T` llamada con una cadena devuelve `string`, no
+    /// `T`. Antes se devolvía el tipo declarado tal cual, y el error que salía
+    /// era "se asignó valor de tipo 'T'": técnicamente cierto y prácticamente
+    /// inútil, porque `T` es un nombre del que escribió la función, no del que
+    /// la llama, y no dice cuál es el tipo que de verdad llegó.
+    ///
+    /// Se unifica en silencio: los choques entre argumentos ya los reporta
+    /// `check_call_types`, y hacerlo también aquí duplicaría cada aviso.
+    fn call_return_type(&mut self, fn_name: &str, args: &[Expr]) -> Option<String> {
+        let sig = self.fn_sigs.get(fn_name).cloned()?;
+        let declared = sig.return_type.clone()?;
+        if sig.type_params.is_empty() {
+            return Some(declared);
+        }
+        let before = self.issues.len();
+        let bindings = self.unify_type_params(&sig, args);
+        self.issues.truncate(before);
+        Some(resolve_generic(&declared, &bindings))
+    }
+
     fn unify_type_params(&mut self, sig: &FnSig, args: &[Expr]) -> HashMap<String, String> {
         let mut bindings: HashMap<String, String> = HashMap::new();
         let type_param_set: HashSet<&str> = sig.type_params.iter().map(|s| s.as_str()).collect();

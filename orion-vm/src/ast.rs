@@ -152,10 +152,37 @@ impl Param {
     }
 }
 
+/// Patrón de un brazo de `match`.
+///
+/// Antes un patrón era una `Expr` y el `match` se compilaba a `sujeto == patrón`:
+/// un `switch`, no un match. Con esto un brazo puede además ligar nombres,
+/// mirar dentro de listas, dicts e instancias, y filtrar con una guarda.
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    /// `_` — casa con cualquier cosa y no liga nada.
+    Wildcard,
+    /// `nombre` — casa siempre y liga el sujeto a ese nombre.
+    Bind(String),
+    /// Un literal o cualquier expresión: casa si es igual al sujeto.
+    Value(Expr),
+    /// `[a, b]` — lista de longitud EXACTA; cada hueco es otro patrón.
+    List(Vec<Pattern>),
+    /// `{clave: patrón, otra}` — el dict tiene que traer esas claves; puede
+    /// traer más. `{otra}` es abreviatura de `{otra: otra}`.
+    Dict(Vec<(String, Pattern)>),
+    /// `Forma(campo, otro: patrón)` — comprueba de qué shape es la instancia y
+    /// liga sus campos POR NOMBRE. Se escribe con paréntesis, como se construye,
+    /// y así no se confunde con la llave que abre el cuerpo del brazo.
+    Shape { name: String, fields: Vec<(String, Pattern)> },
+}
+
 /// Brazo de un `match`
 #[derive(Debug, Clone)]
 pub struct MatchArm {
-    pub pattern: Expr,
+    pub pattern: Pattern,
+    /// `patrón if condición` — se evalúa DESPUÉS de ligar, así que la guarda
+    /// puede usar los nombres que el patrón acaba de ligar.
+    pub guard: Option<Expr>,
     pub body: Vec<Stmt>,
 }
 

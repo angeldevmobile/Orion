@@ -1,0 +1,166 @@
+-- Regresión de la sintaxis que el lexer reconocía y el parser no atendía.
+--
+-- Cada bloque de aquí cubre algo que ANTES fallaba de una de estas tres formas:
+-- daba un error de sintaxis genérico, no existía, o —lo peor— devolvía un
+-- resultado equivocado sin avisar. Los que devolvían mal están marcados.
+
+-- El runner descubre y ejecuta las funciones `test_*` de este archivo.
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Rangos
+-- ───────────────────────────────────────────────────────────────────────────
+
+fn test_rango_como_expresion() {
+    -- ANTES: `1..4` fuera de un `for` caía al operador genérico y, con el
+    -- fallback de op_instr a Add, devolvía 5 (la SUMA de los extremos).
+    assert_eq(1..4, [1, 2, 3], "rango exclusivo como expresión")
+    assert_eq(len(1..4), 3, "el rango es una lista de verdad")
+}
+
+fn test_tres_formas_de_rango() {
+    assert_eq(1..4,  [1, 2, 3],    "..  excluye el extremo")
+    assert_eq(1..<4, [1, 2, 3],    "..< excluye el extremo")
+    assert_eq(1...4, [1, 2, 3, 4], "... lo incluye")
+}
+
+fn test_rango_en_for_no_construye_lista() {
+    -- El `for` tiene camino propio (contador, sin reservar la lista); lo que se
+    -- comprueba es que dé lo MISMO que la forma expresión.
+    vistos = []
+    for i in 1..4 { vistos.push(i) }
+    assert_eq(vistos, [1, 2, 3], "for con rango exclusivo")
+
+    vistos2 = []
+    for i in 1...4 { vistos2.push(i) }
+    assert_eq(vistos2, [1, 2, 3, 4], "for con rango inclusivo")
+}
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Pipe
+-- ───────────────────────────────────────────────────────────────────────────
+
+fn doble(n) { return n * 2 }
+fn suma_dos(a, b) { return a + b }
+
+fn test_pipe_formas() {
+    assert_eq([1,2,3] |> len, 3,      "pipe a nombre de función")
+    assert_eq(5 |> doble, 10,         "pipe a función de usuario")
+    assert_eq(5 |> suma_dos(10), 15,  "el valor entra como PRIMER argumento")
+    assert_eq(5 |> doble |> doble, 20, "pipe encadenado")
+    assert_eq(3 |> (n) => n + 100, 103, "pipe a lambda inline")
+}
+
+fn test_pipe_precedencia() {
+    -- Vive entre comparación y aritmética: la suma entra entera y la
+    -- comparación se aplica al RESULTADO del pipe, sin paréntesis.
+    assert_eq(2 + 3 |> doble, 10,          "a + b |> f  es  f(a + b)")
+    assert_eq([1,2,3,4] |> len > 3, yes,   "x |> len > 3  es  (x |> len) > 3")
+}
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Ternario
+-- ───────────────────────────────────────────────────────────────────────────
+
+fn test_ternario() {
+    assert_eq(7 > 5 ? "grande" : "chico", "grande", "ternario verdadero")
+    assert_eq(2 > 5 ? "grande" : "chico", "chico",  "ternario falso")
+}
+
+fn test_ternario_anidado_asocia_derecha() {
+    -- `a ? b : c ? d : e` es `a ? b : (c ? d : e)` — la cadena else-if.
+    assert_eq(clasifica(-3), "negativo", "rama izquierda")
+    assert_eq(clasifica(0),  "cero",     "rama del medio")
+    assert_eq(clasifica(9),  "positivo", "rama final")
+}
+
+fn clasifica(x) {
+    return x < 0 ? "negativo" : x == 0 ? "cero" : "positivo"
+}
+
+fn revienta() {
+    error "esta rama no se debe evaluar"
+}
+
+fn test_ternario_es_perezoso() {
+    -- Solo se evalúa la rama elegida; si evaluara las dos, esto lanzaría.
+    assert_eq(yes ? "ok" : revienta(), "ok", "la rama no elegida no se evalúa")
+}
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Spread
+-- ───────────────────────────────────────────────────────────────────────────
+
+fn suma3(a, b, c) { return a + b + c }
+
+fn test_spread_en_listas() {
+    otra = [3, 4]
+    assert_eq([1, 2, ...otra, 5], [1, 2, 3, 4, 5], "spread en medio")
+    assert_eq([...otra], [3, 4],                   "spread solo")
+    assert_eq([...otra, ...otra], [3, 4, 3, 4],    "dos spreads")
+}
+
+fn test_spread_copia_no_aliasa() {
+    -- Las listas de Orion van por referencia. `[...b]` tiene que dar una lista
+    -- NUEVA: si compilara al propio `b`, escribir en la copia escribiría en el
+    -- original.
+    original = [1, 2]
+    copia = [...original]
+    copia.push(99)
+    assert_eq(original, [1, 2],     "el original no se toca")
+    assert_eq(copia, [1, 2, 99],    "la copia sí cambia")
+}
+
+fn test_spread_en_argumentos() {
+    args = [1, 2, 3]
+    assert_eq(suma3(...args), 6,            "todos los argumentos expandidos")
+    assert_eq(suma3(10, ...[20, 30]), 60,   "sueltos y expandidos mezclados")
+}
+
+fn test_spread_con_lambda_en_variable() {
+    -- El invocable viaja como nombre y hay que resolverlo contra las variables
+    -- del frame, no solo contra las funciones globales.
+    f = (a, b) => a * b
+    assert_eq(f(...[6, 7]), 42, "lambda guardada en variable")
+}
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Operadores de bits
+-- ───────────────────────────────────────────────────────────────────────────
+
+fn test_bits() {
+    assert_eq(12 & 10, 8,   "and")
+    assert_eq(12 | 10, 14,  "or")
+    assert_eq(12 ^ 10, 6,   "xor")
+    assert_eq(1 << 4, 16,   "shift izquierda")
+    assert_eq(256 >> 4, 16, "shift derecha")
+    assert_eq(-8 >> 1, -4,  "shift derecha conserva el signo")
+}
+
+fn test_bits_precedencia() {
+    -- Por DEBAJO de la comparación, no como en C: `a & b == c` es `(a & b) == c`.
+    -- En C sería `a & (b == c)`, que es el error clásico del que avisan los
+    -- compiladores.
+    assert_eq(12 & 10 == 8, yes, "(a & b) == c")
+    assert_eq(1 << 2 + 1, 8,     "el shift es más suelto que la suma: 1 << 3")
+    assert_eq(3 & 1 << 1, 2,     "el shift aprieta más que el and: 3 & 2")
+}
+
+fn test_bits_mascaras() {
+    LEER = 1
+    ESCRIBIR = 2
+    EJECUTAR = 4
+    permisos = LEER | EJECUTAR
+    assert_eq(permisos, 5,                      "permisos combinados")
+    assert_eq(permisos & ESCRIBIR != 0, no,     "no tiene escritura")
+    assert_eq(permisos & EJECUTAR != 0, yes,    "sí tiene ejecución")
+}
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Llamada a un invocable que no es un nombre
+-- ───────────────────────────────────────────────────────────────────────────
+
+fn test_lambda_invocada_al_vuelo() {
+    -- ANTES: moría con "Función '__call__' no definida" — el nombre de un
+    -- símbolo interno que el programador nunca escribió.
+    assert_eq(((n) => n + 1)(10), 11, "lambda invocada en el sitio")
+}
