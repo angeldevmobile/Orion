@@ -76,6 +76,41 @@ function extractFns(file) {
     return fns;
 }
 
+// Tipos de retorno que aparecen tras la flecha en los comentarios de contrato.
+//
+// La capitalización es libre en el código (`Bool`, `bool`, `List`, `list`), así
+// que se compara en minúsculas y se normaliza al nombre que usa el lenguaje.
+// Los sinónimos en español están porque los comentarios los mezclan.
+const TIPOS_RETORNO = {
+    bool: 'bool', booleano: 'bool',
+    int: 'int', entero: 'int',
+    float: 'float', flotante: 'float',
+    string: 'string', str: 'string', texto: 'string', cadena: 'string',
+    list: 'list', lista: 'list',
+    dict: 'dict', diccionario: 'dict',
+    handle: 'handle',
+    nada: 'nada', none: 'nada', null: 'nada', void: 'nada',
+};
+
+// Separa un tipo de retorno de la prosa que lo acompaña.
+//
+// El convenio de los módulos es `nombre(args) → tipo resto de la explicación`,
+// y hasta ahora TODO lo que seguía a la flecha se guardaba como descripción: el
+// tipo estaba escrito en ~190 funciones y se tiraba, dejando el hover sin un
+// solo tipo de retorno. Solo se mira aquí, después de la flecha, porque en esa
+// posición una palabra como "lista" es el tipo; al principio de una frase suele
+// ser el verbo ("Lista el contenido de una carpeta") y confundirlos daría
+// firmas mentira, que es peor que no tener firma.
+function partirRetorno(tail) {
+    const m = tail.match(/^([\p{L}]+)\b(.*)$/u);
+    if (!m) return { ret: null, resto: tail };
+    const tipo = TIPOS_RETORNO[m[1].toLowerCase()];
+    if (!tipo) return { ret: null, resto: tail };
+    // Lo que sigue al tipo se limpia de separadores sueltos (`—`, `:`, `,`).
+    const resto = m[2].replace(/^\s*[—\-:,]\s*/, '').trim();
+    return { ret: tipo, resto };
+}
+
 // 3. Comentario `nombre(args) → desc` → firma y descripción.
 function parseDoc(mod, name, comment) {
     let signature = `${mod}.${name}(…)`;
@@ -88,13 +123,39 @@ function parseDoc(mod, name, comment) {
     if (at > 0) comment = comment.slice(at).replace(new RegExp('^' + mod + '\\.'), '');
     if (comment.startsWith(mod + '.')) comment = comment.slice(mod.length + 1);
     if (comment) {
-        const arrow = comment.split(/\s*→\s*/);
+        // El separador de contrato es `→` (479 comentarios). Tres usan raya
+        // larga, y sin contemplarla la descripción entera acababa DENTRO de la
+        // firma: `gui.section(titulo, accion?) … — card con cabecera y acción
+        // opcional. Deja la card ABIERTA…` se mostraba como si todo eso fuera
+        // la lista de parámetros. Se admite como alternativa solo cuando no hay
+        // flecha, para no partir una raya que sea parte de la explicación.
+        const sep = comment.includes('→') ? /\s*→\s*/ : /\s*…?\s*—\s*/;
+        const arrow = comment.split(sep);
         const head = arrow[0].trim();
-        const tail = arrow.slice(1).join(' → ').trim();
+        const tail = arrow.slice(1).join(' — ').trim();
         if (head.startsWith(name + '(') || head === name) {
-            // Lo que sigue a → es descripción, no tipo de retorno: no va en la firma.
             signature = `${mod}.${head}`;
-            if (tail) description = cap(tail);
+            if (tail) {
+                // Si tras la flecha viene un tipo, va a la FIRMA (`-> dict`) y
+                // solo el resto queda como descripción. Así el hover dice qué
+                // devuelve, que es lo que hace falta para encadenar llamadas.
+                // Si el contrato ya declara el retorno en la cabecera
+                // (`upper(s: string) -> string → en mayúsculas`), no se vuelve a
+                // añadir: sin esta guarda salía `-> string -> string` en cuanto
+                // la descripción empezaba por una palabra que parece un tipo.
+                const { ret, resto } = head.includes('->')
+                    ? { ret: null, resto: tail }
+                    : partirRetorno(tail);
+                if (ret) {
+                    signature = `${mod}.${head} -> ${ret}`;
+                    // Un comentario que era solo el tipo (`→ bool`) no deja
+                    // prosa: mejor decir qué devuelve que repetir "Función del
+                    // módulo X", que no informa de nada.
+                    description = resto ? cap(resto) : `Devuelve ${ret}.`;
+                } else {
+                    description = cap(tail);
+                }
+            }
         } else {
             description = cap(comment);
         }
@@ -120,6 +181,10 @@ fn f(module: &str, name: &str, signature: &str, description: &str) -> BuiltinDoc
         signature: signature.into(),
         description: description.into(),
         example: String::new(),
+        // Los rellena builtins::registry() desmenuzando la firma; aquí no se
+        // duplica el parseo para que no haya dos versiones que puedan discrepar.
+        params: Vec::new(),
+        returns: None,
     }
 }
 

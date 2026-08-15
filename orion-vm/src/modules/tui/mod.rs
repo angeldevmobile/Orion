@@ -60,16 +60,24 @@ where
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
+        // Las funciones de este módulo DECLARAN la interfaz; no dibujan nada
+        // hasta que se llama a run(), que toma el control de la terminal.
+        //
+        // panel(titulo?: string) -> nada → título de la ventana; sin él, "Orion TUI"
         "panel" => {
             let title = str_arg(&args, 0).unwrap_or_else(|| "Orion TUI".into());
             with_state(|s| s.title = title);
             Ok(EvalValue::Null)
         }
 
+        // text(texto: string, estilo?: dict) -> nada → una línea de texto normal
         "text"    => push(TuiWidget::Text(req_str(&args, 0, "text")?,    style_args(&args, 1, 2))),
+        // heading(texto: string, estilo?: dict) -> nada → un título destacado
         "heading" => push(TuiWidget::Heading(req_str(&args, 0, "heading")?, style_args(&args, 1, 2))),
+        // caption(texto: string, estilo?: dict) -> nada → texto secundario, más apagado
         "caption" => push(TuiWidget::Caption(req_str(&args, 0, "caption")?, style_args(&args, 1, 2))),
 
+        // gauge(etiqueta: string, porcentaje: int, estilo?: dict) -> nada → barra de progreso; el porcentaje se recorta a 0-100
         "gauge" => {
             let label   = req_str(&args, 0, "gauge")?;
             let percent = i64_arg(&args, 1).unwrap_or(0).clamp(0, 100) as u16;
@@ -77,12 +85,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             push(TuiWidget::Gauge { label, percent, style })
         }
 
+        // list(elementos: list, estilo?: dict) -> nada → lista vertical; cada elemento se muestra como texto
         "list" => {
             let items = list_strings(&args, 0);
             let style = style_args(&args, 1, 2);
             push(TuiWidget::Items { items, style })
         }
 
+        // table(cabeceras: list, filas: list, estilo?: dict) -> nada → tabla; cada fila es una lista de celdas
         "table" => {
             let headers = list_strings(&args, 0);
             let rows: Vec<Vec<String>> = match args.get(1) {
@@ -96,6 +106,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             push(TuiWidget::Grid { headers, rows, style })
         }
 
+        // chart(etiqueta: string, datos: list) -> nada → barras a partir de pares [["nombre", valor], …]
         "chart" => {
             let label = req_str(&args, 0, "chart")?;
             // acepta lista de pares [["label", value], ...] o dict
@@ -116,6 +127,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             push(TuiWidget::Chart { label, data })
         }
 
+        // spark(datos: list) -> nada → minigráfico de una sola línea, para tendencias
         "spark" => {
             let data: Vec<u64> = match args.first() {
                 Some(EvalValue::List(l)) => l.iter().map(|v| match v {
@@ -128,23 +140,29 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             push(TuiWidget::Spark { data })
         }
 
+        // tabs(etiquetas: list, activa?: int) -> nada → pestañas; `activa` es el índice de la seleccionada
         "tabs" => {
             let labels   = list_strings(&args, 0);
             let selected = i64_arg(&args, 1).unwrap_or(0).max(0) as usize;
             push(TuiWidget::TuiTabs { labels, selected })
         }
 
+        // divider() -> nada → línea horizontal de separación
         "divider" => push(TuiWidget::Divider),
+        // spacer() -> nada → hueco vertical vacío
         "spacer"  => push(TuiWidget::Spacer),
 
+        // row() -> nada → abre un contenedor horizontal; lo que declares después va dentro hasta el end()
         "row" => {
             with_state(|s| s.container_stack.push(("row".into(), s.widgets.len())));
             Ok(EvalValue::Null)
         }
+        // col() -> nada → abre un contenedor vertical; se cierra con end()
         "col" => {
             with_state(|s| s.container_stack.push(("col".into(), s.widgets.len())));
             Ok(EvalValue::Null)
         }
+        // end() -> nada → cierra el row() o col() abierto más recientemente
         "end" => {
             with_state(|s| {
                 if let Some((kind, start)) = s.container_stack.pop() {
@@ -157,20 +175,24 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
 
         // Eventos de teclado
+        // on_key(tecla: string, evento: string) -> nada → asocia una tecla a un nombre de evento que luego lee key()
         "on_key" => {
             let key   = req_str(&args, 0, "on_key")?;
             let event = req_str(&args, 1, "on_key")?;
             with_state(|s| s.key_handlers.push((key, event)));
             Ok(EvalValue::Null)
         }
+        // key() -> string → el último evento de tecla recibido, o cadena vacía si no hubo ninguno
         "key" => Ok(EvalValue::Str(with_state(|s| s.last_key.clone()))),
 
         // Estado persistente (igual que gui.val/gui.set)
+        // val(clave: string, defecto?: any) -> any → lee del estado; devuelve `defecto` si esa clave no está
         "val" => {
             let key     = req_str(&args, 0, "val")?;
             let default = args.get(1).cloned().unwrap_or(EvalValue::Null);
             Ok(with_state(|s| s.state_store.get(&key).cloned().unwrap_or(default)))
         }
+        // set(clave: string, valor: any) -> nada → guarda en el estado, que sobrevive a los redibujados
         "set" => {
             let key = req_str(&args, 0, "set")?;
             let val = args.get(1).cloned().unwrap_or(EvalValue::Null);
@@ -178,6 +200,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
+        // run() -> nada → toma la terminal y dibuja lo declarado. BLOQUEA hasta que el usuario sale
         "run" => {
             let (title, widgets, key_handlers) = with_state(|s| (
                 s.title.clone(),

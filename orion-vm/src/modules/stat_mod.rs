@@ -3,23 +3,41 @@ use indexmap::IndexMap as HashMap;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
+        // mean(datos: list) -> float → media aritmética; una lista vacía da 0
         "mean"        => fn_mean(args),
+        // median(datos: list) -> float → valor central; con un número par de datos, interpola entre los dos del medio
         "median"      => fn_median(args),
+        // mode(datos: list) -> any → el valor que más se repite, tal cual (no lo convierte a float). Si hay empate, cuál gana no está garantizado
         "mode"        => fn_mode(args),
+        // std(datos: list) -> float → desviación típica POBLACIONAL (divide entre N, no entre N-1). Con menos de 2 datos da 0
         "std"         => fn_std(args),
+        // variance(datos: list) -> float → varianza POBLACIONAL (divide entre N). Es std al cuadrado
         "variance"    => fn_variance(args),
+        // min(datos: list) -> float → el menor. Siempre float, aunque entren enteros
         "min"         => fn_min(args),
+        // max(datos: list) -> float → el mayor. Siempre float, aunque entren enteros
         "max"         => fn_max(args),
+        // range(datos: list) -> float → recorrido, o sea max - min
         "range"       => fn_range(args),
+        // sum(datos: list) -> float → suma de todos
         "sum"         => fn_sum(args),
+        // percentile(datos: list, p: float) -> float → percentil p de 0 a 100, interpolando entre los dos vecinos
         "percentile"  => fn_percentile(args),
+        // iqr(datos: list) -> float → rango intercuartílico, p75 - p25
         "iqr"         => fn_iqr(args),
+        // zscore(datos: list) -> list → cada dato en desviaciones típicas respecto a la media; si no hay dispersión, todos 0
         "zscore"      => fn_zscore(args),
+        // normalize(datos: list) -> list → reescala a [0, 1]; si todos son iguales, todos 0
         "normalize"   => fn_normalize(args),
+        // correlation(x: list, y: list) -> float → correlación de Pearson, de -1 a 1. Las dos listas deben medir lo mismo
         "correlation" => fn_correlation(args),
+        // regression(x: list, y: list) -> dict → recta de mínimos cuadrados: { slope, intercept, r2 }. Necesita 2 puntos como mínimo
         "regression"  => fn_regression(args),
+        // outliers(datos: list) -> list → los valores fuera de [q1 - 1.5·iqr, q3 + 1.5·iqr], ordenados
         "outliers"    => fn_outliers(args),
+        // histogram(datos: list, bins?: int) -> dict → { bins: bordes, counts: cuántos por tramo }; 10 tramos por defecto
         "histogram"   => fn_histogram(args),
+        // describe(datos: list) -> dict → resumen de un vistazo: { count, mean, std, min, p25, median, p75, max }
         "describe"    => fn_describe(args),
         _ => Err(format!("stat.{} no existe", function)),
     }

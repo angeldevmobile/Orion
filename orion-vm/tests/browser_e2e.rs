@@ -9,10 +9,18 @@
 //!
 //! Ejecutar EN SERIE: `cargo test --test browser_e2e -- --test-threads=1`.
 //!
-//! Medido: en paralelo caen 2 tests al azar (nunca los mismos) en ~195 s; en
-//! serie pasan los 74 en ~145 s. El `turno()` ya serializa los cuerpos, así que
-//! el paralelismo solo añade fallos fantasma. Si ves rojo aquí, repite en serie
-//! antes de tocar nada.
+//! Estos tests son INESTABLES bajo carga, y conviene saberlo antes de perder una
+//! tarde persiguiendo un fallo que no existe:
+//!
+//! - En paralelo caen ~2 al azar por pasada, en ~195 s.
+//! - En serie caen menos y va más rápido (~145 s), pero **también caen**: se ha
+//!   visto una pasada limpia de 74/74 y otra con 2 fallos.
+//! - Los que caen NUNCA son los mismos, y cada uno aislado pasa en 1-3 s.
+//!
+//! Que cambien de una pasada a otra es la prueba de que es contención de
+//! recursos —cada test levanta un navegador de verdad y un servidor local— y no
+//! un defecto del módulo. La regla práctica: ante un rojo aquí, repetir el test
+//! solo; si pasa, era esto. No des por bueno un verde en serie como garantía.
 
 use std::fs;
 use std::io::{Read, Write};

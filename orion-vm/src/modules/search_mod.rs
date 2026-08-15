@@ -11,16 +11,30 @@ use std::path::Path;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        "in_file"  => fn_in_file(args),     // auto-detecta tipo por extensión
-        "text"     => fn_text(args),         // busca en txt/log/cualquier texto
-        "regex"    => fn_regex(args),        // búsqueda con regex
-        "csv"      => fn_csv(args),          // busca en CSV por columna=valor
-        "excel"    => fn_excel(args),        // busca en Excel
-        "count"    => fn_count(args),        // cuenta matches sin materializar
-        "first"    => fn_first(args),        // primer match y para
-        "in_dir"   => fn_in_dir(args),       // busca en todos los archivos de un directorio
-        "context"  => fn_context(args),      // grep -C: líneas antes/después del match
-        "columns"  => fn_csv_columns(args),  // busca en múltiples columnas de CSV
+        // Los comentarios van ENCIMA del arm, no al final de la línea: el
+        // generador de la documentación solo recoge los de arriba, y con los de
+        // al lado este módulo entero salía sin describir en el editor.
+        //
+        // in_file(ruta: string, patron: string) -> list → elige el buscador por la extensión del archivo
+        "in_file"  => fn_in_file(args),
+        // text(ruta: string, patron: string, distingue_mayusculas?: bool) -> list → una entrada { line, content } por línea que casa
+        "text"     => fn_text(args),
+        // regex(ruta: string, patron: string) -> list → como text() pero el patrón es una expresión regular
+        "regex"    => fn_regex(args),
+        // csv(ruta: string, columna: string, valor: string) -> list → filas cuya columna vale eso; falla si la columna no existe
+        "csv"      => fn_csv(args),
+        // excel(ruta: string, patron: string, hoja?: string) -> list → filas que contienen el patrón; sin hoja, la primera
+        "excel"    => fn_excel(args),
+        // count(ruta: string, patron: string) -> int → cuántas veces aparece, sin traerse los resultados a memoria
+        "count"    => fn_count(args),
+        // first(ruta: string, patron: string) -> dict → la primera coincidencia { line, content }, o null si no hay ninguna. Para de leer al encontrarla
+        "first"    => fn_first(args),
+        // in_dir(directorio: string, patron: string, ext?: string) -> list → recorre los archivos del directorio; `ext` los filtra por extensión
+        "in_dir"   => fn_in_dir(args),
+        // context(ruta: string, patron: string, n?: int) -> list → cada coincidencia con n líneas antes y después ({ line, content, before, after }); n vale 2 por defecto
+        "context"  => fn_context(args),
+        // columns(ruta: string, columnas: list, patron: string) -> list → filas donde el patrón aparece en alguna de esas columnas
+        "columns"  => fn_csv_columns(args),
         _ => Err(format!("search.{} no existe", function)),
     }
 }

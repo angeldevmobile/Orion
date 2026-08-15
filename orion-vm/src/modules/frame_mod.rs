@@ -234,53 +234,90 @@ fn infer_columns(headers: &[String], rows: &[Vec<String>]) -> Vec<(String, Col)>
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
+        // Las funciones que TRANSFORMAN (keep, drop, where_, head, sort…) no
+        // tocan el frame de origen: devuelven un handle NUEVO. Conviene saberlo
+        // porque cada uno ocupa memoria hasta que se libera con free(), y en una
+        // cadena larga se acumulan los intermedios.
+        //
         // Carga
+        // open(ruta: string) -> handle → carga CSV o .odf; el formato se detecta solo
         "open"       => fn_open(args),
+        // from_txt(ruta: string, sep?: string) -> handle → texto delimitado indicando el separador
         "from_txt"     => fn_from_txt(args),
+        // to_excel(h: handle, ruta: string, split_por?: string) -> nada → vuelca a xlsx; con `split_por` reparte en varias hojas según esa columna
         "to_excel"     => fn_to_excel(args),
+        // txt_to_excel(txt: string, base: string, sep?: string, split_por?: string) -> nada → de texto a xlsx en streaming, sin cargarlo entero
         "txt_to_excel" => fn_txt_to_excel(args),
+        // from_list(filas: list) -> handle → a partir de una lista de dicts
         "from_list"  => fn_from_list(args),
         // Exploración
+        // peek(h: handle, n?: int) -> nada → IMPRIME las primeras n filas (5 por defecto); no devuelve nada, es para mirar
         "peek"       => fn_peek(args),
+        // schema(h: handle) -> dict → nombre de columna → tipo detectado
         "schema"     => fn_schema(args),
+        // size(h: handle) -> dict → { rows, cols }
         "size"       => fn_size(args),
+        // col(h: handle, nombre: string) -> list → una columna entera como lista
         "col"        => fn_col(args),
+        // row(h: handle, indice: int) -> dict → una fila como dict columna→valor
         "row"        => fn_row(args),
+        // to_list(h: handle) -> list → todas las filas como dicts. Materializa el frame ENTERO en memoria
         "to_list"    => fn_to_list(args),
         // Selección
+        // keep(h: handle, columnas: list) -> handle → frame nuevo solo con esas columnas
         "keep"       => fn_keep(args),
+        // drop(h: handle, columnas: list) -> handle → frame nuevo sin esas columnas
         "drop"       => fn_drop(args),
+        // rename(h: handle, viejo: string, nuevo: string) -> handle → frame nuevo con la columna renombrada
         "rename"     => fn_rename(args),
         // Filtrado
+        // where_(h: handle, columna: string, valor: any) -> handle → frame nuevo con las filas cuya columna es igual a ese valor
         "where_"     => fn_where(args),
+        // head(h: handle, n?: int) -> handle → frame nuevo con las n primeras filas
         "head"       => fn_head(args),
+        // tail(h: handle, n?: int) -> handle → frame nuevo con las n últimas filas
         "tail"       => fn_tail(args),
+        // sort(h: handle, columna: string, orden?: string) -> handle → frame nuevo ordenado; ascendente salvo que pases exactamente "desc"
         "sort"       => fn_sort(args),
         // Estadísticas por columna (directo sobre Vec<f64>)
+        // mean(h: handle, columna: string) -> float → media de la columna
         "mean"       => fn_col_stat(args, "mean"),
+        // sum(h: handle, columna: string) -> float → suma de la columna
         "sum"        => fn_col_stat(args, "sum"),
+        // min(h: handle, columna: string) -> float → menor valor de la columna
         "min"        => fn_col_stat(args, "min"),
+        // max(h: handle, columna: string) -> float → mayor valor de la columna
         "max"        => fn_col_stat(args, "max"),
+        // std(h: handle, columna: string) -> float → desviación típica de la columna
         "std"        => fn_col_stat(args, "std"),
+        // stats(h: handle, columna: string) -> dict → todas las anteriores de una pasada
         "stats"      => fn_stats(args),
         // Agregación
+        // group(h: handle, por: string, columna: string, op: string) -> handle → agrupa por una columna y agrega otra con op ("sum", "mean", "count"…)
         "group"      => fn_group(args),
+        // count(h: handle) -> int → número de filas
         "count"      => fn_count(args),
         // Columna calculada
+        // add_col(h: handle, nombre: string, valores: list) -> handle → frame nuevo con una columna más; la lista debe medir lo mismo que el frame
         "add_col"    => fn_add_col(args),
         // Chunked (grandes volúmenes sin cargar todo)
-        // each_chunk(ruta, chunk_size?) → lista de handles, un frame por bloque
+        // each_chunk(ruta: string, chunk_size?: int) -> list → lista de handles, un frame por bloque; para archivos que no caben en memoria
         "each_chunk" => fn_each_chunk(args),
+        // scan_stats(ruta: string, columna: string) -> dict → estadísticas de una columna leyendo el archivo de una pasada, sin cargarlo
         "scan_stats" => fn_scan_stats(args),
         // Persistencia
+        // save(h: handle, ruta: string) -> nada → escribe el frame como CSV
         "save"       => fn_save(args),
+        // save_odf(h: handle, ruta: string) -> nada → escribe en .odf binario, unas 11 veces más compacto que CSV
         "save_odf"   => fn_save_odf(args),
+        // load_odf(ruta: string) -> handle → carga un .odf. open() ya lo detecta solo; esta es la forma explícita
         "load_odf"   => fn_load_odf(args),
+        // txt_to_odf(txt: string, base: string, sep?: string, chunk?: int) -> nada → de texto a .odf en streaming, por bloques
         "txt_to_odf" => fn_txt_to_odf(args),
         // Memoria del store
-        // free(handle) → libera el frame; yes si existía
+        // free(h: handle) -> bool → libera el frame; yes si existía. `with` lo llama solo al salir del bloque
         "free"       => fn_free(args),
-        // frames() → número de frames vivos en memoria
+        // frames() -> int → cuántos frames siguen vivos en memoria; útil para cazar los que no se liberaron
         "frames"     => Ok(EvalValue::Int(with_frames(|fs| fs.len() as i64))),
         _ => Err(format!("frame.{} no existe", function)),
     }

@@ -116,7 +116,75 @@ fn module_functions() -> &'static HashMap<String, HashSet<String>> {
     })
 }
 
+/// Firmas de las funciones de módulo, indexadas por "modulo.funcion".
+///
+/// Sale del mismo registro que el hover, así que lo que el editor enseña y lo
+/// que aquí se comprueba son literalmente el mismo dato.
+fn module_signatures() -> &'static HashMap<String, Vec<crate::cli::builtins::ParamDoc>> {
+    static TABLE: std::sync::OnceLock<HashMap<String, Vec<crate::cli::builtins::ParamDoc>>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut map = HashMap::new();
+        for doc in crate::cli::builtins::registry() {
+            if !doc.owner.is_empty() && !doc.params.is_empty() {
+                map.insert(doc.qualified.clone(), doc.params.clone());
+            }
+        }
+        map
+    })
+}
+
+/// ¿Se puede comprobar este tipo declarado, o es mejor callarse?
+///
+/// Se comprueba SOLO contra una lista cerrada de tipos que el chequeo sabe
+/// comparar. Todo lo demás se ignora, y esa es la parte importante: las firmas
+/// las escriben personas en comentarios, y ahí aparecen marcadores como
+/// `[campos]` o nombres de tipo de otro módulo que no significan nada aquí.
+/// Compararlos daría avisos sobre código correcto, que es la forma más rápida de
+/// que alguien desactive los avisos y deje de leerlos.
+///
+/// `handle` queda fuera aunque sea un tipo nuestro: en ejecución un handle de
+/// `frame` es una cadena y uno de `browser` un entero, así que el tipo inferido
+/// nunca va a coincidir con la palabra "handle".
+fn tipo_comprobable(t: &str) -> bool {
+    matches!(
+        normalize(t).as_str(),
+        "int" | "float" | "number" | "string" | "bool" | "list" | "dict"
+    )
+}
+
 impl TypeChecker {
+    /// Compara los argumentos de `modulo.funcion(...)` con los tipos que declara
+    /// su contrato.
+    ///
+    /// Sale como ADVERTENCIA, nunca como error. Estos tipos no los verifica el
+    /// compilador: los escribió una persona en el comentario del módulo, y una
+    /// errata ahí no puede tumbar un programa que funciona. Cuando la cobertura
+    /// suba y se confíe en ellos, subir el nivel es cambiar una línea.
+    fn check_module_arg_types(&mut self, receiver: &Expr, method: &str, args: &[Expr]) {
+        let Expr::Ident(ns) = receiver else { return };
+        let Some(module) = self.module_ns.get(ns).cloned() else { return };
+        let Some(params) = module_signatures().get(&format!("{module}.{method}")) else { return };
+
+        for (idx, arg) in args.iter().enumerate() {
+            let Some(p) = params.get(idx) else { break };
+            let Some(declarado) = p.ty.as_deref() else { continue };
+            if !tipo_comprobable(declarado) { continue; }
+            let Some(real) = self.infer_type(arg) else { continue };
+            if types_compatible(declarado, &real) { continue; }
+
+            let line = self.current_line;
+            let col  = self.current_col;
+            self.issues.push(TypeIssue::warning(
+                format!(
+                    "{ns}.{method}(): el argumento #{} ('{}') se declara '{declarado}' y se está pasando '{real}'",
+                    idx + 1, p.name
+                ),
+                line, col,
+            ));
+        }
+    }
+
     pub fn new() -> Self {
         TypeChecker {
             issues: Vec::new(),
@@ -604,10 +672,17 @@ impl TypeChecker {
                 // Re-marcamos esas lecturas sin registrar escrituras ni duplicar
                 // diagnósticos, eliminando el falso "asignada pero nunca usada".
                 let saved = self.issues.len();
+                // Se GUARDA el valor anterior en vez de apagarlo a secas: un
+                // bucle dentro de otro ejecuta esto mismo, y al terminar su
+                // segunda pasada apagaba el flag con la del bucle externo aún en
+                // marcha. El resto del cuerpo de fuera volvía a registrar
+                // escrituras después de las lecturas, y el contador del bucle
+                // externo salía como "asignado pero nunca usado".
+                let flag_previo = self.suppress_write_tracking;
                 self.suppress_write_tracking = true;
                 self.infer_type(cond);
                 self.check_stmts(body, return_type);
-                self.suppress_write_tracking = false;
+                self.suppress_write_tracking = flag_previo;
                 self.issues.truncate(saved);
                 self.pop_block_scope(&[]);
             }
@@ -629,9 +704,12 @@ impl TypeChecker {
                 // lecturas que ocurren en iteraciones posteriores, tras las
                 // escrituras del cuerpo del bucle.
                 let saved = self.issues.len();
+                // Mismo motivo que en While: el flag se restaura, no se apaga,
+                // porque un bucle anidado ejecuta este mismo camino.
+                let flag_previo = self.suppress_write_tracking;
                 self.suppress_write_tracking = true;
                 self.check_stmts(body, return_type);
-                self.suppress_write_tracking = false;
+                self.suppress_write_tracking = flag_previo;
                 self.issues.truncate(saved);
                 self.pop_block_scope(&[var.as_str()]);
             }
@@ -789,7 +867,7 @@ impl TypeChecker {
                 // `count`...), así que hay que registrarlos para no reportarlos
                 // como "no definidos". Incluye los campos heredados vía `using`.
                 let all_fields = self.collect_all_fields(name);
-                let check_with_type_params = |checker: &mut TypeChecker, params: &[crate::ast::Param], body: &[Stmt]| {
+                let check_with_type_params = |checker: &mut TypeChecker, params: &[crate::ast::Param], body: &[Stmt], con_instancia: bool| {
                     checker.push_scope();
                     for tp in type_params { checker.scope_set(tp.clone(), "any".to_string()); }
                     // Campos del shape (propios + heredados): visibles como nombres sueltos.
@@ -801,8 +879,20 @@ impl TypeChecker {
                         };
                         checker.scope_set(fname.clone(), fty);
                     }
-                    // `self` siempre disponible dentro del cuerpo.
-                    checker.scope_set("self".to_string(), name.clone());
+                    // La instancia, disponible en todo cuerpo que la tenga.
+                    //
+                    // Se registraba como `self`, que en Orion no es nada: la
+                    // palabra es `me` (la que codegen convierte en PushSelf). Se
+                    // declaraba un nombre que nadie escribe y se dejaba sin
+                    // declarar el que sí, y por eso TODO shape con un `act` que
+                    // usara `me` arrastraba un "Variable 'me' usada pero no
+                    // definida" por cada aparición.
+                    //
+                    // Un `static act` NO la tiene: registrarla ahí taparía el
+                    // error de usar `me` donde no hay instancia.
+                    if con_instancia {
+                        checker.scope_set("me".to_string(), name.clone());
+                    }
                     for p in params {
                         // Igual que en `Fn`: los params sin anotación valen "any"
                         // (antes solo se registraban los tipados → falsos positivos
@@ -814,20 +904,30 @@ impl TypeChecker {
                         };
                         checker.scope_set(p.name.clone(), resolved);
                     }
-                    // Campos/self/params no leídos no son "asignados y nunca usados".
+                    checker.check_stmts(body, None);
+
+                    // Campos, parámetros de tipo, instancia y params no son
+                    // "asignados y nunca usados".
+                    //
+                    // La limpieza va DESPUÉS de recorrer el cuerpo, no antes:
+                    // hacerlo antes no servía de nada porque el propio cuerpo los
+                    // vuelve a marcar al escribirlos. Un campo asignado en
+                    // `on_create` y leído en otro `act` —el caso normal de un
+                    // shape— se reportaba como muerto, porque cada act tiene su
+                    // scope y la lectura ocurre en otro.
                     if let Some(top) = checker.written_not_read.last_mut() {
                         for (fname, _) in &all_fields { top.remove(fname); }
                         for p in params { top.remove(&p.name); }
-                        top.remove("self");
+                        for tp in type_params { top.remove(tp); }
+                        top.remove("me");
                     }
-                    checker.check_stmts(body, None);
                     checker.pop_scope();
                 };
                 if let Some((params, body)) = on_create {
-                    check_with_type_params(self, params, body);
+                    check_with_type_params(self, params, body, true);
                 }
                 for act in acts {
-                    check_with_type_params(self, &act.params, &act.body);
+                    check_with_type_params(self, &act.params, &act.body, !act.is_static);
                 }
             }
 
@@ -839,6 +939,15 @@ impl TypeChecker {
     fn check_call_types(&mut self, expr: &Expr) {
         match expr {
             Expr::Call { callee, args, .. } => {
+                // Llamar a algo LO LEE, y hay que marcarlo aquí porque el callee
+                // de una llamada nunca pasa por el brazo de `Expr::Ident`. Sin
+                // esto, una lambda guardada en una variable y llamada dentro de
+                // otra llamada —`assert_eq(f(3), 6, "...")`, que es como se
+                // escribe medio archivo de tests— se reportaba como "asignada
+                // pero nunca usada".
+                if let Expr::Ident(fn_name) = callee.as_ref() {
+                    self.scope_get(fn_name);
+                }
                 if let Expr::Ident(fn_name) = callee.as_ref() {
                     let sig = self.fn_sigs.get(fn_name).cloned();
                     if let Some(sig) = sig {
@@ -893,6 +1002,7 @@ impl TypeChecker {
             Expr::AttrAccess { object, attr: _ } => self.check_call_types(object),
             Expr::CallMethod { receiver, method, args, kwargs } => {
                 self.check_module_fn(receiver, method);
+                self.check_module_arg_types(receiver, method, args);
                 self.check_call_types(receiver);
                 for arg in args { self.check_call_types(arg); }
                 for (_, v) in kwargs { self.check_call_types(v); }

@@ -122,13 +122,19 @@ fn browser_ctx(h: u64) -> Result<(Arc<Conn>, Duration, Tuning), String> {
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
+        // open(opts?: dict) -> handle → arranca un navegador propio y lo cierra al salir del `with`. opts: { headless, images, gpu, width, height, chrome, user_data, allow, args }
         "open"    => open(&args),
         // attach(puerto|url|opts) → navegador ya abierto; no se cierra al salir
         "attach"  => attach(&args),
+        // page(navegador: handle) -> handle → abre una pestaña nueva y devuelve su handle
         "page"    => page(&args),
+        // goto(pestaña: handle, url: string) -> nada → navega y espera a que la página cargue
         "goto"    => goto(&args),
+        // title(pestaña: handle) -> string → el título de la página
         "title"   => read_str(&args, "document.title", "browser.title"),
+        // url(pestaña: handle) -> string → la URL actual, ya con las redirecciones aplicadas
         "url"     => read_str(&args, "location.href", "browser.url"),
+        // eval(pestaña: handle, js: string) -> any → ejecuta JavaScript en la página y devuelve el resultado
         "eval"    => eval(&args),
         // reload(pestaña, opts?) → recarga; { cache: no } fuerza traerlo todo del servidor
         "reload"  => do_history(&args, 0),
@@ -136,18 +142,31 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "back"    => do_history(&args, -1),
         // forward(pestaña) → avanza en el historial
         "forward" => do_history(&args, 1),
+        // content(pestaña: handle) -> string → el HTML entero tal y como está AHORA, ya con lo que haya pintado el JavaScript
         "content" => read_str(&args, "document.documentElement.outerHTML", "browser.content"),
+        // pages(navegador: handle) -> list → los handles de las pestañas abiertas
         "pages"   => pages(&args),
 
-        // Interacción
+        // Interacción. Todas esperan a que el elemento se pueda usar de verdad
+        // (que exista, se vea y nada lo tape) antes de tocarlo.
+        //
+        // click(pestaña: handle, selector: string, opts?: dict) -> nada → clic real; `force` atraviesa lo que tape sin clicar a ciegas
         "click"      => do_click(&args, "left", 1),
+        // dblclick(pestaña: handle, selector: string, opts?: dict) -> nada → doble clic
         "dblclick"   => do_click(&args, "left", 2),
+        // rightclick(pestaña: handle, selector: string, opts?: dict) -> nada → clic derecho, para menús contextuales
         "rightclick" => do_click(&args, "right", 1),
+        // hover(pestaña: handle, selector: string) -> nada → deja el ratón encima; despliega los menús que reaccionan al paso
         "hover"      => do_hover(&args),
+        // drag(pestaña: handle, origen: string, destino: string) -> nada → arrastra de un elemento a otro con eventos de ratón reales
         "drag"       => do_drag(&args),
+        // scroll(pestaña: handle, selector_o_y: any) -> nada → desplaza hasta un elemento o hasta una posición
         "scroll"     => do_scroll(&args),
+        // type(pestaña: handle, selector: string, texto: string) -> nada → escribe tecla a tecla, disparando los eventos que espera la página
         "type"       => do_type(&args),
+        // press(pestaña: handle, tecla: string) -> nada → pulsa una tecla suelta ("Enter", "Tab", "Escape"…)
         "press"      => do_press(&args),
+        // select(pestaña: handle, selector: string, valor: string) -> nada → elige una opción de un desplegable
         "select"     => do_select(&args),
         // fill(pestaña, campos, opts?) → rellena un formulario entero en UNA llamada; detecta si cada control es texto, desplegable o casilla
         "fill"       => do_fill(&args),
@@ -157,7 +176,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "uncheck"    => do_check(&args, false),
 
         // Modales y ventanas
+        // dialogs(pestaña: handle, politica: string) -> nada → qué hacer con alert/confirm/prompt: "accept", "dismiss"… Se fija ANTES de provocarlos, o el diálogo bloquea la página
         "dialogs"     => do_dialogs(&args),
+        // click_opens(pestaña: handle, selector: string) -> handle → clic que abre una pestaña nueva; devuelve el handle de la que se abrió
         "click_opens" => do_click_opens(&args),
 
         // Lectura del DOM.
@@ -165,14 +186,20 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Las que devuelven contenido esperan a que lo haya; las que informan
         // del estado responden sobre el instante actual y no esperan nunca.
         "wait"    => do_wait(&args),
+        // text(pestaña: handle, selector: string) -> string → el texto visible del primer elemento que case, sin espacios sobrantes. ESPERA a que aparezca
         "text"    => query(&args, "browser.text", Espera::Si,
                         "const e = __find(sel); return e ? (e.innerText || e.textContent || '').trim() : null;"),
+        // html(pestaña: handle, selector: string) -> string → el HTML de dentro del elemento. ESPERA a que aparezca
         "html"    => query(&args, "browser.html", Espera::Si,
                         "const e = __find(sel); return e ? e.innerHTML : null;"),
+        // texts(pestaña: handle, selector: string) -> list → el texto de TODOS los que casen. ESPERA a que haya alguno
         "texts"   => query(&args, "browser.texts", Espera::Si,
                         "return __findAll(sel).map(e => (e.innerText || e.textContent || '').trim());"),
+        // exists(pestaña: handle, selector: string) -> bool → si está ahora mismo. NO espera: para preguntar sin bloquear
         "exists"  => query(&args, "browser.exists", Espera::No, "return !!__find(sel);"),
+        // count(pestaña: handle, selector: string) -> int → cuántos hay ahora mismo. NO espera
         "count"   => query(&args, "browser.count", Espera::No, "return __findAll(sel).length;"),
+        // visible(pestaña: handle, selector: string) -> bool → si existe Y se ve de verdad (con tamaño, sin display:none ni opacidad 0). NO espera
         "visible" => query(&args, "browser.visible", Espera::No, r#"
                         const e = __find(sel);
                         if (!e) return false;
@@ -181,12 +208,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                         return r.width > 0 && r.height > 0
                             && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
                      "#),
+        // attr(pestaña: handle, selector: string, nombre: string) -> string → un atributo del HTML. Para lo que el usuario ha escrito en un campo usa value()
         "attr"    => do_attr(&args),
         // value(pestaña, selector) → lo que un campo contiene AHORA; distinto de attr("value"), que lee el atributo del HTML y no cambia al escribir
         "value"   => do_value(&args),
         // table(pestaña, selector, opts?) → lee una <table> entera como lista de registros, con la cabecera deducida y las celdas combinadas expandidas
         "table"   => do_table(&args),
+        // extract(pestaña: handle, selector: string, esquema: dict, espera?: int) -> list → una fila por cada elemento que case `selector`, con los campos del esquema { nombre: "selector" }. Un campo con "|list" recoge todas las coincidencias
         "extract"    => do_extract(&args),
+        // extract_to(pestaña: handle, urls: list, selector: string, esquema: dict, salida: string) -> dict → como extract() pero recorriendo varias urls y escribiendo a disco (.csv o .odf) según lee, sin acumular en memoria
         "extract_to" => do_extract_to(&args),
         // discover(pestaña, opts?) → deduce el esquema solo: {row, count, fields, sample}
         "discover"   => do_discover(&args),
@@ -226,6 +256,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // invoca el desugar de `with`, y `close` porque es el que la gente
         // escribe cuando cierra a mano.
         "free" | "close" => free(&args),
+        // info() -> dict → diagnóstico sin abrir nada: { found, path, env, open_browsers, in_use, open_pages }. Lo primero que mirar cuando "no me funciona"
         "info"    => info(),
         f => Err(format!("browser.{f}() no existe")),
     }
