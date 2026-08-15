@@ -6,6 +6,13 @@
 //!
 //! Si la máquina no tiene ningún navegador basado en Chromium, los tests se
 //! saltan en vez de fallar — no tenerlo instalado no es un defecto de Orion.
+//!
+//! Ejecutar EN SERIE: `cargo test --test browser_e2e -- --test-threads=1`.
+//!
+//! Medido: en paralelo caen 2 tests al azar (nunca los mismos) en ~195 s; en
+//! serie pasan los 74 en ~145 s. El `turno()` ya serializa los cuerpos, así que
+//! el paralelismo solo añade fallos fantasma. Si ves rojo aquí, repite en serie
+//! antes de tocar nada.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -111,9 +118,14 @@ fn run_orion(dir: &PathBuf, fuente: &str) -> (String, bool) {
 }
 
 /// ¿Hay navegador en esta máquina? Se le pregunta al propio módulo.
+/// ¿Hay un navegador Chromium? La respuesta es la misma para toda la suite, así
+/// que se calcula una vez en vez de levantar 74 procesos `orion` para lo mismo.
 fn hay_navegador(dir: &PathBuf) -> bool {
-    let (salida, _) = run_orion(dir, "use \"browser\" as web\nshow(web.info())\n");
-    salida.contains("found: yes")
+    static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| {
+        let (salida, _) = run_orion(dir, "use \"browser\" as web\nshow(web.info())\n");
+        salida.contains("found: yes")
+    })
 }
 
 /// Turno para arrancar un navegador.
@@ -2528,4 +2540,70 @@ with b = web.open() {{
     // vacía que parece buena, que es el fallo que este aviso evita.
     assert!(salida.contains("E=") && salida.contains("fantasma"),
             "un campo muerto en todo el recorrido debería delatarse:\n{salida}");
+}
+
+//    attach() — engancharse a un navegador ajeno
+
+#[test]
+fn attach_usa_un_navegador_ya_abierto_y_no_lo_cierra() {
+    // El invariante de `attach`: soltar el enganche no puede matar un navegador
+    // que no arrancamos. Se comprueba usándolo después, no mirando si el proceso
+    // existe — en Windows tarda en desaparecer y daría un verde falso.
+    let dir = tmp_dir("attach");
+    if !hay_navegador(&dir) {
+        eprintln!("[skip] no hay navegador Chromium en esta máquina");
+        return;
+    }
+    let _turno = turno();
+    let url = serve_html(PAGINA);
+    let puerto = 39_222;
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+
+with propio = web.open({{ args: ["--remote-debugging-port={puerto}"] }}) {{
+    -- Segundo handle sobre el MISMO navegador, por el puerto.
+    ajeno = web.attach({puerto})
+    p = web.page(ajeno)
+    web.goto(p, "{url}")
+    show("ENGANCHADO=" + web.title(p))
+
+    -- Soltar el enganche. Si `free` matara el navegador ajeno, lo de abajo
+    -- fallaría: es la comprobación de verdad.
+    web.free(ajeno)
+
+    q = web.page(propio)
+    web.goto(q, "{url}")
+    show("SIGUE_VIVO=" + web.title(q))
+}}
+show("FIN")
+"##));
+
+    assert!(ok, "el programa falló:\n{salida}");
+    assert!(salida.contains("ENGANCHADO=Pagina de prueba"),
+            "attach no pudo usar el navegador ya abierto:\n{salida}");
+    assert!(salida.contains("SIGUE_VIVO=Pagina de prueba"),
+            "soltar el enganche mató un navegador que no era suyo:\n{salida}");
+    assert!(salida.contains("FIN"), "el bloque with no terminó:\n{salida}");
+}
+
+#[test]
+fn attach_a_un_puerto_sin_navegador_explica_que_hacer() {
+    // Es EL error del caso real: en un equipo gestionado el navegador del día a
+    // día no expone CDP. Un "conexión rechazada" a secas no dice qué hacer, así
+    // que el mensaje tiene que nombrar la bandera que falta.
+    let dir = tmp_dir("attach_sin_nadie");
+    let (salida, ok) = run_orion(&dir, r##"
+use "browser" as web
+attempt {
+    b = web.attach(39299)
+    show("NO_DEBERIA_LLEGAR")
+} handle e {
+    show("ERR=" + e)
+}
+"##);
+
+    assert!(ok, "el attempt debería recoger el error:\n{salida}");
+    assert!(salida.contains("--remote-debugging-port"),
+            "el error debe decir qué bandera falta:\n{salida}");
 }

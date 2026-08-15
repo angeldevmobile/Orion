@@ -233,6 +233,13 @@ impl TypeChecker {
             Expr::List(_)       => Some("list".into()),
             Expr::Dict(_)       => Some("dict".into()),
             Expr::Lambda { .. } => Some("fn".into()),
+            // Un ternario tiene tipo solo si sus dos ramas coinciden.
+            Expr::Ternary { then_e, else_e, .. } => {
+                match (self.infer_pure(then_e), self.infer_pure(else_e)) {
+                    (Some(a), Some(b)) if a == b => Some(a),
+                    _ => None,
+                }
+            }
             Expr::BinaryOp { op, left, right } => {
                 let lt = self.infer_pure(left);
                 let rt = self.infer_pure(right);
@@ -869,6 +876,14 @@ impl TypeChecker {
                 self.check_call_types(right);
             }
             Expr::UnaryOp { op: _, expr } => self.check_call_types(expr),
+            // Sin estos dos, una llamada escrita dentro de un ternario o de un
+            // spread se quedaba sin comprobar los argumentos.
+            Expr::Spread(inner) => self.check_call_types(inner),
+            Expr::Ternary { cond, then_e, else_e } => {
+                self.check_call_types(cond);
+                self.check_call_types(then_e);
+                self.check_call_types(else_e);
+            }
             Expr::List(items) => { for e in items { self.check_call_types(e); } }
             Expr::Dict(pairs) => { for (_, v) in pairs { self.check_call_types(v); } }
             Expr::Index { object, index } => {
@@ -1057,6 +1072,27 @@ impl TypeChecker {
                 self.infer_type(object);
                 self.infer_type(index);
                 None
+            }
+
+            // `...expr` — expande una lista, así que el tipo sigue siendo el de
+            // dentro. Sin este brazo caía al `_` y su interior no se visitaba:
+            // una variable usada SOLO dentro de un spread salía como "asignada
+            // pero nunca usada", y un error ahí dentro no se reportaba.
+            Expr::Spread(inner) => self.infer_type(inner),
+
+            // `cond ? a : b`. El tipo es el común de las dos ramas, y `None` si
+            // difieren: decir que un ternario de int y string es int sería peor
+            // que no decir nada. Las tres partes se recorren siempre, aunque el
+            // tipo no se determine, para que las lecturas queden registradas y
+            // los errores de dentro salgan.
+            Expr::Ternary { cond, then_e, else_e } => {
+                self.infer_type(cond);
+                let a = self.infer_type(then_e);
+                let b = self.infer_type(else_e);
+                match (a, b) {
+                    (Some(x), Some(y)) if x == y => Some(x),
+                    _ => None,
+                }
             }
 
             _ => None,

@@ -51,7 +51,10 @@ use launch::{LaunchOpts, Launched, Tuning};
 
 struct BrowserState {
     conn:      Arc<Conn>,
-    proc:      std::process::Child,
+    /// El proceso, si lo arrancamos nosotros. `None` con `attach`: ese
+    /// navegador es del usuario y decide qué hace `free` — el nuestro se mata,
+    /// al ajeno solo se le suelta el socket.
+    proc:      Option<std::process::Child>,
     exe:       String,
     user_data: std::path::PathBuf,
     temporal:  bool,
@@ -120,6 +123,8 @@ fn browser_ctx(h: u64) -> Result<(Arc<Conn>, Duration, Tuning), String> {
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         "open"    => open(&args),
+        // attach(puerto|url|opts) → navegador ya abierto; no se cierra al salir
+        "attach"  => attach(&args),
         "page"    => page(&args),
         "goto"    => goto(&args),
         "title"   => read_str(&args, "document.title", "browser.title"),
@@ -282,9 +287,123 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
 
     let id = new_id();
     handles().lock().unwrap().insert(id, Handle::Browser(BrowserState {
-        conn, proc: child, exe, user_data, temporal, timeout, tuning, pages: Vec::new(),
+        conn, proc: Some(child), exe, user_data, temporal, timeout, tuning, pages: Vec::new(),
     }));
     Ok(EvalValue::Int(id as i64))
+}
+
+//    attach(puerto | url | opts) → handle de un navegador YA abierto
+
+/// Se engancha a un navegador ya abierto, en vez de arrancar uno.
+///
+/// Cubre lo que `open` no puede: reutilizar el navegador del usuario, con su
+/// sesión y su SSO. Chrome se niega a abrir un perfil que otro Chrome ya tiene
+/// bloqueado, de ahí el "cierra tu ventana" de las automatizaciones de
+/// escritorio. Requiere que ese navegador se arrancara con
+/// `--remote-debugging-port=N`; uno abierto normal no expone CDP.
+///
+/// ```orion
+/// b = web.attach(9222)
+/// b = web.attach("ws://127.0.0.1:9222/...")
+/// b = web.attach({ port: 9222, timeout: 5000 })
+/// ```
+///
+/// Al cerrar NO se cierra el navegador: ver la rama `None` de `free`.
+fn attach(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let uso = "browser.attach(puerto | \"ws://...\" | { port: 9222 })";
+
+    let (endpoint, port, opts_dict) = match args.first() {
+        Some(EvalValue::Int(p))   => (None, Some(*p as u64), None),
+        Some(EvalValue::Str(s))   => (Some(s.clone()), None, None),
+        Some(EvalValue::Dict(m))  => {
+            let url  = m.get("url").or_else(|| m.get("endpoint")).map(to_str);
+            let port = m.get("port").and_then(|v| to_u64(v).ok());
+            if url.is_none() && port.is_none() {
+                return Err(format!("{uso}: hace falta `port` o `url`"));
+            }
+            (url, port, Some(m.clone()))
+        }
+        _ => return Err(format!("{uso}: falta el puerto o la url")),
+    };
+
+    let tuning = Tuning::default();
+    let timeout = opts_dict
+        .as_ref()
+        .and_then(|m| m.get("timeout"))
+        .and_then(|v| to_u64(v).ok())
+        .map(|ms| Duration::from_millis(ms.max(1_000)))
+        .unwrap_or_else(|| Duration::from_millis(30_000));
+
+    // Un puerto no es un endpoint: hay que preguntarle al navegador cuál es el
+    // suyo, porque lleva un identificador de sesión que cambia en cada arranque.
+    let ws_url = match endpoint {
+        Some(u) if u.starts_with("ws://") || u.starts_with("wss://") => u,
+        Some(u) => descubrir_endpoint(&u, timeout)?,
+        None => descubrir_endpoint(&format!("127.0.0.1:{}", port.unwrap()), timeout)?,
+    };
+
+    let limits = cdp::Limits {
+        max_events: tuning.max_events,
+        idle_poll:  Duration::from_millis(tuning.idle_poll_ms),
+        send:       Duration::from_millis(tuning.send_ms),
+        nav_settle: Duration::from_millis(tuning.nav_settle_ms),
+        retry:      Duration::from_millis(tuning.retry_ms),
+    };
+    let conn = Conn::connect(&ws_url, limits)
+        .map_err(|e| format!("browser.attach: no se pudo hablar con el navegador en {ws_url}: {e}"))?;
+
+    // La lista blanca de dominios vale igual estando enganchados.
+    if let Some(m) = &opts_dict {
+        if let Some(EvalValue::List(xs)) = m.get("allow") {
+            let allow: Vec<String> = xs.iter().map(to_str).collect();
+            if allow.is_empty() {
+                return Err("browser.attach: `allow` está vacío. Quítalo si no quieres \
+                            restringir; una lista vacía bloquearía todo.".into());
+            }
+            conn.set_allowlist(allow);
+        }
+    }
+
+    let id = new_id();
+    handles().lock().unwrap().insert(id, Handle::Browser(BrowserState {
+        conn,
+        proc: None,                            // no es nuestro: ver `free`
+        exe: ws_url,
+        user_data: std::path::PathBuf::new(),  // su perfil no se toca
+        temporal: false,
+        timeout,
+        tuning,
+        pages: Vec::new(),
+    }));
+    Ok(EvalValue::Int(id as i64))
+}
+
+/// Pregunta a `http://host:puerto/json/version` cuál es su endpoint CDP.
+///
+/// El error se redacta con cuidado porque este es EL punto donde falla el caso
+/// del equipo gestionado, y "conexión rechazada" a secas no dice qué hacer.
+fn descubrir_endpoint(host_port: &str, timeout: Duration) -> Result<String, String> {
+    let url = format!("http://{host_port}/json/version");
+    let resp = ureq::get(&url)
+        .timeout(timeout)
+        .call()
+        .map_err(|e| format!(
+            "browser.attach: no hay ningún navegador escuchando en {host_port} ({e}).\n  \
+             El navegador tiene que estar arrancado con --remote-debugging-port={}.\n  \
+             Uno abierto de la forma normal no expone CDP.",
+            host_port.rsplit(':').next().unwrap_or("9222")
+        ))?;
+
+    let v: serde_json::Value = resp.into_json()
+        .map_err(|e| format!("browser.attach: respuesta ilegible de {url}: {e}"))?;
+
+    v.get("webSocketDebuggerUrl")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!(
+            "browser.attach: {host_port} respondió, pero sin endpoint de depuración. \
+             ¿Es de verdad un navegador con CDP abierto?"
+        ))
 }
 
 //    page(browser) → handle de pestaña
@@ -1817,21 +1936,45 @@ fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
         }
 
         Some(Handle::Browser(mut b)) => {
-            // Las pestañas se van con él: sus handles quedarían apuntando a un
-            // navegador muerto.
-            {
+            // Las pestañas se van con él. Se guardan sus targetId antes de
+            // tirarlas del registro porque un navegador ajeno (`attach`) NO va a
+            // morir: sin esto, cada ejecución le dejaba una pestaña huérfana.
+            let targets: Vec<String> = {
                 let mut reg = handles().lock().unwrap();
-                for p in &b.pages { reg.remove(p); }
-            }
-            let _ = b.conn.call("Browser.close", serde_json::json!({}), None,
-                                Duration::from_millis(b.tuning.close_ms));
-            b.conn.close();
-            // `Browser.close` es una petición amable; si no la atendió, se
-            // termina el proceso a mano para no dejarlo huérfano.
-            let _ = b.proc.kill();
-            let _ = b.proc.wait();
-            if b.temporal {
-                remove_profile(&b.user_data, b.tuning.cleanup_tries);
+                b.pages.iter()
+                    .filter_map(|p| match reg.remove(p) {
+                        Some(Handle::Page(ps)) => Some(ps.target_id),
+                        _ => None,
+                    })
+                    .collect()
+            };
+            match b.proc.as_mut() {
+                // Navegador nuestro: se cierra y, si hace falta, se remata.
+                Some(proc) => {
+                    let _ = b.conn.call("Browser.close", serde_json::json!({}), None,
+                                        Duration::from_millis(b.tuning.close_ms));
+                    b.conn.close();
+                    // `Browser.close` es una petición amable; si no la atendió,
+                    // se termina el proceso a mano para no dejarlo huérfano.
+                    let _ = proc.kill();
+                    let _ = proc.wait();
+                    if b.temporal {
+                        remove_profile(&b.user_data, b.tuning.cleanup_tries);
+                    }
+                }
+                // Ajeno: se recoge lo que abrimos y se suelta el socket. Ni
+                // `Browser.close` ni `kill` ni tocar su perfil.
+                None => {
+                    for t in targets {
+                        let _ = b.conn.call(
+                            "Target.closeTarget",
+                            serde_json::json!({ "targetId": t }),
+                            None,
+                            Duration::from_millis(b.tuning.close_ms),
+                        );
+                    }
+                    b.conn.close();
+                }
             }
             Ok(EvalValue::Bool(true))
         }

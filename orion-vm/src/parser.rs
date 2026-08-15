@@ -972,15 +972,6 @@ impl Parser {
                 Ok(Expr::Await(Box::new(inner)))
             }
 
-            // `static` solo tiene sentido dentro de un shape. Fuera, el error
-            // genérico ("token inesperado") no dice lo único que hace falta
-            // saber: que una función a secas ya es eso, y se declara con `fn`.
-            TokenKind::Static => Err(self.err(
-                "'static act' solo puede ir dentro de un shape. Una función \
-                 independiente se declara con 'fn'"
-                    .to_string(),
-            )),
-
             kind => Err(self.err(format!("Token inesperado en expresión: {:?}", kind))),
         }
     }
@@ -1400,15 +1391,19 @@ impl Parser {
                         }
                         // `act` normal o `static act`. El único cambio es que el
                         // estático no recibe instancia; el resto se parsea igual.
-                        TokenKind::Act | TokenKind::Static => {
-                            let is_static = matches!(self.peek(), TokenKind::Static);
+                        //
+                        // `static` se reconoce AQUÍ, y solo si le sigue un `act`.
+                        // Fuera de esa posición sigue siendo un identificador
+                        // como cualquier otro, así que `router.static(...)` y
+                        // una variable llamada `static` siguen funcionando.
+                        TokenKind::Act | TokenKind::Ident(_)
+                            if matches!(self.peek(), TokenKind::Act)
+                                || (matches!(self.peek(), TokenKind::Ident(n) if n == "static")
+                                    && matches!(self.peek_at(1), TokenKind::Act)) =>
+                        {
+                            let is_static = !matches!(self.peek(), TokenKind::Act);
                             if is_static {
                                 self.pos += 1; // 'static'
-                                if !matches!(self.peek(), TokenKind::Act) {
-                                    return Err(self.err(
-                                        "después de 'static' se espera 'act'".to_string(),
-                                    ));
-                                }
                             }
                             self.pos += 1;
                             let act_name = self.expect_ident()?;

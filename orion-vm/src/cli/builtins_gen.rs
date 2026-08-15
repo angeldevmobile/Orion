@@ -854,6 +854,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("validate", "all", "validate.all(datos_dict, reglas_dict)", "Alias de validate.todo."));
     // browser (browser.rs)
     v.push(f("browser", "open", "browser.open(…)", "Función del módulo browser."));
+    v.push(f("browser", "attach", "browser.attach(puerto|url|opts)", "Navegador ya abierto; no se cierra al salir"));
     v.push(f("browser", "page", "browser.page(…)", "Función del módulo browser."));
     v.push(f("browser", "goto", "browser.goto(…)", "Función del módulo browser."));
     v.push(f("browser", "title", "browser.title(…)", "Función del módulo browser."));

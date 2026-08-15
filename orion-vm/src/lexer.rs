@@ -499,7 +499,9 @@ fn keyword_or_ident(word: &str) -> TokenKind {
 
         "shape"     => TokenKind::Shape,
         "act"       => TokenKind::Act,
-        "static"    => TokenKind::Static,
+        // `static` NO se reserva aquí: es contextual, y el parser solo la trata
+        // como palabra clave delante de un `act`. Reservarla rompía el código
+        // que ya la usaba de nombre (`router.static(...)`).
         "using"     => TokenKind::Using,
         "is"        => TokenKind::Is,
         "on_create" => TokenKind::OnCreate,
