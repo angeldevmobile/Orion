@@ -107,7 +107,7 @@ cargo build --release --manifest-path orion-vm/Cargo.toml
 
 Create a file called `hello.orx` and run it:
 
-```orion
+```orion run
 name    = "Orion"
 version = 1
 
