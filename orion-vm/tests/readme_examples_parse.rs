@@ -13,14 +13,17 @@
 
 use std::{
     fs,
+    io::Read,
     path::PathBuf,
     process::{Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 const README_RUN_BLOCK_INDICES: &[usize] = &[];
 const RUN_TIMEOUT: Duration = Duration::from_secs(3);
+static TEMP_FILE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 struct OrionBlock {
@@ -75,14 +78,11 @@ fn is_executable_block(block: &OrionBlock, extra_indices: &[usize]) -> bool {
 
 fn run_orion_with_timeout(src: &str, timeout: Duration) -> Result<(), String> {
     let mut path = std::env::temp_dir();
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let seq = TEMP_FILE_SEQ.fetch_add(1, Ordering::Relaxed);
     path.push(format!(
         "orion_readme_run_{}_{}.orx",
         std::process::id(),
-        nanos
+        seq
     ));
     fs::write(&path, src).map_err(|e| format!("no se pudo escribir temp: {e}"))?;
 
@@ -92,35 +92,46 @@ fn run_orion_with_timeout(src: &str, timeout: Duration) -> Result<(), String> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("no se pudo ejecutar orion: {e}"))?;
+    let mut stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| "no se pudo capturar stdout".to_string())?;
+    let mut stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or_else(|| "no se pudo capturar stderr".to_string())?;
 
     let start = Instant::now();
     let result = loop {
         if start.elapsed() >= timeout {
             let _ = child.kill();
-            let out = child
-                .wait_with_output()
-                .map_err(|e| format!("timeout y no se pudo leer salida: {e}"))?;
+            let _ = child.wait();
+            let mut stdout = String::new();
+            let mut stderr = String::new();
+            let _ = stdout_pipe.read_to_string(&mut stdout);
+            let _ = stderr_pipe.read_to_string(&mut stderr);
             break Err(format!(
                 "timeout después de {:?}\nstdout:\n{}\nstderr:\n{}",
                 timeout,
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+                stdout,
+                stderr
             ));
         }
 
         match child.try_wait() {
-            Ok(Some(_)) => {
-                let out = child
-                    .wait_with_output()
-                    .map_err(|e| format!("no se pudo leer salida: {e}"))?;
-                if out.status.success() {
+            Ok(Some(status)) => {
+                let mut stdout = String::new();
+                let mut stderr = String::new();
+                let _ = stdout_pipe.read_to_string(&mut stdout);
+                let _ = stderr_pipe.read_to_string(&mut stderr);
+                if status.success() {
                     break Ok(());
                 }
                 break Err(format!(
                     "exit code {:?}\nstdout:\n{}\nstderr:\n{}",
-                    out.status.code(),
-                    String::from_utf8_lossy(&out.stdout),
-                    String::from_utf8_lossy(&out.stderr)
+                    status.code(),
+                    stdout,
+                    stderr
                 ));
             }
             Ok(None) => thread::sleep(Duration::from_millis(10)),
@@ -241,7 +252,8 @@ show "run by index"
 
     let blocks = orion_blocks(src);
     assert_eq!(blocks.len(), 3);
-    assert!(!is_executable_block(&blocks[0], &[2]));
-    assert!(is_executable_block(&blocks[1], &[2]));
+    assert!(!is_executable_block(&blocks[0], &[]));
+    assert!(is_executable_block(&blocks[1], &[]));
+    assert!(!is_executable_block(&blocks[2], &[]));
     assert!(is_executable_block(&blocks[2], &[2]));
 }
