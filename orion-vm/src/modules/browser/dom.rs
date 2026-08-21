@@ -117,23 +117,12 @@ const __findAll = (sel) => {
 };
 "#;
 
-/// Envuelve un cuerpo JS con el helper y el selector ya inyectado como literal.
-///
-/// El selector se serializa con `serde_json` en vez de concatenarse entre
-/// comillas: un selector con comillas o barras invertidas rompería la
-/// expresión, y ese es el tipo de fallo que aparece en producción con el
-/// selector raro de un solo sitio.
 pub fn expr(sel: &str, cuerpo: &str, t: &Tuning) -> String {
     let s = serde_json::Value::String(sel.to_string()).to_string();
     let prof = t.iframe_depth;
     format!("(() => {{ const __PROF = {prof};\n {FIND_JS}\n const sel = {s};\n {cuerpo} }})()")
 }
 
-/// Como `expr`, pero sin fijar un selector concreto.
-///
-/// `expr` inyecta `const sel = "..."` porque casi todo opera sobre un elemento.
-/// `fill` no: recibe un formulario entero y necesita el mismo buscador —con sus
-/// iframes y sus tres sintaxis— para varios selectores en la misma evaluación.
 pub fn expr_multi(cuerpo: &str, t: &Tuning) -> String {
     let prof = t.iframe_depth;
     format!("(() => {{ const __PROF = {prof};\n {FIND_JS}\n {cuerpo} }})()")
@@ -170,21 +159,10 @@ pub fn expr_waiting(sel: &str, cuerpo: &str, ms: u64, t: &Tuning) -> String {
     expr(sel, &envuelto, t)
 }
 
-/// Como `expr`, para cuerpos que ya traen su propia espera.
-///
-/// `expr_waiting` envuelve el cuerpo en un reintento genérico "hasta que
-/// devuelva algo"; la extracción necesita esperar por otro criterio —que haya
-/// filas— y devolver además su diagnóstico, así que se monta su propio bucle.
 pub fn expr_waiting_raw(sel: &str, cuerpo: &str, t: &Tuning) -> String {
     expr(sel, cuerpo, t)
 }
 
-/// Espera a que un selector aparezca.
-///
-/// No hay sondeo desde Orion: la espera ocurre en la página con un
-/// `MutationObserver` y se resuelve con una promesa, así que son **una llamada
-/// CDP y una sola**, en vez de una cada 50 ms. Menos mensajes, menos latencia y
-/// nada de tráfico mientras no pasa nada.
 pub fn wait_for(
     conn: &Conn,
     session: &str,
@@ -203,8 +181,6 @@ pub fn wait_for(
     }});
     "#);
 
-    // El plazo de CDP tiene que ser mayor que el del JS: si vencieran a la vez,
-    // el error sería un timeout de transporte en vez del "no apareció" real.
     let limite = Duration::from_millis(ms + t.cdp_margin_ms);
     let r = conn.call(
         "Runtime.evaluate",
@@ -223,30 +199,9 @@ pub fn wait_for(
 pub struct Box {
     pub x: f64,
     pub y: f64,
-    /// Cierto si hubo que atravesar algo para llegar: quien despache el evento
-    /// tiene que restaurar la página después.
     pub forced: bool,
 }
 
-/// Espera a que un elemento sea **accionable** y devuelve dónde pincharlo.
-///
-/// Accionable quiere decir las cuatro cosas a la vez: existe, ocupa espacio, no
-/// está oculto por estilo, y nadie lo tapa en su punto central. Si falta alguna
-/// se reintenta hasta agotar el plazo, porque casi siempre es cuestión de
-/// tiempo: el banner de cookies que se va, la animación que termina, el bloque
-/// que aún se está montando.
-///
-/// Aquí está la diferencia con Selenium. Una cadena de acciones suya son varias
-/// peticiones al driver, y entre ellas la página ha seguido ejecutando JS: el
-/// elemento se movió o algo se le puso encima. Cuando llega el clic, las
-/// coordenadas ya no valen y el clic acaba en otro sitio, sin avisar.
-///
-/// El bucle de reintento vive **dentro de la página**, así que todo esto es una
-/// sola llamada CDP y la medición ocurre en el mismo instante en que se
-/// aprueba, no varios mensajes antes. Si vence el plazo, el error dice qué
-/// impedía el clic — "lo tapa `<div.cookie-banner>`" y no "element not
-/// interactable".
-/// Estrategia frente a algo que tapa el elemento.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Force {
     /// Espera a que se despeje; si no se despeja, falla diciendo qué estorba.
@@ -380,10 +335,6 @@ pub fn box_for_click(
     })
 }
 
-/// Devuelve su `pointer-events` a todo lo que se neutralizó para forzar un clic.
-///
-/// Se llama siempre después de un clic forzado, incluso si el clic falló: dejar
-/// media página sorda al ratón rompería todo lo que viniera después.
 pub fn restore_pointer_events(conn: &Conn, session: &str, timeout: Duration) {
     let js = r#"(() => {
       const docs = [document];
@@ -449,11 +400,8 @@ mod tests {
 
     #[test]
     fn la_espera_usa_observador_y_no_sondeo() {
-        // Si esto cambiara a un bucle de sondeo, se multiplicarían los mensajes
-        // CDP sin que nadie lo notara hasta medir.
         let cuerpo = format!("{}", 1234);
         assert!(!cuerpo.is_empty());
-        // El cuerpo real se construye en wait_for; se comprueba su forma aquí.
         let js = expr("x", "return new Promise((resolve) => { const obs = new MutationObserver(() => {}); });", &Tuning::default());
         assert!(js.contains("MutationObserver"));
     }

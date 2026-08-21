@@ -37,10 +37,6 @@ use tungstenite::{Message, WebSocket};
 
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
-/// Límites de recursos de la conexión.
-///
-/// Llegan desde `open()` en vez de estar fijados aquí: el historial de eventos
-/// es RAM y el sondeo es CPU, y las dos cosas las nota quien ejecuta.
 #[derive(Debug, Clone, Copy)]
 pub struct Limits {
     /// Tope de eventos retenidos. Un navegador activo emite miles por minuto y
@@ -48,12 +44,9 @@ pub struct Limits {
     /// historial que no sirve para nada. Se descartan los más antiguos.
     pub max_events: usize,
     /// Techo del sondeo del hilo lector. Parte de cero mientras hay peticiones
-    /// en vuelo (para no añadir latencia) y se relaja hasta aquí en reposo.
     pub idle_poll:  Duration,
     /// Plazo para que un envío por el socket progrese.
     pub send:       Duration,
-    /// Cuánto se espera a que la página termine de cambiar de documento antes
-    /// de dar por perdida una evaluación. Ver `reintentable`.
     pub nav_settle: Duration,
     /// Pausa entre reintentos de una evaluación.
     pub retry:      Duration,
@@ -71,22 +64,6 @@ impl Default for Limits {
     }
 }
 
-/// ¿Este fallo es "la página está cambiando de documento ahora mismo"?
-///
-/// Es el fallo intermitente clásico de la automatización web. Al pulsar
-/// "Enviar", el navegador tira el documento actual y monta el siguiente; entre
-/// una cosa y la otra no hay ningún contexto donde evaluar JavaScript, y todo
-/// lo que llegue en ese hueco muere con uno de estos mensajes.
-///
-/// Lo que lo hace tan traicionero es que depende del tiempo: en local la página
-/// nueva llega antes de la siguiente instrucción y no pasa nada, y en el
-/// servidor —o el día que la red va peor— revienta. Es el motivo de fondo de
-/// que un scraper "funcione en mi máquina".
-///
-/// Reintentar es seguro precisamente porque el contexto ya no existía: la
-/// evaluación **no llegó a ejecutarse**, así que no hay ningún efecto a medias
-/// que repetir. Solo se aplica a `Runtime.evaluate`; un evento de ratón sí se
-/// duplicaría, y un clic de más no es un reintento, es otra acción.
 fn reintentable(method: &str, error: &str) -> bool {
     method == "Runtime.evaluate"
         && (error.contains("Inspected target navigated or closed")
@@ -107,19 +84,14 @@ struct State {
     responses: HashMap<u64, serde_json::Value>,
     events:    Vec<Event>,
     next_seq:  u64,
-    /// Se rellena si el socket muere: convierte una espera eterna en un error.
     dead:      Option<String>,
 }
 
 pub struct Conn {
     socket:  Mutex<Socket>,
     state:   Mutex<State>,
-    /// Política de diálogos por pestaña. Vive fuera de `state` para que el
-    /// hilo lector pueda consultarla sin tomar el candado del estado.
     dialogs: Mutex<HashMap<String, String>>,
-    /// Dominios a los que se permite ir. Vacía significa sin restricción.
     allow:   Mutex<Vec<String>>,
-    /// URLs que se han cortado por no estar en la lista.
     blocked: Mutex<Vec<String>>,
     limits:  Limits,
     cv:      Condvar,
@@ -134,13 +106,9 @@ impl Conn {
         let (mut socket, _) = tungstenite::connect(url)
             .map_err(|e| format!("no se pudo conectar a CDP en {url}: {e}"))?;
 
-        // No bloqueante: el lector sondea y suelta el candado enseguida, así que
-        // un `call` concurrente no espera detrás de una lectura parada.
         match socket.get_mut() {
             MaybeTlsStream::Plain(s) => s.set_nonblocking(true)
                 .map_err(|e| format!("no se pudo poner el socket CDP en no bloqueante: {e}"))?,
-            // CDP siempre es ws:// contra localhost; si algún día no lo fuera,
-            // se sigue funcionando (con el lector bloqueándose más tiempo).
             _ => {}
         }
 
@@ -188,8 +156,6 @@ impl Conn {
                 Err(tungstenite::Error::Io(e))
                     if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
                 {
-                    // Con peticiones en vuelo no se duerme: la respuesta puede
-                    // llegar en cualquier momento y la latencia se nota.
                     if self.pending.load(Ordering::Relaxed) > 0 {
                         thread::yield_now();
                         espera = Duration::from_millis(0);
@@ -206,12 +172,6 @@ impl Conn {
         }
     }
 
-    /// Fija qué hacer con los `alert`/`confirm`/`prompt` de una pestaña.
-    ///
-    /// Se declara una vez y vale para siempre, en vez de registrar un handler
-    /// antes de cada acción que pudiera abrir uno. Un diálogo nativo **congela**
-    /// la página hasta que alguien responde: si nadie lo hace, el síntoma es que
-    /// todo deja de responder sin ningún error, que es lo peor que puede pasar.
     pub fn set_dialog_policy(&self, session: &str, politica: Option<String>) {
         let mut p = self.dialogs.lock().unwrap();
         match politica {
@@ -234,20 +194,11 @@ impl Conn {
     pub fn bloqueadas(&self) -> Vec<String> {
         self.blocked.lock().unwrap().clone()
     }
-
-    /// Deja pasar o corta una petición interceptada.
-    ///
-    /// Lo contesta el hilo lector por el mismo motivo que los diálogos: con
-    /// `Fetch` activo el navegador **para cada petición** hasta que alguien
-    /// responde, así que si esto esperase su turno detrás de otra llamada, la
-    /// página entera se quedaría congelada.
     fn answer_fetch(&self, session: Option<&str>, request_id: &str, url: &str) {
         let lista = self.allow.lock().unwrap().clone();
         let ok = super::state::permitida(url, &lista);
         if !ok {
             let mut b = self.blocked.lock().unwrap();
-            // Acotado: una página que insista en pedir a un dominio prohibido
-            // no debe hacer crecer esta lista sin fin.
             if b.len() < self.limits.max_events {
                 b.push(url.to_string());
             }
@@ -268,11 +219,6 @@ impl Conn {
         let _ = self.send_text(msg.to_string());
     }
 
-    /// Responde a un diálogo sin esperar confirmación.
-    ///
-    /// Lo llama el hilo lector, que no puede bloquearse esperando una respuesta:
-    /// si lo hiciera, dejaría de repartir mensajes y la respuesta que espera
-    /// nunca llegaría.
     fn answer_dialog(&self, session: Option<&str>, politica: &str) {
         let (accept, texto) = match politica.split_once(':') {
             Some(("answer" | "responder", t)) => (true, Some(t.to_string())),
@@ -296,13 +242,6 @@ impl Conn {
     fn dispatch(&self, txt: &str) {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(txt) else { return };
 
-        // Los diálogos se atienden aquí y no en quien llamó: el que abre el
-        // diálogo puede ser un temporizador de la página, sin ninguna llamada
-        // de Orion en curso a la que colgarlo.
-        // Con `Fetch` activo el navegador PARA cada petición hasta que se le
-        // contesta. Si esto se atendiera desde quien llamó, la página se
-        // quedaría congelada esperando a un programa que a su vez espera a la
-        // página. Se responde aquí, igual que los diálogos.
         if v.get("method").and_then(|m| m.as_str()) == Some("Fetch.requestPaused") {
             let ses = v.get("sessionId").and_then(|s| s.as_str());
             let id  = v.get("params").and_then(|p| p.get("requestId"))
@@ -321,8 +260,6 @@ impl Conn {
                 ses.and_then(|s| p.get(s).cloned())
             };
             if let Some(pol) = pol {
-                // El candado del estado NO está tomado todavía: enviar desde
-                // aquí no puede cruzarse con `dispatch`.
                 self.answer_dialog(ses, &pol);
             }
         }
@@ -350,24 +287,16 @@ impl Conn {
         self.cv.notify_all();
     }
 
-    /// Marca la conexión como muerta y despierta a todos los que esperaban:
-    /// sin esto, una caída del navegador dejaría hilos dormidos para siempre.
     fn die(&self, motivo: &str) {
         self.closed.store(true, Ordering::SeqCst);
         self.state.lock().unwrap().dead = Some(motivo.to_string());
         self.cv.notify_all();
     }
 
-    /// Número de secuencia actual: se toma antes de provocar algo para después
-    /// esperar solo los eventos posteriores y no uno viejo que ya estaba ahí.
     pub fn event_mark(&self) -> u64 {
         self.state.lock().unwrap().next_seq
     }
 
-    /// Envía un comando y espera su respuesta.
-    ///
-    /// `session` es el `sessionId` de la pestaña; sin él, el comando va dirigido
-    /// al navegador entero.
     pub fn call(
         &self,
         method: &str,
@@ -382,9 +311,6 @@ impl Conn {
             match r {
                 Err(e) if reintentable(method, &e) => {
                     if Instant::now() >= limite {
-                        // El mensaje crudo de CDP no le dice nada a quien
-                        // escribió el programa: habla de un "inspected target"
-                        // que él nunca ha visto.
                         return Err(format!(
                             "la página siguió cambiando de documento durante {} ms y no se pudo leer.\n  \
                              Suele ser una redirección en cadena; sube el plazo con \
@@ -428,9 +354,6 @@ impl Conn {
 
     fn send_text(&self, texto: String) -> Result<(), String> {
         let mut sock = self.socket.lock().unwrap();
-        // En un socket no bloqueante el envío puede quedarse a medias; para los
-        // mensajes diminutos de CDP contra localhost es rarísimo, pero
-        // reintentar es más barato que perseguir un fallo intermitente.
         let limite = Instant::now() + self.limits.send;
         loop {
             match sock.send(Message::Text(texto.clone())) {
@@ -482,8 +405,6 @@ impl Conn {
         }
     }
 
-    /// Espera un evento posterior a `desde`, opcionalmente de una pestaña
-    /// concreta. Devuelve `Ok(None)` si vence el plazo.
     pub fn wait_event(
         &self,
         method: &str,
@@ -494,13 +415,6 @@ impl Conn {
         self.wait_event_where(method, session, desde, timeout, |_| true)
     }
 
-    /// Como `wait_event`, pero además el evento tiene que cumplir `cond`.
-    ///
-    /// Hace falta porque hay flujos que emiten el mismo método varias veces y
-    /// solo interesa uno: una descarga manda un `downloadProgress` por cada
-    /// trozo recibido, y quedarse con el primero daría por terminada una
-    /// descarga que acaba de empezar. Con el predicado, la espera se acaba
-    /// cuando el estado dice `completed` y no cuando el nombre coincide.
     pub fn wait_event_where(
         &self,
         method: &str,
@@ -535,15 +449,6 @@ impl Conn {
         }
     }
 
-    /// Todos los eventos posteriores a `desde` que cumplan la condición.
-    ///
-    /// `wait_event_where` para en el primero, que es lo que hace falta cuando se
-    /// espera a que algo ocurra. Para recoger no sirve: un panel pide tres o
-    /// cuatro cosas a la vez y quedarse con la primera daría un resultado
-    /// incompleto con pinta de completo.
-    ///
-    /// No espera: se usa después de haber esperado, y lo que no esté en el
-    /// historial —acotado por `max_events`— no está.
     pub fn events_where(
         &self,
         method: &str,
@@ -583,11 +488,7 @@ impl Conn {
 mod tests {
     use super::*;
 
-    /// El reparto de mensajes no necesita un navegador: se puede comprobar
-    /// contra una conexión construida a mano.
     fn conn_de_prueba() -> Conn {
-        // Un socket real no hace falta para probar `dispatch`; se usa un
-        // listener local para obtener un stream válido y nunca se lee de él.
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let cliente = std::thread::spawn(move || TcpStream::connect(addr).unwrap());
@@ -690,12 +591,8 @@ mod tests {
             assert!(reintentable("Runtime.evaluate", e), "debería reintentarse: {e}");
         }
 
-        // Un error de verdad no se reintenta: repetirlo solo retrasa el
-        // diagnóstico el tiempo del plazo entero.
         assert!(!reintentable("Runtime.evaluate", "Runtime.evaluate: SyntaxError"));
 
-        // Y sobre todo: un clic NO se repite. Duplicarlo no es reintentar una
-        // lectura, es comprar dos veces.
         assert!(!reintentable(
             "Input.dispatchMouseEvent",
             "Input.dispatchMouseEvent: Inspected target navigated or closed"

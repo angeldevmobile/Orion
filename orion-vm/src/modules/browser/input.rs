@@ -16,9 +16,6 @@ use super::dom;
 use super::launch::Tuning;
 pub use super::dom::Force;
 
-/// Teclas con nombre. La lista es corta a propósito: cubre lo que se usa de
-/// verdad en formularios y navegación, y cualquier otra cosa se escribe como
-/// texto normal.
 fn tecla(nombre: &str) -> Option<(&'static str, i64)> {
     Some(match nombre.to_lowercase().as_str() {
         "enter" | "return" => ("Enter", 13),
@@ -39,8 +36,6 @@ fn tecla(nombre: &str) -> Option<(&'static str, i64)> {
     })
 }
 
-/// Nombres de tecla admitidos, para poder decirlo en el mensaje de error en vez
-/// de dejar al usuario adivinando.
 pub const TECLAS: &str =
     "enter, tab, escape, backspace, delete, space, up, down, left, right, home, end, pageup, pagedown";
 
@@ -65,14 +60,9 @@ pub fn click(
     conn: &Conn, session: &str, sel: &str,
     boton: &str, veces: i64, espera_ms: u64, force: Force, t: &Tuning, timeout: Duration,
 ) -> Result<(), String> {
-    // La espera está dentro de `box_for_click`: espera a que el elemento sea
-    // accionable, no solo a que exista. Un scraper que exige acordarse de poner
-    // un `wait` es un scraper que falla de forma intermitente.
     let b = dom::box_for_click(conn, session, sel, espera_ms, force, t)
         .map_err(|e| format!("browser.click {e}"))?;
 
-    // Un movimiento previo dispara los `hover` de los que dependen muchos menús
-    // desplegables; sin él, el clic cae sobre un elemento que aún no existe.
     let r = (|| {
         mouse(conn, session, "mouseMoved", b.x, b.y, "none", 0, timeout)?;
         for n in 1..=veces {
@@ -82,8 +72,6 @@ pub fn click(
         Ok(())
     })();
 
-    // Se restaura pase lo que pase: dejar media página sorda al ratón rompería
-    // todo lo que viniera después, incluido el propio diagnóstico del fallo.
     if b.forced { dom::restore_pointer_events(conn, session, timeout); }
     r
 }
@@ -109,10 +97,6 @@ pub fn drag(
 
     mouse(conn, session, "mouseMoved",   a.x, a.y, "none", 0, timeout)?;
     mouse(conn, session, "mousePressed", a.x, a.y, "left", 1, timeout)?;
-    // Pasos intermedios: un salto directo no dispara los `dragover` en los que
-    // se apoyan las librerías de arrastrar y soltar.
-    // Cuántos pasos hacen falta depende del sitio, así que es decisión del
-    // programa y no una constante escondida.
     let pasos = t.drag_steps.max(1);
     for i in 1..=pasos {
         let f = i as f64 / pasos as f64;
@@ -138,16 +122,10 @@ pub fn scroll(
 }
 
 /// Escribe texto en un campo.
-///
-/// Se manda tecla a tecla en vez de asignar `value` desde JS: React, Vue y
-/// compañía solo se enteran del cambio si llegan los eventos de teclado, y un
-/// `value` puesto a mano queda ignorado al enviar el formulario.
 pub fn type_text(
     conn: &Conn, session: &str, sel: &str, texto: &str,
     limpiar: bool, espera_ms: u64, force: Force, t: &Tuning, timeout: Duration,
 ) -> Result<(), String> {
-    // Enfocar con un clic real: hay campos que solo se activan al recibirlo.
-    // El clic ya espera a que el campo sea accionable.
     click(conn, session, sel, "left", 1, espera_ms, force, t, timeout)
         .map_err(|e| e.replace("browser.click", "browser.type"))?;
 

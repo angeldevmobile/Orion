@@ -24,11 +24,6 @@ use crate::bytecode::OrionBytecode;
 use super::compiler::CodeGen;
 use super::runtime_oop::join_names;
 
-/// Compila `bc` a un objeto nativo con el programa ya traducido a código máquina.
-///
-/// - `Ok(Some(bytes))` → objeto listo para enlazar contra la staticlib.
-/// - `Ok(None)`        → el programa usa construcciones no elegibles; el que
-///                       llama debe recurrir al modo bundle (bytecode + VM).
 pub fn compile_to_native_object(bc: &OrionBytecode) -> Result<Option<Vec<u8>>, String> {
     let mut flag_builder = settings::builder();
     flag_builder.set("use_colocated_libcalls", "false").unwrap();
@@ -77,8 +72,6 @@ pub fn compile_to_native_object(bc: &OrionBytecode) -> Result<Option<Vec<u8>>, S
         .declare_function("rt_register_method", Linkage::Import, &reg_method_sig)
         .map_err(|e| format!("Error declarando rt_register_method: {e}"))?;
 
-    // Literales del prólogo: se emiten antes de abrir el builder de main para
-    // no tener el módulo prestado mientras se construye la función.
     let mut lits: HashMap<String, String> = HashMap::new();
     for (name, fields, parents) in &prog.shapes {
         lits.insert(format!("shape:{name}"), name.clone());

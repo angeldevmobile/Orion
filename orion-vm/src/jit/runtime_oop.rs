@@ -92,12 +92,6 @@ pub fn register_method(shape_name: &str, act_name: &str, fn_ptr: i64) {
 }
 
 //     Registro desde el propio binario (AOT)
-//
-// En JIT el compilador puebla estas tablas desde Rust antes de saltar al código.
-// Un ejecutable AOT no tiene esa fase: nadie corre el compilador al arrancarlo,
-// así que el prólogo de su `main` llama a estas funciones. Los campos y padres
-// viajan como una lista separada por '\x1f' (nunca aparece en un identificador)
-// para que baste un literal por shape.
 
 /// Separador de los nombres dentro de un literal de campos/padres.
 const SEP: char = '\x1f';
@@ -136,7 +130,6 @@ pub extern "C" fn rt_register_method(shape_ptr: i64, act_ptr: i64, fn_ptr: i64) 
 //     Instanciación
 
 /// Crea una instancia con todos sus campos en null.
-/// Llamada por `rt_create_instance_and_init` (que también corre el on_create).
 #[no_mangle]
 pub extern "C" fn rt_create_instance(shape_name_ptr: i64) -> i64 {
     unsafe {
@@ -149,8 +142,6 @@ pub extern "C" fn rt_create_instance(shape_name_ptr: i64) -> i64 {
 }
 
 /// Crea la instancia y la inicializa con los N args del ARG_BUF: vía on_create
-/// si el shape lo define, o asignando los args a los campos por posición si no
-/// (mismo constructor implícito que aplica la VM en `instantiate_shape`).
 #[no_mangle]
 pub extern "C" fn rt_create_instance_and_init(shape_name_ptr: i64, n_args: i64) -> i64 {
     let inst_ptr = rt_create_instance(shape_name_ptr);
@@ -159,8 +150,6 @@ pub extern "C" fn rt_create_instance_and_init(shape_name_ptr: i64, n_args: i64) 
         let oc_key = format!("{}::on_create", shape_name);
         let fn_ptr = METHOD_TABLE.with(|mt| mt.borrow().get(&oc_key).copied());
 
-        // Drenar SIEMPRE: dejar args del constructor en el buffer los haría
-        // aparecer como argumentos de la siguiente llamada.
         let args: Vec<i64> = ARG_BUF.with(|b| {
             let mut buf = b.borrow_mut();
             let take = (n_args as usize).min(buf.len());
@@ -394,9 +383,6 @@ unsafe fn call_method_str(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
 //     Métodos builtin de List
 
 unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
-    // `&mut` para que los mutadores (push/append/reverse/sort) modifiquen el Vec
-    // detrás del puntero IN-PLACE y devuelvan el MISMO puntero → semántica por
-    // referencia, en paridad con la VM (`Rc<RefCell>`). Los alias ven el cambio.
     let items = &mut *(data_i as *mut Vec<i64>);
     let name  = cstr_to_str(name_ptr);
     match name {
@@ -472,8 +458,6 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             }).unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }
         "pop" => {
-            // Quita y devuelve el último elemento, mutando in-place (contrato
-            // estándar, paridad con la VM). Antes solo leía `last()` sin quitar.
             items.pop().unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }
         _ => { eprintln!("[JIT] List no tiene método '{}'", name); std::process::exit(1) }
@@ -487,8 +471,6 @@ unsafe fn call_method_dict(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
     let entries = &*(data_i as *const Vec<(String, i64)>);
     let name    = cstr_to_str(name_ptr);
 
-    // Namespace de módulo nativo (fs, json, random, datetime, ...): el dict lleva
-    // un marcador con el nombre del módulo. Despachar al módulo nativo.
     if let Some((_, marker)) = entries.iter().find(|(k, _)| k == "__native_module__") {
         let mod_name = val_to_display(val_ref(*marker));
         let vm_args: Vec<crate::value::Value> = args.iter().map(|&p| orion_to_value(p)).collect();

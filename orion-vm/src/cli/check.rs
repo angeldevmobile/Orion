@@ -3,18 +3,6 @@ use crate::{lexer, parser, codegen, typechecker};
 use crate::token::{Token, TokenKind};
 use super::banner;
 
-//   Lint de indentación engañosa
-//
-// La indentación en Orion es cosmética (los bloques los delimitan las
-// llaves), pero cuando MIENTE sobre la estructura real confunde al lector —
-// la clase de bug del célebre `goto fail` de Apple. Reglas conservadoras,
-// pensadas para cero falsos positivos con los estilos habituales:
-//   1. Mezcla de tabs y espacios en la sangría de una misma línea.
-//   2. Una `}` que abre línea debe alinear con la línea que abrió su bloque
-//      (cubre `}`, `} else {`, `} handle err {`, cierres de dicts…).
-//   3. La primera línea dentro de un bloque `{` multilínea debe estar MÁS
-//      indentada que la línea que lo abre (si no, parece estar fuera).
-
 /// Ancho visual de la sangría de una línea (tab = 4) y si mezcla tab/espacio.
 fn sangria(linea: &str) -> (usize, bool) {
     let mut ancho = 0;
@@ -38,8 +26,6 @@ pub fn lint_indentation(src: &str, tokens: &[Token]) -> Vec<(u32, String)> {
 
     let mut avisos: Vec<(u32, String)> = Vec::new();
 
-    // Regla 1: tabs y espacios mezclados (solo líneas que abren con un token,
-    // así una línea de comentario no genera ruido).
     let mut vistas = std::collections::HashSet::new();
     for t in tokens {
         if vistas.insert(t.line) {
@@ -118,8 +104,6 @@ pub fn run_check(path: &str, check_types: bool) {
         }
     };
 
-    // Phase 1.5: indentación engañosa (avisos, nunca fatal — la indentación
-    // en Orion es cosmética, pero no debe mentir sobre la estructura)
     for (line, msg) in lint_indentation(&src, &tokens) {
         banner::warn(&format!("[indentación] línea {line} — {msg}"));
     }
@@ -134,15 +118,6 @@ pub fn run_check(path: &str, check_types: bool) {
     };
 
     // Phase 3: type check (antes de codegen para errores más claros)
-    //
-    // El chequeo corre SIEMPRE. Antes estaba detrás de `--types`, y el efecto
-    // era que `orion check` daba "sin errores" en un archivo que `orion run`
-    // se negaba a ejecutar: el comando que existe para validar era más laxo que
-    // el que ejecuta, justo al revés de lo que uno espera de un CI. Nada de lo
-    // que se rechace aquí pasaba antes de verdad; solo pasaba desapercibido.
-    //
-    // `--types` ya no decide SI se chequea, sino cuánto se cuenta: sin él se
-    // muestran los errores, con él también las advertencias.
     let issues = typechecker::type_check(&stmts);
     let errors: Vec<_> = issues.iter().filter(|i| i.kind == "error").collect();
     let warnings: Vec<_> = issues.iter().filter(|i| i.kind == "warning").collect();

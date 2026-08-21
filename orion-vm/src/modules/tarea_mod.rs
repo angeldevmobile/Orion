@@ -11,28 +11,28 @@ fn timers() -> &'static Mutex<HashMap<String, Instant>> {
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // dormir(ms) → Null  — pausa la ejecución
-        "dormir" | "sleep" => {
+        // sleep(ms) → Null  — pausa la ejecución
+        "sleep" | "dormir" => {
             let ms = to_i64(args.first().ok_or("tarea.dormir requiere (ms)")?)? as u64;
             std::thread::sleep(Duration::from_millis(ms));
             Ok(EvalValue::Null)
         }
-        // ahora() → timestamp Unix en ms
-        "ahora" | "now" => {
+        // now() → timestamp Unix en ms
+        "now" | "ahora" => {
             let ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|e| format!("tarea.ahora: {}", e))?
                 .as_millis() as i64;
             Ok(EvalValue::Int(ms))
         }
-        // iniciar(nombre) → Null  — arranca un cronómetro
-        "iniciar" | "start" => {
+        // start(nombre) → Null  — arranca un cronómetro
+        "start" | "iniciar" => {
             let name = one_str("tarea.iniciar", &args)?;
             timers().lock().unwrap().insert(name, Instant::now());
             Ok(EvalValue::Null)
         }
-        // medir(nombre) → ms transcurridos desde iniciar()
-        "medir" | "elapsed" => {
+        // elapsed(nombre) → ms transcurridos desde iniciar()
+        "elapsed" | "medir" => {
             let name = one_str("tarea.medir", &args)?;
             let ms = timers().lock().unwrap()
                 .get(&name)
@@ -40,14 +40,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .ok_or_else(|| format!("tarea.medir: timer '{}' no iniciado", name))?;
             Ok(EvalValue::Int(ms))
         }
-        // reiniciar(nombre) → Null
-        "reiniciar" | "reset" => {
+        // reset(nombre) → Null
+        "reset" | "reiniciar" => {
             let name = one_str("tarea.reiniciar", &args)?;
             timers().lock().unwrap().insert(name, Instant::now());
             Ok(EvalValue::Null)
         }
-        // repetir(n, intervalo_ms) → Null  — espera n veces con intervalo (bloqueante)
-        "repetir" | "repeat" => {
+        // repeat(n, intervalo_ms) → Null  — espera n veces con intervalo (bloqueante)
+        "repeat" | "repetir" => {
             if args.len() < 2 { return Err("tarea.repetir requiere (n, intervalo_ms)".into()); }
             let n        = to_i64(&args[0])? as u64;
             let interval = to_i64(&args[1])? as u64;

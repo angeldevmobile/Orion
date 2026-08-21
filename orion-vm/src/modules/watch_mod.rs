@@ -20,14 +20,14 @@ fn mtime(path: &str) -> u64 {
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // observar(path) → Bool  — registra el estado actual del archivo
-        "observar" | "watch" => {
+        // watch(path) → Bool  — registra el estado actual del archivo
+        "watch" | "observar" => {
             let path = one_str("watch.observar", &args)?;
             watched().lock().unwrap().insert(path.clone(), mtime(&path));
             Ok(EvalValue::Bool(true))
         }
-        // modificado(path) → Bool  — true si cambió desde la última observación
-        "modificado" | "changed" => {
+        // changed(path) → Bool  — true si cambió desde la última observación
+        "changed" | "modificado" => {
             let path    = one_str("watch.modificado", &args)?;
             let current = mtime(&path);
             let mut map = watched().lock().unwrap();
@@ -39,8 +39,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 Ok(EvalValue::Bool(false))
             }
         }
-        // estado(path) → Dict {existe, tamaño, modificado_unix, es_directorio}
-        "estado" | "stat" => {
+        // stat(path) → Dict {existe, tamaño, modificado_unix, es_directorio}
+        "stat" | "estado" => {
             let path = one_str("watch.estado", &args)?;
             let mut m = HashMap::new();
             match std::fs::metadata(&path) {
@@ -58,14 +58,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
             Ok(EvalValue::Dict(m))
         }
-        // dejar(path) → Bool  — deja de rastrear el archivo
-        "dejar" | "unwatch" => {
+        // unwatch(path) → Bool  — deja de rastrear el archivo
+        "unwatch" | "dejar" => {
             let path = one_str("watch.dejar", &args)?;
             watched().lock().unwrap().shift_remove(&path);
             Ok(EvalValue::Bool(true))
         }
-        // lista() → List<Str> de paths observados
-        "lista" | "list" => {
+        // list() → List<Str> de paths observados
+        "list" | "lista" => {
             let paths: Vec<EvalValue> = watched().lock().unwrap()
                 .keys().map(|k| EvalValue::Str(k.clone())).collect();
             Ok(EvalValue::List(paths))

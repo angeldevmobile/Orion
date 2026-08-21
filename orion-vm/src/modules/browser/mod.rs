@@ -44,16 +44,9 @@ use cdp::Conn;
 use launch::{LaunchOpts, Launched, Tuning};
 
 //    Registro de handles
-//
-// Navegadores y pestañas comparten numeración y mapa: así `free(h)` funciona
-// con cualquiera de los dos, que es lo que necesita `with` para no obligar al
-// programa a saber qué clase de cosa está soltando.
 
 struct BrowserState {
     conn:      Arc<Conn>,
-    /// El proceso, si lo arrancamos nosotros. `None` con `attach`: ese
-    /// navegador es del usuario y decide qué hace `free` — el nuestro se mata,
-    /// al ajeno solo se le suelta el socket.
     proc:      Option<std::process::Child>,
     exe:       String,
     user_data: std::path::PathBuf,
@@ -67,11 +60,6 @@ struct PageState {
     browser:   u64,
     target_id: String,
     session:   String,
-    /// Escucha de red armada: patrón de URL y desde qué evento mirar.
-    ///
-    /// La marca se guarda al armar y no al recoger porque la petición ocurre
-    /// entre las dos llamadas: buscar solo hacia delante desde el momento de
-    /// recoger encontraría siempre una lista vacía.
     watch:     Option<(String, u64)>,
 }
 
@@ -89,11 +77,6 @@ fn handles() -> &'static Mutex<HashMap<u64, Handle>> {
 
 fn new_id() -> u64 { NEXT_ID.fetch_add(1, Ordering::SeqCst) }
 
-/// Datos de una pestaña más la conexión de su navegador.
-///
-/// Se devuelven copiados en vez de mantener el candado: una llamada CDP puede
-/// tardar segundos y bloquear el registro mientras tanto dejaría clavado a
-/// cualquier otra tarea que solo quisiera abrir una pestaña.
 fn page_ctx(h: u64) -> Result<(Arc<Conn>, String, Duration, Tuning), String> {
     let reg = handles().lock().unwrap();
     let Some(Handle::Page(p)) = reg.get(&h) else {
@@ -269,10 +252,6 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
     let tuning = parse_tuning(args.first());
     let timeout = opts.timeout;
 
-    // La lista blanca se valida ANTES de arrancar nada. Comprobarla después
-    // dejaba un navegador vivo al que ya nadie tenía handle: ni `with` ni
-    // `free` pueden cerrar algo que nunca llegó a registrarse, así que el
-    // proceso se quedaba suelto comiendo memoria hasta el reinicio.
     let allow: Vec<String> = match args.first() {
         Some(EvalValue::Dict(m)) => match m.get("allow") {
             Some(EvalValue::List(l)) => l.iter().map(to_str)
@@ -310,8 +289,6 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
         }
     };
 
-    // Se fija antes de que exista ninguna pestaña: puesta después, la primera
-    // navegación ya habría salido sin control.
     if !allow.is_empty() {
         conn.set_allowlist(allow);
     }
@@ -323,23 +300,6 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(EvalValue::Int(id as i64))
 }
 
-//    attach(puerto | url | opts) → handle de un navegador YA abierto
-
-/// Se engancha a un navegador ya abierto, en vez de arrancar uno.
-///
-/// Cubre lo que `open` no puede: reutilizar el navegador del usuario, con su
-/// sesión y su SSO. Chrome se niega a abrir un perfil que otro Chrome ya tiene
-/// bloqueado, de ahí el "cierra tu ventana" de las automatizaciones de
-/// escritorio. Requiere que ese navegador se arrancara con
-/// `--remote-debugging-port=N`; uno abierto normal no expone CDP.
-///
-/// ```orion
-/// b = web.attach(9222)
-/// b = web.attach("ws://127.0.0.1:9222/...")
-/// b = web.attach({ port: 9222, timeout: 5000 })
-/// ```
-///
-/// Al cerrar NO se cierra el navegador: ver la rama `None` de `free`.
 fn attach(args: &[EvalValue]) -> Result<EvalValue, String> {
     let uso = "browser.attach(puerto | \"ws://...\" | { port: 9222 })";
 
@@ -409,10 +369,6 @@ fn attach(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(EvalValue::Int(id as i64))
 }
 
-/// Pregunta a `http://host:puerto/json/version` cuál es su endpoint CDP.
-///
-/// El error se redacta con cuidado porque este es EL punto donde falla el caso
-/// del equipo gestionado, y "conexión rechazada" a secas no dice qué hacer.
 fn descubrir_endpoint(host_port: &str, timeout: Duration) -> Result<String, String> {
     let url = format!("http://{host_port}/json/version");
     let resp = ureq::get(&url)
@@ -466,9 +422,6 @@ fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
     // Los eventos de página hacen falta para saber cuándo terminó de cargar.
     conn.call("Page.enable", serde_json::json!({}), Some(&session), timeout)?;
 
-    // La interceptación solo se activa si hay lista blanca. Encenderla siempre
-    // saldría caro para nada: con `Fetch` puesto, el navegador para en CADA
-    // petición y espera una respuesta por el socket.
     if conn.hay_allowlist() {
         conn.call("Fetch.enable", serde_json::json!({}), Some(&session), timeout)?;
     }
@@ -490,8 +443,6 @@ fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
         .ok_or("browser.goto(pestaña, url): falta la url")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
 
-    // La marca se toma ANTES de navegar: si no, una carga anterior podría
-    // hacerse pasar por esta y `goto` volvería antes de tiempo.
     let marca = conn.event_mark();
 
     let r = conn.call(
@@ -503,13 +454,8 @@ fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
         return Err(format!("browser.goto '{url}': {err}"));
     }
 
-    // Que la carga no termine no es un error por sí solo: hay páginas que dejan
-    // peticiones abiertas para siempre y su contenido ya está ahí.
     let cargo = conn.wait_event("Page.loadEventFired", Some(&session), marca, timeout)?;
 
-    // Pero hay una causa concreta que sí conviene delatar: un alert/confirm
-    // durante la carga deja la página congelada y sin nadie que lo atienda. Sin
-    // este aviso, el síntoma es un timeout genérico imposible de diagnosticar.
     if cargo.is_none() {
         if let Some(ev) = conn.wait_event(
             "Page.javascriptDialogOpening", Some(&session), marca, Duration::from_millis(0)
@@ -552,11 +498,6 @@ fn eval(args: &[EvalValue]) -> Result<EvalValue, String> {
     evaluate(&conn, &session, &js, timeout)
 }
 
-/// Evalúa JavaScript en la página y trae el resultado ya convertido.
-///
-/// `returnByValue` es lo que evita traerse referencias a objetos del DOM: solo
-/// cruza el socket el valor final, serializado. Es la decisión que mantiene la
-/// memoria de Orion proporcional a los datos pedidos y no al peso de la página.
 fn evaluate(conn: &Conn, session: &str, expr: &str, timeout: Duration) -> Result<EvalValue, String> {
     evaluate_awaiting(conn, session, expr, timeout, true)
 }
@@ -574,8 +515,6 @@ fn evaluate_awaiting(
         Some(session), timeout,
     )?;
 
-    // Una excepción del JS llega como resultado correcto de CDP con un
-    // `exceptionDetails` dentro; si no se mira, los errores del usuario se
     // convierten en `null` silenciosos.
     if let Some(ex) = r.get("exceptionDetails") {
         let msg = ex.get("exception").and_then(|e| e.get("description")).and_then(|d| d.as_str())
@@ -589,21 +528,6 @@ fn evaluate_awaiting(
 }
 
 //    Interacción
-//
-// Todas esperan al selector antes de actuar. La espera implícita no es una
-// comodidad: un scraper que exige acordarse de poner `wait` es un scraper que
-// falla de forma intermitente, y esos son los que nadie consigue depurar.
-
-/// Milisegundos de espera de un selector.
-///
-/// Tres niveles, del más concreto al más general: lo que diga esta llamada, lo
-/// que se fijó al abrir el navegador, y el default. Antes solo existía el
-/// primero y el último, así que quien quisiera otro plazo tenía que repetirlo en
-/// **cada** llamada — que es la forma más cansada de tener una constante fijada.
-///
-/// El argumento admite un número (los milisegundos) o un dict de opciones, para
-/// que el caso simple siga siendo `click(p, sel)` y el complicado no necesite
-/// una función aparte.
 fn espera_de(args: &[EvalValue], i: usize, t: &Tuning) -> u64 {
     match args.get(i) {
         Some(EvalValue::Dict(m)) => m.get("wait").and_then(|v| to_u64(v).ok()).unwrap_or(t.wait_ms),
@@ -612,11 +536,6 @@ fn espera_de(args: &[EvalValue], i: usize, t: &Tuning) -> u64 {
     }
 }
 
-/// Afinado leído de las opciones de `open`.
-///
-/// Los parámetros de política viven en la raíz (`wait`, `drag_steps`…) porque se
-/// tocan de verdad; los de mecanismo van bajo `tuning` para no ensuciar la API
-/// de uso diario. Lo que no se indique conserva su default.
 fn parse_tuning(v: Option<&EvalValue>) -> Tuning {
     let mut t = Tuning::default();
     let Some(EvalValue::Dict(m)) = v else { return t };
@@ -722,15 +641,6 @@ fn do_press(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(EvalValue::Bool(true))
 }
 
-/// Elige una opción de un `<select>` nativo.
-///
-/// Un `<select>` abre un desplegable del **sistema operativo**, fuera del DOM:
-/// ningún clic sintético ni real puede navegarlo, y por eso Selenium tiene una
-/// clase `Select` aparte. Aquí se asigna el valor y se emiten `input` y `change`
-/// como haría el navegador, que es lo que el sitio está escuchando.
-///
-/// Acepta el `value`, el texto visible o el índice: quien escribe el scraper ve
-/// el texto en pantalla, no el `value` del HTML.
 fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.select(pestaña, selector, opción)")?;
     let sel = args.get(1).map(to_str).ok_or("browser.select: falta el selector")?;
@@ -782,11 +692,6 @@ fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(v)
 }
 
-/// Rellena un formulario entero en una sola llamada.
-///
-/// El tipo de cada control lo decide la página: un texto, un desplegable y una
-/// casilla se escriben igual. Obligar a elegir la función según de qué está
-/// hecho el campo significa mirar el HTML antes de poder escribir una línea.
 fn do_fill(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.fill(pestaña, campos, opts?)")?;
     let EvalValue::Dict(campos) = args.get(1)
@@ -804,8 +709,6 @@ fn do_fill(args: &[EvalValue]) -> Result<EvalValue, String> {
     let estricto = opts.and_then(|m| m.get("strict")).map(truthy).unwrap_or(true);
     let por_teclas = opts.and_then(|m| m.get("keys")).map(truthy).unwrap_or(false);
 
-    // El orden del diccionario se conserva (es un IndexMap) y hace falta: un
-    // desplegable de provincia que solo se llena al elegir el país tiene que ir
     // después del país.
     let lista: Vec<(String, serde_json::Value)> = campos.iter()
         .map(|(k, v)| (k.clone(), json_de(v)))
@@ -817,9 +720,6 @@ fn do_fill(args: &[EvalValue]) -> Result<EvalValue, String> {
 
     let mut r = form::fill(&conn, &session, &lista, ms, &t)?;
 
-    // Un error de `fill` puede repetir el valor que no se admitió —el de un
-    // desplegable, por ejemplo— y ese error acaba en un log o en una consola
-    // compartida. Los campos marcados como secretos no cuentan lo suyo.
     if let Some(secretos) = opts.and_then(|m| m.get("secret")) {
         let marcados: Vec<String> = match secretos {
             EvalValue::List(l) => l.iter().map(to_str).collect(),
@@ -840,12 +740,6 @@ fn do_fill(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(EvalValue::Int(r.puestos as i64))
 }
 
-/// Variante lenta y fiel: teclas de verdad, campo a campo.
-///
-/// Existe porque hay sitios que solo reaccionan a las pulsaciones —
-/// autocompletados, máscaras, buscadores que filtran mientras escribes—, y en
-/// esos la asignación directa deja el campo relleno y la aplicación sin
-/// enterarse. Cuesta unas 4 ms por carácter, así que es la excepción.
 fn fill_con_teclas(
     conn: &Conn, session: &str, lista: &[(String, serde_json::Value)],
     ms: u64, t: &Tuning, estricto: bool,
@@ -884,11 +778,6 @@ fn fill_con_teclas(
     Ok(EvalValue::Int(puestos as i64))
 }
 
-/// Marca o desmarca una casilla, con un clic real y sin repetirlo si ya estaba.
-///
-/// Es idempotente a propósito: `check` sobre una casilla ya marcada la dejaría
-/// desmarcada si se limitase a pulsar, que es el error que convierte un
-/// reintento inocente en el contrario de lo que se pedía.
 fn do_check(args: &[EvalValue], querer: bool) -> Result<EvalValue, String> {
     let quien = if querer { "check" } else { "uncheck" };
     let p = arg_handle(args, 0, &format!("browser.{quien}(pestaña, selector)"))?;
@@ -912,18 +801,6 @@ fn do_check(args: &[EvalValue], querer: bool) -> Result<EvalValue, String> {
     Ok(EvalValue::Bool(querer))
 }
 
-/// Lo que un campo contiene ahora mismo.
-///
-/// Hace falta aparte de `attr` porque no son lo mismo, y confundirlos es un
-/// clásico: `attr(p, sel, "value")` lee el **atributo** del HTML —el que venía
-/// escrito en la página— y ese no cambia cuando alguien escribe en el campo.
-/// Un `<input>` sin `value=` en el HTML devuelve `null` por ahí aunque tenga
-/// texto dentro, que es exactamente el momento en el que uno cree que su
-/// `fill` no funcionó.
-///
-/// Devuelve además lo que corresponde a cada control: el texto de un `<select>`
-/// no está en el elemento sino en la opción elegida, y una casilla no tiene
-/// texto sino estado.
 fn do_value(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.value(pestaña, selector)")?;
     let sel = args.get(1).map(to_str)
@@ -960,9 +837,6 @@ fn do_table(args: &[EvalValue]) -> Result<EvalValue, String> {
     let (conn, session, _timeout, t) = page_ctx(p)?;
     let ms = espera_de(args, 2, &t);
 
-    // Con `{ header: no }` no se interpreta ninguna fila como cabecera y todo
-    // sale como datos con columnas `col_1`, `col_2`… Hace falta para las tablas
-    // que se usan como maquetación, donde la primera fila ya es un dato.
     let con_cabecera = match args.get(2) {
         Some(EvalValue::Dict(m)) => m.get("header").map(truthy).unwrap_or(true),
         _ => true,
@@ -984,11 +858,6 @@ fn json_de(v: &EvalValue) -> serde_json::Value {
     }
 }
 
-/// Espera a que una pestaña termine de cargar.
-///
-/// Se pregunta por `readyState` en vez de esperar el evento de carga porque el
-/// evento puede haber pasado ya antes de que nos adjuntáramos, y entonces la
-/// espera no terminaría nunca.
 fn wait_ready(conn: &Conn, session: &str, ms: u64, t: &Tuning) -> Result<(), String> {
     let reintento = t.retry_ms;
     let js = format!(r#"(() => {{
@@ -1010,12 +879,6 @@ fn wait_ready(conn: &Conn, session: &str, ms: u64, t: &Tuning) -> Result<(), Str
     Ok(())
 }
 
-/// Política para los diálogos nativos de una pestaña.
-///
-/// `accept`, `dismiss`, o `answer:<texto>` para un `prompt`. Se declara una vez
-/// y vale para toda la sesión, en vez del registro previo a cada acción que usan
-/// Playwright y Selenium: un diálogo abierto por un temporizador de la página no
-/// tiene ninguna llamada tuya a la que engancharse.
 fn do_dialogs(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.dialogs(pestaña, política)")?;
     let (conn, session, _to, _t) = page_ctx(p)?;
@@ -1040,11 +903,6 @@ fn do_dialogs(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 /// Clic que abre una pestaña nueva; devuelve el handle de la que se abrió.
-///
-/// Playwright necesita envolver el clic en `expect_popup` **antes** de hacerlo, y
-/// Selenium te hace listar los handles de ventana y adivinar cuál es la nueva.
-/// Aquí es una llamada, y la carrera entre el clic y la aparición de la pestaña
-/// la resuelve el módulo: la marca de eventos se toma antes de clicar.
 fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.click_opens(pestaña, selector)")?;
     let sel = args.get(1).map(to_str).ok_or("browser.click_opens: falta el selector")?;
@@ -1054,8 +912,6 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
         _ => return Err(format!("browser.click_opens: la pestaña {p} no existe")),
     };
 
-    // Descubrir targets antes de clicar: si se activa después, el evento de la
-    // pestaña recién creada ya habrá pasado.
     conn.call("Target.setDiscoverTargets", serde_json::json!({ "discover": true }),
               None, timeout)?;
     let marca = conn.event_mark();
@@ -1085,9 +941,6 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
         .to_string();
     conn.call("Page.enable", serde_json::json!({}), Some(&nueva_ses), timeout)?;
 
-    // Nos enganchamos en `targetCreated`, que ocurre antes de que la pestaña
-    // tenga contenido. Sin esperar a que termine de cargar, el primer `title`
-    // o `text` sobre ella devolvería vacío y parecería que la página está mal.
     wait_ready(&conn, &nueva_ses, ms, &t)?;
 
     let id = new_id();
@@ -1106,9 +959,6 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
 fn do_wait(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.wait(pestaña, selector, ms?)")?;
 
-    // `wait` con un diccionario espera una condición de la página en vez de un
-    // selector. Va aquí y no en una función aparte porque es la misma idea
-    // —parar hasta que algo esté listo— y separarlas obligaría a recordar dos
     // nombres para lo mismo.
     if let Some(EvalValue::Dict(m)) = args.get(1) {
         let (conn, session, _to, t) = page_ctx(p)?;
@@ -1130,19 +980,6 @@ fn do_wait(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 /// Espera a que la red se calme.
-///
-/// Sirve para lo que ningún selector resuelve: no sabes **qué** va a aparecer,
-/// solo que la página aún está trayendo cosas. Es el caso del panel que se monta
-/// con tres llamadas encadenadas, o del listado que se recarga al filtrar.
-///
-/// La alternativa que usa todo el mundo es dormir dos segundos, y tiene los dos
-/// defectos a la vez: si la red va lenta se lee a medias, y si va rápida se
-/// tiran dos segundos por petición.
-///
-/// Se cuentan las peticiones en vuelo **dentro de la página**, interceptando
-/// `fetch` y `XMLHttpRequest`, en vez de contar eventos CDP desde fuera. Así es
-/// una sola llamada y no depende de que el historial de eventos —que está
-/// acotado— haya conservado los que hacían falta.
 fn do_wait_idle(
     conn: &Conn, session: &str, quieto_ms: u64, tope_ms: u64, t: &Tuning,
 ) -> Result<EvalValue, String> {
@@ -1193,12 +1030,6 @@ fn do_wait_idle(
     Ok(EvalValue::Bool(true))
 }
 
-/// Recarga, atrás y adelante.
-///
-/// El historial se lee del navegador en vez de contar pasos: `history.back()`
-/// desde JavaScript no dice si había algo a lo que volver, y sin eso un `back`
-/// al principio del historial se queda callado y el programa sigue creyendo que
-/// cambió de página.
 fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
     let quien = match salto { 0 => "reload", -1 => "back", _ => "forward" };
     let p = arg_handle(args, 0, &format!("browser.{quien}(pestaña)"))?;
@@ -1212,8 +1043,6 @@ fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
     };
 
     if salto == 0 {
-        // `ignoreCache` deja recargar de verdad cuando hace falta; por defecto
-        // se respeta la caché, que es lo que hace F5.
         let duro = match args.get(1) {
             Some(EvalValue::Dict(m)) => m.get("cache").map(|v| !truthy(v)).unwrap_or(false),
             _ => false,
@@ -1238,14 +1067,7 @@ fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
                   Some(&session), timeout)?;
     }
 
-    // Aquí NO se espera `Page.loadEventFired`, y es deliberado: al volver
-    // atrás, Chrome suele restaurar la página desde su caché de retroceso sin
-    // recargarla, y entonces **no hay evento de carga**. Esperarlo dejaba cada
-    // `back` clavado el plazo entero —treinta segundos— para acabar
-    // continuando igual. Se mira la página, que es quien sabe dónde está.
     let condicion = if salto == 0 {
-        // Recargar lleva a la misma URL, así que el criterio es que el
-        // documento vuelva a estar completo.
         "document.readyState === 'complete'".to_string()
     } else {
         format!(
@@ -1278,10 +1100,6 @@ fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
 #[derive(Clone, Copy, PartialEq)]
 enum Espera { Si, No }
 
-/// Ejecuta una consulta sobre el DOM con el selector ya inyectado.
-///
-/// Toda la lectura pasa por aquí y por tanto por **una** evaluación: es lo que
-/// evita el patrón de Selenium de una petición HTTP por cada atributo leído.
 fn query(args: &[EvalValue], quien: &str, espera: Espera, cuerpo: &str) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, &format!("{quien}(pestaña, selector)"))?;
     let sel = args.get(1).map(to_str)
@@ -1319,11 +1137,6 @@ fn do_attr(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 //    Extracción declarativa
-
-/// `extract(pestaña, selector_de_fila, esquema, opts?)` → lista de dicts.
-///
-/// El esquema entero se compila a una sola evaluación dentro de la página. Ver
-/// `extract.rs` para la gramática de las especificaciones.
 fn do_extract(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.extract(pestaña, selector, esquema)")?;
     let fila_sel = args.get(1).map(to_str)
@@ -1349,10 +1162,6 @@ fn do_extract(args: &[EvalValue]) -> Result<EvalValue, String> {
     let ms = espera_de(args, 3, &t);
     let r = extract::extract(&conn, &session, &fila_sel, &campos, ms, &t)?;
 
-    // Un campo vacío en TODAS las filas es casi siempre un selector equivocado,
-    // no un dato ausente. Callarlo devolvería una lista de nulls que parece
-    // buena y revienta mucho más adelante, que es el fallo clásico de
-    // BeautifulSoup. Con `strict: no` se acepta y se sigue.
     let estricto = match args.get(3) {
         Some(EvalValue::Dict(m)) => m.get("strict").map(truthy).unwrap_or(true),
         _ => true,
@@ -1373,18 +1182,11 @@ fn do_extract(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(json_to_eval(r.json))
 }
 
-/// `discover(pestaña, opts?)` → esquema propuesto.
-///
-/// Analiza la página y propone el selector de fila y un selector por campo, más
-/// una muestra ya extraída. No sustituye a `extract`: te lleva hasta su puerta.
 fn do_discover(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.discover(pestaña, opts?)")?;
     let (conn, session, _to, t) = page_ctx(p)?;
     let ms = espera_de(args, 1, &t);
 
-    // Cuántos elementos hermanos hacen falta para considerarlo un "listado".
-    // Tres es lo mínimo para hablar de repetición; algunos sitios lo necesitan
-    // más alto para no enganchar una fila de tres iconos de cabecera.
     let min = match args.get(1) {
         Some(EvalValue::Dict(m)) => m.get("min").and_then(|v| to_u64(v).ok()).unwrap_or(3).max(2),
         _ => 3,
@@ -1429,11 +1231,6 @@ fn do_discover(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(json_to_eval(v))
 }
 
-/// `crawl(navegador, opts)` → resumen del recorrido paralelo.
-///
-/// Toma el **navegador**, no una pestaña: abre N por su cuenta y las conduce en
-/// paralelo. Es la versión con músculo de `extract_to` — hilos de sistema de
-/// verdad, streaming a disco y reanudación.
 fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
     let nav = arg_handle(args, 0, "browser.crawl(navegador, opts)")?;
     let Some(EvalValue::Dict(o)) = args.get(1) else {
@@ -1464,9 +1261,6 @@ fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
 
     let (conn, timeout, t) = browser_ctx(nav)?;
 
-    // Reanudar sobre `.odf` no está soportado (numera bloques y lleva el conteo
-    // en la cabecera); se avisa antes de arrancar el navegador en vez de fallar a
-    // la mitad de un recorrido largo.
     let resume = o.get("resume").map(truthy).unwrap_or(false);
     if resume && !salida.to_lowercase().ends_with(".csv") {
         return Err("browser.crawl: `resume` solo funciona con salida .csv; \
@@ -1486,8 +1280,6 @@ fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
 
     let r = crawl::crawl(conn, timeout, t, opts)?;
 
-    // Selectores muertos: como en `extract`, callarlos devolvería columnas
-    // vacías que parecen buenas. Con `{ strict: no }` se acepta.
     let estricto = o.get("strict").map(truthy).unwrap_or(true);
     if estricto && !r.muertos.is_empty() {
         return Err(format!(
@@ -1509,19 +1301,10 @@ fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(EvalValue::Dict(m))
 }
 
-/// `extract_to(pestaña, urls, selector, esquema, salida, opts?)` → resumen.
-///
-/// Recorre las URLs **reutilizando una sola pestaña** y vuelca lo extraído a
-/// disco según se obtiene. Las dos cosas son deliberadas: abrir una pestaña por
-/// URL multiplica la memoria del navegador, y acumular el listado entero antes
-/// de guardar es lo que hace que un scraper de Python se coma la RAM en cuanto
-/// el volumen crece.
 fn do_extract_to(args: &[EvalValue]) -> Result<EvalValue, String> {
     const USO: &str = "browser.extract_to(pestaña, urls, selector, esquema, salida)";
     let p = arg_handle(args, 0, USO)?;
 
-    // Una sola URL también vale: obligar a envolverla en una lista sería
-    // ceremonia por nada.
     let urls: Vec<String> = match args.get(1) {
         Some(EvalValue::List(l)) => l.iter().map(to_str).collect(),
         Some(v) => vec![to_str(v)],
@@ -1557,9 +1340,6 @@ fn do_extract_to(args: &[EvalValue]) -> Result<EvalValue, String> {
     let mut muertos_globales: Vec<(String, String)> = Vec::new();
 
     for url in &urls {
-        // Un fallo en una URL no aborta el recorrido: en una tanda de veinte,
-        // morir por un 404 tira el trabajo de las diecinueve buenas. Se anota y
-        // se sigue, y el resumen dice exactamente qué pasó.
         if let Err(e) = navegar(&conn, &session, url, timeout) {
             errores.push(EvalValue::Str(format!("{url}: {e}")));
             continue;
@@ -1569,12 +1349,7 @@ fn do_extract_to(args: &[EvalValue]) -> Result<EvalValue, String> {
                 if r.filas > 0 && !r.muertos.is_empty() && muertos_globales.is_empty() {
                     muertos_globales = r.muertos.clone();
                 }
-                // Una página que carga pero no da filas no es un error de red y
-                // por eso pasa desapercibida: un 404 con plantilla, un redirect
-                // al login, o el selector que dejó de valer en esa sección. Se
-                // anota aparte para que un recorrido no pierda páginas en
-                // silencio, que es el fallo que nadie detecta hasta que faltan
-                // datos en el informe.
+
                 if r.filas == 0 { vacias.push(EvalValue::Str(url.clone())); }
                 if let Some(arr) = r.json.as_array() {
                     for reg in arr {
@@ -1621,8 +1396,6 @@ fn do_extract_to(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(EvalValue::Dict(m))
 }
 
-/// Navega y espera la carga. Extraído de `goto` para poder reutilizarlo en el
-/// recorrido sin pasar por la conversión de argumentos de Orion.
 fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(), String> {
     let marca = conn.event_mark();
     let r = conn.call("Page.navigate", serde_json::json!({ "url": url }), Some(session), timeout)?;
@@ -1634,25 +1407,11 @@ fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(
 }
 
 //    Captura de red
-
-/// Arma la escucha: a partir de aquí se anota lo que la página pida y case.
-///
-/// Va antes de provocar la petición, no después. Si se encendiera al recoger,
-/// la llamada ya habría pasado y no quedaría nada que leer — es el mismo
-/// motivo por el que `click_opens` toma la marca de eventos antes de pulsar.
 fn do_watch(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.watch(pestaña, patrón)")?;
     let patron = args.get(1).map(to_str).unwrap_or_default();
     let (conn, session, timeout, t) = page_ctx(p)?;
 
-    // El dominio de red solo se enciende si alguien va a escuchar: con él
-    // puesto el navegador emite varios eventos por cada petición, y una página
-    // con cien recursos son cientos de mensajes por el socket que nadie
-    // consumiría.
-    //
-    // Los tamaños de buffer no están fijados en el código: el cuerpo de una
-    // respuesta se lee del búfer del navegador, así que un listado grande
-    // necesita más sitio y quien ejecuta es el que sabe cuánto.
     conn.call(
         "Network.enable",
         serde_json::json!({
@@ -1670,12 +1429,6 @@ fn do_watch(args: &[EvalValue]) -> Result<EvalValue, String> {
     Ok(EvalValue::Bool(true))
 }
 
-/// Recoge lo que la página pidió desde que se armó la escucha.
-///
-/// Devuelve una lista de `{url, status, method, json}` — el JSON **ya
-/// parseado**, que es el sentido de todo esto: los datos llegan tipados y con
-/// los campos que el sitio no llega a pintar. Si el cuerpo no era JSON, `json`
-/// viene nulo y el texto crudo va en `text`.
 fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
     let p = arg_handle(args, 0, "browser.capture(pestaña, opts?)")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
@@ -1692,10 +1445,6 @@ fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
         }
     };
 
-    // Se espera a que llegue algo que case, en vez de mirar una vez y volver
-    // vacío: la petición sale después de la acción que la provoca, y devolver
-    // una lista vacía convertiría un problema de tiempo en "este sitio no usa
-    // API", que es una conclusión falsa y difícil de deshacer.
     let pat = patron.clone();
     let _ = conn.wait_event_where(
         "Network.responseReceived", Some(&session), marca,
@@ -1706,9 +1455,6 @@ fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
                   .unwrap_or(false),
     )?;
 
-    // Un margen para que terminen de llegar las que salieron a la vez: un
-    // panel suele pedir tres o cuatro cosas de golpe, y quedarse con la
-    // primera daría un resultado incompleto que parece completo.
     let respuestas = conn.events_where("Network.responseReceived", Some(&session), marca, |e| {
         e.params.get("response").and_then(|r| r.get("url")).and_then(|u| u.as_str())
             .map(|u| capture::casa(u, &patron)).unwrap_or(false)
@@ -1725,10 +1471,6 @@ fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
         m.insert("url".into(), EvalValue::Str(url));
         m.insert("status".into(), EvalValue::Int(status));
 
-        // El cuerpo se pide aparte porque no viaja en el evento. Puede haber
-        // desaparecido ya del búfer del navegador —una respuesta enorme, o
-        // muchas peticiones después—: eso no es un error del programa, así que
-        // se anota y se sigue en vez de tirar la captura entera.
         match conn.call(
             "Network.getResponseBody",
             serde_json::json!({ "requestId": req_id }),
@@ -1787,11 +1529,6 @@ fn do_load_state(args: &[EvalValue]) -> Result<EvalValue, String> {
     r.insert("cookies".into(), EvalValue::Int(c.cookies as i64));
     r.insert("local".into(),   EvalValue::Int(c.local as i64));
     r.insert("session".into(), EvalValue::Int(c.session as i64));
-    // Se informa de los orígenes que NO se aplicaron en vez de callarlos: el
-    // navegador no deja escribir el almacenamiento de otro dominio, así que
-    // cargar el estado estando en la página equivocada restaura las cookies y
-    // deja fuera lo demás — y el síntoma sería una sesión a medias sin motivo
-    // aparente.
     r.insert("skipped".into(), EvalValue::List(
         c.omitidos.into_iter().map(EvalValue::Str).collect()
     ));
@@ -1800,8 +1537,6 @@ fn do_load_state(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 fn do_blocked(args: &[EvalValue]) -> Result<EvalValue, String> {
     let h = arg_handle(args, 0, "browser.blocked(navegador)")?;
-    // Vale con el handle del navegador o el de una pestaña: quien depura no
-    // tiene por qué acordarse de cuál de los dos tenía a mano.
     let conn = match browser_ctx(h) {
         Ok((c, _, _)) => c,
         Err(_) => page_ctx(h)?.0,
@@ -1811,11 +1546,6 @@ fn do_blocked(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 //    Archivos
 
-/// Rutas de archivo de un argumento: admite una sola o una lista.
-///
-/// Adjuntar un archivo es lo normal y adjuntar varios la excepción, así que
-/// obligar a escribir `["f.pdf"]` en el caso común sería cobrar a todos el
-/// precio de unos pocos.
 fn rutas_de(v: Option<&EvalValue>) -> Vec<String> {
     match v {
         Some(EvalValue::List(l)) => l.iter().map(to_str).collect(),
@@ -1835,9 +1565,6 @@ fn do_upload(args: &[EvalValue]) -> Result<EvalValue, String> {
     let (conn, session, timeout, t) = page_ctx(p)?;
     let puestos = files::upload(&conn, &session, &sel, &rutas,
                                 espera_de(args, 3, &t), &t, timeout)?;
-    // Se devuelven las rutas absolutas de verdad: la conversión de relativa a
-    // absoluta ocurre por dentro, y sin verla es imposible entender por qué el
-    // navegador dice que un archivo que existe no existe.
     Ok(EvalValue::List(puestos.into_iter().map(EvalValue::Str).collect()))
 }
 
@@ -1888,9 +1615,7 @@ fn do_pdf(args: &[EvalValue]) -> Result<EvalValue, String> {
         }
         if let Some(v) = m.get("pages") { o.insert("pageRanges".into(), to_str(v).into()); }
     }
-    // Sin esto, un fondo de color o una tabla con filas alternas salen en
-    // blanco: el navegador los quita al imprimir para ahorrar tinta, que en un
-    // PDF que nadie va a imprimir es justo lo contrario de lo que se quiere.
+
     o.entry("printBackground").or_insert(true.into());
 
     let escrito = files::pdf(&conn, &session, &ruta, serde_json::Value::Object(o), timeout)?;
@@ -1948,9 +1673,6 @@ fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
         None => Ok(EvalValue::Bool(false)),
 
         Some(Handle::Page(p)) => {
-            // Cerrar la pestaña es lo que libera la memoria del renderer, que
-            // es la parte cara: dejarla abierta y olvidada es RAM que nadie
-            // reclama hasta que muere el navegador.
             let mut reg = handles().lock().unwrap();
             if let Some(Handle::Browser(b)) = reg.get_mut(&p.browser) {
                 b.pages.retain(|x| *x != h);
@@ -1967,9 +1689,6 @@ fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
         }
 
         Some(Handle::Browser(mut b)) => {
-            // Las pestañas se van con él. Se guardan sus targetId antes de
-            // tirarlas del registro porque un navegador ajeno (`attach`) NO va a
-            // morir: sin esto, cada ejecución le dejaba una pestaña huérfana.
             let targets: Vec<String> = {
                 let mut reg = handles().lock().unwrap();
                 b.pages.iter()
@@ -1985,16 +1704,13 @@ fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
                     let _ = b.conn.call("Browser.close", serde_json::json!({}), None,
                                         Duration::from_millis(b.tuning.close_ms));
                     b.conn.close();
-                    // `Browser.close` es una petición amable; si no la atendió,
-                    // se termina el proceso a mano para no dejarlo huérfano.
                     let _ = proc.kill();
                     let _ = proc.wait();
                     if b.temporal {
                         remove_profile(&b.user_data, b.tuning.cleanup_tries);
                     }
                 }
-                // Ajeno: se recoge lo que abrimos y se suelta el socket. Ni
-                // `Browser.close` ni `kill` ni tocar su perfil.
+
                 None => {
                     for t in targets {
                         let _ = b.conn.call(
@@ -2012,27 +1728,15 @@ fn free(args: &[EvalValue]) -> Result<EvalValue, String> {
     }
 }
 
-/// Borra el perfil temporal, reintentando.
-///
-/// `wait()` solo espera al proceso principal, pero Chrome deja hijos (renderer,
-/// GPU, red) que tardan un instante en soltar los archivos del perfil. En
-/// Windows eso hace fallar el borrado inmediato, y un intento único dejaba
-/// varios MB por sesión tirados en el temporal.
 fn remove_profile(dir: &std::path::Path, intentos: u32) {
     for intento in 0..intentos.max(1) as u64 {
         if !dir.exists() || std::fs::remove_dir_all(dir).is_ok() { return; }
         std::thread::sleep(Duration::from_millis(50 + intento * 25));
     }
-    // Si tras un segundo largo sigue bloqueado, no se insiste: perder el
-    // directorio temporal es mucho menos grave que colgar el programa del
-    // usuario al cerrar un navegador.
 }
 
 //    info() — diagnóstico
 
-/// Qué navegador se usaría y de dónde sale. Sin esto, "no me funciona" es
-/// indepurable: no se sabe si falta el navegador, si se eligió otro, o si el
-/// problema está en la página.
 fn info() -> Result<EvalValue, String> {
     let mut m: IndexMap<String, EvalValue> = IndexMap::new();
     match launch::resolve_browser(None) {
@@ -2051,9 +1755,6 @@ fn info() -> Result<EvalValue, String> {
     let abiertos = handles().lock().unwrap();
     let en_uso: Vec<EvalValue> = abiertos.values()
         .filter_map(|h| match h {
-            // Se informa del ejecutable REAL de cada navegador abierto, no del
-            // que se resolvería ahora: pueden no coincidir si el programa pasó
-            // una ruta distinta en `open`, y ahí es donde está el malentendido.
             Handle::Browser(b) => Some(EvalValue::Str(b.exe.clone())),
             Handle::Page(_) => None,
         })

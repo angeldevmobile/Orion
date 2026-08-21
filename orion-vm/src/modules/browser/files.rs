@@ -34,14 +34,6 @@ use super::launch::Tuning;
 
 //    Rutas
 
-/// Convierte una ruta a absoluta para dárselas al navegador.
-///
-/// El navegador es otro proceso y no comparte el directorio de trabajo del
-/// programa: una ruta relativa se resolvería contra el suyo, que no es el que
-/// el usuario tiene en la cabeza. Se resuelve aquí, donde sí se sabe.
-///
-/// En Windows `canonicalize` devuelve la forma extendida `\\?\C:\...`, que
-/// varias APIs del navegador rechazan; se le quita el prefijo.
 fn absoluta(p: &str) -> PathBuf {
     let ruta = Path::new(p);
     let abs = if ruta.is_absolute() {
@@ -60,22 +52,6 @@ fn absoluta(p: &str) -> PathBuf {
 
 //    Subir archivos
 
-/// Adjunta archivos al control indicado por `sel`.
-///
-/// `sel` puede apuntar a dos cosas distintas y las dos tienen que funcionar,
-/// porque en un sitio real casi nunca es la primera:
-///
-/// 1. El propio `<input type="file">`. Se le asignan los archivos directamente
-///    y la ventana del sistema no llega ni a plantearse.
-/// 2. Cualquier otra cosa que **abra** el selector al pulsarla — el botón
-///    "Examinar", una zona de arrastrar y soltar, un `<label>`. El `<input>`
-///    real suele estar oculto y a veces ni siquiera es alcanzable con un
-///    selector. Aquí se activa la interceptación, se pulsa, y cuando el
-///    navegador anuncia que iba a abrir la ventana se le contesta con los
-///    archivos. La ventana nunca aparece.
-///
-/// El caso 2 es el que no cubre Selenium: su receta es `send_keys` sobre el
-/// input, que exige que el input exista y sea alcanzable.
 pub fn upload(
     conn: &Conn, session: &str, sel: &str, rutas: &[String],
     espera_ms: u64, t: &Tuning, timeout: Duration,
@@ -84,10 +60,6 @@ pub fn upload(
         return Err("browser.upload: no se indicó ningún archivo".into());
     }
 
-    // Comprobar los archivos ANTES de tocar la página. El navegador acepta en
-    // silencio una ruta que no existe: el formulario se envía sin adjunto y el
-    // fallo aparece mucho después, en el servidor de otro. Es justo el error
-    // que nadie relaciona con el scraper.
     let mut abs = Vec::with_capacity(rutas.len());
     for r in rutas {
         let a = absoluta(r);
@@ -137,9 +109,6 @@ fn upload_interceptando(
         Some(session), timeout,
     )?;
 
-    // Se desactiva pase lo que pase: dejar la interceptación puesta haría que
-    // un `upload` posterior de otra parte del programa se quedase esperando un
-    // diálogo que ya nadie va a atender.
     let r = (|| -> Result<(), String> {
         let marca = conn.event_mark();
         input::click(conn, session, sel, "left", 1, espera_ms, Force::No, t, timeout)
@@ -153,8 +122,6 @@ fn upload_interceptando(
                  si es un botón, que al pulsarlo abra el diálogo."
             ))?;
 
-        // Un control de un solo archivo al que se le mandan varios los ignora
-        // todos menos el primero, sin decir nada.
         let modo = ev.params.get("mode").and_then(|m| m.as_str()).unwrap_or("");
         if modo == "selectSingle" && abs.len() > 1 {
             return Err(format!(
@@ -203,8 +170,6 @@ fn object_id_de(
 ) -> Result<String, String> {
     let r = conn.call(
         "Runtime.evaluate",
-        // Sin `returnByValue`: lo que hace falta es el identificador del objeto
-        // que vive en la página, no una copia serializada de él.
         serde_json::json!({ "expression": dom::expr(sel, "return __find(sel);", t) }),
         Some(session), timeout,
     )?;
@@ -222,8 +187,6 @@ pub struct Descarga {
     pub url:   String,
 }
 
-/// Opciones de una descarga. Todo opcional; sin nada, cae en el directorio de
-/// trabajo con el nombre que proponga el servidor.
 pub struct DescargaOpts {
     pub dir:       Option<String>,
     pub name:      Option<String>,
@@ -231,18 +194,6 @@ pub struct DescargaOpts {
     pub wait_ms:   u64,
 }
 
-/// Pulsa `sel` y espera a que la descarga **termine**, devolviendo dónde quedó.
-///
-/// Los dos problemas reales de descargar con un navegador automatizado:
-///
-/// 1. **La ventana "Guardar como"**, que se evita fijando el comportamiento de
-///    descarga antes de pulsar.
-/// 2. **Saber cuándo ha acabado.** El navegador escribe primero un archivo
-///    temporal `.crdownload` y lo renombra al final. Sin un aviso, la receta
-///    habitual es dormir unos segundos y cruzar los dedos: si la red va lenta
-///    se lee un archivo a medias, y si va rápida se pierde el tiempo. Aquí se
-///    espera el evento de finalización, así que se vuelve exactamente cuando el
-///    archivo está entero.
 pub fn download(
     conn: &Conn, session: &str, sel: &str, o: &DescargaOpts,
     espera_ms: u64, t: &Tuning, timeout: Duration,
@@ -259,12 +210,6 @@ pub fn download(
     };
     let dir_txt = dir.display().to_string();
 
-    // `allowAndName` guarda el archivo con un identificador único en vez de con
-    // el nombre propuesto. Parece un rodeo y es justo lo contrario: elimina la
-    // ambigüedad de qué archivo acaba de aparecer. Con el nombre del servidor,
-    // si ya existía uno igual el navegador escribe "factura (1).pdf" por su
-    // cuenta y el programa acaba leyendo el archivo de la ejecución anterior
-    // creyendo que es el nuevo. Aquí se renombra al final, ya sabiendo cuál es.
     let mut nombrado = true;
     if conn.call(
         "Browser.setDownloadBehavior",
@@ -273,8 +218,6 @@ pub fn download(
         }),
         None, timeout,
     ).is_err() {
-        // Navegador antiguo: se acepta el modo simple y se asume el nombre
-        // propuesto. Es peor, pero es mejor que no poder descargar.
         nombrado = false;
         conn.call(
             "Browser.setDownloadBehavior",
@@ -305,9 +248,6 @@ pub fn download(
         .unwrap_or("descarga").to_string();
     let url = inicio.params.get("url").and_then(|u| u.as_str()).unwrap_or("").to_string();
 
-    // Solo interesa el progreso de ESTA descarga y solo cuando ya no sigue en
-    // marcha: el navegador emite uno por cada trozo recibido, y quedarse con el
-    // primero daría por buena una descarga que acaba de empezar.
     let g = guid.clone();
     let fin = conn
         .wait_event_where("Browser.downloadProgress", None, marca, plazo, move |e| {
@@ -347,12 +287,6 @@ pub fn download(
     })
 }
 
-/// Ruta final de la descarga, sin pisar nada por accidente.
-///
-/// Sobrescribir en silencio es la peor opción posible: una tanda de facturas
-/// con el mismo nombre dejaría una sola y nadie se enteraría hasta el cierre
-/// del mes. Se numera, y como la ruta real se devuelve en el resultado, el
-/// programa siempre sabe cuál es la suya.
 pub fn destino_libre(dir: &Path, nombre: &str, overwrite: bool) -> PathBuf {
     let base = dir.join(nombre);
     if overwrite || !base.exists() {
@@ -369,13 +303,6 @@ pub fn destino_libre(dir: &Path, nombre: &str, overwrite: bool) -> PathBuf {
 }
 
 //    Impresión a PDF
-
-/// Imprime la página a PDF sin abrir el diálogo de impresión.
-///
-/// Distinto de una captura: no es una foto de lo que se ve, es el documento
-/// entero paginado y con el texto seleccionable. Para guardar un justificante o
-/// una factura de un portal web es lo que hace falta, y es exactamente lo que
-/// obliga a pelearse con la ventana del sistema si se hace a mano.
 pub fn pdf(
     conn: &Conn, session: &str, ruta: &str, opts: serde_json::Value, timeout: Duration,
 ) -> Result<String, String> {
@@ -404,8 +331,6 @@ mod tests {
 
     #[test]
     fn windows_no_deja_el_prefijo_extendido() {
-        // `\\?\C:\...` es válido para Rust y lo rechazan varias APIs del
-        // navegador; si se colara, la subida fallaría solo en Windows.
         let d = std::env::temp_dir();
         let a = absoluta(&d.display().to_string());
         assert!(!a.display().to_string().starts_with(r"\\?\"), "{}", a.display());

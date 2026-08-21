@@ -76,8 +76,6 @@ fn abrir_pestaña(conn: &Conn, timeout: Duration) -> Result<(String, String), St
     Ok((target, session))
 }
 
-/// Navega y espera la carga (misma semántica que `goto`: que no llegue el evento
-/// no es un error por sí solo, hay páginas que dejan peticiones abiertas).
 fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(), String> {
     let marca = conn.event_mark();
     let r = conn.call("Page.navigate", serde_json::json!({ "url": url }), Some(session), timeout)?;
@@ -88,9 +86,6 @@ fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(
     Ok(())
 }
 
-/// Lo que cada hilo acumula por su cuenta y se funde al final. Se evita un
-/// candado por resultado: los hilos solo comparten la cola, el volcador y el
-/// archivo de progreso, y cada uno lleva su propia cuenta.
 #[derive(Default)]
 struct Parcial {
     ok:      usize,
@@ -104,9 +99,6 @@ pub fn crawl(
     let headers: Vec<String> = o.campos.iter().map(|c| c.nombre.clone()).collect();
     let progreso_ruta = format!("{}.progress", o.salida);
 
-    // Reanudación: las URLs ya terminadas se leen del archivo de progreso y se
-    // descartan de la tanda. El volcador se abre en modo "continuar" para no
-    // borrar lo que ya había en disco.
     let hechas: HashSet<String> = if o.resume {
         std::fs::read_to_string(&progreso_ruta).unwrap_or_default()
             .lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
@@ -135,9 +127,6 @@ pub fn crawl(
     let cola     = Arc::new(Mutex::new(pendientes));
     let escritor = Arc::new(Mutex::new(volcador));
     let progreso = Arc::new(Mutex::new(progreso));
-    // Campos que ALGUNA vez trajeron un valor. Al final, los que nunca lo
-    // hicieron son selectores muertos — el aviso que evita un recorrido de horas
-    // que guarda columnas vacías sin que nadie lo note.
     let vistos   = Arc::new(Mutex::new(HashSet::<String>::new()));
 
     let mut hilos = Vec::with_capacity(n);
@@ -187,9 +176,6 @@ pub fn crawl(
                                     extract::a_texto(v)
                                 }).collect();
                                 if let Err(e) = w.escribir(fila) {
-                                    // Un fallo de escritura (disco lleno) sí es
-                                    // fatal para este hilo: no tiene sentido
-                                    // seguir extrayendo lo que no se puede guardar.
                                     par.errores.push(format!("(escritura) {e}"));
                                     drop(w); drop(vis);
                                     let _ = conn.call("Target.closeTarget",
@@ -199,9 +185,6 @@ pub fn crawl(
                             }
                         }
                         par.ok += 1;
-                        // Se anota como hecha DESPUÉS de escribir sus filas: si el
-                        // proceso muere entre medias, al reanudar se repite la
-                        // página en vez de perderla.
                         if let Ok(mut pf) = progreso.lock() {
                             let _ = writeln!(pf, "{url}");
                             let _ = pf.flush();
@@ -233,7 +216,6 @@ pub fn crawl(
         .into_inner().unwrap();
     let (filas, archivos) = volcador.cerrar().map_err(|e| format!("browser.crawl: {e}"))?;
 
-    // Selectores muertos: campos que no trajeron valor en NINGUNA página.
     let vis = Arc::try_unwrap(vistos).map(|m| m.into_inner().unwrap()).unwrap_or_default();
     let muertos: Vec<String> = if filas > 0 {
         headers.iter().filter(|h| !vis.contains(*h)).cloned().collect()

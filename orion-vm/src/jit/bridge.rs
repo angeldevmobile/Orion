@@ -47,9 +47,6 @@ thread_local! {
     static VM_FN_REFS: RefCell<Vec<(Rc<ModuleCtx>, String)>> = RefCell::new(Vec::new());
 }
 
-/// Carga un módulo `.orx` para el JIT: lo compila, ejecuta su cuerpo en una
-/// sub-VM para obtener globales, y devuelve un namespace TAG_DICT con cada
-/// función como marcador TAG_VMFN y cada constante convertida a OrionVal.
 pub fn load_orx_module_jit(path: &str) -> i64 {
     use crate::codegen::compile;
     use crate::lexer::lex;
@@ -149,10 +146,6 @@ pub fn orion_to_value(ptr: i64) -> Value {
             TAG_DICT => {
                 let entries = &*(v.data_i as *const Vec<(String, i64)>);
 
-                // El namespace de un módulo se representa aquí como un dict con
-                // un marcador, pero para la VM es un `Value::Module`. Sin esta
-                // vuelta, `type(fs)` decía `dict` en el ejecutable compilado y
-                // `module<fs>` con `orion run`.
                 if let Some((_, marca)) = entries.iter().find(|(k, _)| k == "__native_module__") {
                     return Value::Module(crate::jit::runtime::val_to_display(val_ref(*marca)));
                 }
@@ -199,11 +192,6 @@ pub fn value_to_orion(v: &Value) -> i64 {
 
 //     Builtins vía puente VM
 
-/// True si el builtin (`str`, `len`, `push`, `range`, …) puede despacharse a la
-/// VM desde el JIT. Se EXCLUYEN los de orden superior (`map`/`filter`/`reduce`/
-/// `find`: reciben closures que no cruzan el puente) y los dependientes de estado
-/// o E/S (`input`). Ampliar con cuidado: cada nombre debe convertir limpio entre
-/// `OrionVal` y `Value`.
 pub fn is_jit_builtin(name: &str) -> bool {
     matches!(name,
         // conversión / tipos
@@ -227,14 +215,6 @@ fn mutates_first_arg(name: &str) -> bool {
     matches!(name, "push" | "append" | "pop" | "reverse" | "sort")
 }
 
-/// Despacha un builtin del VM desde código JIT. Los argumentos vienen en el
-/// ARG_BUF (empujados con `rt_push_arg`, `elem_0` primero). Devuelve el
-/// resultado como `OrionVal`.
-///
-/// Para builtins que mutan su primer argumento (`push`/`pop`/`reverse`/`sort`),
-/// reescribe el backing `Vec<i64>` del `OrionVal`-lista original **in-place**, de
-/// modo que todos los alias (que comparten ese puntero) vean el cambio — igual
-/// que la semántica por referencia de la VM.
 #[no_mangle]
 pub extern "C" fn rt_call_builtin(name_ptr: i64, argc: i64) -> i64 {
     let name = unsafe { cstr_to_str(name_ptr) }.to_string();
@@ -242,9 +222,6 @@ pub extern "C" fn rt_call_builtin(name_ptr: i64, argc: i64) -> i64 {
     let arg_ptrs = super::runtime::drain_arg_buf(argc);
     let vm_args: Vec<Value> = arg_ptrs.iter().map(|&p| orion_to_value(p)).collect();
 
-    // Handle Rc del 1er arg-lista (si el builtin muta), para el write-back.
-    // Clonar un `Value::List` clona el `Rc` → comparte el mismo backing que
-    // mutará `call_builtin`.
     let list_handle: Option<Value> = if mutates_first_arg(&name) {
         match vm_args.first() {
             Some(v @ Value::List(_)) => Some(v.clone()),

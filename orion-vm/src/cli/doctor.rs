@@ -13,12 +13,8 @@ pub fn run_doctor() {
     banner::row("Versión VM", &format!("v{}", env!("CARGO_PKG_VERSION")), true);
 
     // 2. Project + package directories
-    //
-    // Se informa de las mismas rutas que usa el runtime (crate::paths), no de
-    // una copia local: este check existía y mentía porque miraba otro sitio.
     let root = paths::project_root();
     banner::row("Raíz de proyecto", &root.to_string_lossy(), true);
-    // El manifiesto es opcional: un script suelto es un uso legítimo de Orion.
     banner::row(
         "Manifiesto",
         &if paths::has_manifest() {
@@ -29,10 +25,6 @@ pub fn run_doctor() {
         true,
     );
 
-    // Ninguno de los dos directorios es obligatorio: un proyecto sin
-    // dependencias no tiene por qué tener uno, así que se marcan siempre como
-    // correctos y se anota si todavía no existen. Un ✗ aquí haría pensar en una
-    // avería donde solo hay ausencia de paquetes.
     let describe = |d: &std::path::Path| {
         if d.is_dir() { d.to_string_lossy().to_string() }
         else { format!("{} (aún no creado)", d.display()) }

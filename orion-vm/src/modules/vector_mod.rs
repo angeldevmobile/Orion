@@ -54,8 +54,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Int(count as i64))
         }
 
-        // vector.buscar(handle, embedding, top?) → List<{id, score, metadata?}>
-        "buscar" | "search" => {
+        // search(handle, embedding, top?) → List<{id, score, metadata?}>
+        "search" | "buscar" => {
             if args.len() < 2 { return Err("vector.buscar requiere (handle, embedding, top?)".into()); }
             let handle = to_str(&args[0]);
             let query  = to_float_vec(&args[1])?;

@@ -5,11 +5,12 @@ Clean syntax, optional typing, native OOP, 58 built-in modules and a full pipeli
 
 > Built by **Angel Zapata** · 2025-2026
 
-> **Note on naming.** Orion was designed by a Spanish-speaking developer. Core
-> keywords are English (`fn`, `return`, `if`, `while`, `shape`, `serve`), while
-> parts of the standard library use Spanish names, often with an English alias:
-> `db.insertar` / `db.insert`, `cache.tamaño` / `cache.len`. Examples below use
-> the real names, so they run as written.
+> **Note on naming.** Orion is written in English: keywords (`fn`, `return`,
+> `if`, `while`, `shape`, `serve`) and the standard library alike, so
+> `db.insert`, `cache.set` and `validate.required` are the canonical names.
+> Orion was designed by a Spanish-speaking developer, and the Spanish names
+> that came first are kept as permanent aliases: `db.insertar` still works and
+> always will, it is simply documented as an alias of `db.insert`.
 
 ---
 
@@ -21,7 +22,7 @@ Clean syntax, optional typing, native OOP, 58 built-in modules and a full pipeli
 -- demo/demo_ventas_q1.orx  -  70 lines · 16 ms
 use "excel" as excel
 
-full_data = excel.cruzar(sellers, budgets, "region", "left")
+full_data = excel.join(sellers, budgets, "region", "left")
 pivot     = excel.pivot(full_data, "region", "producto", "venta")
 
 excel.write_multi("sales_report.xlsx", {
@@ -313,7 +314,7 @@ The handler receives the request and returns a dict with `status` and `body`.
 ```orion
 use "db"
 
-db.ejecutar("app.db", "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)")
+db.exec("app.db", "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT)")
 
 fn router(req) {
     if req["path"] == "/ping" {
@@ -325,7 +326,7 @@ fn router(req) {
             return { "status": 200, "body": db.query("app.db", "SELECT * FROM users") }
         }
         if req["method"] == "POST" {
-            db.insertar("app.db", "INSERT INTO users (name) VALUES (?)", [req["body"]])
+            db.insert("app.db", "INSERT INTO users (name) VALUES (?)", [req["body"]])
             return { "status": 201, "body": { "ok": yes, "message": "Created" } }
         }
     }
@@ -1148,7 +1149,7 @@ for doc in corpus {
     vector.add(db, doc.id, v, doc.title)
 }
 query_vec = embed.text("When was the company founded?")
-results   = vector.buscar(db, query_vec, 5)
+results   = vector.search(db, query_vec, 5)
 -- → [{id: "doc-12", score: 0.934, metadata: "History"}, ...]
 vector.save(db, "corpus.vdb.json")   -- persist to JSON
 db2 = vector.load("corpus.vdb.json") -- load back

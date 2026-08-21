@@ -305,9 +305,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //   Data pipeline                              
 
-        // filtrar(datos, campo, op, valor) → lista filtrada
+        // filter(datos, campo, op, valor) → lista filtrada
         // op: ">" | "<" | ">=" | "<=" | "==" | "!=" | "contiene" | "empieza" | "termina"
-        "filtrar" | "filter" => {
+        "filter" | "filtrar" => {
             if args.len() < 4 {
                 return Err("excel.filtrar requiere (datos, campo, op, valor)".into());
             }
@@ -324,12 +324,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // agrupar(datos, campo, config?) → list agrupada
+        // group(datos, campo, config?) → list agrupada
         // config: {"suma": ["col1","col2"], "conteo": yes, "promedio": ["col1"]}
         // group(data, campo, spec) — multi-agg
         // spec: { "col": ["sum","avg","max","min","count","first","last","std","median"],
         //         "count": yes }
-        "agrupar" | "group" => {
+        "group" | "agrupar" => {
             if args.len() < 2 {
                 return Err("excel.group requiere (datos, campo, spec?)".into());
             }
@@ -342,7 +342,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             group_by_multi(rows, campo, spec)
         }
 
-        // ordenar(datos, campo, dir?) → sorted — dir: "asc" (default) | "desc"
+        // sort(datos, campo, dir?) → sorted — dir: "asc" (default) | "desc"
         // sort(data, criterios...) — multi-columna
         // Formas:
         //   excel.sort(data, "col+")              → col asc
@@ -350,7 +350,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //   excel.sort(data, "region+", "sales-") → multi-col shorthand
         //   excel.sort(data, [{by:"col",dir:"asc"}, ...]) → explícito
         //   excel.sort(data, "col", "asc"|"desc") → compat. 1-col anterior
-        "ordenar" | "sort_by" | "sort" => {
+        "sort" | "ordenar" | "sort_by" => {
             if args.len() < 2 {
                 return Err("excel.sort requiere (datos, criterio...)".into());
             }
@@ -404,8 +404,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(rows))
         }
 
-        // columna(datos, campo) → lista de valores de esa columna
-        "columna" | "column" => {
+        // column(datos, campo) → lista de valores de esa columna
+        "column" | "columna" => {
             if args.len() < 2 {
                 return Err("excel.columna requiere (datos, campo)".into());
             }
@@ -414,8 +414,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(rows.into_iter().map(|r| dict_get(&r, &campo)).collect()))
         }
 
-        // sumar(datos, campo) → Float — suma de columna numérica
-        "sumar" | "sum_col" => {
+        // sum_col(datos, campo) → Float — suma de columna numérica
+        "sum_col" | "sumar" => {
             if args.len() < 2 {
                 return Err("excel.sumar requiere (datos, campo)".into());
             }
@@ -427,8 +427,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Float(total))
         }
 
-        // promedio(datos, campo) → Float — promedio de columna numérica
-        "promedio" | "avg_col" => {
+        // avg_col(datos, campo) → Float — promedio de columna numérica
+        "avg_col" | "promedio" => {
             if args.len() < 2 {
                 return Err("excel.promedio requiere (datos, campo)".into());
             }
@@ -498,8 +498,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // seleccionar(datos, [campos]) → lista con solo esas columnas
-        "seleccionar" | "select_cols" => {
+        // select_cols(datos, [campos]) → lista con solo esas columnas
+        "select_cols" | "seleccionar" => {
             if args.len() < 2 {
                 return Err("excel.seleccionar requiere (datos, [campos])".into());
             }
@@ -520,8 +520,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // unir(datos1, datos2, ...) → lista concatenada (más claro que +)
-        "unir" | "concat" => {
+        // concat(datos1, datos2, ...) → lista concatenada (más claro que +)
+        "concat" | "unir" => {
             let mut result = Vec::new();
             for arg in &args {
                 match arg {
@@ -532,11 +532,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // cruzar / join — una o múltiples claves
-        // join(data1, data2, "clave", tipo?)
-        // join(data1, data2, ["clave1","clave2"], tipo?)
-        // tipo: "inner" (default) | "left" | "right" | "full"
-        "cruzar" | "join" => {
+        // join(data1, data2, clave, tipo?) → List
+        // clave puede ser "col" o ["col1","col2"]; tipo: "inner" (default) | "left" | "right" | "full"
+        "join" | "cruzar" => {
             if args.len() < 3 {
                 return Err("excel.join requiere (data1, data2, clave|[claves], tipo?)".into());
             }
@@ -555,9 +553,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             join_multi(left, right, claves, &tipo)
         }
 
-        // deduplicar(data, campos?) → filas únicas
+        // dedupe(data, campos?) → filas únicas
         // campos: lista de campos clave — si se omite, usa todos los campos
-        "deduplicar" | "dedupe" => {
+        "dedupe" | "deduplicar" => {
             if args.is_empty() {
                 return Err("excel.deduplicar requiere (data, [campos]?)".into());
             }
@@ -569,8 +567,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             deduplicate(rows, campos)
         }
 
-        // estadisticas(data, campo) → dict { min, max, sum, avg, count, std, mediana }
-        "estadisticas" | "stats" => {
+        // stats(data, campo) → dict { min, max, sum, avg, count, std, mediana }
+        "stats" | "estadisticas" => {
             if args.len() < 2 {
                 return Err("excel.estadisticas requiere (data, campo)".into());
             }
@@ -579,8 +577,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             compute_stats(rows, campo)
         }
 
-        // renombrar_col(data, viejo, nuevo) → lista con columna renombrada
-        "renombrar_col" | "rename_col" => {
+        // rename_col(data, viejo, nuevo) → lista con columna renombrada
+        "rename_col" | "renombrar_col" => {
             if args.len() < 3 {
                 return Err("excel.renombrar_col requiere (data, viejo, nuevo)".into());
             }
@@ -598,8 +596,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // rellenar(data, campo, valor) → reemplaza nulos/vacíos en campo con valor
-        "rellenar" | "fill_null" => {
+        // fill_null(data, campo, valor) → reemplaza nulos/vacíos en campo con valor
+        "fill_null" | "rellenar" => {
             if args.len() < 3 {
                 return Err("excel.rellenar requiere (data, campo, valor)".into());
             }

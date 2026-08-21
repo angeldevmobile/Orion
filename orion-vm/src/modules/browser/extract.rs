@@ -46,11 +46,6 @@ pub struct Campo {
     pub conv:   Option<String>,
 }
 
-/// Busca el separador `sep` más a la derecha que esté fuera de corchetes.
-///
-/// Hace falta porque `@` y `|` aparecen dentro de los selectores: `//a[@href]`
-/// lleva una arroba que no es el sufijo de atributo, y partir por la primera
-/// —o por la última sin mirar— rompería todos los XPath con predicado.
 fn corte(spec: &str, sep: char) -> Option<usize> {
     let mut nivel = 0i32;
     let mut hallado = None;
@@ -76,8 +71,6 @@ pub fn parse_campo(nombre: &str, spec: &str) -> Result<Campo, String> {
                 return Err(format!("campo '{nombre}': falta la conversión después de '|'"));
             }
             const VALIDAS: [&str; 6] = ["num", "int", "bool", "html", "text", "trim"];
-            // `list` recoge TODAS las coincidencias en vez de la primera, y
-            // admite una conversión detrás para el contenido: `list:num`.
             let sub = match c.strip_prefix("list") {
                 Some(r) => Some(r.trim_start_matches(':')),
                 None => None,
@@ -117,11 +110,6 @@ pub fn parse_campo(nombre: &str, spec: &str) -> Result<Campo, String> {
     })
 }
 
-/// JavaScript que resuelve un campo dentro de una fila y convierte el valor.
-///
-/// La conversión numérica merece cuidado: los precios reales vienen como
-/// `"1.234,56 €"` o `"$1,234.56"`, y quedarse con los dígitos sin más daría
-/// 123456. Se decide por cuál de los dos separadores aparece el último.
 const EXTRAER_JS: &str = r#"
 const __enFila = (fila, sel) => {
   if (!sel) return fila;
@@ -311,10 +299,6 @@ pub fn extract(
         .unwrap_or(serde_json::Value::Null);
     let total = v.get("total").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
 
-    // Un campo que falla en TODAS las filas casi nunca es un dato ausente: es un
-    // selector equivocado, o el sitio que cambió de estructura. Distinguirlo de
-    // "esta fila no tiene ese dato opcional" es justo lo que evita el fallo
-    // silencioso de BeautifulSoup, donde el null se propaga cien líneas.
     let mut muertos = Vec::new();
     if total > 0 {
         if let Some(vac) = v.get("vacios").and_then(|x| x.as_object()) {
@@ -363,8 +347,6 @@ mod tests {
 
     #[test]
     fn la_arroba_de_un_xpath_no_es_el_sufijo_de_atributo() {
-        // `//a[@href]` lleva una arroba dentro del predicado. Partir por la
-        // primera —o por la última sin mirar corchetes— rompería todo XPath
         // con predicado, que son casi todos.
         let x = c("enlace", "//a[@href]");
         assert_eq!(x.sel, "//a[@href]");
@@ -422,8 +404,6 @@ mod tests {
 
     #[test]
     fn el_js_de_numeros_cubre_los_dos_formatos() {
-        // No se ejecuta JS aquí; se comprueba que la lógica de ambos
-        // separadores está presente, porque perderla convertiría "1.234,56" en
         // 123456 sin que ningún test lo notara.
         assert!(EXTRAER_JS.contains("lastIndexOf(',')"));
         assert!(EXTRAER_JS.contains("lastIndexOf('.')"));
@@ -451,13 +431,6 @@ impl Formato {
     }
 }
 
-/// Escritor que mantiene la memoria acotada.
-///
-/// El CSV se escribe fila a fila, así que la memoria es constante de verdad. El
-/// `.odf` lleva el número de filas en la cabecera y no admite añadir al final,
-/// así que se acumula un bloque y se vuelca — el mismo patrón que usa
-/// `frame.txt_to_odf`. En los dos casos lo que nunca ocurre es tener el listado
-/// entero en RAM, que es lo que hace un scraper de Python antes de guardar.
 pub struct Volcador {
     formato:  Formato,
     ruta:     String,
@@ -490,13 +463,6 @@ impl Volcador {
         })
     }
 
-    /// Abre para **seguir escribiendo** al final de un archivo que ya existe.
-    ///
-    /// Lo necesita `crawl` al reanudar: un recorrido que se cortó a la mitad ya
-    /// dejó filas en disco, y volver a crear el archivo las borraría. Solo tiene
-    /// sentido en CSV, que admite añadir al final; el `.odf` lleva el número de
-    /// filas en la cabecera y numera bloques, así que reanudar sobre él es otra
-    /// cosa —se rechaza con un mensaje claro en vez de corromper el archivo—.
     pub fn continuar(ruta: &str, headers: Vec<String>, chunk: usize) -> Result<Volcador, String> {
         let formato = Formato::de_ruta(ruta)?;
         if !matches!(formato, Formato::Csv) {
@@ -537,9 +503,6 @@ impl Volcador {
     /// Vuelca el bloque pendiente y **libera** su memoria.
     fn volcar_bloque(&mut self) -> Result<(), String> {
         if self.buffer.is_empty() { return Ok(()); }
-        // El primer bloque conserva el nombre pedido; a partir del segundo se
-        // numeran. Así el caso normal produce el archivo que el usuario escribió
-        // y el caso grande no pisa nada.
         let ruta = if self.archivos.is_empty() {
             self.ruta.clone()
         } else {
@@ -567,10 +530,6 @@ impl Volcador {
     }
 }
 
-/// Convierte un valor JSON de un campo a su forma textual para el volcado.
-///
-/// Los nulos van como cadena vacía, que es lo que tanto CSV como la inferencia
-/// de columnas del `.odf` entienden como ausencia.
 pub fn a_texto(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Null => String::new(),

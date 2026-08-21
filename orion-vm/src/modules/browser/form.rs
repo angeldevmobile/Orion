@@ -39,13 +39,6 @@ use super::dom;
 use super::launch::Tuning;
 
 //    Rellenar un formulario
-
-/// JavaScript que asigna un valor a un control, sea del tipo que sea.
-///
-/// El tipo de control lo decide la página, no quien escribe el programa: pedir
-/// `fill` para los textos, `select` para los desplegables y `check` para las
-/// casillas obligaría a saber de qué está hecho cada campo antes de escribir
-/// una línea.
 const RELLENAR_JS: &str = r#"
 const __esVerdad = (v) =>
   !(v === false || v === 0 || v === null || v === undefined ||
@@ -122,10 +115,6 @@ pub struct Relleno {
     pub fallidos: Vec<(String, String)>,
 }
 
-/// Rellena varios campos de una vez. `campos` es una lista `(selector, valor)`.
-///
-/// El orden se respeta porque importa: un desplegable de provincia que solo se
-/// llena al elegir el país tiene que ir después del país.
 pub fn fill(
     conn: &Conn, session: &str, campos: &[(String, serde_json::Value)],
     ms: u64, t: &Tuning,
@@ -197,11 +186,6 @@ pub fn fill(
     })
 }
 
-/// Mensaje de lo que no se pudo rellenar.
-///
-/// Un campo que no se rellena casi nunca es un dato que faltaba: es el selector
-/// equivocado, o el formulario que cambió. Callarlo deja el envío incompleto y
-/// el fallo aparece en el servidor de otro, sin nada que lo relacione con esto.
 pub fn queja(r: &Relleno) -> Option<String> {
     if r.ausentes.is_empty() && r.fallidos.is_empty() {
         return None;
@@ -255,25 +239,6 @@ pub fn estado_casilla(
 }
 
 //    Tablas
-
-/// Lee una `<table>` entera y devuelve sus filas como registros.
-///
-/// Las decisiones de aquí no salen de un ejemplo de manual sino de mirar tablas
-/// reales. En tres páginas de Wikipedia, de 13 tablas: **ninguna tenía
-/// `<thead>`**, 10 llevaban `<th>` dentro del cuerpo (encabezados de fila, no de
-/// tabla), 4 usaban `colspan`/`rowspan` y una tenía otra tabla dentro.
-///
-/// Un lector que dé por hecho el `<thead>` —que es como sale la primera
-/// versión— funciona perfecto en el sitio de demostración y falla en el 100% de
-/// las tablas de verdad. De ahí las cuatro reglas:
-///
-/// 1. La cabecera se busca en cascada: `<thead>`, o la primera fila si **todas**
-///    sus celdas son `<th>`, o nombres generados.
-/// 2. Exigir que sean *todas* `<th>` es lo que evita confundir una fila de datos
-///    que empieza con un encabezado de fila con la cabecera de la tabla.
-/// 3. `colspan` y `rowspan` se expanden a una rejilla, o las columnas se
-///    desalinean a partir de la primera celda combinada.
-/// 4. Las filas de una tabla anidada pertenecen a la de dentro, no a esta.
 pub fn table(
     conn: &Conn, session: &str, sel: &str, con_cabecera: bool, ms: u64, t: &Tuning,
 ) -> Result<serde_json::Value, String> {

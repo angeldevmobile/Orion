@@ -38,16 +38,6 @@ thread_local! {
 
 //     OrionVal                                                                 
 
-/// Valor Orion boxeado en heap. Tamaño fijo: 24 bytes.
-/// Siempre pasado como puntero crudo (i64) en el ABI del JIT.
-///
-/// Distribución de campos:
-/// - INT:   data_i = valor i64
-/// - BOOL:  data_i = 0 (no) ó 1 (yes)
-/// - STR:   data_i = puntero a bytes UTF-8 terminados en '\0'
-/// - FLOAT: data_f = valor f64  (data_i sin uso)
-/// - NULL:  ambos = 0
-#[repr(C)]
 pub struct OrionVal {
     pub tag:    u8,
     pub _pad:   [u8; 7],
@@ -310,10 +300,6 @@ pub extern "C" fn rt_neg(a: i64) -> i64 {
 
 //     Comparación                                                              
 
-/// Igualdad del operador `==`, idéntica a `Value::compare_eq` de la VM:
-/// numérica con promoción int↔float, y ESTRUCTURAL (recursiva) para listas y
-/// dicts. Antes el JIT solo comparaba escalares y devolvía `false` para
-/// listas/dicts → `[1,2] == [1,2]` daba `no` (divergencia con la VM).
 unsafe fn jit_vals_equal(a: i64, b: i64) -> bool {
     let av = val_ref(a);
     let bv = val_ref(b);
@@ -437,7 +423,6 @@ pub extern "C" fn rt_push_arg(val: i64) {
 }
 
 /// Construye una Lista con los N primeros elementos del buffer.
-/// El compilador empuja los elementos en orden (elem_0 primero).
 #[no_mangle]
 pub extern "C" fn rt_make_list_n(n: i64) -> i64 {
     ARG_BUF.with(|b| {
@@ -450,8 +435,6 @@ pub extern "C" fn rt_make_list_n(n: i64) -> i64 {
 }
 
 /// Construye un Diccionario con N pares del buffer.
-/// El compilador empuja en orden: val_{n-1}, key_{n-1}, ..., val_0, key_0
-/// (mismo orden de pop del stack → mismo orden de inserción que el intérprete).
 #[no_mangle]
 pub extern "C" fn rt_make_dict_n(n: i64) -> i64 {
     ARG_BUF.with(|b| {
@@ -693,7 +676,6 @@ pub extern "C" fn rt_read_env(key: i64, cast_ptr: i64) -> i64 {
 }
 
 /// Carga un módulo por nombre/path y devuelve un dict con su namespace.
-/// Soporta el módulo builtin "math" con constantes. Los módulos .orx devuelven dict vacío.
 #[no_mangle]
 pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
     unsafe {
@@ -702,9 +684,6 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or(path_str);
-
-        // Path explícito (p.ej. "packages/math") → el archivo .orx tiene prioridad
-        // sobre los módulos nativos del mismo nombre (paridad con la VM).
         let explicit_path = path_str.contains('/') || path_str.contains('\\');
         let resolved = crate::paths::resolve_module_file(path_str)
             .map(|p| p.to_string_lossy().to_string());
@@ -750,24 +729,6 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
 }
 
 //     Variables globales
-//
-// El JIT compila cada función con variables **locales** de Cranelift, así que
-// una función no tenía forma de ver algo definido fuera de ella. Al ejecutar
-// con `orion run` no se nota, porque ahí manda la VM; pero un ejecutable
-// compilado va entero por este camino, y un global leído dentro de una función
-// llegaba como null.
-//
-// El síntoma no siempre era un error. `use "fs"` define un global, así que
-// `fs.cwd()` dentro de una función recibía null como receptor y abortaba con un
-// mensaje sobre `CallMethod` que no apuntaba a la causa. Pero un cálculo con una
-// constante global —un tipo de IVA, sin ir más lejos— daba **otro resultado**
-// que en `orion run`, sin avisar. Un binario que miente es peor que uno que se
-// cae.
-//
-// La tabla es de proceso y no por hilo: una tarea lanzada con `spawn` corre en
-// otro hilo del pool y tiene que ver los mismos globales que el resto. Los
-// punteros son a valores del heap del JIT, que no se liberan mientras el
-// programa vive.
 
 static GLOBALS: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
 
@@ -783,10 +744,6 @@ pub extern "C" fn rt_store_global(name_ptr: i64, val: i64) {
 }
 
 /// Lee un global. Lo emite una función al usar un nombre que no es suyo.
-///
-/// Si no existe devuelve null, que es lo mismo que hace la VM con una variable
-/// desconocida: el objetivo de esto es la paridad, no inventar una semántica
-/// nueva para el camino compilado.
 #[no_mangle]
 pub extern "C" fn rt_load_global(name_ptr: i64) -> i64 {
     let name = unsafe { cstr_to_str(name_ptr) };
@@ -809,16 +766,12 @@ pub fn register_jit_fn(name: &str, fn_ptr: i64) {
 }
 
 /// `rt_register_fn(name, fn_ptr)` — versión C-ABI para binarios AOT, donde el
-/// registro lo emite el prólogo de `main` en vez de hacerlo el compilador.
 #[no_mangle]
 pub extern "C" fn rt_register_fn(name_ptr: i64, fn_ptr: i64) {
     let name = unsafe { cstr_to_str(name_ptr) };
     register_jit_fn(name, fn_ptr);
 }
 
-/// Estado compartido de una tarea async en el JIT. Como el resultado JIT es un
-/// simple `i64` (OrionVal NaN-boxed, Copy), basta un Option<i64> + Condvar para
-/// parking real: rt_await se aparca en vez de girar en un sleep-loop.
 pub struct JitTask {
     result: Mutex<Option<i64>>,
     done:   Condvar,
@@ -873,7 +826,6 @@ unsafe fn call_fn_n(fn_ptr: i64, args: &[i64]) -> i64 {
 //     JIT-6: Closures
 
 /// Crea un valor Closure que apunta al fn_ptr de la función capturada.
-/// En el JIT las llamadas son estáticas, por lo que el closure es solo un marcador.
 #[no_mangle]
 pub extern "C" fn rt_make_closure(fn_name_ptr: i64) -> i64 {
     let fn_name = unsafe { cstr_to_str(fn_name_ptr).to_string() };
@@ -884,8 +836,6 @@ pub extern "C" fn rt_make_closure(fn_name_ptr: i64) -> i64 {
 //     JIT-6: Async
 
 /// Lanza la función JIT identificada por `fn_name_ptr` en un hilo nuevo.
-/// Los `n_args` argumentos se toman del ARG_BUF thread-local.
-/// Devuelve un OrionVal TAG_TASK que puede ser esperado con rt_await.
 #[no_mangle]
 pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
     let fn_name = unsafe { cstr_to_str(fn_name_ptr).to_string() };
@@ -919,7 +869,6 @@ pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
 }
 
 /// Bloquea hasta que la tarea (TAG_TASK) complete y devuelve su resultado.
-/// Si el valor no es un TAG_TASK, lo devuelve sin modificar.
 #[no_mangle]
 pub extern "C" fn rt_await(task: i64) -> i64 {
     unsafe {

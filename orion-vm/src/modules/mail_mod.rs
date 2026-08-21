@@ -5,13 +5,13 @@ use lettre::message::header::ContentType;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // enviar(smtp, usuario, clave, de, para, asunto, cuerpo) → Bool
-        "enviar" | "send" => {
+        // send(smtp, usuario, clave, de, para, asunto, cuerpo) → Bool
+        "send" | "enviar" => {
             check_len(&args, 7, "mail.enviar requiere (smtp, usuario, clave, de, para, asunto, cuerpo)")?;
             send_mail(&args, false)
         }
-        // enviar_html(smtp, usuario, clave, de, para, asunto, html) → Bool
-        "enviar_html" | "send_html" => {
+        // send_html(smtp, usuario, clave, de, para, asunto, html) → Bool
+        "send_html" | "enviar_html" => {
             check_len(&args, 7, "mail.enviar_html requiere (smtp, usuario, clave, de, para, asunto, html)")?;
             send_mail(&args, true)
         }

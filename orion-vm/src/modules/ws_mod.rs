@@ -16,8 +16,8 @@ fn conns() -> &'static Mutex<HashMap<u64, WsConn>> {
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // conectar(url) → id Int
-        "conectar" | "connect" => {
+        // connect(url) → id Int
+        "connect" | "conectar" => {
             let url = one_str("ws.conectar", &args)?;
             let (socket, _) = connect(&url)
                 .map_err(|e| format!("ws.conectar '{}': {}", url, e))?;
@@ -25,8 +25,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             conns().lock().unwrap().insert(id, socket);
             Ok(EvalValue::Int(id as i64))
         }
-        // enviar(id, mensaje) → Bool
-        "enviar" | "send" => {
+        // send(id, mensaje) → Bool
+        "send" | "enviar" => {
             if args.len() < 2 { return Err("ws.enviar requiere (id, mensaje)".into()); }
             let id  = to_u64(&args[0])?;
             let msg = to_str(&args[1]);
@@ -37,8 +37,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .map_err(|e| format!("ws.enviar: {}", e))?;
             Ok(EvalValue::Bool(true))
         }
-        // recibir(id) → String o Null
-        "recibir" | "recv" => {
+        // recv(id) → String o Null
+        "recv" | "recibir" => {
             let id = to_u64(args.first().ok_or("ws.recibir requiere (id)")?)?;
             match conns().lock().unwrap()
                 .get_mut(&id)
@@ -51,16 +51,16 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 _                  => Ok(EvalValue::Null),
             }
         }
-        // cerrar(id) → Bool
-        "cerrar" | "close" => {
+        // close(id) → Bool
+        "close" | "cerrar" => {
             let id = to_u64(args.first().ok_or("ws.cerrar requiere (id)")?)?;
             if let Some(mut conn) = conns().lock().unwrap().shift_remove(&id) {
                 let _ = conn.close(None);
             }
             Ok(EvalValue::Bool(true))
         }
-        // conexiones() → List<Int> de ids activos
-        "conexiones" | "connections" => {
+        // connections() → List<Int> de ids activos
+        "connections" | "conexiones" => {
             let ids: Vec<EvalValue> = conns().lock().unwrap()
                 .keys().map(|k| EvalValue::Int(*k as i64)).collect();
             Ok(EvalValue::List(ids))

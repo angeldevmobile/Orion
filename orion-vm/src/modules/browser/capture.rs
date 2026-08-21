@@ -42,9 +42,6 @@ pub fn casa(url: &str, patron: &str) -> bool {
 
     let partes: Vec<&str> = p.split('*').collect();
     let mut resto = url;
-
-    // El primer trozo tiene que estar pegado al principio si el patrón no
-    // empieza por comodín; el último, al final por el mismo motivo.
     for (i, trozo) in partes.iter().enumerate() {
         if trozo.is_empty() { continue; }
         if i == 0 {

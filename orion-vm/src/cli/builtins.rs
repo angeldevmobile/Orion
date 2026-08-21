@@ -1,39 +1,17 @@
 //! Registro central de builtins de Orion — la "typeshed" del lenguaje.
-//!
-//! El compilador es la ÚNICA fuente de verdad para la documentación de keywords,
-//! funciones globales, métodos de tipos (list/string/dict) y funciones de módulo.
-//! `orion --builtins-json` lo serializa y la extensión de VS Code (LSP) lo lee al
-//! arrancar → hover/autocompletado SIEMPRE completos y en sync, sin JSON a mano.
-//!
-//! Para documentar algo nuevo: agrega una entrada aquí y reconstruye. La extensión
-//! lo recoge sola (igual que un docstring de Python lo recogen todas las tools).
 
 use serde::Serialize;
 
 /// Un parámetro de una firma, ya desmenuzado.
-///
-/// La firma se escribe una sola vez, en el comentario de contrato del módulo, y
-/// de ahí sale tanto el texto que se enseña como esto. Tenerlo estructurado es
-/// lo que permite que el editor pinte cada parámetro por separado y que el
-/// chequeo de tipos pueda mirarlos, en vez de tener una cadena que solo sirve
-/// para mostrar.
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct ParamDoc {
     pub name: String,
-    /// `None` cuando el contrato no declara tipo, que es el caso mayoritario
-    /// todavía. Sin tipo no se puede comprobar nada, y eso es correcto: es mejor
-    /// no saber que inventarse un tipo.
     #[serde(rename = "type")]
     pub ty: Option<String>,
-    /// Escrito `nombre?` en el contrato.
     pub optional: bool,
 }
 
 /// Desmenuza `mod.fn(a: string, b?: int, c) -> tipo` en sus partes.
-///
-/// Devuelve `(params, retorno)`. Se separa por las comas de PRIMER nivel: hay
-/// firmas con listas y dicts dentro —`gui.fields([["Etiqueta", "valor"], …],
-/// opts?)`— y partir por todas las comas las trocearía por la mitad.
 pub fn parse_signature(signature: &str) -> (Vec<ParamDoc>, Option<String>) {
     let abre = match signature.find('(') { Some(i) => i, None => return (Vec::new(), None) };
     let cierra = match signature.rfind(')') { Some(i) if i > abre => i, _ => return (Vec::new(), None) };
@@ -65,16 +43,6 @@ pub fn parse_signature(signature: &str) -> (Vec<ParamDoc>, Option<String>) {
     (params, retorno)
 }
 
-/// ¿Lo que hay tras los dos puntos es un tipo, o es prosa?
-///
-/// No todas las firmas son contratos: algunas usan `clave: valor` para enseñar
-/// las opciones de un dict —`excel.long(datos, keep: [campos], var:
-/// "nombre_col")`— y tomarlo por un tipo producía cosas como
-/// `'"nombre_val") Convierte formato ancho a largo'`. Un tipo de verdad es una
-/// palabra, quizá con corchetes (`list[int]`); en cuanto aparecen comillas,
-/// espacios o paréntesis, es texto y se descarta. Mejor sin tipo que con uno
-/// inventado: un tipo falso ensucia el hover y, ahora que el chequeo los mira,
-/// generaría avisos sobre código correcto.
 fn es_tipo(t: &str) -> bool {
     !t.is_empty()
         && t.len() <= 24
@@ -133,8 +101,6 @@ fn e(name: &str, qualified: &str, owner: &str, kind: &str, signature: &str, desc
         signature: signature.into(),
         description: description.into(),
         example: example.into(),
-        // Se derivan de la firma en `registry()`, de una vez para todas las
-        // entradas vengan de donde vengan (curadas a mano o generadas).
         params: Vec::new(),
         returns: None,
     }
@@ -170,18 +136,11 @@ pub fn registry() -> Vec<BuiltinDoc> {
     modules(&mut v);
     math_module(&mut v);
 
-    // Resto de la stdlib: entradas extraídas de los match-arms de src/modules/*.rs
-    // (node scripts/gen_builtins.js). Lo curado a mano arriba tiene prioridad:
-    // se descarta todo qualified ya presente.
     let seen: std::collections::HashSet<String> = v.iter().map(|e| e.qualified.clone()).collect();
     let mut generated = Vec::new();
     super::builtins_gen::generated_modules(&mut generated);
     v.extend(generated.into_iter().filter(|e| !seen.contains(&e.qualified)));
 
-    // Un solo sitio donde se desmenuza la firma, después de juntarlo todo. Así
-    // da igual si la entrada se escribió a mano arriba o la sacó el generador de
-    // los comentarios: las dos acaban con los mismos datos estructurados, y no
-    // hay forma de que el texto y las partes digan cosas distintas.
     for doc in v.iter_mut() {
         let (params, returns) = parse_signature(&doc.signature);
         doc.params = params;

@@ -16,15 +16,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-/// Opciones de arranque. Todo tiene un valor por defecto sensato y todo se
-/// puede cambiar desde Orion: aquí no hay constantes escondidas.
 #[derive(Debug, Clone)]
 pub struct LaunchOpts {
     pub chrome:    Option<String>,
     pub headless:  bool,
-    /// Las imágenes se desactivan por defecto: son el grueso del consumo de
-    /// memoria y de red de una página, y casi ningún scraper las necesita.
-    /// Se reactivan con `images: yes` (obligatorio para capturas fieles).
     pub images:    bool,
     pub gpu:       bool,
     pub width:     u32,
@@ -33,11 +28,6 @@ pub struct LaunchOpts {
     pub timeout:   Duration,
     /// Banderas añadidas por el programa. Van al final, así que mandan.
     pub extra:     Vec<String>,
-    /// Banderas por defecto que hay que **quitar**.
-    ///
-    /// Sin esto, `extra` solo podía añadir: un sitio que necesitara extensiones
-    /// no tenía forma de deshacer `--disable-extensions`, porque en Chrome una
-    /// bandera posterior no siempre revierte a la anterior.
     pub sin:       Vec<String>,
 }
 
@@ -58,27 +48,11 @@ impl Default for LaunchOpts {
     }
 }
 
-/// Afinado interno del motor.
-///
-/// Separado de `LaunchOpts` a propósito. Arriba van las decisiones sobre *tu*
-/// problema —cuánto esperar, qué navegador, cuántos pasos de arrastre—, que
-/// nunca deberían estar fijadas. Aquí abajo va el mecanismo: no cambia la
-/// semántica de nada, solo el uso de CPU y memoria.
-///
-/// Se expone igualmente porque el consumo de recursos también es observable, y
-/// un valor que no puedes tocar cuando te estorba es un valor hardcodeado por
-/// mucho que se llame "detalle interno". Pero vive aparte para no ensuciar la
-/// API que se usa a diario: cada perilla es superficie que hay que mantener.
 #[derive(Debug, Clone)]
 pub struct Tuning {
-    //   Política: decisiones del programa
-    /// Espera por defecto de las acciones y lecturas, en ms.
     pub wait_ms:       u64,
     /// Cada cuánto se reintenta dentro de la página mientras se espera.
     pub retry_ms:      u64,
-    /// Margen que se le da al plazo de CDP sobre el de la propia espera, para
-    /// que un vencimiento se reporte como "no apareció" y no como fallo de
-    /// transporte.
     pub cdp_margin_ms: u64,
     /// Pasos intermedios de un arrastre. Menos de dos y las librerías de
     /// drag-and-drop no reciben `dragover`.
@@ -89,13 +63,8 @@ pub struct Tuning {
     pub iframe_depth:  u32,
     /// Margen en píxeles al probar puntos dentro de un elemento.
     pub hit_inset:     f64,
-    /// Cuánto se tolera que la página esté cambiando de documento antes de dar
-    /// por perdida una lectura. Cubre el hueco entre que un clic tira el
-    /// documento actual y el navegador monta el siguiente.
     pub nav_settle_ms: u64,
 
-    //   Mecanismo: uso de recursos
-    /// Eventos CDP retenidos. Más historial es más RAM.
     pub max_events:    usize,
     /// Techo del sondeo del hilo lector cuando no hay nada en vuelo. Subirlo
     /// baja la CPU en reposo a cambio de algo de latencia.
@@ -146,8 +115,6 @@ pub struct Launched {
     pub ws_url:    String,
     pub exe:       String,
     pub user_data: PathBuf,
-    /// El perfil lo creamos nosotros y se borra al cerrar; uno indicado por el
-    /// usuario no se toca, porque contiene sus sesiones.
     pub temporal:  bool,
 }
 
@@ -224,10 +191,6 @@ pub fn resolve_browser(preferido: Option<&str>) -> Result<PathBuf, String> {
 }
 
 /// Argumentos de arranque.
-///
-/// La lista está podada a propósito: cada bandera apaga algo que un navegador
-/// automatizado no necesita y que sí consume memoria o red. Lo que el usuario
-/// añada en `extra` va al final y por tanto manda.
 fn args(opts: &LaunchOpts, user_data: &PathBuf) -> Vec<String> {
     let mut a: Vec<String> = vec![
         "--remote-debugging-port=0".into(),
@@ -260,9 +223,6 @@ fn args(opts: &LaunchOpts, user_data: &PathBuf) -> Vec<String> {
         a.push("--blink-settings=imagesEnabled=false".into());
     }
 
-    // Quitar lo que el programa haya pedido quitar. Se compara por el nombre de
-    // la bandera (antes del `=`) para que `--blink-settings` valga sin tener que
-    // repetir su valor exacto.
     if !opts.sin.is_empty() {
         let nombre = |s: &str| s.split('=').next().unwrap_or(s).to_string();
         let fuera: Vec<String> = opts.sin.iter().map(|s| nombre(s)).collect();
@@ -275,9 +235,6 @@ fn args(opts: &LaunchOpts, user_data: &PathBuf) -> Vec<String> {
 }
 
 /// Borra los perfiles temporales de Orion más viejos que `minutos`.
-///
-/// Los fallos se ignoran a propósito: un perfil bloqueado es justo el de un
-/// navegador vivo, y no poder borrarlo es la respuesta correcta.
 fn barrer_perfiles_viejos(minutos: u64) {
     if minutos == 0 { return; }
     let umbral = Duration::from_secs(minutos * 60);
@@ -299,17 +256,6 @@ fn barrer_perfiles_viejos(minutos: u64) {
     }
 }
 
-/// Lee el endpoint CDP del archivo `DevToolsActivePort` del perfil.
-///
-/// El formato son dos líneas: el puerto y la ruta del navegador.
-///
-/// ```text
-/// 53133
-/// /devtools/browser/c3fa616c-33d0-4022-9e1b-ba61260313d6
-/// ```
-///
-/// El archivo puede aparecer a medio escribir, así que solo se acepta cuando
-/// las dos líneas están completas; si no, se reintenta en la siguiente vuelta.
 fn leer_puerto(archivo: &PathBuf) -> Option<String> {
     let contenido = std::fs::read_to_string(archivo).ok()?;
     let mut lineas = contenido.lines();
@@ -324,15 +270,6 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
     let exe = resolve_browser(opts.chrome.as_deref())?;
 
     // Barrido de perfiles abandonados.
-    //
-    // Al cerrar se intenta borrar el perfil, pero el navegador tarda un instante
-    // en soltar los archivos y a veces la ventana de reintentos se queda corta;
-    // y un programa que muere de golpe no llega a limpiar nada. Sin esto, cada
-    // caso deja unos megabytes en el temporal para siempre.
-    //
-    // Es seguro: un perfil en uso está bloqueado y el borrado falla sin más. El
-    // filtro por edad protege el caso Unix, donde sí se puede borrar un
-    // directorio abierto y eso rompería una sesión viva.
     barrer_perfiles_viejos(tuning.stale_profile_mins);
 
     let (user_data, temporal) = match &opts.user_data {
@@ -351,8 +288,6 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
     std::fs::create_dir_all(&user_data)
         .map_err(|e| format!("no se pudo crear el perfil en {}: {e}", user_data.display()))?;
 
-    // Si el perfil es del usuario puede traer el archivo de una sesión anterior;
-    // leerlo daría el puerto de un navegador que ya no existe.
     let puerto_file = user_data.join("DevToolsActivePort");
     let _ = std::fs::remove_file(&puerto_file);
 
@@ -366,9 +301,6 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
     let stderr = child.stderr.take()
         .ok_or("no se pudo leer la salida del navegador")?;
 
-    // El navegador anuncia su endpoint en stderr. Se lee desde otro hilo porque
-    // no hay forma portable de leer con plazo: si Chrome nunca lo imprime, el
-    // hilo se queda ahí y el plazo lo pone el canal, no la lectura.
     let (tx, rx) = mpsc::channel::<String>();
     let diag = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let diag_hilo = std::sync::Arc::clone(&diag);
@@ -378,8 +310,6 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
             for linea in BufReader::new(stderr).lines().map_while(Result::ok) {
                 if let Some(url) = linea.split("DevTools listening on ").nth(1) {
                     let _ = tx.send(url.trim().to_string());
-                    // Se sigue drenando: si nadie lee el stderr, Chrome se
-                    // bloquea al llenarse la tubería.
                     continue;
                 }
                 let mut d = diag_hilo.lock().unwrap();
@@ -388,22 +318,12 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
         })
         .map_err(|e| format!("no se pudo leer la salida del navegador: {e}"))?;
 
-    // Dos fuentes para el mismo dato, porque no todos los navegadores dan las
-    // dos: **Chrome** lo anuncia por stderr y además escribe el archivo;
-    // **Edge no escribe nada en stderr**, solo el archivo. Leer solo el stderr
-    // era asumir el comportamiento de Chrome y dejaba Edge inservible, que en
-    // Windows es justo el navegador que siempre está.
     let limite = std::time::Instant::now() + opts.timeout;
     let mut encontrado: Option<String> = None;
     let mut relanzo = false;
     while std::time::Instant::now() < limite {
         if let Ok(url) = rx.try_recv() { encontrado = Some(url); break; }
         if let Some(url) = leer_puerto(&puerto_file) { encontrado = Some(url); break; }
-        // Que el proceso lanzado haya terminado NO significa que no haya
-        // navegador: Edge se relanza a sí mismo y su lanzador muere enseguida,
-        // escribiendo el puerto el proceso hijo. Cortar aquí lo daba por
-        // fallido justo cuando estaba a punto de funcionar. Solo se anota, para
-        // poder decirlo si al final vence el plazo.
         if !relanzo && matches!(child.try_wait(), Ok(Some(_))) { relanzo = true; }
         std::thread::sleep(Duration::from_millis(25));
     }
@@ -442,8 +362,6 @@ mod tests {
 
     #[test]
     fn hay_candidatos_para_esta_plataforma() {
-        // No se exige que estén instalados, solo que la lista no esté vacía:
-        // una plataforma sin candidatos sería un olvido, no una configuración.
         assert!(!candidatos().is_empty(), "no hay rutas candidatas en esta plataforma");
     }
 
@@ -480,8 +398,6 @@ mod tests_tuning {
 
     #[test]
     fn los_defaults_siguen_siendo_los_de_antes() {
-        // Hacer configurable algo no debe cambiar cómo se comporta por defecto:
-        // el que no toca nada tiene que ver exactamente lo de siempre.
         let t = Tuning::default();
         assert_eq!(t.wait_ms, 10_000);
         assert_eq!(t.retry_ms, 50);
@@ -501,8 +417,6 @@ mod tests_tuning {
         let normal = args(&LaunchOpts::default(), &dir);
         assert!(normal.iter().any(|a| a == "--disable-extensions"));
 
-        // Un sitio que necesite extensiones tiene que poder deshacerlo: añadir
-        // no basta porque en Chrome una bandera posterior no siempre revierte.
         let sin = LaunchOpts {
             sin: vec!["--disable-extensions".into()],
             ..Default::default()
@@ -516,8 +430,6 @@ mod tests_tuning {
 
     #[test]
     fn quitar_una_bandera_no_exige_repetir_su_valor() {
-        // `--blink-settings=imagesEnabled=false` se quita nombrando solo la
-        // bandera, sin tener que reproducir el valor exacto.
         let opts = LaunchOpts {
             sin: vec!["--blink-settings".into()],
             ..Default::default()
@@ -558,8 +470,6 @@ mod tests_arranque {
 
     #[test]
     fn un_archivo_a_medio_escribir_no_se_acepta() {
-        // El navegador lo escribe en dos pasos; leerlo a medias daría una URL
-        // inválida y un fallo de conexión desconcertante.
         let d = std::env::temp_dir().join("orion_test_devtools_parcial");
         let _ = std::fs::create_dir_all(&d);
         let f = d.join("DevToolsActivePort");

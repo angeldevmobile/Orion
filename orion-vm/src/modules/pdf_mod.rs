@@ -7,41 +7,41 @@ use std::io::BufWriter;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // crear(path, texto) → Bool
-        "crear" | "create" => {
+        // create(path, texto) → Bool
+        "create" | "crear" => {
             if args.len() < 2 { return Err("pdf.crear requiere (path, texto)".into()); }
             create_pdf(&to_str(&args[0]), &to_str(&args[1]))
         }
-        // paginas(path) → Int
-        "paginas" | "pages" => {
+        // pages(path) → Int
+        "pages" | "paginas" => {
             let path = one_str("pdf.paginas", &args)?;
             let doc = Document::load(&path)
                 .map_err(|e| format!("pdf.paginas '{}': {}", path, e))?;
             Ok(EvalValue::Int(doc.get_pages().len() as i64))
         }
-        // plantilla(path, titulo, campos) → Bool   campos: Dict<Str,Str>
-        "plantilla" | "template" => {
+        // template(path, titulo, campos) → Bool   campos: Dict<Str,Str>
+        "template" | "plantilla" => {
             if args.len() < 3 { return Err("pdf.plantilla requiere (path, titulo, campos)".into()); }
             let path   = to_str(&args[0]);
             let titulo = to_str(&args[1]);
             let campos = to_dict(&args[2]);
             create_template(&path, &titulo, &campos)
         }
-        // reporte(path, titulo, filas) → Bool   filas: List<List<Str>>
-        "reporte" | "report" => {
+        // report(path, titulo, filas) → Bool   filas: List<List<Str>>
+        "report" | "reporte" => {
             if args.len() < 3 { return Err("pdf.reporte requiere (path, titulo, filas)".into()); }
             let path   = to_str(&args[0]);
             let titulo = to_str(&args[1]);
             let filas  = to_list_of_list(&args[2]);
             create_report(&path, &titulo, &filas)
         }
-        // marca(path, salida, texto) → Bool
-        "marca" | "watermark" => {
+        // watermark(path, salida, texto) → Bool
+        "watermark" | "marca" => {
             if args.len() < 3 { return Err("pdf.marca requiere (path, salida, texto)".into()); }
             add_watermark(&to_str(&args[0]), &to_str(&args[1]), &to_str(&args[2]))
         }
-        // paginar(path, salida, inicio, fin) → Bool   páginas 1-indexadas
-        "paginar" | "paginate" => {
+        // paginate(path, salida, inicio, fin) → Bool   páginas 1-indexadas
+        "paginate" | "paginar" => {
             if args.len() < 4 { return Err("pdf.paginar requiere (path, salida, inicio, fin)".into()); }
             let path   = to_str(&args[0]);
             let salida = to_str(&args[1]);
@@ -54,9 +54,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let path = one_str("pdf.info", &args)?;
             get_pdf_info(&path)
         }
-        // leer(path) → String  — extrae el texto embebido del PDF (PDFs de texto).
+        // read(path) → String  — extrae el texto embebido del PDF (PDFs de texto).
         // Para PDFs escaneados (solo imágenes) usar pdf.ocr.
-        "leer" | "read" | "extraer_texto" | "extract_text" => {
+        "read" | "leer" | "extraer_texto" | "extract_text" => {
             let path = one_str("pdf.leer", &args)?;
             let text = pdf_extract::extract_text(&path)
                 .map_err(|e| format!("pdf.leer '{}': {}", path, e))?;
@@ -68,9 +68,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if args.is_empty() { return Err("pdf.ocr requiere (path, opts?)".into()); }
             ocr_pdf(&to_str(&args[0]), args.get(1))
         }
-        // texto(path) → String  — inteligente: intenta el texto embebido; si el
+        // text(path) → String  — inteligente: intenta el texto embebido; si el
         // PDF no tiene texto (escaneado), cae automáticamente a OCR.
-        "texto" | "text" => {
+        "text" | "texto" => {
             let path = one_str("pdf.texto", &args)?;
             let embedded = pdf_extract::extract_text(&path).unwrap_or_default();
             if embedded.trim().len() >= 8 {
@@ -79,8 +79,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 ocr_pdf(&path, None)
             }
         }
-        // desde_imagen(imagen, salida_pdf) → salida  — convierte una imagen a PDF.
-        "desde_imagen" | "from_image" => {
+        // from_image(imagen, salida_pdf) → salida  — convierte una imagen a PDF.
+        "from_image" | "desde_imagen" => {
             if args.len() < 2 { return Err("pdf.desde_imagen requiere (imagen, salida_pdf)".into()); }
             image_to_pdf(&to_str(&args[0]), &to_str(&args[1]))
         }

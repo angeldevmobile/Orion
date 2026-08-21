@@ -12,14 +12,14 @@ fn queues() -> &'static Mutex<HashMap<String, VecDeque<serde_json::Value>>> {
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // crear(nombre) → Bool
-        "crear" | "create" => {
+        // create(nombre) → Bool
+        "create" | "crear" => {
             let name = one_str("cola.crear", &args)?;
             queues().lock().unwrap().entry(name).or_insert_with(VecDeque::new);
             Ok(EvalValue::Bool(true))
         }
-        // enviar(nombre, valor) → Bool  — agrega al final
-        "enviar" | "push" => {
+        // push(nombre, valor) → Bool  — agrega al final
+        "push" | "enviar" => {
             if args.len() < 2 { return Err("cola.enviar requiere (nombre, valor)".into()); }
             let name = to_str(&args[0]);
             let val  = crate::modules::json_mod::eval_to_json(args[1].clone());
@@ -28,8 +28,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .push_back(val);
             Ok(EvalValue::Bool(true))
         }
-        // recibir(nombre) → valor o Null  — extrae del frente (FIFO)
-        "recibir" | "pop" => {
+        // pop(nombre) → valor o Null  — extrae del frente (FIFO)
+        "pop" | "recibir" => {
             let name = one_str("cola.recibir", &args)?;
             Ok(queues().lock().unwrap()
                 .get_mut(&name)
@@ -37,8 +37,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .map(crate::modules::json_mod::json_to_eval)
                 .unwrap_or(EvalValue::Null))
         }
-        // espiar(nombre) → ver el frente sin extraer
-        "espiar" | "peek" => {
+        // peek(nombre) → ver el frente sin extraer
+        "peek" | "espiar" => {
             let name = one_str("cola.espiar", &args)?;
             Ok(queues().lock().unwrap()
                 .get(&name)
@@ -46,27 +46,27 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .map(crate::modules::json_mod::json_to_eval)
                 .unwrap_or(EvalValue::Null))
         }
-        // tamaño(nombre) → Int
-        "tamaño" | "size" | "len" => {
+        // size(nombre) → Int
+        "size" | "tamaño" | "len" => {
             let name = one_str("cola.tamaño", &args)?;
             Ok(EvalValue::Int(
                 queues().lock().unwrap().get(&name).map(|q| q.len()).unwrap_or(0) as i64,
             ))
         }
-        // vaciar(nombre) → Bool
-        "vaciar" | "clear" => {
+        // clear(nombre) → Bool
+        "clear" | "vaciar" => {
             let name = one_str("cola.vaciar", &args)?;
             if let Some(q) = queues().lock().unwrap().get_mut(&name) { q.clear(); }
             Ok(EvalValue::Bool(true))
         }
-        // eliminar(nombre) → Bool (true si la cola existía) — elimina la cola entera
-        "eliminar" | "delete" => {
+        // delete(nombre) → Bool (true si la cola existía) — elimina la cola entera
+        "delete" | "eliminar" => {
             let name = one_str("cola.eliminar", &args)?;
             let existed = queues().lock().unwrap().shift_remove(&name).is_some();
             Ok(EvalValue::Bool(existed))
         }
-        // lista() → List<Str> de nombres de colas existentes
-        "lista" | "list" => {
+        // list() → List<Str> de nombres de colas existentes
+        "list" | "lista" => {
             let names: Vec<EvalValue> = queues().lock().unwrap()
                 .keys().map(|k| EvalValue::Str(k.clone())).collect();
             Ok(EvalValue::List(names))

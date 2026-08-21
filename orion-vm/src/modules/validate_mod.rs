@@ -13,13 +13,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let s = one_str("validate.url", &args)?;
             Ok(EvalValue::Bool(s.starts_with("http://") || s.starts_with("https://")))
         }
-        // requerido(valor) → Bool
-        "requerido" | "required" => {
+        // required(valor) → Bool
+        "required" | "requerido" => {
             let v = args.first().ok_or("validate.requerido requiere (valor)")?;
             Ok(EvalValue::Bool(!matches!(v, EvalValue::Null) && !to_str(v).is_empty()))
         }
-        // longitud(s, min, max) → Bool
-        "longitud" | "length" => {
+        // length(s, min, max) → Bool
+        "length" | "longitud" => {
             if args.len() < 3 { return Err("validate.longitud requiere (s, min, max)".into()); }
             let s   = to_str(&args[0]);
             let min = to_i64(&args[1])? as usize;
@@ -27,24 +27,24 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let len = s.chars().count();
             Ok(EvalValue::Bool(len >= min && len <= max))
         }
-        // numero(s) → Bool
-        "numero" | "number" => {
+        // number(s) → Bool
+        "number" | "numero" => {
             let s = one_str("validate.numero", &args)?;
             Ok(EvalValue::Bool(s.parse::<f64>().is_ok()))
         }
-        // alfa(s) → Bool  — solo letras
-        "alfa" | "alpha" => {
+        // alpha(s) → Bool  — solo letras
+        "alpha" | "alfa" => {
             let s = one_str("validate.alfa", &args)?;
             Ok(EvalValue::Bool(s.chars().all(|c| c.is_alphabetic())))
         }
-        // alfanumerico(s) → Bool
-        "alfanumerico" | "alphanumeric" => {
+        // alphanumeric(s) → Bool
+        "alphanumeric" | "alfanumerico" => {
             let s = one_str("validate.alfanumerico", &args)?;
             Ok(EvalValue::Bool(s.chars().all(|c| c.is_alphanumeric())))
         }
-        // todo(datos_dict, reglas_dict) → {valido, errores}
+        // all(datos_dict, reglas_dict) → {valido, errores}
         // Reglas: "requerido|email|min:5|max:100|numero|alfa"
-        "todo" | "all" => {
+        "all" | "todo" => {
             if args.len() < 2 { return Err("validate.todo requiere (datos, reglas)".into()); }
             let datos = match &args[0] {
                 EvalValue::Dict(m) => m.clone(),

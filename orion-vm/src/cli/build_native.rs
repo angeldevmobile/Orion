@@ -41,7 +41,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
         }
     };
 
-    //   2. cranelift-object → .o
+    //   2. cranelift-object → .orx
     //
     //   Se prefiere compilar el programa a código máquina. Si usa algo que el
     //   backend nativo no cubre, se recurre al modo bundle: el objeto lleva el
@@ -251,12 +251,6 @@ fn link_native(obj: &Path, lib: &Path, out: &Path) {
 }
 
 /// Librerías de importación de Windows que necesita el runtime bundleado.
-/// Nombres SIN extensión: para MSVC se emiten como `/DEFAULTLIB:<x>.lib`, para
-/// MinGW como `-l<x>`. Cubren: base del SO (kernel32/user32/gdi32/advapi32),
-/// shell y COM (shell32/ole32/oleaut32/uuid/shcore/propsys), red (ws2_32),
-/// crypto y TLS (bcrypt/crypt32/secur32/ncrypt), y la pila de ventana/gráficos
-/// que arrastran egui/winit/glow (opengl32/dwmapi/setupapi/cfgmgr32/imm32/
-/// winmm/version/msimg32/dbghelp/userenv/ntdll).
 const WINDOWS_SYSTEM_LIBS: &[&str] = &[
     "kernel32", "user32", "gdi32", "advapi32", "shell32",
     "ole32", "oleaut32", "uuid", "shcore", "propsys", "comdlg32",
@@ -283,10 +277,6 @@ fn detect_linker(obj: &Path, lib: &Path, out: &Path) -> (String, Vec<String>, Ve
                 "/NOLOGO".to_string(),
                 "/DEFAULTLIB:msvcrt.lib".to_string(),
             ]);
-            // El runtime bundleado (orion_vm.lib) arrastra TODA la stdlib, cuyas
-            // crates nativas referencian APIs de Windows repartidas en varias libs
-            // de sistema. Sin pasarlas, link falla con cientos de símbolos sin
-            // resolver (p. ej. clipboard_win → user32). Las declaramos todas.
             for l in WINDOWS_SYSTEM_LIBS {
                 args.push(format!("/DEFAULTLIB:{l}.lib"));
             }
@@ -294,18 +284,13 @@ fn detect_linker(obj: &Path, lib: &Path, out: &Path) -> (String, Vec<String>, Ve
         };
         let base = vec![obj_s.clone(), lib_s.clone()];
 
-        // 1) Developer Command Prompt: LIB ya está poblada, `link` del PATH es
-        //    el de MSVC. Es el único caso en que el PATH es de fiar (ver abajo).
         if std::env::var_os("LIB").is_some() && which("link").is_some() {
             return ("link".to_string(), msvc_args(base), Vec::new());
         }
 
-        // 2) Shell normal: resolver la toolchain nosotros. NO se busca `link` en
-        //    el PATH — Git for Windows trae un `link.exe` de GNU coreutils (crea
-        //    hard links) que se encontraría primero y fallaría con "extra operand".
+        // 2) Shell normal: resolver la toolchain nosotros.
         if let Some(msvc) = find_msvc_toolchain() {
             let mut env = vec![("LIB".to_string(), msvc.lib_paths.join(";"))];
-            // link.exe carga DLLs vecinas (mspdbcore, tbbmalloc): su bin al PATH.
             if let Some(bin) = msvc.link_exe.parent() {
                 let path = std::env::var("PATH").unwrap_or_default();
                 env.push(("PATH".to_string(), format!("{};{}", bin.display(), path)));
@@ -354,11 +339,6 @@ fn msvc_arch() -> &'static str {
 }
 
 /// Localiza link.exe de MSVC y las rutas de LIB (VC Tools + Windows SDK).
-///
-/// Fuera del Developer Command Prompt nada de esto está en el entorno, así que
-/// se replica lo que hace vcvarsall.bat: ubicar la instalación de Visual Studio
-/// con vswhere, leer la versión de las VC Tools, y añadir el Windows SDK (um +
-/// ucrt) — sin ellas link no resuelve ni kernel32 ni la CRT.
 fn find_msvc_toolchain() -> Option<MsvcToolchain> {
     let arch = msvc_arch();
 
@@ -437,12 +417,9 @@ fn find_windows_sdk() -> Option<(PathBuf, String)> {
     let mut versions: Vec<String> = fs::read_dir(root.join("Lib")).ok()?
         .flatten()
         .map(|e| e.file_name().to_string_lossy().to_string())
-        // Solo versiones utilizables: um/<arch> es donde vive kernel32.lib.
         .filter(|v| root.join("Lib").join(v).join("um").join(msvc_arch()).exists())
         .collect();
 
-    // Orden numérico por componente: "10.0.22000.0" > "10.0.9412.0", que el
-    // orden lexicográfico invertiría.
     versions.sort_by_key(|v| {
         v.split('.').map(|n| n.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>()
     });

@@ -23,8 +23,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let params = extract_params(args.get(2));
             with_conn(&to_str(&args[0]), |conn| run_query(conn, &sql, params))
         }
-        // uno(path, sql, params?) → Dict o Null  — primer resultado
-        "uno" | "first" => {
+        // first(path, sql, params?) → Dict o Null  — primer resultado
+        "first" | "uno" => {
             if args.len() < 2 { return Err("db.uno requiere (path, sql, params?)".into()); }
             let sql    = to_str(&args[1]);
             let params = extract_params(args.get(2));
@@ -36,16 +36,16 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 }
             })
         }
-        // ejecutar(path, sql, params?) → Int (filas afectadas)
-        "ejecutar" | "exec" => {
+        // exec(path, sql, params?) → Int (filas afectadas)
+        "exec" | "ejecutar" => {
             if args.len() < 2 { return Err("db.ejecutar requiere (path, sql, params?)".into()); }
             let sql    = to_str(&args[1]);
             let params = extract_params(args.get(2));
             with_conn(&to_str(&args[0]), |conn| run_exec(conn, &sql, params))
         }
-        // insertar(path, sql, params?) → Int (rowid de la fila insertada)
+        // insert(path, sql, params?) → Int (rowid de la fila insertada)
         // Azúcar sobre INSERT: devuelve el last_insert_rowid, no las filas.
-        "insertar" | "insert" => {
+        "insert" | "insertar" => {
             if args.len() < 2 { return Err("db.insertar requiere (path, sql, params?)".into()); }
             let sql    = to_str(&args[1]);
             let params = extract_params(args.get(2));
@@ -56,9 +56,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 Ok(EvalValue::Int(conn.last_insert_rowid()))
             })
         }
-        // transaccion(path, [sql, ...]) → Bool  — lista de SQL en una transacción.
+        // transaction(path, [sql, ...]) → Bool  — lista de SQL en una transacción.
         // Cada elemento puede ser "SQL" o [ "SQL", [params...] ].
-        "transaccion" | "transaction" => {
+        "transaction" | "transaccion" => {
             if args.len() < 2 { return Err("db.transaccion requiere (path, [sqls])".into()); }
             let pasos = match &args[1] {
                 EvalValue::List(l) => l.clone(),
@@ -81,8 +81,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 Ok(EvalValue::Bool(true))
             })
         }
-        // tablas(path) → List<Str>
-        "tablas" | "tables" => {
+        // tables(path) → List<Str>
+        "tables" | "tablas" => {
             with_conn(&one_str("db.tablas", &args)?, |conn| {
                 let rows = run_query(
                     conn,
@@ -98,10 +98,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 }
             })
         }
-        // copiar(path, tabla, [columnas], [[fila],…]) → Int  — carga masiva.
+        // copy(path, tabla, [columnas], [[fila],…]) → Int  — carga masiva.
         // En SQLite se hace con una transacción + sentencia preparada reusada
         // (el equivalente rápido a COPY): una sola tx para miles de filas.
-        "copiar" | "copy" => {
+        "copy" | "copiar" => {
             if args.len() < 4 { return Err("db.copiar requiere (path, tabla, columnas, filas)".into()); }
             let tabla = to_str(&args[1]);
             let cols = match &args[2] {
@@ -132,11 +132,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 Ok(EvalValue::Int(filas.len() as i64))
             })
         }
-        // copiar_archivo(path, tabla, [columnas], ruta_csv, opts?) → Int
+        // copy_file(path, tabla, [columnas], ruta_csv, opts?) → Int
         // Carga en STREAMING con RAM constante: el crate csv lee fila a fila y
         // se insertan en una transacción con sentencia preparada. No materializa
         // el CSV en memoria — vale para archivos enormes.
-        "copiar_archivo" | "copy_file" => {
+        "copy_file" | "copiar_archivo" => {
             if args.len() < 4 { return Err("db.copiar_archivo requiere (path, tabla, columnas, ruta, opts?)".into()); }
             let tabla = to_str(&args[1]);
             let cols = match &args[2] {
@@ -175,8 +175,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // pool(path, n?) → Int  — en SQLite es no-op (una conexión persistente
         // por archivo); existe para que el mismo código sirva en Postgres.
         "pool" => Ok(EvalValue::Int(1)),
-        // cerrar(path) → Bool  — descarta la conexión del pool (libera el archivo).
-        "cerrar" | "close" => {
+        // close(path) → Bool  — descarta la conexión del pool (libera el archivo).
+        "close" | "cerrar" => {
             if args.is_empty() { return Err("db.cerrar requiere (path)".into()); }
             let removed = pool().lock().unwrap().remove(&to_str(&args[0])).is_some();
             Ok(EvalValue::Bool(removed))
@@ -457,7 +457,7 @@ mod pg {
                 let params = extract_params(args.get(2));
                 with_client(&to_str(&args[0]), |c| run_query(c, &sql, &params))
             }
-            "uno" | "first" => {
+            "first" | "uno" => {
                 if args.len() < 2 { return Err("db.uno requiere (url, sql, params?)".into()); }
                 let sql    = translate(&to_str(&args[1]));
                 let params = extract_params(args.get(2));
@@ -467,7 +467,7 @@ mod pg {
                     } else { Ok(EvalValue::Null) }
                 })
             }
-            "ejecutar" | "exec" => {
+            "exec" | "ejecutar" => {
                 if args.len() < 2 { return Err("db.ejecutar requiere (url, sql, params?)".into()); }
                 let sql    = translate(&to_str(&args[1]));
                 let params = extract_params(args.get(2));
@@ -481,7 +481,7 @@ mod pg {
             }
             // insertar: en Postgres no hay last_insert_rowid. Se espera un
             // `... RETURNING id`: devolvemos el primer valor de la fila devuelta.
-            "insertar" | "insert" => {
+            "insert" | "insertar" => {
                 if args.len() < 2 { return Err("db.insertar requiere (url, sql RETURNING id, params?)".into()); }
                 let sql    = translate(&to_str(&args[1]));
                 let params = extract_params(args.get(2));
@@ -496,7 +496,7 @@ mod pg {
                     }
                 })
             }
-            "transaccion" | "transaction" => {
+            "transaction" | "transaccion" => {
                 if args.len() < 2 { return Err("db.transaccion requiere (url, [sqls])".into()); }
                 let pasos = match &args[1] {
                     EvalValue::List(l) => l.clone(),
@@ -520,7 +520,7 @@ mod pg {
                     Ok(EvalValue::Bool(true))
                 })
             }
-            "tablas" | "tables" => {
+            "tables" | "tablas" => {
                 if args.is_empty() { return Err("db.tablas requiere (url)".into()); }
                 with_client(&to_str(&args[0]), |c| {
                     let rows = c.query(
@@ -538,9 +538,9 @@ mod pg {
                 pool_for(&to_str(&args[0])).max.store(n, Ordering::Relaxed);
                 Ok(EvalValue::Int(n as i64))
             }
-            // copiar(url, tabla, [columnas], [[fila],…]) → Int  — carga masiva
+            // copy(url, tabla, [columnas], [[fila],…]) → Int  — carga masiva
             // vía COPY FROM STDIN (mucho más rápido que INSERT para millones).
-            "copiar" | "copy" => {
+            "copy" | "copiar" => {
                 if args.len() < 4 { return Err("db.copiar requiere (url, tabla, columnas, filas)".into()); }
                 let tabla = to_str(&args[1]);
                 let cols = match &args[2] {
@@ -574,11 +574,11 @@ mod pg {
                     Ok(EvalValue::Int(n as i64))
                 })
             }
-            // copiar_archivo(url, tabla, [columnas], ruta_csv, opts?) → Int
+            // copy_file(url, tabla, [columnas], ruta_csv, opts?) → Int
             // Carga en STREAMING con RAM constante: lee el CSV en trozos de 64KB
             // y los empuja a COPY … FROM STDIN (Postgres parsea el CSV). No
             // materializa el archivo en memoria — sirve para millones de filas.
-            "copiar_archivo" | "copy_file" => {
+            "copy_file" | "copiar_archivo" => {
                 if args.len() < 4 { return Err("db.copiar_archivo requiere (url, tabla, columnas, ruta, opts?)".into()); }
                 let tabla = to_str(&args[1]);
                 let cols = match &args[2] {
@@ -608,7 +608,7 @@ mod pg {
                     Ok(EvalValue::Int(filas as i64))
                 })
             }
-            "cerrar" | "close" => {
+            "close" | "cerrar" => {
                 if args.is_empty() { return Err("db.cerrar requiere (url)".into()); }
                 let removed = pool().lock().unwrap().remove(&to_str(&args[0])).is_some();
                 Ok(EvalValue::Bool(removed))
@@ -839,7 +839,7 @@ mod my {
                     .map_err(|e| format!("db.query(mysql): {}", e))?;
                 Ok(rows_to_eval(rows))
             }
-            "uno" | "first" => {
+            "first" | "uno" => {
                 if args.len() < 2 { return Err("db.uno requiere (url, sql, params?)".into()); }
                 let sql = to_str(&args[1]);
                 let params = to_params(&extract_params(args.get(2)));
@@ -848,7 +848,7 @@ mod my {
                     .map_err(|e| format!("db.uno(mysql): {}", e))?;
                 Ok(rows.into_iter().next().map(row_to_dict).unwrap_or(EvalValue::Null))
             }
-            "ejecutar" | "exec" => {
+            "exec" | "ejecutar" => {
                 if args.len() < 2 { return Err("db.ejecutar requiere (url, sql, params?)".into()); }
                 let sql = to_str(&args[1]);
                 let params = to_params(&extract_params(args.get(2)));
@@ -857,7 +857,7 @@ mod my {
                 Ok(EvalValue::Int(c.affected_rows() as i64))
             }
             // insertar: MySQL sí tiene last_insert_id() → devuelve el id autogenerado.
-            "insertar" | "insert" => {
+            "insert" | "insertar" => {
                 if args.len() < 2 { return Err("db.insertar requiere (url, sql, params?)".into()); }
                 let sql = to_str(&args[1]);
                 let params = to_params(&extract_params(args.get(2)));
@@ -865,7 +865,7 @@ mod my {
                 c.exec_drop(sql, params).map_err(|e| format!("db.insertar(mysql): {}", e))?;
                 Ok(EvalValue::Int(c.last_insert_id() as i64))
             }
-            "transaccion" | "transaction" => {
+            "transaction" | "transaccion" => {
                 if args.len() < 2 { return Err("db.transaccion requiere (url, [sqls])".into()); }
                 let pasos = match &args[1] {
                     EvalValue::List(l) => l.clone(),
@@ -885,17 +885,17 @@ mod my {
                 tx.commit().map_err(|e| format!("db.transaccion commit(mysql): {}", e))?;
                 Ok(EvalValue::Bool(true))
             }
-            "tablas" | "tables" => {
+            "tables" | "tablas" => {
                 if args.is_empty() { return Err("db.tablas requiere (url)".into()); }
                 let mut c = conn(&to_str(&args[0]))?;
                 let rows: Vec<Row> = c.query("SHOW TABLES")
                     .map_err(|e| format!("db.tablas(mysql): {}", e))?;
                 Ok(EvalValue::List(rows.into_iter().map(|mut r| my_cell(r.take(0).unwrap_or(MyValue::NULL))).collect()))
             }
-            // copiar(url, tabla, [columnas], [[fila],…]) → Int — carga masiva.
+            // copy(url, tabla, [columnas], [[fila],…]) → Int — carga masiva.
             // MySQL no tiene COPY FROM STDIN; se usa INSERT multi-fila por lotes
             // dentro de una transacción (el camino rápido en MySQL).
-            "copiar" | "copy" => {
+            "copy" | "copiar" => {
                 if args.len() < 4 { return Err("db.copiar requiere (url, tabla, columnas, filas)".into()); }
                 let tabla = to_str(&args[1]);
                 let cols = match &args[2] {
@@ -928,10 +928,10 @@ mod my {
                 tx.commit().map_err(|e| format!("db.copiar commit(mysql): {}", e))?;
                 Ok(EvalValue::Int(filas.len() as i64))
             }
-            // copiar_archivo(url, tabla, [columnas], ruta_csv, opts?) → Int
+            // copy_file(url, tabla, [columnas], ruta_csv, opts?) → Int
             // Streaming con RAM constante: el crate csv lee fila a fila y se
             // insertan por lotes de 500 en una transacción.
-            "copiar_archivo" | "copy_file" => {
+            "copy_file" | "copiar_archivo" => {
                 if args.len() < 4 { return Err("db.copiar_archivo requiere (url, tabla, columnas, ruta, opts?)".into()); }
                 let tabla = to_str(&args[1]);
                 let cols = match &args[2] {
@@ -976,7 +976,7 @@ mod my {
             "pool" => Ok(EvalValue::Int(
                 args.get(1).and_then(|v| v.to_i64().ok()).unwrap_or(10)
             )),
-            "cerrar" | "close" => {
+            "close" | "cerrar" => {
                 if args.is_empty() { return Err("db.cerrar requiere (url)".into()); }
                 let removed = pools().lock().unwrap().remove(&to_str(&args[0])).is_some();
                 Ok(EvalValue::Bool(removed))

@@ -78,8 +78,8 @@ fn as_int(v: &EvalValue) -> Result<i64, String> {
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // crear(cap?) → Int (handle). cap=0 o ausente → ilimitado.
-        "crear" | "create" | "new" => {
+        // create(cap?) → Int (handle). cap=0 o ausente → ilimitado.
+        "create" | "crear" | "new" => {
             let cap = args.get(0).and_then(|v| match v {
                 EvalValue::Int(n)   => Some(*n as usize),
                 EvalValue::Float(f) => Some(*f as usize),
@@ -96,9 +96,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Int(id))
         }
 
-        // enviar(id, valor) → Bool. Bloquea si el canal tiene capacidad y está
+        // send(id, valor) → Bool. Bloquea si el canal tiene capacidad y está
         // lleno. Error si el canal está cerrado.
-        "enviar" | "send" | "push" => {
+        "send" | "enviar" | "push" => {
             if args.len() < 2 { return Err("chan.enviar requiere (canal, valor)".into()); }
             let id  = as_int(&args[0])?;
             let val = eval_to_json(args[1].clone());
@@ -119,9 +119,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Bool(true))
         }
 
-        // recibir(id) → valor | Null. Bloquea (parking) hasta que haya un valor.
+        // recv(id) → valor | Null. Bloquea (parking) hasta que haya un valor.
         // Devuelve Null si el canal se cierra y ya no quedan valores.
-        "recibir" | "recv" | "pop" => {
+        "recv" | "recibir" | "pop" => {
             let id = as_int(args.get(0).ok_or("chan.recibir requiere (canal)")?)?;
             let ch = get_chan(id)?;
             let mut st = ch.inner.lock().unwrap();
@@ -137,8 +137,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
 
-        // try_recibir(id) → valor | Null (no bloquea; Null si vacío).
-        "try_recibir" | "try_recv" | "intentar_recibir" => {
+        // try_recv(id) → valor | Null (no bloquea; Null si vacío).
+        "try_recv" | "try_recibir" | "intentar_recibir" => {
             let id = as_int(args.get(0).ok_or("chan.try_recibir requiere (canal)")?)?;
             let ch = get_chan(id)?;
             let mut st = ch.inner.lock().unwrap();
@@ -148,8 +148,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
 
-        // cerrar(id) → Bool. Despierta a todos los bloqueados.
-        "cerrar" | "close" => {
+        // close(id) → Bool. Despierta a todos los bloqueados.
+        "close" | "cerrar" => {
             let id = as_int(args.get(0).ok_or("chan.cerrar requiere (canal)")?)?;
             let ch = get_chan(id)?;
             {
@@ -162,8 +162,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Bool(true))
         }
 
-        // cerrada(id) → Bool
-        "cerrada" | "is_closed" | "closed" => {
+        // is_closed(id) → Bool
+        "is_closed" | "cerrada" | "closed" => {
             let id = as_int(args.get(0).ok_or("chan.cerrada requiere (canal)")?)?;
             let ch = get_chan(id)?;
             let st = ch.inner.lock().unwrap();
@@ -178,8 +178,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Int(st.queue.len() as i64))
         }
 
-        // eliminar(id) → Bool. Libera el canal del registro.
-        "eliminar" | "delete" | "free" => {
+        // delete(id) → Bool. Libera el canal del registro.
+        "delete" | "eliminar" | "free" => {
             let id = as_int(args.get(0).ok_or("chan.eliminar requiere (canal)")?)?;
             let existed = registry().lock().unwrap().shift_remove(&id).is_some();
             Ok(EvalValue::Bool(existed))
@@ -226,8 +226,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
 
-        // lista() → List<Int> de handles de canales vivos
-        "lista" | "list" => {
+        // list() → List<Int> de handles de canales vivos
+        "list" | "lista" => {
             let ids: Vec<EvalValue> = registry().lock().unwrap()
                 .keys().map(|k| EvalValue::Int(*k)).collect();
             Ok(EvalValue::List(ids))

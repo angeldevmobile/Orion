@@ -306,10 +306,6 @@ impl CodeGen<JITModule> {
     }
 
     /// Compila y ejecuta un programa completo (main + funciones).
-    ///
-    /// - `Ok(true)`  → JIT compiló y ejecutó con éxito.
-    /// - `Ok(false)` → instrucciones no elegibles → usar intérprete.
-    /// - `Err(msg)`  → error real de compilación JIT.
     pub fn run_program(&mut self, bc: &OrionBytecode) -> Result<bool, String> {
         let prog = match self.compile_program(bc)? {
             Some(p) => p,
@@ -319,8 +315,6 @@ impl CodeGen<JITModule> {
         self.module.finalize_definitions()
             .map_err(|e| format!("JIT finalize: {e}"))?;
 
-        // Las shapes viven en TLS del proceso: aquí basta registrarlas, mientras
-        // que en AOT hay que emitir el registro dentro del propio binario.
         for (name, fields, parents) in &prog.shapes {
             super::runtime_oop::register_shape_info(name, fields.clone(), parents.clone());
         }
@@ -345,11 +339,6 @@ impl CodeGen<JITModule> {
 }
 
 impl<M: Module> CodeGen<M> {
-    /// Generador en modo AOT sobre un backend que emite a archivo objeto.
-    ///
-    /// A diferencia del JIT no se registran punteros de símbolos: las `rt_*`
-    /// son `extern "C"` exportadas por la staticlib de orion_vm, así que se
-    /// declaran como `Linkage::Import` y las resuelve el linker.
     pub fn new_aot(module: M) -> Self {
         CodeGen {
             module, fn_counter: 0, fn_cache: HashMap::new(),
@@ -367,9 +356,6 @@ impl<M: Module> CodeGen<M> {
     }
 
     /// Emite literales NUL-terminados como datos del objeto y devuelve sus ids.
-    ///
-    /// Lo usa el prólogo del AOT, que necesita las direcciones de las cadenas
-    /// fuera del flujo normal de generación (donde las produce `cstr_ptr`).
     pub fn emit_literals(
         &mut self,
         lits: &HashMap<String, String>,
@@ -392,18 +378,10 @@ impl<M: Module> CodeGen<M> {
     }
 
     /// Puntero a un literal C (NUL-terminado) utilizable desde el código emitido.
-    ///
-    /// En JIT basta la dirección del buffer en este proceso, mantenido vivo por
-    /// `string_storage`. En AOT esa dirección no existirá cuando corra el
-    /// binario, así que la cadena se emite como dato del objeto y se referencia
-    /// por símbolo; se deduplica porque los mismos nombres de campo, shape y
-    /// módulo reaparecen en cada instrucción que los menciona.
     fn cstr_ptr(&mut self, builder: &mut FunctionBuilder, s: &str) -> Value {
         if !self.aot {
             let mut bytes = s.as_bytes().to_vec();
             bytes.push(0u8);
-            // El puntero se toma antes de mover el Vec al storage: mover el Vec
-            // no reubica su buffer en el heap, así que sigue siendo válido.
             let raw = bytes.as_ptr() as i64;
             self.string_storage.push(bytes);
             return builder.ins().iconst(types::I64, raw);
@@ -519,19 +497,7 @@ impl<M: Module> CodeGen<M> {
     }
 
     //     API pública
-
-    /// Compila un programa completo (main + funciones + acts) a IR nativo.
-    ///
-    /// No lo ejecuta ni lo emite: cada backend decide qué hacer con el
-    /// resultado — el JIT finaliza y salta a `main`, el AOT escribe el objeto.
-    ///
-    /// - `Ok(Some(p))` → compilado; `p` lleva los ids para la fase final.
-    /// - `Ok(None)`    → instrucciones no elegibles → usar intérprete.
-    /// - `Err(msg)`    → error real de compilación.
     pub fn compile_program(&mut self, bc: &OrionBytecode) -> Result<Option<CompiledProgram>, String> {
-        // Nombres llamables por el JIT: solo funciones de usuario y shapes.
-        // El JIT NO implementa builtins (len, str, range, ...) ni métodos de módulo;
-        // un Call a algo fuera de este conjunto => programa no elegible => fallback al VM.
         let callable: HashSet<&str> = bc.functions.keys()
             .chain(bc.shapes.keys())
             .map(|s| s.as_str())
@@ -541,8 +507,6 @@ impl<M: Module> CodeGen<M> {
                 // Un Call resuelve a: función de usuario, shape, o builtin puenteable.
                 Instruction::Call(name, argc) => {
                     if let Some(f) = bc.functions.get(name.as_str()) {
-                        // Si la llamada usa valores por defecto (menos args que
-                        // params), el JIT no los rellena → fallback al intérprete.
                         *argc as usize == f.params.len()
                     } else if bc.shapes.contains_key(name.as_str()) {
                         true
@@ -589,18 +553,6 @@ impl<M: Module> CodeGen<M> {
         }
 
         // 1. Declarar funciones de usuario
-        //
-        // En AOT el símbolo lleva prefijo. El objeto que se genera comparte
-        // espacio de nombres con el `main` de C que arranca el ejecutable, así
-        // que un programa con `fn main()` —que son casi todos, porque es la
-        // forma natural de escribirlos— chocaba: el mismo símbolo declarado dos
-        // veces con firmas distintas (i64 contra i32). El compilador lo
-        // detectaba y se pasaba al modo bytecode, así que ninguna aplicación
-        // real llegaba a compilarse nativa.
-        //
-        // El nombre de Orion se conserva en `fn_cache` y en el registro en
-        // tiempo de ejecución; lo que cambia es solo la etiqueta del símbolo,
-        // y las llamadas se resuelven por `FuncId`.
         let fn_names: Vec<String> = bc.functions.keys().cloned().collect();
         for name in &fn_names {
             let n_params = bc.functions[name].params.len();
@@ -613,9 +565,6 @@ impl<M: Module> CodeGen<M> {
             self.fn_cache.insert(name.clone(), fid);
         }
 
-        // 2. Declarar acts de shapes como funciones JIT
-        // Nombre mangling: "shape__{ShapeName}__{act_name}"
-        // Firma: (param0, param1, ...) -> i64   (self se accede via TLS)
         struct ActEntry { jit_name: String, shape: String, act: String, params: Vec<String>, body: Vec<Instruction> }
         let mut act_entries: Vec<ActEntry> = Vec::new();
         for (sname, sdef) in &bc.shapes {
@@ -833,20 +782,6 @@ impl<M: Module> CodeGen<M> {
             if !var_names.contains(p) { var_names.push(p.clone()); }
         }
 
-        // Qué nombres son de ESTA función y cuáles vienen de fuera.
-        //
-        // Local es lo que la función asigna o recibe como parámetro; todo lo
-        // demás que lea es un global. Es la misma regla que aplica la VM —y la
-        // misma que usa Python—, así que el camino compilado no estrena una
-        // semántica propia: asignar dentro crea una variable de la función, y
-        // leer un nombre que no es suyo mira fuera.
-        //
-        // En `main` no hace falta distinguir: ahí todo es global por
-        // definición, y sus asignaciones se publican para que las funciones las
-        // vean.
-        // En el cuerpo de un `act`, los campos del shape también son suyos:
-        // llegan inicializados desde `self` aunque el cuerpo no los asigne, y
-        // mandarlos a la tabla de globales los convertiría en null.
         let locales: HashSet<String> = instructions.iter()
             .filter_map(|i| match i {
                 Instruction::StoreVar(n) | Instruction::StoreConst(n) => Some(n.clone()),
@@ -936,19 +871,6 @@ impl<M: Module> CodeGen<M> {
         for (i, instr) in instructions.iter().enumerate() {
             // Cambio de bloque básico
             if i > 0 && block_starts.contains(&i) {
-                // Valores que siguen en la pila al cruzar la frontera están
-                // VIVOS: los produjo el bloque anterior y el siguiente los va a
-                // consumir. Modelar eso pide parámetros de bloque (phi) en el
-                // punto de fusión, y este compilador todavía no los emite.
-                //
-                // Aquí se hacía `stack.clear()` a secas, y eso no perdía la
-                // compilación: perdía los valores. Un `cond ? a : b` compilaba
-                // "nativo" y devolvía null, sin aviso ninguno. Un resultado
-                // equivocado en silencio es peor que no compilar, así que se
-                // rechaza el programa y el que llama cae al intérprete, que da
-                // la respuesta correcta. La comprobación es general: cubre
-                // cualquier construcción futura con esta forma, no solo el
-                // ternario.
                 if !terminated && !stack.is_empty() {
                     return Err(format!(
                         "valores vivos al cruzar el bloque en la instrucción {i}: \
@@ -966,8 +888,7 @@ impl<M: Module> CodeGen<M> {
                     stack.push(builder.inst_results(call)[0]);
                 }
             }
-            // JIT-3: EndAttempt debe procesarse incluso si el bloque previo fue terminado por Raise
-            // (necesitamos hacer pop del handler_stack en tiempo de compilación)
+
             if terminated {
                 if let Instruction::EndAttempt(_) = instr { handler_stack.pop(); }
                 continue;
@@ -1002,12 +923,6 @@ impl<M: Module> CodeGen<M> {
 
                 //    Variables                                                 
                 Instruction::LoadVar(name) => {
-                    // Un nombre que la función no asigna ni recibe viene de
-                    // fuera: se busca en la tabla de globales en vez de leer una
-                    // variable local que nadie ha inicializado. Antes esto
-                    // devolvía null en silencio, y con `use "fs"` —que también
-                    // define un global— el null acababa siendo el receptor de
-                    // `fs.cwd()`.
                     if !is_main && !locales.contains(name) {
                         let name_ptr = self.cstr_ptr(&mut builder, name);
                         let call = builder.ins().call(load_global_ref, &[name_ptr]);
@@ -1023,10 +938,7 @@ impl<M: Module> CodeGen<M> {
                     if let Some(&var) = var_table.get(name) {
                         builder.def_var(var, val);
                     }
-                    // Lo que se asigna en el nivel superior queda visible para
-                    // las funciones. Se publica en cada asignación y no una vez
-                    // al final porque una función puede llamarse en medio del
-                    // programa, cuando el valor todavía va por la mitad.
+
                     if is_main {
                         let name_ptr = self.cstr_ptr(&mut builder, name);
                         builder.ins().call(store_global_ref, &[name_ptr, val]);
@@ -1222,18 +1134,6 @@ impl<M: Module> CodeGen<M> {
                 }
                 Instruction::MakeDict(n_count) => {
                     let n = *n_count as usize;
-                    // El stack tiene [key0, val0, key1, val1, ...] (bottom→top),
-                    // así que sacar de arriba da los pares **del revés**: el
-                    // último literal primero.
-                    //
-                    // Los pares se recogen y se emiten al derecho, que es lo
-                    // mismo que hace la VM (`pairs.into_iter().rev()`). Sin
-                    // esto, un diccionario salía con las claves invertidas solo
-                    // en el ejecutable compilado: `{zeta, alfa}` se convertía en
-                    // `{alfa, zeta}`. Los dicts de Orion conservan el orden de
-                    // escritura, y de ese orden dependen cosas que se ven — el
-                    // JSON que se genera, las columnas de un CSV, lo que
-                    // imprime un `show`.
                     let mut pares = Vec::with_capacity(n);
                     for _ in 0..n {
                         let val = stack.pop().ok_or("MakeDict: pila vacía (val)")?;
@@ -1344,10 +1244,6 @@ impl<M: Module> CodeGen<M> {
                     let path_ptr = self.cstr_ptr(&mut builder, path);
                     let call = builder.ins().call(use_module_ref, &[path_ptr]);
                     let module_val = builder.inst_results(call)[0];
-                    // El namespace del módulo también es un global: sin esto,
-                    // `use "fs"` arriba y `fs.cwd()` dentro de una función no se
-                    // encuentran, que es el caso que más duele porque casi todo
-                    // programa real lo hace.
                     if is_main {
                         let alias_ptr = self.cstr_ptr(&mut builder, alias);
                         builder.ins().call(store_global_ref, &[alias_ptr, module_val]);
@@ -1359,8 +1255,6 @@ impl<M: Module> CodeGen<M> {
 
                 //    JIT-6: Closures                                              
                 Instruction::MakeClosure(fn_name) => {
-                    // Crea un OrionVal TAG_CLOSURE con el fn_ptr de la función.
-                    // Las llamadas en JIT son estáticas; el valor sirve como marcador.
                     let name_ptr = self.cstr_ptr(&mut builder, fn_name);
                     let call = builder.ins().call(make_closure_ref, &[name_ptr]);
                     stack.push(builder.inst_results(call)[0]);

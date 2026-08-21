@@ -13,22 +13,16 @@ pub fn run_watch(path: &str) {
     ));
     println!();
 
-    // Servidores: `serve` bloquea dentro de la evaluación, así que el script
-    // corre como proceso hijo que se mata y relanza en cada cambio (estilo
-    // nodemon). Hay que detectarlo ANTES de la primera evaluación in-process.
     if script_has_serve(path) {
         run_watch_server(path);
         return;
     }
 
-    // Activar watch mode: gui.run() no bloqueará, solo registra los componentes
     gui::state::IS_WATCH_MODE.store(true, Ordering::Relaxed);
 
     // Primera evaluación
     compile_and_run(path);
 
-    // Si era un script GUI, lanzamos la ventana con hot-reload integrado.
-    // launch_watch bloquea hasta que se cierra la ventana (eframe::run_native).
     if gui::try_launch_watch(path) {
         return;
     }
@@ -51,18 +45,12 @@ fn mtime(path: &str) -> Option<SystemTime> {
     fs::metadata(path).ok()?.modified().ok()
 }
 
-/// ¿El script usa `serve`? Se decide a nivel de tokens (no hace falta parsear,
-/// y así cuenta también un serve dentro de una función). Strings y comentarios
-/// no llegan como keyword, por lo que no dan falsos positivos.
 fn script_has_serve(path: &str) -> bool {
     let Ok(src) = fs::read_to_string(path) else { return false };
     let Ok(tokens) = lexer::lex(&src) else { return false };
     tokens.iter().any(|t| matches!(t.kind, crate::token::TokenKind::Serve))
 }
 
-/// Watch para servidores: el script corre en un proceso hijo (`orion run`) que
-/// se termina y relanza en cada cambio. Si el servidor muere solo (error de
-/// arranque, puerto ocupado…), el watcher queda esperando el próximo guardado.
 fn run_watch_server(path: &str) {
     use std::process::{Child, Command};
 

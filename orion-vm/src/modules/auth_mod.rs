@@ -16,8 +16,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .to_string();
             Ok(EvalValue::Str(hash))
         }
-        // verificar(password, hash) → Bool
-        "verificar" | "verify" => {
+        // verify(password, hash) → Bool
+        "verify" | "verificar" => {
             if args.len() < 2 { return Err("auth.verificar requiere (password, hash)".into()); }
             let pass   = to_str(&args[0]);
             let hash   = to_str(&args[1]);
@@ -50,8 +50,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             ).map_err(|e| format!("auth.token: {}", e))?;
             Ok(EvalValue::Str(token))
         }
-        // verificar_token(token, secret) → Dict con payload o {error, valido:false}
-        "verificar_token" | "decode_token" => {
+        // decode_token(token, secret) → Dict con payload o {error, valido:false}
+        "decode_token" | "verificar_token" => {
             if args.len() < 2 { return Err("auth.verificar_token requiere (token, secret)".into()); }
             let token  = to_str(&args[0]);
             let secret = to_str(&args[1]);

@@ -3,15 +3,15 @@ use minijinja::Environment;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // renderizar(template_str, vars_dict) → String
-        "renderizar" | "render" => {
+        // render(template_str, vars_dict) → String
+        "render" | "renderizar" => {
             if args.len() < 2 { return Err("template.renderizar requiere (template, vars)".into()); }
             let tmpl = to_str(&args[0]);
             let vars = crate::modules::json_mod::eval_to_json(args[1].clone());
             render_str(&tmpl, vars)
         }
-        // desde_archivo(path, vars_dict) → String
-        "desde_archivo" | "from_file" => {
+        // from_file(path, vars_dict) → String
+        "from_file" | "desde_archivo" => {
             if args.len() < 2 { return Err("template.desde_archivo requiere (path, vars)".into()); }
             let path = to_str(&args[0]);
             let vars = crate::modules::json_mod::eval_to_json(args[1].clone());

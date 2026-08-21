@@ -3,9 +3,9 @@ use comfy_table::{Table, ContentArrangement};
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // tabla(encabezados, filas) → String  — tabla ASCII formateada
+        // table(encabezados, filas) → String  — tabla ASCII formateada
         // filas puede ser List<List> o List<Dict>
-        "tabla" | "table" => {
+        "table" | "tabla" => {
             if args.len() < 2 { return Err("formato.tabla requiere (encabezados, filas)".into()); }
             let headers = to_str_list(&args[0])?;
             let rows    = match &args[1] {
@@ -31,25 +31,25 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
             Ok(EvalValue::Str(format!("{}", table)))
         }
-        // separador(ancho, caracter?) → String  — línea horizontal
-        "separador" | "divider" => {
+        // divider(ancho, caracter?) → String  — línea horizontal
+        "divider" | "separador" => {
             let ancho = to_i64(args.first().ok_or("formato.separador requiere (ancho)")?)?.max(0);
             let ch    = args.get(1).map(to_str_val).unwrap_or_else(|| "─".to_string());
             let ch    = ch.chars().next().unwrap_or('─');
             Ok(EvalValue::Str(std::iter::repeat(ch).take(ancho as usize).collect()))
         }
-        // numero(n, decimales=0, miles=",", decimal=".") → "1,487,000.50"
+        // number(n, decimales=0, miles=",", decimal=".") → "1,487,000.50"
         // Estilo español: numero(n, 2, ".", ",") → "1.487.000,50"
-        "numero" | "number" => {
+        "number" | "numero" => {
             let n = to_f64(args.first().ok_or("formato.numero requiere (n)")?)?;
             let dec  = args.get(1).and_then(|v| to_i64(v).ok()).unwrap_or(0).max(0) as usize;
             let thou = args.get(2).map(to_str_val).unwrap_or_else(|| ",".to_string());
             let dsep = args.get(3).map(to_str_val).unwrap_or_else(|| ".".to_string());
             Ok(EvalValue::Str(format_number(n, dec, &thou, &dsep)))
         }
-        // moneda(n, simbolo="$", decimales=2) → "$1,487,000.00"
+        // currency(n, simbolo="$", decimales=2) → "$1,487,000.00"
         // Símbolo alfabético va con espacio: moneda(n, "USD") → "USD 1,487,000.00"
-        "moneda" | "currency" => {
+        "currency" | "moneda" => {
             let n = to_f64(args.first().ok_or("formato.moneda requiere (n)")?)?;
             let sym = args.get(1).map(to_str_val).unwrap_or_else(|| "$".to_string());
             let dec = args.get(2).and_then(|v| to_i64(v).ok()).unwrap_or(2).max(0) as usize;
@@ -57,8 +57,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let sep = if sym.chars().all(|c| c.is_alphabetic()) { " " } else { "" };
             Ok(EvalValue::Str(format!("{}{}{}", sym, sep, num)))
         }
-        // porcentaje(x, decimales=1) → 0.156 → "15.6%"
-        "porcentaje" | "percent" => {
+        // percent(x, decimales=1) → 0.156 → "15.6%"
+        "percent" | "porcentaje" => {
             let x = to_f64(args.first().ok_or("formato.porcentaje requiere (x)")?)?;
             let dec = args.get(1).and_then(|v| to_i64(v).ok()).unwrap_or(1).max(0) as usize;
             Ok(EvalValue::Str(format!("{:.*}%", dec, x * 100.0)))
@@ -76,8 +76,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             };
             Ok(EvalValue::Str(s))
         }
-        // duracion(segundos) → "1d 2h 3m 4s"; menos de 1s → "500ms"
-        "duracion" | "duration" => {
+        // duration(segundos) → "1d 2h 3m 4s"; menos de 1s → "500ms"
+        "duration" | "duracion" => {
             let secs = to_f64(args.first().ok_or("formato.duracion requiere (segundos)")?)?;
             if secs <= 0.0 { return Ok(EvalValue::Str("0s".into())); }
             if secs < 1.0 {
@@ -94,8 +94,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if s > 0 || parts.is_empty() { parts.push(format!("{}s", s)); }
             Ok(EvalValue::Str(parts.join(" ")))
         }
-        // truncar(s, max) → corta a max caracteres agregando "…" si hizo falta
-        "truncar" | "truncate" => {
+        // truncate(s, max) → corta a max caracteres agregando "…" si hizo falta
+        "truncate" | "truncar" => {
             if args.len() < 2 { return Err("formato.truncar requiere (s, max)".into()); }
             let s   = to_str_val(&args[0]);
             let max = to_i64(&args[1])?.max(0) as usize;
@@ -108,8 +108,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             };
             Ok(EvalValue::Str(out))
         }
-        // centrar(s, ancho) → String  — texto centrado con espacios
-        "centrar" | "center" => {
+        // center(s, ancho) → String  — texto centrado con espacios
+        "center" | "centrar" => {
             if args.len() < 2 { return Err("formato.centrar requiere (s, ancho)".into()); }
             let s     = to_str_val(&args[0]);
             let ancho = to_i64(&args[1])? as usize;

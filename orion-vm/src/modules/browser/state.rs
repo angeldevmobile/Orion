@@ -31,11 +31,6 @@ use std::time::Duration;
 
 use super::cdp::Conn;
 
-/// Lo que se guarda de una sesión.
-///
-/// El almacenamiento local va **por origen** porque así lo separa el navegador:
-/// `localStorage` de un sitio es invisible para otro, y volcarlo todo junto
-/// haría que restaurar en un dominio metiera ahí las claves de otro.
 fn origen_js() -> &'static str {
     r#"(() => {
       const vuelca = (s) => {
@@ -63,10 +58,6 @@ pub struct Guardado {
 pub fn save(
     conn: &Conn, sesion_cdp: &str, ruta: &str, timeout: Duration,
 ) -> Result<Guardado, String> {
-    // `Storage.getCookies` da las del navegador entero, no solo las del
-    // documento actual. Importa: la cookie de sesión de un portal suele estar
-    // puesta en el dominio padre, y `Network.getCookies` sobre la página no la
-    // trae si el marco actual es de un subdominio.
     let c = conn.call("Storage.getCookies", serde_json::json!({}), None, timeout)
         .or_else(|_| conn.call("Network.getCookies", serde_json::json!({}), Some(sesion_cdp), timeout))
         .map_err(|e| format!("browser.save_state: no se pudieron leer las cookies: {e}"))?;
@@ -107,19 +98,6 @@ pub fn save(
     })
 }
 
-/// Deja una cookie leída del navegador en forma de poder volver a ponerla.
-///
-/// No es cosmética, arregla el fallo que hacía inútil todo esto: una cookie de
-/// sesión se lee con **`expires: -1`**, que es como el navegador dice "esta
-/// muere al cerrar". Si se le devuelve tal cual, `-1` se interpreta como una
-/// fecha —el 31 de diciembre de 1969— y el navegador acepta la cookie y la
-/// caduca en el mismo instante. El resultado es el peor posible: `load_state`
-/// dice que restauró cinco cookies, no falla nada, y la sesión no existe. Y
-/// justo la de sesión es la que siempre viene así.
-///
-/// Se copian solo los campos que `Network.setCookies` entiende: lo que devuelve
-/// la lectura trae además `size`, `priority` o `partitionKey`, que describen
-/// cómo está guardada y no cómo crearla.
 fn para_poner(c: &serde_json::Value) -> serde_json::Value {
     let mut o = serde_json::Map::new();
     for campo in ["name", "value", "domain", "path", "sameSite"] {
@@ -149,12 +127,6 @@ pub struct Cargado {
     pub omitidos: Vec<String>,
 }
 
-/// Restaura cookies y almacenamiento desde un JSON.
-///
-/// Las cookies van al navegador entero, así que valen para cualquier pestaña.
-/// El almacenamiento local **solo se puede escribir estando en su origen** —el
-/// navegador no deja tocar el de otro dominio—, así que se aplica el que
-/// coincide con la página actual y se informa de los que no.
 pub fn load(
     conn: &Conn, sesion_cdp: &str, ruta: &str, timeout: Duration,
 ) -> Result<Cargado, String> {
@@ -217,15 +189,6 @@ pub fn load(
 
 //    Lista blanca de dominios
 
-/// ¿La URL está permitida por la lista?
-///
-/// Sirve para acotar a dónde puede ir un proceso automático. Sin lista, una
-/// página comprometida —o un anuncio inyectado en ella— puede redirigir al bot
-/// a cualquier sitio, y ese bot lleva encima la sesión de la empresa.
-///
-/// Los esquemas internos del navegador se dejan pasar siempre: `about:blank` es
-/// la página en blanco con la que arranca toda pestaña, y bloquearla dejaría el
-/// navegador sin poder abrir nada.
 pub fn permitida(url: &str, lista: &[String]) -> bool {
     if lista.is_empty() { return true; }
     let u = url.trim();
@@ -251,9 +214,6 @@ fn host_de(url: &str) -> String {
     };
     let hasta = sin_esquema.find(['/', '?', '#']).unwrap_or(sin_esquema.len());
     let autoridad = &sin_esquema[..hasta];
-    // Las credenciales en la URL van antes de la arroba y no son el host; sin
-    // quitarlas, `http://empresa.com@malo.net/` pasaría una lista que solo
-    // permite empresa.com, que es un truco de suplantación clásico.
     let sin_cred = match autoridad.rfind('@') {
         Some(i) => &autoridad[i + 1..],
         None => autoridad,
@@ -283,9 +243,6 @@ mod tests {
 
     #[test]
     fn una_cookie_de_sesion_no_se_restaura_ya_caducada() {
-        // `expires: -1` es como el navegador dice "muere al cerrar". Devolverlo
-        // tal cual lo convierte en una fecha de 1969 y la cookie se acepta y se
-        // caduca a la vez: load_state diría que restauró y no habría sesión.
         let c = serde_json::json!({
             "name": "sid", "value": "abc", "domain": ".x.com", "path": "/",
             "expires": -1.0, "httpOnly": true, "secure": true,

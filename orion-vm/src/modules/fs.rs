@@ -169,8 +169,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Int(meta.len() as i64))
         }
 
-        // guardar_b64(path, base64_str) → guarda binario decodificado de base64
-        "guardar_b64" | "write_b64" => {
+        // write_b64(path, base64_str) → guarda binario decodificado de base64
+        "write_b64" | "guardar_b64" => {
             if args.len() < 2 { return Err("fs.guardar_b64 requiere (path, base64_str)".into()); }
             let path   = eval_to_str(&args[0]);
             let b64    = eval_to_str(&args[1]);
@@ -188,8 +188,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Int(bytes.len() as i64))
         }
 
-        // leer_b64(path) → lee archivo binario y retorna base64 string
-        "leer_b64" | "read_b64" => {
+        // read_b64(path) → lee archivo binario y retorna base64 string
+        "read_b64" | "leer_b64" => {
             let path  = one_str("leer_b64", args)?;
             let bytes = std_fs::read(&path)
                 .map_err(|e| format!("fs.leer_b64: {}", e))?;

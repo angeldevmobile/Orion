@@ -25,16 +25,16 @@ fn store() -> &'static Mutex<GraphStore> {
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // crear() → id Int
-        "crear" | "create" => {
+        // create() → id Int
+        "create" | "crear" => {
             let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
             let mut st = store().lock().unwrap();
             st.graphs.insert(id, OrionGraph::new());
             st.node_index.insert(id, HashMap::new());
             Ok(EvalValue::Int(id as i64))
         }
-        // nodo(id, nombre) → Bool  — agrega nodo si no existe
-        "nodo" | "node" => {
+        // node(id, nombre) → Bool  — agrega nodo si no existe
+        "node" | "nodo" => {
             if args.len() < 2 { return Err("grafo.nodo requiere (id, nombre)".into()); }
             let gid  = to_u64(&args[0])?;
             let name = to_str(&args[1]);
@@ -48,8 +48,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
             Ok(EvalValue::Bool(true))
         }
-        // arista(id, desde, hasta, peso?) → Bool
-        "arista" | "edge" => {
+        // edge(id, desde, hasta, peso?) → Bool
+        "edge" | "arista" => {
             if args.len() < 3 { return Err("grafo.arista requiere (id, desde, hasta, peso?)".into()); }
             let gid   = to_u64(&args[0])?;
             let desde = to_str(&args[1]);
@@ -73,8 +73,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             st.graphs.get_mut(&gid).unwrap().add_edge(a, b, peso);
             Ok(EvalValue::Bool(true))
         }
-        // camino(id, desde, hasta) → List<Str> de nodos o Null si no existe ruta
-        "camino" | "path" => {
+        // path(id, desde, hasta) → List<Str> de nodos o Null si no existe ruta
+        "path" | "camino" => {
             if args.len() < 3 { return Err("grafo.camino requiere (id, desde, hasta)".into()); }
             let gid   = to_u64(&args[0])?;
             let desde = to_str(&args[1]);
@@ -91,8 +91,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 None => Ok(EvalValue::Null),
             }
         }
-        // vecinos(id, nodo) → List<Str>
-        "vecinos" | "neighbors" => {
+        // neighbors(id, nodo) → List<Str>
+        "neighbors" | "vecinos" => {
             if args.len() < 2 { return Err("grafo.vecinos requiere (id, nodo)".into()); }
             let gid  = to_u64(&args[0])?;
             let name = to_str(&args[1]);
@@ -105,15 +105,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .collect();
             Ok(EvalValue::List(vecinos))
         }
-        // nodos(id) → List<Str> de todos los nodos
-        "nodos" | "nodes" => {
+        // nodes(id) → List<Str> de todos los nodos
+        "nodes" | "nodos" => {
             let gid = to_u64(args.first().ok_or("grafo.nodos requiere (id)")?)?;
             let st  = store().lock().unwrap();
             let g   = st.graphs.get(&gid).ok_or_else(|| format!("grafo {}: no existe", gid))?;
             Ok(EvalValue::List(g.node_weights().map(|n| EvalValue::Str(n.clone())).collect()))
         }
-        // eliminar(id) → Bool
-        "eliminar" | "delete" => {
+        // delete(id) → Bool
+        "delete" | "eliminar" => {
             let gid = to_u64(args.first().ok_or("grafo.eliminar requiere (id)")?)?;
             let mut st = store().lock().unwrap();
             st.graphs.shift_remove(&gid);
