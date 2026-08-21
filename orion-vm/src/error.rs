@@ -40,11 +40,11 @@ pub enum ErrorKind {
 impl ErrorKind {
     fn label(&self) -> &str {
         match self {
-            ErrorKind::Lexer   => "error léxico",
-            ErrorKind::Parse   => "error sintáctico",
-            ErrorKind::Codegen => "error de compilación",
-            ErrorKind::Type    => "error de tipos",
-            ErrorKind::Runtime => "error en ejecución",
+            ErrorKind::Lexer   => "lexical error",
+            ErrorKind::Parse   => "syntax error",
+            ErrorKind::Codegen => "compile error",
+            ErrorKind::Type    => "type error",
+            ErrorKind::Runtime => "runtime error",
         }
     }
 

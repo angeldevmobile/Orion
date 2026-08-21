@@ -181,7 +181,7 @@ impl TypeChecker {
             let col  = self.current_col;
             self.issues.push(TypeIssue::warning(
                 format!(
-                    "{ns}.{method}(): el argumento #{} ('{}') se declara '{declarado}' y se está pasando '{real}'",
+                    "{ns}.{method}(): argument #{} ('{}') is declared '{declarado}' but '{real}' is being passed",
                     idx + 1, p.name
                 ),
                 line, col,
@@ -440,7 +440,7 @@ impl TypeChecker {
                 // Ignorar variables con _ prefix (convención de descarte)
                 if !name.starts_with('_') {
                     self.issues.push(TypeIssue::warning(
-                        format!("Variable '{name}' asignada pero nunca usada"),
+                        format!("Variable '{name}' assigned but never used"),
                         line, 1,
                     ));
                 }
@@ -469,10 +469,10 @@ impl TypeChecker {
         let col  = self.current_col;
         let msg  = match closest_name(method, known) {
             Some(sug) => format!(
-                "{}.{}() no existe. ¿Quisiste decir {}.{}()?",
+                "{}.{}() does not exist. Did you mean {}.{}()?",
                 ns, method, ns, sug
             ),
-            None => format!("{}.{}() no existe en el módulo '{}'.", ns, method, module),
+            None => format!("{}.{}() does not exist in module '{}'.", ns, method, module),
         };
         self.report(msg, line, col);
     }
@@ -551,7 +551,7 @@ impl TypeChecker {
                 if let Some(actual_ty) = &actual {
                     if !types_compatible(type_hint, actual_ty) {
                         self.report(
-                            format!("'{name}: {type_hint}' — se asignó valor de tipo '{actual_ty}'"),
+                            format!("'{name}: {type_hint}' — assigned a value of type '{actual_ty}'"),
                             *line, *col,
                         );
                     }
@@ -640,7 +640,7 @@ impl TypeChecker {
                             if let Some(actual) = actual {
                                 if !types_compatible(rt, &actual) {
                                     self.report(
-                                        format!("RETURN: se esperaba '{rt}', pero es de tipo '{actual}'"),
+                                        format!("RETURN: expected '{rt}', found '{actual}'"),
                                         *line, *col,
                                     );
                                 }
@@ -1119,7 +1119,7 @@ impl TypeChecker {
                     let line = self.current_line;
                     let col  = self.current_col;
                     self.issues.push(TypeIssue::warning(
-                        format!("Variable '{name}' usada pero no definida en este scope"),
+                        format!("Variable '{name}' used but not defined in this scope"),
                         line, col,
                     ));
                 }
@@ -1251,7 +1251,7 @@ impl TypeChecker {
                                 let line = self.current_line;
                                 let col  = self.current_col;
                                 self.report(
-                                    format!("Generic '{declared}' usado como '{}' y '{}' en la misma llamada", entry, actual),
+                                    format!("Generic '{declared}' used as '{}' and '{}' in the same call", entry, actual),
                                     line, col,
                                 );
                             }

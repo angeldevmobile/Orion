@@ -1,0 +1,108 @@
+-- Fixture de conformidad de SPEC.md. Cada linea es "clave=valor" y
+-- tests/spec_conformance.rs comprueba el valor exacto. Si el compilador cambia
+-- de comportamiento, este test falla y SPEC.md queda formalmente desmentida.
+--
+-- OJO: no renombrar a test_*.orx — lo cogeria el runner de `orion test`.
+
+/// Comentario de documentacion.
+fn documentada() { return 1 }
+fn greet(x) { return "hi " + x }
+fn apply(f, v) { return f(v) }
+
+-- 5. literales
+show "hex=" + "${0x2A}"
+show "bin=" + "${0b101010}"
+show "bool_si=" + "${yes}"
+show "bool_no=" + "${no}"
+
+-- 5.1 strings
+n = 7
+show "interp=${n}"
+show "escape_hex=" + "A\x42"
+
+-- 6. precedencia
+show "bitwise_vs_cmp=" + "${6 & 3 == 2}"
+show "mul_antes_de_suma=" + "${2 + 3 * 4}"
+show "power_asocia_derecha=" + "${2 ** 3 ** 2}"
+show "unario_antes_de_and=" + "${not yes and no}"
+
+-- 7. scope: asignar dentro de una funcion crea un local
+counter = 0
+fn bump() { counter = counter + 1 }
+bump()
+show "global_intacto=" + "${counter}"
+
+-- 8. valores funcion
+show "tipo_lambda=" + type(fn(x) { return x })
+show "tipo_nombrada=" + type(greet)
+igual = greet == "greet"
+show "fn_igual_a_su_nombre=" + "${igual}"
+s = "greet"
+show "string_invocable=" + s(2)
+lam = fn(x) { return x + 1 }
+show "lambda_como_arg=" + "${apply(lam, 10)}"
+show "lambda_literal_arg=" + "${apply(lam, 10)}"
+-- Regresion: la lambda literal dentro de una interpolacion estuvo rota
+-- (el cuerpo generado no subia hasta el registro de funciones).
+attempt { v = "${apply(fn(x) { return x + 1 }, 10)}" show "lambda_en_interpolacion=ok" }
+handle e { show "lambda_en_interpolacion=roto" }
+show "nombrada_como_arg=" + apply(greet, 10)
+
+-- 9. nombres de tipo
+show "t_int=" + type(1)
+show "t_float=" + type(1.5)
+show "t_string=" + type("s")
+show "t_bool=" + type(yes)
+show "t_list=" + type([1])
+show "t_dict=" + type({a: 1})
+show "t_null=" + type(null)
+
+-- 6.1 pipe
+fn doble(n) { return n * 2 }
+fn suma(x, y) { return x + y }
+show "pipe_ident=" + "${5 |> doble}"
+show "pipe_call=" + "${5 |> suma(3)}"
+pf = 5 |> (n) => n * 3
+show "pipe_flecha=" + "${pf}"
+
+-- 8 lambdas: dos sintaxis
+gflecha = (n) => n + 1
+hflecha = n => n + 2
+show "flecha_parens=" + "${gflecha(1)}"
+show "flecha_sin_parens=" + "${hflecha(1)}"
+
+-- 9.1 orden de evaluacion
+log = []
+fn ev_a() { log.push("a")  return 1 }
+fn ev_b() { log.push("b")  return 2 }
+fn ev_dos(p, q) { return p + q }
+ev_dos(ev_a(), ev_b())
+show "orden_args=" + log.join(",")
+log2 = []
+fn ev_c() { log2.push("c")  return 1 }
+fn ev_d() { log2.push("d")  return 2 }
+zz = {x: ev_c(), y: ev_d()}
+show "orden_dict=" + log2.join(",")
+
+-- 9.2 aritmetica
+show "int_mas_float=" + type(1 + 1.0)
+show "division_real=" + "${3 / 2}"
+show "tipo_division=" + type(3 / 2)
+attempt { o = 9223372036854775807 + 1  show "overflow=ok" } handle e { show "overflow=error" }
+attempt { pn = 2 ** -1  show "pow_neg_int=ok" } handle e { show "pow_neg_int=error" }
+show "pow_neg_float=" + "${2.0 ** -1}"
+
+-- 9.3 null
+show "null_eq_undefined=" + "${null == undefined}"
+show "tipo_undefined=" + type(undefined)
+
+-- 9.4 iteracion
+dd = {zeta: 1, alfa: 2, medio: 3}
+attempt { for k in dd { } show "for_sobre_dict=ok" } handle e { show "for_sobre_dict=no_soportado" }
+ks = []
+for k in dd.keys() { ks.push(k) }
+show "orden_insercion=" + ks.join(",")
+
+-- 5 literales
+show "exponente=" + "${1e3}"
+show "exponente_float=" + "${1.5e2}"

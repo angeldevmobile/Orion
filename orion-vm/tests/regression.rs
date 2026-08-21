@@ -40,14 +40,14 @@ fn test_default_params_ok() {
 fn test_default_falta_arg_obligatorio() {
     // 'a' es obligatorio; llamar f() debe fallar en runtime con mensaje claro.
     let err = run_err("fn f(a, b = 5) { return a + b }\nshow f()");
-    assert!(err.contains("espera") && err.contains("recibió"),
+    assert!(err.contains("expects") && err.contains("got"),
         "mensaje inesperado: {}", err);
 }
 
 #[test]
 fn test_default_demasiados_args() {
     let err = run_err("fn f(a, b = 5) { return a + b }\nshow f(1, 2, 3)");
-    assert!(err.contains("espera 2"), "mensaje inesperado: {}", err);
+    assert!(err.contains("expects 2"), "mensaje inesperado: {}", err);
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn test_default_orden_invalido_es_error_de_compilacion() {
     let tokens = lexer::lex("fn mal(a = 1, b) { return a }").unwrap();
     let stmts = parser::parse(tokens).unwrap();
     let err = codegen::compile(stmts).expect_err("se esperaba error de compilación");
-    assert!(err.message.contains("no puede ir después"), "mensaje: {}", err.message);
+    assert!(err.message.contains("cannot follow"), "mensaje: {}", err.message);
 }
 
 // ── Argumentos con nombre (named args) ──────────────────────────────────────
@@ -87,7 +87,7 @@ fn test_named_arg_duplicado() {
 #[test]
 fn test_named_arg_en_funcion_desconocida_es_error() {
     let e = compile_err("show desconocida(x = 1)");
-    assert!(e.contains("no soportado"), "mensaje: {}", e);
+    assert!(e.contains("not supported"), "mensaje: {}", e);
 }
 
 // ── Literales y aritmética ──────────────────────────────────────────────────
@@ -770,7 +770,7 @@ fn f() {
 }"#,
     ).unwrap();
     let err = orion_vm::parser::parse(tokens).expect_err("return dentro de with debe rechazarse");
-    assert!(err.message.contains("liberación"), "mensaje: {}", err.message);
+    assert!(err.message.contains("releasing"), "mensaje: {}", err.message);
 }
 
 #[test]
@@ -784,14 +784,14 @@ while yes {
 }"#,
     ).unwrap();
     let err = orion_vm::parser::parse(tokens).expect_err("break que escapa del with debe rechazarse");
-    assert!(err.message.contains("liberar"), "mensaje: {}", err.message);
+    assert!(err.message.contains("releasing"), "mensaje: {}", err.message);
 }
 
 #[test]
 fn test_with_rechaza_init_que_no_es_modulo() {
     let tokens = orion_vm::lexer::lex("with h = 42 { show h }").unwrap();
     let err = orion_vm::parser::parse(tokens).expect_err("init sin módulo debe rechazarse");
-    assert!(err.message.contains("recurso de módulo"), "mensaje: {}", err.message);
+    assert!(err.message.contains("module resource"), "mensaje: {}", err.message);
 }
 
 // ── Handlers huérfanos: return dentro de attempt (fix de la VM) ──────────────
@@ -964,5 +964,36 @@ fn test_break_fuera_de_loop_es_error_de_compilacion() {
     let tokens = orion_vm::lexer::lex("break").unwrap();
     let stmts = orion_vm::parser::parse(tokens).unwrap();
     let err = orion_vm::codegen::compile(stmts).expect_err("break suelto debe rechazarse");
-    assert!(err.message.contains("fuera de un loop"), "mensaje: {}", err.message);
+    assert!(err.message.contains("outside a loop"), "mensaje: {}", err.message);
+}
+
+/// Una lambda escrita dentro de una interpolación `${...}` no llegaba a
+/// registrarse: `compile_sub_expr` compilaba la expresión con un vector de
+/// funciones generadas LOCAL, que se descartaba al salir. La llamada quedaba
+/// emitida y su destino no existía, así que reventaba en ejecución con
+/// "Función '__lambda_N__' no definida" — pero solo dentro de un string.
+#[test]
+fn lambda_dentro_de_interpolacion_se_registra() {
+    run_ok(r#"
+        fn apply(g, v) { return g(v) }
+        xs = [1, 2, 3]
+        a = "${apply(fn(x) { return x + 1 }, 10)}"
+        if a != "11" { error "lambda simple en interpolacion: " + a }
+
+        -- dos en la misma interpolación, cada una con su nombre sintético
+        b = "${apply(fn(x) { return x + 1 }, 1)} y ${apply(fn(x) { return x * 10 }, 2)}"
+        if b != "2 y 20" { error "dos lambdas en una interpolacion: " + b }
+
+        -- anidada: la de dentro también tiene que subir
+        c = "${apply(fn(x) { return apply(fn(y) { return y * 2 }, x) }, 5)}"
+        if c != "10" { error "lambda anidada en interpolacion: " + c }
+
+        -- forma de flecha, que pasa por el mismo camino
+        d = "${5 |> (n) => n * 3}"
+        if d != "15" { error "lambda de flecha en interpolacion: " + d }
+
+        -- método con lambda inline
+        e = "${xs.map(fn(x) { return x * 2 })}"
+        if e != "[2, 4, 6]" { error "map con lambda en interpolacion: " + e }
+    "#);
 }

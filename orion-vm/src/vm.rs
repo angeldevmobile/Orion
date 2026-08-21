@@ -406,14 +406,14 @@ impl VM {
                         None
                     }
                 });
-                let val = val.ok_or_else(|| format!("Variable '{}' no definida", name))?;
+                let val = val.ok_or_else(|| format!("Variable '{}' is not defined", name))?;
                 self.value_stack.push(val);
             }
             Instruction::StoreVar(name) => {
                 let val = self.pop()?;
                 let frame = self.call_stack.last_mut().ok_or("Sin frame activo")?;
                 if frame.consts.contains(&name) {
-                    return Err(format!("No se puede reasignar '{}': es una constante", name));
+                    return Err(format!("Cannot reassign '{}': it is a constant", name));
                 }
                 frame.vars.insert(name, val);
             }
@@ -432,13 +432,13 @@ impl VM {
             Instruction::Mod => {
                 let b = self.pop()?; let a = self.pop()?;
                 match (a, b) {
-                    (Value::Int(_), Value::Int(0)) => return Err("Módulo por cero".to_string()),
+                    (Value::Int(_), Value::Int(0)) => return Err("Modulo by zero".to_string()),
                     (Value::Int(x), Value::Int(y)) => {
                         let r = x.checked_rem(y)
                             .ok_or("Desbordamiento aritmético en módulo")?;
                         self.value_stack.push(Value::Int(r));
                     }
-                    _ => return Err("Módulo solo soporta enteros".to_string()),
+                    _ => return Err("Modulo only supports integers".to_string()),
                 }
             }
             // Bit a bit. Solo enteros a propósito: aplicarlos a un flotante o a
@@ -456,7 +456,7 @@ impl VM {
                 let b = self.pop()?; let a = self.pop()?;
                 match (a, b) {
                     (Value::Int(_), Value::Int(y)) if y < 0 =>
-                        return Err("Exponente negativo en potencia de enteros (usa flotantes)".to_string()),
+                        return Err("Negative exponent in integer power (use floats)".to_string()),
                     (Value::Int(x), Value::Int(y)) => {
                         let r = u32::try_from(y).ok()
                             .and_then(|e| x.checked_pow(e))
@@ -467,7 +467,7 @@ impl VM {
                     (Value::Int(x), Value::Float(y))   => self.value_stack.push(Value::Float((x as f64).powf(y))),
                     // Mismo cast `as i32` que el runtime JIT (rt_pow) para coincidir bit a bit.
                     (Value::Float(x), Value::Int(y))   => self.value_stack.push(Value::Float(x.powi(y as i32))),
-                    _ => return Err("Potencia requiere números".to_string()),
+                    _ => return Err("Power expects numbers".to_string()),
                 }
             }
             Instruction::Neg => {
@@ -479,7 +479,7 @@ impl VM {
                         self.value_stack.push(Value::Int(r));
                     }
                     Value::Float(f) => self.value_stack.push(Value::Float(-f)),
-                    _ => return Err("Negación solo aplica a números".to_string()),
+                    _ => return Err("Negation only applies to numbers".to_string()),
                 }
             }
 
@@ -645,19 +645,19 @@ impl VM {
                     Value::Instance(inst_rc) => {
                         let inst = inst_rc.borrow();
                         let val = inst.fields.get(&attr).cloned()
-                            .ok_or_else(|| format!("Atributo '{}' no encontrado en '{}'", attr, inst.shape_name))?;
+                            .ok_or_else(|| format!("Attribute '{}' not found on '{}'", attr, inst.shape_name))?;
                         self.value_stack.push(val);
                     }
                     Value::Dict(map) => {
                         let val = map.get(&attr).cloned()
-                            .ok_or_else(|| format!("Atributo '{}' no encontrado en dict/módulo", attr))?;
+                            .ok_or_else(|| format!("Attribute '{}' not found on dict/module", attr))?;
                         self.value_stack.push(val);
                     }
                     Value::Module(mod_name) => {
                         let result = crate::modules::call(&mod_name, &attr, vec![])?;
                         self.value_stack.push(eval_to_value(result));
                     }
-                    _ => return Err(format!("GetAttr '{}': no es una instancia ni módulo", attr)),
+                    _ => return Err(format!("GetAttr '{}': not an instance or module", attr)),
                 }
             }
             Instruction::SetAttr(attr) => {
@@ -735,7 +735,7 @@ impl VM {
                 let shape_name = inst_rc.borrow().shape_name.clone();
                 let parents = self.shapes.get(&shape_name)
                     .map(|s| s.using.clone())
-                    .ok_or_else(|| format!("Shape '{}' no encontrado", shape_name))?;
+                    .ok_or_else(|| format!("Shape '{}' not found", shape_name))?;
                 // Buscar el método SOLO en los shapes padre (vía using).
                 let act = parents.iter()
                     .find_map(|p| self.find_act(p, &method_name))
@@ -746,7 +746,7 @@ impl VM {
                     ))?;
                 if args.len() != act.params.len() {
                     return Err(format!(
-                        "super.{}() espera {} argumento(s), recibió {}",
+                        "super.{}() expects {} argument(s), got {}",
                         method_name, act.params.len(), args.len()
                     ));
                 }
@@ -786,22 +786,22 @@ impl VM {
                             "reverse"     => Value::Str(s.chars().rev().collect()),
                             "contains" => {
                                 let needle = args.into_iter().next()
-                                    .ok_or("string.contains() requiere 1 argumento")?;
+                                    .ok_or("string.contains() expects 1 argument")?;
                                 Value::Bool(s.contains(needle.to_string().as_str()))
                             }
                             "starts_with" => {
                                 let prefix = args.into_iter().next()
-                                    .ok_or("string.starts_with() requiere 1 argumento")?;
+                                    .ok_or("string.starts_with() expects 1 argument")?;
                                 Value::Bool(s.starts_with(prefix.to_string().as_str()))
                             }
                             "ends_with" => {
                                 let suffix = args.into_iter().next()
-                                    .ok_or("string.ends_with() requiere 1 argumento")?;
+                                    .ok_or("string.ends_with() expects 1 argument")?;
                                 Value::Bool(s.ends_with(suffix.to_string().as_str()))
                             }
                             "split" => {
                                 let sep = args.into_iter().next()
-                                    .ok_or("string.split() requiere 1 argumento")?;
+                                    .ok_or("string.split() expects 1 argument")?;
                                 let sep_str = sep.to_string();
                                 // split("") → caracteres (sin strings vacíos en los bordes)
                                 let parts: Vec<Value> = if sep_str.is_empty() {
@@ -815,13 +815,13 @@ impl VM {
                             }
                             "replace" => {
                                 let mut it = args.into_iter();
-                                let from = it.next().ok_or("string.replace() requiere 2 argumentos")?;
-                                let to   = it.next().ok_or("string.replace() requiere 2 argumentos")?;
+                                let from = it.next().ok_or("string.replace() expects 2 arguments")?;
+                                let to   = it.next().ok_or("string.replace() expects 2 arguments")?;
                                 Value::Str(s.replace(from.to_string().as_str(), &to.to_string()))
                             }
                             "index_of" | "find" => {
                                 let needle = args.into_iter().next()
-                                    .ok_or("string.find() requiere 1 argumento")?;
+                                    .ok_or("string.find() expects 1 argument")?;
                                 match s.find(needle.to_string().as_str()) {
                                     Some(i) => Value::Int(i as i64),
                                     None    => Value::Int(-1),
@@ -831,12 +831,12 @@ impl VM {
                                 let mut it = args.into_iter();
                                 let start = match it.next() {
                                     Some(Value::Int(n)) => n as usize,
-                                    _ => return Err("string.slice() requiere índice int".to_string()),
+                                    _ => return Err("string.slice() expects an int index".to_string()),
                                 };
                                 let end = match it.next() {
                                     Some(Value::Int(n)) => n as usize,
                                     None => s.chars().count(),
-                                    _ => return Err("string.slice() índice inválido".to_string()),
+                                    _ => return Err("string.slice() invalid index".to_string()),
                                 };
                                 let sliced: String = s.chars().skip(start).take(end - start).collect();
                                 Value::Str(sliced)
@@ -844,23 +844,23 @@ impl VM {
                             "repeat" => {
                                 let n = match args.into_iter().next() {
                                     Some(Value::Int(n)) => n as usize,
-                                    _ => return Err("string.repeat() requiere un int".to_string()),
+                                    _ => return Err("string.repeat() expects an int".to_string()),
                                 };
                                 Value::Str(s.repeat(n))
                             }
                             "to_int" | "parse_int" => {
                                 match s.trim().parse::<i64>() {
                                     Ok(n) => Value::Int(n),
-                                    Err(_) => return Err(format!("No se puede convertir '{}' a int", s)),
+                                    Err(_) => return Err(format!("Cannot convert '{}' to int", s)),
                                 }
                             }
                             "to_float" | "parse_float" => {
                                 match s.trim().parse::<f64>() {
                                     Ok(n) => Value::Float(n),
-                                    Err(_) => return Err(format!("No se puede convertir '{}' a float", s)),
+                                    Err(_) => return Err(format!("Cannot convert '{}' to float", s)),
                                 }
                             }
-                            _ => return Err(format!("String no tiene método '{}'", method_name)),
+                            _ => return Err(format!("String has no method '{}'", method_name)),
                         };
                         self.value_stack.push(result);
                     }
@@ -877,7 +877,7 @@ impl VM {
                             "is_empty" => Value::Bool(list.borrow().is_empty()),
                             "push" | "append" => {
                                 let item = args.into_iter().next()
-                                    .ok_or("list.push() requiere 1 argumento")?;
+                                    .ok_or("list.push() expects 1 argument")?;
                                 // Guardar un contenedor dentro de la lista puede
                                 // cerrar un ciclo → registrarla para el GC.
                                 if crate::gc::is_container(&item) {
@@ -895,7 +895,7 @@ impl VM {
                             "reverse" => { list.borrow_mut().reverse(); Value::List(list) }
                             "contains" => {
                                 let item = args.into_iter().next()
-                                    .ok_or("list.contains() requiere 1 argumento")?;
+                                    .ok_or("list.contains() expects 1 argument")?;
                                 Value::Bool(list.borrow().contains(&item))
                             }
                             "join" => {
@@ -908,7 +908,7 @@ impl VM {
                             }
                             "map" => {
                                 let cb = args.into_iter().next()
-                                    .ok_or("list.map() requiere una función/lambda")?;
+                                    .ok_or("list.map() expects a function/lambda")?;
                                 let items = list.borrow().0.clone();
                                 let mut out = Vec::with_capacity(items.len());
                                 for item in items {
@@ -919,7 +919,7 @@ impl VM {
                             }
                             "filter" => {
                                 let cb = args.into_iter().next()
-                                    .ok_or("list.filter() requiere una función/lambda")?;
+                                    .ok_or("list.filter() expects a function/lambda")?;
                                 let items = list.borrow().0.clone();
                                 let mut out = Vec::new();
                                 for item in items {
@@ -930,8 +930,8 @@ impl VM {
                             }
                             "reduce" => {
                                 let mut it = args.into_iter();
-                                let cb  = it.next().ok_or("list.reduce() requiere función y acumulador")?;
-                                let acc = it.next().ok_or("list.reduce() requiere acumulador inicial")?;
+                                let cb  = it.next().ok_or("list.reduce() expects a function and an accumulator")?;
+                                let acc = it.next().ok_or("list.reduce() expects an initial accumulator")?;
                                 let mut acc = acc;
                                 let items = list.borrow().0.clone();
                                 for item in items {
@@ -970,7 +970,7 @@ impl VM {
                                 (Value::Float(x), Value::Float(y)) => if x >= y { a } else { b },
                                 _ => a,
                             }).unwrap_or(Value::Null),
-                            _ => return Err(format!("List no tiene método '{}'", method_name)),
+                            _ => return Err(format!("List has no method '{}'", method_name)),
                         };
                         self.value_stack.push(result);
                     }
@@ -999,13 +999,13 @@ impl VM {
                             "values"   => { self.value_stack.push(Value::list(map.values().cloned().collect())); }
                             "contains" | "has_key" => {
                                 let key = args.into_iter().next()
-                                    .ok_or("dict.contains() requiere 1 argumento")?
+                                    .ok_or("dict.contains() expects 1 argument")?
                                     .to_string();
                                 self.value_stack.push(Value::Bool(map.contains_key(&key)));
                             }
                             "get" => {
                                 let key = args.into_iter().next()
-                                    .ok_or("dict.get() requiere 1 argumento")?
+                                    .ok_or("dict.get() expects 1 argument")?
                                     .to_string();
                                 self.value_stack.push(map.get(&key).cloned().unwrap_or(Value::Null));
                             }
@@ -1015,7 +1015,7 @@ impl VM {
                                     let result = self.call_value(fn_val, args)?;
                                     self.value_stack.push(result);
                                 } else {
-                                    return Err(format!("Dict no tiene método '{}'", method_name));
+                                    return Err(format!("Dict has no method '{}'", method_name));
                                 }
                             }
                         }
@@ -1024,12 +1024,12 @@ impl VM {
                     Value::Instance(inst_rc) => {
                         let shape_name = inst_rc.borrow().shape_name.clone();
                         let act = self.find_act(&shape_name, &method_name)
-                            .ok_or_else(|| format!("Método '{}' no encontrado en '{}'", method_name, shape_name))?
+                            .ok_or_else(|| format!("Method '{}' not found on '{}'", method_name, shape_name))?
                             .clone();
 
                         if args.len() != act.params.len() {
                             return Err(format!(
-                                "'{}' espera {} argumento(s), recibió {}",
+                                "'{}' expects {} argument(s), got {}",
                                 method_name, act.params.len(), args.len()
                             ));
                         }
@@ -1099,11 +1099,11 @@ impl VM {
                                     Err(e) => return Err(e),
                                 }
                             }
-                            other => return Err(format!("tarea.{}() no existe", other)),
+                            other => return Err(format!("task.{}() does not exist", other)),
                         };
                         self.value_stack.push(result);
                     }
-                    _ => return Err(format!("CallMethod '{}': no es una instancia", method_name)),
+                    _ => return Err(format!("CallMethod '{}': not an instance", method_name)),
                 }
             }
 
@@ -1144,12 +1144,12 @@ impl VM {
                             i as usize
                         };
                         let item = items.get(i_usize).cloned()
-                            .ok_or_else(|| format!("Índice {} fuera de rango", i))?;
+                            .ok_or_else(|| format!("Index {} out of range", i))?;
                         self.value_stack.push(item);
                     }
                     (Value::Dict(map), Value::Str(key)) => {
                         let val = map.get(&key).cloned()
-                            .ok_or_else(|| format!("Clave '{}' no encontrada", key))?;
+                            .ok_or_else(|| format!("Key '{}' not found", key))?;
                         self.value_stack.push(val);
                     }
                     (Value::Str(s), Value::Int(i)) => {
@@ -1160,10 +1160,10 @@ impl VM {
                             i as usize
                         };
                         let ch = s.chars().nth(i_usize)
-                            .ok_or_else(|| format!("Índice {} fuera de rango en string", i))?;
+                            .ok_or_else(|| format!("Index {} out of range in string", i))?;
                         self.value_stack.push(Value::Str(ch.to_string()));
                     }
-                    _ => return Err("GetIndex: tipo no soportado".to_string()),
+                    _ => return Err("GetIndex: unsupported type".to_string()),
                 }
             }
             Instruction::SetIndex => {
@@ -1183,7 +1183,7 @@ impl VM {
                                 i as usize
                             };
                             if i_usize >= items_mut.len() {
-                                return Err(format!("Índice {} fuera de rango en SetIndex", i));
+                                return Err(format!("Index {} out of range in SetIndex", i));
                             }
                             items_mut[i_usize] = val;
                         }
@@ -1197,7 +1197,7 @@ impl VM {
                         map.insert(key, val);
                         self.value_stack.push(Value::Dict(map));
                     }
-                    _ => return Err("SetIndex: tipo no soportado".to_string()),
+                    _ => return Err("SetIndex: unsupported type".to_string()),
                 }
             }
 
@@ -1217,7 +1217,7 @@ impl VM {
                 args.reverse();
 
                 let func = self.functions.get(&fn_name).cloned()
-                    .ok_or_else(|| format!("función async '{}' no existe", fn_name))?;
+                    .ok_or_else(|| format!("async function '{}' does not exist", fn_name))?;
 
                 // Convertir args a SendValue (thread-safe)
                 let send_args: Vec<SendValue> = args.iter()
@@ -1349,14 +1349,14 @@ impl VM {
                 if let Some(ref opts) = choices_list {
                     let opts_str: Vec<String> = opts.iter().map(|v| v.to_string()).collect();
                     if !opts_str.contains(&raw) {
-                        return Err(format!("Opción inválida '{}'. Elige entre: {}", raw, opts_str.join(", ")));
+                        return Err(format!("Invalid choice '{}'. Pick one of: {}", raw, opts_str.join(", ")));
                     }
                 }
 
                 // Cast de tipo
                 let result = match cast.as_deref() {
-                    Some("int")   => Value::Int(raw.parse::<i64>().map_err(|_| format!("No se puede convertir '{}' a int", raw))?),
-                    Some("float") => Value::Float(raw.parse::<f64>().map_err(|_| format!("No se puede convertir '{}' a float", raw))?),
+                    Some("int")   => Value::Int(raw.parse::<i64>().map_err(|_| format!("Cannot convert '{}' to int", raw))?),
+                    Some("float") => Value::Float(raw.parse::<f64>().map_err(|_| format!("Cannot convert '{}' to float", raw))?),
                     Some("bool")  => Value::Bool(matches!(raw.as_str(), "yes" | "true" | "1")),
                     _             => Value::Str(raw),
                 };
@@ -1367,7 +1367,7 @@ impl VM {
                 let path_val = self.pop()?;
                 let path = path_val.to_string();
                 let content = std::fs::read_to_string(&path)
-                    .map_err(|e| format!("read: no se pudo leer '{}': {}", path, e))?;
+                    .map_err(|e| format!("read: could not read '{}': {}", path, e))?;
                 let result = match fmt.as_str() {
                     "json" => {
                         let parsed: serde_json::Value = serde_json::from_str(&content)
@@ -1440,7 +1440,7 @@ impl VM {
                 let port_val = self.pop()?;
                 let port: u16 = match port_val {
                     Value::Int(n) => n as u16,
-                    _ => return Err("serve: el puerto debe ser un entero".to_string()),
+                    _ => return Err("serve: the port must be an integer".to_string()),
                 };
                 self.serve_http(port, fn_name)?;
             }
@@ -1564,7 +1564,7 @@ impl VM {
             return self.load_orx_module(&file, base_name, &prefix);
         }
 
-        Err(format!("Módulo '{}' no encontrado", path))
+        Err(format!("Module '{}' not found", path))
     }
 
     /// Carga un módulo .orx: compila, ejecuta en sub-VM, extrae vars y fns en un dict.
@@ -1574,7 +1574,7 @@ impl VM {
         use crate::codegen::compile;
 
         let src = std::fs::read_to_string(path)
-            .map_err(|e| format!("No se pudo leer '{}': {}", path, e))?;
+            .map_err(|e| format!("Could not read '{}': {}", path, e))?;
         let tokens = lex(&src).map_err(|e| format!("Error lexando '{}': {:?}", path, e))?;
         let ast = parse(tokens).map_err(|e| format!("Error parseando '{}': {:?}", path, e))?;
         let bc = compile(ast).map_err(|e| format!("Error compilando '{}': {:?}", path, e))?;
@@ -1704,7 +1704,7 @@ impl VM {
         let (fn_name, closure_env) = match callee {
             Value::Closure { fn_name, env } => (fn_name, Some(env)),
             Value::Str(s) => (s, None),
-            other => return Err(format!("No es un callable: {:?}", other)),
+            other => return Err(format!("Not callable: {:?}", other)),
         };
 
         if fn_name.starts_with("__math__") {
@@ -1712,7 +1712,7 @@ impl VM {
         }
 
         let func_def = self.functions.get(&fn_name)
-            .ok_or_else(|| format!("Función '{}' no encontrada", fn_name))?
+            .ok_or_else(|| format!("Function '{}' not found", fn_name))?
             .clone();
         let args = self.bind_args_with_defaults(&func_def, args, &fn_name)?;
         let stack_depth = self.call_stack.len();
@@ -1739,16 +1739,16 @@ impl VM {
         let data = match args.get(0) {
             Some(Value::List(l)) => l.borrow().0.clone(),
             Some(other) => return Err(format!(
-                "excel.compute: primer argumento debe ser lista, se recibió {:?}", other
+                "excel.compute: first argument must be a list, got {:?}", other
             )),
-            None => return Err("excel.compute: requiere (data, spec)".into()),
+            None => return Err("excel.compute: expects (data, spec)".into()),
         };
         let spec = match args.get(1) {
             Some(Value::Dict(m)) => m.clone(),
             Some(other) => return Err(format!(
-                "excel.compute: segundo argumento debe ser dict de funciones, se recibió {:?}", other
+                "excel.compute: second argument must be a dict of functions, got {:?}", other
             )),
-            None => return Err("excel.compute: requiere (data, spec)".into()),
+            None => return Err("excel.compute: expects (data, spec)".into()),
         };
 
         let col_names: Vec<String> = spec.keys().cloned().collect(); // IndexMap → insertion order
@@ -1758,7 +1758,7 @@ impl VM {
             let mut new_row = match row {
                 Value::Dict(m) => m.clone(),
                 other => return Err(format!(
-                    "excel.compute: cada fila debe ser un dict, se recibió {:?}", other
+                    "excel.compute: each row must be a dict, got {:?}", other
                 )),
             };
             for col_name in &col_names {
@@ -1777,7 +1777,7 @@ impl VM {
             match v {
                 Value::Float(f) => Ok(*f),
                 Value::Int(i) => Ok(*i as f64),
-                _ => Err(format!("Se esperaba número, no {:?}", v)),
+                _ => Err(format!("Expected a number, found {:?}", v)),
             }
         }
         match name {
@@ -1785,7 +1785,7 @@ impl VM {
             "abs"       => match &args[0] {
                 Value::Int(i)   => Ok(Value::Int(i.abs())),
                 Value::Float(f) => Ok(Value::Float(f.abs())),
-                _ => Err("abs() requiere número".into()),
+                _ => Err("abs() expects a number".into()),
             },
             "floor"     => Ok(Value::Int(to_f64(&args[0])?.floor() as i64)),
             "ceil"      => Ok(Value::Int(to_f64(&args[0])?.ceil() as i64)),
@@ -1849,7 +1849,7 @@ impl VM {
                 let range = (b - a + 1).max(1);
                 Ok(Value::Int(a + (seed as i64 % range)))
             }
-            _ => Err(format!("math.{} no implementado", name)),
+            _ => Err(format!("math.{} is not implemented", name)),
         }
     }
 
@@ -1879,7 +1879,7 @@ impl VM {
         if let Some(oc) = on_create {
             if !args.is_empty() && args.len() != oc.params.len() {
                 return Err(format!(
-                    "'{}' on_create espera {} argumento(s), recibió {}",
+                    "'{}' on_create expects {} argument(s), got {}",
                     shape_name, oc.params.len(), args.len()
                 ));
             }
@@ -1902,7 +1902,7 @@ impl VM {
             let field_order: Vec<String> = all_fields.iter().map(|f| f.name.clone()).collect();
             if args.len() > field_order.len() {
                 return Err(format!(
-                    "'{}' tiene {} campo(s), recibió {} argumento(s)",
+                    "'{}' has {} field(s), got {} argument(s)",
                     shape_name, field_order.len(), args.len()
                 ));
             }
@@ -1964,7 +1964,7 @@ impl VM {
     ) -> Result<Vec<Value>, String> {
         let n = func.params.len();
         if args.len() > n {
-            return Err(format!("'{}' espera {} argumento(s), recibió {}", name, n, args.len()));
+            return Err(format!("'{}' expects {} argument(s), got {}", name, n, args.len()));
         }
         while args.len() < n {
             let i = args.len();
@@ -1974,7 +1974,7 @@ impl VM {
                     args.push(v);
                 }
                 None => {
-                    return Err(format!("'{}' espera {} argumento(s), recibió {}", name, n, args.len()));
+                    return Err(format!("'{}' expects {} argument(s), got {}", name, n, args.len()));
                 }
             }
         }
@@ -2003,7 +2003,7 @@ impl VM {
 
     fn resolve_fields(&self, shape_name: &str) -> Result<Vec<crate::bytecode::FieldDef>, String> {
         let shape = self.shapes.get(shape_name)
-            .ok_or_else(|| format!("Shape '{}' no definido", shape_name))?
+            .ok_or_else(|| format!("Shape '{}' is not defined", shape_name))?
             .clone();
 
         let mut all_fields = Vec::new();
@@ -2134,13 +2134,13 @@ impl VM {
 
         let addr = format!("0.0.0.0:{}", port);
         let server = Arc::new(Server::http(&addr)
-            .map_err(|e| format!("serve: no se pudo iniciar el servidor en {}: {}", addr, e))?);
+            .map_err(|e| format!("serve: could not start the server on {}: {}", addr, e))?);
 
         // Validar el handler una sola vez antes de levantar los hilos.
         let func = self.functions.get(&fn_name).cloned()
-            .ok_or_else(|| format!("serve: handler '{}' no encontrado", fn_name))?;
+            .ok_or_else(|| format!("serve: handler '{}' not found", fn_name))?;
         if func.params.len() != 1 {
-            return Err(format!("serve: handler '{}' debe tener exactamente 1 parámetro (req)", fn_name));
+            return Err(format!("serve: handler '{}' must take exactly 1 parameter (req)", fn_name));
         }
 
         // Snapshot de las variables globales (frame <main>) para sembrar cada
@@ -2209,7 +2209,7 @@ impl VM {
     /// request del mismo worker.
     fn run_handler(&mut self, fn_name: &str, req: Value) -> Result<Value, String> {
         let func = self.functions.get(fn_name).cloned()
-            .ok_or_else(|| format!("handler '{}' no encontrado", fn_name))?;
+            .ok_or_else(|| format!("handler '{}' not found", fn_name))?;
         let frame = CallFrame::with_args(func.body, func.lines, &func.params, vec![req]);
         self.call_stack.push(frame);
         match self.run_until_frame_done() {
@@ -2318,7 +2318,7 @@ impl VM {
             if let Some((dir, rest)) = crate::modules::router_mod::active_static(&path) {
                 let (st, bytes, ct): (u16, Vec<u8>, String) = match resolve_static(&dir, &rest) {
                     Some((bytes, mime)) => (200, bytes, mime),
-                    None => (404, b"archivo no encontrado".to_vec(), "text/plain; charset=utf-8".into()),
+                    None => (404, b"file not found".to_vec(), "text/plain; charset=utf-8".into()),
                 };
                 let mut response = Response::from_data(bytes).with_status_code(st);
                 if let Ok(h) = Header::from_str(&format!("Content-Type: {}", ct)) {
@@ -2521,7 +2521,7 @@ impl VM {
                         }
                         Err(_) => (
                             404,
-                            format!("archivo no encontrado: {}", fpath).into_bytes(),
+                            format!("file not found: {}", fpath).into_bytes(),
                             "text/plain; charset=utf-8".to_string(),
                             extra,
                         ),
@@ -2605,7 +2605,7 @@ impl VM {
             // start/end pueden ser Null (extremo abierto); índices negativos cuentan desde el final.
             "slice" => {
                 let mut it = args.into_iter();
-                let obj     = it.next().ok_or("slice() requiere un objeto")?;
+                let obj     = it.next().ok_or("slice() expects an object")?;
                 let start_v = it.next().unwrap_or(Value::Null);
                 let end_v   = it.next().unwrap_or(Value::Null);
                 let resolve = |v: Value, len: i64, default: i64| -> i64 {
@@ -2635,42 +2635,42 @@ impl VM {
                 }
             }
             "str" => {
-                let val = args.into_iter().next().ok_or("str() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("str() expects one argument")?;
                 Ok(Some(Value::Str(val.to_string())))
             }
             "int" => {
-                let val = args.into_iter().next().ok_or("int() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("int() expects one argument")?;
                 match val {
                     Value::Int(n)   => Ok(Some(Value::Int(n))),
                     Value::Float(f) => Ok(Some(Value::Int(f as i64))),
                     Value::Str(s)   => s.parse::<i64>()
                         .map(|n| Some(Value::Int(n)))
-                        .map_err(|_| format!("No se puede convertir '{}' a int", s)),
-                    _ => Err("int(): tipo no convertible".to_string()),
+                        .map_err(|_| format!("Cannot convert '{}' to int", s)),
+                    _ => Err("int(): type cannot be converted".to_string()),
                 }
             }
             "float" => {
-                let val = args.into_iter().next().ok_or("float() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("float() expects one argument")?;
                 match val {
                     Value::Float(f) => Ok(Some(Value::Float(f))),
                     Value::Int(n)   => Ok(Some(Value::Float(n as f64))),
                     Value::Str(s)   => s.parse::<f64>()
                         .map(|f| Some(Value::Float(f)))
-                        .map_err(|_| format!("No se puede convertir '{}' a float", s)),
-                    _ => Err("float(): tipo no convertible".to_string()),
+                        .map_err(|_| format!("Cannot convert '{}' to float", s)),
+                    _ => Err("float(): type cannot be converted".to_string()),
                 }
             }
             "len" => {
-                let val = args.into_iter().next().ok_or("len() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("len() expects one argument")?;
                 match val {
                     Value::List(v) => Ok(Some(Value::Int(v.borrow().len() as i64))),
                     Value::Str(s)  => Ok(Some(Value::Int(s.len() as i64))),
                     Value::Dict(m) => Ok(Some(Value::Int(m.len() as i64))),
-                    _ => Err("len(): tipo no soportado".to_string()),
+                    _ => Err("len(): unsupported type".to_string()),
                 }
             }
             "type" => {
-                let val = args.into_iter().next().ok_or("type() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("type() expects one argument")?;
                 Ok(Some(Value::Str(val.type_name())))
             }
             "show" => {
@@ -2681,8 +2681,8 @@ impl VM {
             //    Listas                                                        
             "push" | "append" => {
                 let mut it = args.into_iter();
-                let list = it.next().ok_or("push() requiere al menos 2 argumentos")?;
-                let val  = it.next().ok_or("push() requiere al menos 2 argumentos")?;
+                let list = it.next().ok_or("push() expects at least 2 argument(s)")?;
+                let val  = it.next().ok_or("push() expects at least 2 argument(s)")?;
                 match list {
                     Value::List(v) => {
                         // Un contenedor dentro de la lista puede cerrar un ciclo.
@@ -2692,11 +2692,11 @@ impl VM {
                         v.borrow_mut().push(val);
                         Ok(Some(Value::List(v)))
                     }
-                    _ => Err("push(): el primer argumento debe ser una lista".to_string()),
+                    _ => Err("push(): the first argument must be a list".to_string()),
                 }
             }
             "pop" => {
-                let list = args.into_iter().next().ok_or("pop() requiere un argumento")?;
+                let list = args.into_iter().next().ok_or("pop() expects one argument")?;
                 match list {
                     Value::List(v) => {
                         let item = v.borrow_mut().pop().unwrap_or(Value::Null);
@@ -2704,47 +2704,47 @@ impl VM {
                         // la lista interior es el MISMO backing (ya mutado in-place)
                         Ok(Some(Value::list(vec![item, Value::List(v)])))
                     }
-                    _ => Err("pop(): requiere una lista".to_string()),
+                    _ => Err("pop(): expects a list".to_string()),
                 }
             }
             "first" => {
-                let list = args.into_iter().next().ok_or("first() requiere un argumento")?;
+                let list = args.into_iter().next().ok_or("first() expects one argument")?;
                 match list {
                     Value::List(v) => Ok(Some(v.borrow().first().cloned().unwrap_or(Value::Null))),
-                    _ => Err("first(): requiere una lista".to_string()),
+                    _ => Err("first(): expects a list".to_string()),
                 }
             }
             "last" => {
-                let list = args.into_iter().next().ok_or("last() requiere un argumento")?;
+                let list = args.into_iter().next().ok_or("last() expects one argument")?;
                 match list {
                     Value::List(v) => Ok(Some(v.borrow().last().cloned().unwrap_or(Value::Null))),
-                    _ => Err("last(): requiere una lista".to_string()),
+                    _ => Err("last(): expects a list".to_string()),
                 }
             }
             "reverse" => {
-                let list = args.into_iter().next().ok_or("reverse() requiere un argumento")?;
+                let list = args.into_iter().next().ok_or("reverse() expects one argument")?;
                 match list {
                     Value::List(v) => { v.borrow_mut().reverse(); Ok(Some(Value::List(v))) }
                     Value::Str(s)      => Ok(Some(Value::Str(s.chars().rev().collect()))),
-                    _ => Err("reverse(): requiere una lista o string".to_string()),
+                    _ => Err("reverse(): expects a list or string".to_string()),
                 }
             }
             "range" => {
                 let mut it = args.into_iter();
-                let a = it.next().ok_or("range() requiere al menos 1 argumento")?;
+                let a = it.next().ok_or("range() expects at least 1 argument(s)")?;
                 let b = it.next();
                 let (start, end) = match (a, b) {
                     (Value::Int(n), None)           => (0i64, n),
                     (Value::Int(s), Some(Value::Int(e))) => (s, e),
-                    _ => return Err("range() requiere argumentos enteros".to_string()),
+                    _ => return Err("range() expects integer arguments".to_string()),
                 };
                 let v: Vec<Value> = (start..end).map(Value::Int).collect();
                 Ok(Some(Value::list(v)))
             }
             "contains" => {
                 let mut it = args.into_iter();
-                let container = it.next().ok_or("contains() requiere 2 argumentos")?;
-                let item      = it.next().ok_or("contains() requiere 2 argumentos")?;
+                let container = it.next().ok_or("contains() expects 2 arguments")?;
+                let item      = it.next().ok_or("contains() expects 2 arguments")?;
                 match container {
                     Value::List(v) => Ok(Some(Value::Bool(v.borrow().contains(&item)))),
                     Value::Str(s)  => {
@@ -2755,59 +2755,59 @@ impl VM {
                         let key = item.to_string();
                         Ok(Some(Value::Bool(m.contains_key(&key))))
                     }
-                    _ => Err("contains(): tipo no soportado".to_string()),
+                    _ => Err("contains(): unsupported type".to_string()),
                 }
             }
             //    Dicts                                                        
             "keys" => {
-                let val = args.into_iter().next().ok_or("keys() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("keys() expects one argument")?;
                 match val {
                     Value::Dict(m) => Ok(Some(Value::list(m.keys().map(|k| Value::Str(k.clone())).collect()))),
-                    _ => Err("keys(): requiere un dict".to_string()),
+                    _ => Err("keys(): expects a dict".to_string()),
                 }
             }
             "values" => {
-                let val = args.into_iter().next().ok_or("values() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("values() expects one argument")?;
                 match val {
                     Value::Dict(m) => Ok(Some(Value::list(m.into_values().collect()))),
-                    _ => Err("values(): requiere un dict".to_string()),
+                    _ => Err("values(): expects a dict".to_string()),
                 }
             }
             "has_key" => {
                 let mut it = args.into_iter();
-                let dict = it.next().ok_or("has_key() requiere 2 argumentos")?;
-                let key  = it.next().ok_or("has_key() requiere 2 argumentos")?;
+                let dict = it.next().ok_or("has_key() expects 2 arguments")?;
+                let key  = it.next().ok_or("has_key() expects 2 arguments")?;
                 match dict {
                     Value::Dict(m) => Ok(Some(Value::Bool(m.contains_key(&key.to_string())))),
-                    _ => Err("has_key(): requiere un dict".to_string()),
+                    _ => Err("has_key(): expects a dict".to_string()),
                 }
             }
             //    Strings                                                      
             "upper" => {
-                let val = args.into_iter().next().ok_or("upper() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("upper() expects one argument")?;
                 match val {
                     Value::Str(s) => Ok(Some(Value::Str(s.to_uppercase()))),
-                    _ => Err("upper(): requiere un string".to_string()),
+                    _ => Err("upper(): expects a string".to_string()),
                 }
             }
             "lower" => {
-                let val = args.into_iter().next().ok_or("lower() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("lower() expects one argument")?;
                 match val {
                     Value::Str(s) => Ok(Some(Value::Str(s.to_lowercase()))),
-                    _ => Err("lower(): requiere un string".to_string()),
+                    _ => Err("lower(): expects a string".to_string()),
                 }
             }
             "trim" => {
-                let val = args.into_iter().next().ok_or("trim() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("trim() expects one argument")?;
                 match val {
                     Value::Str(s) => Ok(Some(Value::Str(s.trim().to_string()))),
-                    _ => Err("trim(): requiere un string".to_string()),
+                    _ => Err("trim(): expects a string".to_string()),
                 }
             }
             "split" => {
                 let mut it = args.into_iter();
-                let s   = it.next().ok_or("split() requiere 2 argumentos")?;
-                let sep = it.next().ok_or("split() requiere 2 argumentos")?;
+                let s   = it.next().ok_or("split() expects 2 arguments")?;
+                let sep = it.next().ok_or("split() expects 2 arguments")?;
                 match (s, sep) {
                     (Value::Str(text), Value::Str(delimiter)) => {
                         let parts: Vec<Value> = text.split(delimiter.as_str())
@@ -2815,12 +2815,12 @@ impl VM {
                             .collect();
                         Ok(Some(Value::list(parts)))
                     }
-                    _ => Err("split(): requiere dos strings".to_string()),
+                    _ => Err("split(): expects two strings".to_string()),
                 }
             }
             "join" => {
                 let mut it = args.into_iter();
-                let list = it.next().ok_or("join() requiere 2 argumentos")?;
+                let list = it.next().ok_or("join() expects 2 arguments")?;
                 let sep  = it.next().unwrap_or(Value::Str(" ".to_string()));
                 match (list, sep) {
                     (Value::List(v), Value::Str(s)) => {
@@ -2832,45 +2832,45 @@ impl VM {
             }
             "starts_with" => {
                 let mut it = args.into_iter();
-                let s      = it.next().ok_or("starts_with() requiere 2 argumentos")?;
-                let prefix = it.next().ok_or("starts_with() requiere 2 argumentos")?;
+                let s      = it.next().ok_or("starts_with() expects 2 arguments")?;
+                let prefix = it.next().ok_or("starts_with() expects 2 arguments")?;
                 match (s, prefix) {
                     (Value::Str(a), Value::Str(b)) => Ok(Some(Value::Bool(a.starts_with(b.as_str())))),
-                    _ => Err("starts_with(): requiere strings".to_string()),
+                    _ => Err("starts_with(): expects strings".to_string()),
                 }
             }
             "ends_with" => {
                 let mut it = args.into_iter();
-                let s      = it.next().ok_or("ends_with() requiere 2 argumentos")?;
-                let suffix = it.next().ok_or("ends_with() requiere 2 argumentos")?;
+                let s      = it.next().ok_or("ends_with() expects 2 arguments")?;
+                let suffix = it.next().ok_or("ends_with() expects 2 arguments")?;
                 match (s, suffix) {
                     (Value::Str(a), Value::Str(b)) => Ok(Some(Value::Bool(a.ends_with(b.as_str())))),
-                    _ => Err("ends_with(): requiere strings".to_string()),
+                    _ => Err("ends_with(): expects strings".to_string()),
                 }
             }
             "replace" => {
                 let mut it = args.into_iter();
-                let s    = it.next().ok_or("replace() requiere 3 argumentos")?;
-                let from = it.next().ok_or("replace() requiere 3 argumentos")?;
-                let to   = it.next().ok_or("replace() requiere 3 argumentos")?;
+                let s    = it.next().ok_or("replace() expects 3 arguments")?;
+                let from = it.next().ok_or("replace() expects 3 arguments")?;
+                let to   = it.next().ok_or("replace() expects 3 arguments")?;
                 match (s, from, to) {
                     (Value::Str(text), Value::Str(f), Value::Str(t)) => {
                         Ok(Some(Value::Str(text.replace(f.as_str(), t.as_str()))))
                     }
-                    _ => Err("replace(): requiere strings".to_string()),
+                    _ => Err("replace(): expects strings".to_string()),
                 }
             }
             //    Matemáticas                                                  
             "abs" => {
-                let val = args.into_iter().next().ok_or("abs() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("abs() expects one argument")?;
                 match val {
                     Value::Int(n)   => Ok(Some(Value::Int(n.abs()))),
                     Value::Float(f) => Ok(Some(Value::Float(f.abs()))),
-                    _ => Err("abs(): requiere un número".to_string()),
+                    _ => Err("abs(): expects a number".to_string()),
                 }
             }
             "max" => {
-                if args.is_empty() { return Err("max() requiere argumentos".to_string()); }
+                if args.is_empty() { return Err("max() expects arguments".to_string()); }
                 // max(a, b) o max(lista)
                 let items = if args.len() == 1 {
                     match args.into_iter().next().unwrap() {
@@ -2882,7 +2882,7 @@ impl VM {
                 Ok(Some(best))
             }
             "min" => {
-                if args.is_empty() { return Err("min() requiere argumentos".to_string()); }
+                if args.is_empty() { return Err("min() expects arguments".to_string()); }
                 let items = if args.len() == 1 {
                     match args.into_iter().next().unwrap() {
                         Value::List(v) => v.borrow().0.clone(),
@@ -2893,36 +2893,36 @@ impl VM {
                 Ok(Some(best))
             }
             "floor" => {
-                let val = args.into_iter().next().ok_or("floor() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("floor() expects one argument")?;
                 match val {
                     Value::Float(f) => Ok(Some(Value::Int(f.floor() as i64))),
                     Value::Int(n)   => Ok(Some(Value::Int(n))),
-                    _ => Err("floor(): requiere un número".to_string()),
+                    _ => Err("floor(): expects a number".to_string()),
                 }
             }
             "ceil" => {
-                let val = args.into_iter().next().ok_or("ceil() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("ceil() expects one argument")?;
                 match val {
                     Value::Float(f) => Ok(Some(Value::Int(f.ceil() as i64))),
                     Value::Int(n)   => Ok(Some(Value::Int(n))),
-                    _ => Err("ceil(): requiere un número".to_string()),
+                    _ => Err("ceil(): expects a number".to_string()),
                 }
             }
             "sqrt" => {
-                let val = args.into_iter().next().ok_or("sqrt() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("sqrt() expects one argument")?;
                 match val {
                     Value::Float(f) => Ok(Some(Value::Float(f.sqrt()))),
                     Value::Int(n)   => Ok(Some(Value::Float((n as f64).sqrt()))),
-                    _ => Err("sqrt(): requiere un número".to_string()),
+                    _ => Err("sqrt(): expects a number".to_string()),
                 }
             }
             "round" => {
                 let mut it = args.into_iter();
-                let val = it.next().ok_or("round() requiere al menos un argumento")?;
+                let val = it.next().ok_or("round() expects at least one argument")?;
                 let f = match val {
                     Value::Float(f) => f,
                     Value::Int(n)   => n as f64,
-                    _ => return Err("round(): requiere un número".to_string()),
+                    _ => return Err("round(): expects a number".to_string()),
                 };
                 match it.next() {
                     Some(d) => {
@@ -2935,10 +2935,10 @@ impl VM {
             }
             "pow" => {
                 let mut it = args.into_iter();
-                let base = it.next().ok_or("pow() requiere 2 argumentos")?;
-                let exp  = it.next().ok_or("pow() requiere 2 argumentos")?;
-                let b = match base { Value::Float(f) => f, Value::Int(n) => n as f64, _ => return Err("pow(): requiere números".into()) };
-                let e = match exp  { Value::Float(f) => f, Value::Int(n) => n as f64, _ => return Err("pow(): requiere números".into()) };
+                let base = it.next().ok_or("pow() expects 2 arguments")?;
+                let exp  = it.next().ok_or("pow() expects 2 arguments")?;
+                let b = match base { Value::Float(f) => f, Value::Int(n) => n as f64, _ => return Err("pow(): expects numbers".into()) };
+                let e = match exp  { Value::Float(f) => f, Value::Int(n) => n as f64, _ => return Err("pow(): expects numbers".into()) };
                 Ok(Some(Value::Float(b.powf(e))))
             }
             "sum" => {
@@ -2952,18 +2952,18 @@ impl VM {
                     match item {
                         Value::Int(n)   => total += *n as f64,
                         Value::Float(f) => { total += f; all_int = false; }
-                        _ => return Err("sum(): la lista debe contener números".to_string()),
+                        _ => return Err("sum(): the list must contain numbers".to_string()),
                     }
                 }
                 if all_int { Ok(Some(Value::Int(total as i64))) }
                 else       { Ok(Some(Value::Float(total))) }
             }
             "bool" => {
-                let val = args.into_iter().next().ok_or("bool() requiere un argumento")?;
+                let val = args.into_iter().next().ok_or("bool() expects one argument")?;
                 Ok(Some(Value::Bool(val.is_truthy())))
             }
             "sort" => {
-                let val = args.into_iter().next().ok_or("sort() requiere una lista")?;
+                let val = args.into_iter().next().ok_or("sort() expects a list")?;
                 match val {
                     Value::List(v) => {
                         v.borrow_mut().sort_by(|a, b| {
@@ -2973,7 +2973,7 @@ impl VM {
                         });
                         Ok(Some(Value::List(v)))
                     }
-                    _ => Err("sort(): requiere una lista".to_string()),
+                    _ => Err("sort(): expects a list".to_string()),
                 }
             }
             //    I/O                                                          
@@ -2992,7 +2992,7 @@ impl VM {
             //    Tests                                                        
             "assert" => {
                 let mut it = args.into_iter();
-                let cond = it.next().ok_or("assert() requiere al menos 1 argumento")?;
+                let cond = it.next().ok_or("assert() expects at least 1 argument(s)")?;
                 let msg  = it.next();
                 if !cond.is_truthy() {
                     let text = msg.map(|v| v.to_string())
@@ -3003,8 +3003,8 @@ impl VM {
             }
             "assert_eq" => {
                 let mut it = args.into_iter();
-                let a = it.next().ok_or("assert_eq() requiere 2 argumentos")?;
-                let b = it.next().ok_or("assert_eq() requiere 2 argumentos")?;
+                let a = it.next().ok_or("assert_eq() expects 2 arguments")?;
+                let b = it.next().ok_or("assert_eq() expects 2 arguments")?;
                 let msg = it.next();
                 if a != b {
                     let header = msg.map(|v| format!("{} — ", v)).unwrap_or_default();
@@ -3017,15 +3017,15 @@ impl VM {
             }
             "assert_ne" => {
                 let mut it = args.into_iter();
-                let a = it.next().ok_or("assert_ne() requiere 2 argumentos")?;
-                let b = it.next().ok_or("assert_ne() requiere 2 argumentos")?;
+                let a = it.next().ok_or("assert_ne() expects 2 arguments")?;
+                let b = it.next().ok_or("assert_ne() expects 2 arguments")?;
                 if a == b {
-                    return Err(format!("assert_ne: se esperaban valores distintos, ambos son: {}", a));
+                    return Err(format!("assert_ne: expected different values, both are: {}", a));
                 }
                 Ok(Some(Value::Null))
             }
 
-            other => Err(format!("Función '{}' no definida", other)),
+            other => Err(format!("Function '{}' is not defined", other)),
         }
     }
     //     C FFI                                                                
@@ -3035,19 +3035,19 @@ impl VM {
         use std::ffi::{CStr, CString};
 
         let def = self.extern_fns.get(name).cloned()
-            .ok_or_else(|| format!("FFI: función extern '{}' no registrada", name))?;
+            .ok_or_else(|| format!("FFI: extern function '{}' is not registered", name))?;
         if def.lib.is_empty() {
-            return Err(format!("FFI: '{}' no especifica librería (falta `from \"lib\"`)", name));
+            return Err(format!("FFI: '{}' does not specify a library (missing `from \"lib\"`)", name));
         }
         if args.len() != def.params.len() {
-            return Err(format!("FFI: '{}' espera {} arg(s), recibió {}", name, def.params.len(), args.len()));
+            return Err(format!("FFI: '{}' expects {} arg(s), got {}", name, def.params.len(), args.len()));
         }
 
         // Cargar librería dinámicamente (con caché)
         if !self.extern_libs.contains_key(&def.lib) {
             let path = ffi_resolve_lib(&def.lib);
             let lib = unsafe { libloading::Library::new(&path) }
-                .map_err(|e| format!("FFI: no se pudo cargar '{}': {}", path, e))?;
+                .map_err(|e| format!("FFI: could not load '{}': {}", path, e))?;
             self.extern_libs.insert(def.lib.clone(), lib);
         }
 
@@ -3056,7 +3056,7 @@ impl VM {
             let lib = self.extern_libs.get(&def.lib).unwrap();
             unsafe {
                 let sym: libloading::Symbol<unsafe extern "C" fn()> = lib.get(name.as_bytes())
-                    .map_err(|e| format!("FFI: símbolo '{}' no encontrado en '{}': {}", name, def.lib, e))?;
+                    .map_err(|e| format!("FFI: symbol '{}' not found in '{}': {}", name, def.lib, e))?;
                 *sym as *const ()
             }
         };
@@ -3082,7 +3082,7 @@ impl VM {
                     let v = match arg {
                         Value::Int(n)  => *n as i32,
                         Value::Bool(b) => *b as i32,
-                        _ => return Err(format!("FFI: param 'int', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'int', got {}", arg.type_name())),
                     };
                     s_i32.push(v); arg_kinds.push(AK::I32(s_i32.len()-1)); ffi_types.push(Type::i32());
                 }
@@ -3090,14 +3090,14 @@ impl VM {
                     let v = match arg {
                         Value::Int(n)  => *n,
                         Value::Bool(b) => *b as i64,
-                        _ => return Err(format!("FFI: param 'i64', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'i64', got {}", arg.type_name())),
                     };
                     s_i64.push(v); arg_kinds.push(AK::I64(s_i64.len()-1)); ffi_types.push(Type::i64());
                 }
                 "uint" | "u32" => {
                     let v = match arg {
                         Value::Int(n) => *n as u32,
-                        _ => return Err(format!("FFI: param 'u32', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'u32', got {}", arg.type_name())),
                     };
                     s_u32.push(v); arg_kinds.push(AK::U32(s_u32.len()-1)); ffi_types.push(Type::u32());
                 }
@@ -3105,7 +3105,7 @@ impl VM {
                     let v = match arg {
                         Value::Int(n) => *n as u64,
                         Value::Ptr(p) => *p,
-                        _ => return Err(format!("FFI: param 'u64', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'u64', got {}", arg.type_name())),
                     };
                     s_u64.push(v); arg_kinds.push(AK::U64(s_u64.len()-1)); ffi_types.push(Type::u64());
                 }
@@ -3113,7 +3113,7 @@ impl VM {
                     let v = match arg {
                         Value::Float(f) => *f as f32,
                         Value::Int(n)   => *n as f32,
-                        _ => return Err(format!("FFI: param 'float', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'float', got {}", arg.type_name())),
                     };
                     s_f32.push(v); arg_kinds.push(AK::F32(s_f32.len()-1)); ffi_types.push(Type::f32());
                 }
@@ -3121,7 +3121,7 @@ impl VM {
                     let v = match arg {
                         Value::Float(f) => *f,
                         Value::Int(n)   => *n as f64,
-                        _ => return Err(format!("FFI: param 'double', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'double', got {}", arg.type_name())),
                     };
                     s_f64.push(v); arg_kinds.push(AK::F64(s_f64.len()-1)); ffi_types.push(Type::f64());
                 }
@@ -3129,7 +3129,7 @@ impl VM {
                     let v = match arg {
                         Value::Bool(b) => *b as i32,
                         Value::Int(n)  => (*n != 0) as i32,
-                        _ => return Err(format!("FFI: param 'bool', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'bool', got {}", arg.type_name())),
                     };
                     s_i32.push(v); arg_kinds.push(AK::I32(s_i32.len()-1)); ffi_types.push(Type::i32());
                 }
@@ -3138,7 +3138,7 @@ impl VM {
                         Value::Ptr(p) => *p as *const (),
                         Value::Int(n) => *n as *const (),
                         Value::Null   => std::ptr::null(),
-                        _ => return Err(format!("FFI: param 'ptr', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'ptr', got {}", arg.type_name())),
                     };
                     s_ptr.push(v); arg_kinds.push(AK::Ptr(s_ptr.len()-1)); ffi_types.push(Type::pointer());
                 }
@@ -3152,12 +3152,12 @@ impl VM {
                             p
                         }
                         Value::Null => std::ptr::null(),
-                        _ => return Err(format!("FFI: param 'string', recibió {}", arg.type_name())),
+                        _ => return Err(format!("FFI: param 'string', got {}", arg.type_name())),
                     };
                     s_ptr.push(v); arg_kinds.push(AK::Ptr(s_ptr.len()-1)); ffi_types.push(Type::pointer());
                 }
                 t => return Err(format!(
-                    "FFI: tipo '{}' no soportado (usa: int, i64, uint, u64, float, double, ptr, string, bool)", t
+                    "FFI: unsupported type '{}' (use: int, i64, uint, u64, float, double, ptr, string, bool)", t
                 )),
             }
         }

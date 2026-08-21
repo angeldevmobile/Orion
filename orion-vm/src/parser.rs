@@ -13,7 +13,7 @@ pub struct ParseError {
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SyntaxError [línea {}, col {}]: {}", self.line, self.col, self.message)
+        write!(f, "SyntaxError [line {}, col {}]: {}", self.line, self.col, self.message)
     }
 }
 
@@ -102,7 +102,7 @@ impl Parser {
             let line = self.current_line();
             let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
             Err(ParseError {
-                message: format!("Se esperaba {:?}, pero se encontró {:?}", expected, self.peek()),
+                message: format!("Expected {:?}, found {:?}", expected, self.peek()),
                 line, col,
             })
         }
@@ -116,7 +116,7 @@ impl Parser {
             let line = self.current_line();
             let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
             Err(ParseError {
-                message: format!("Se esperaba un identificador, pero se encontró {:?}", self.peek()),
+                message: format!("Expected an identifier, found {:?}", self.peek()),
                 line, col,
             })
         }
@@ -138,7 +138,7 @@ impl Parser {
                     let line = self.current_line();
                     let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
                     return Err(ParseError {
-                        message: format!("Se esperaba un identificador, pero se encontró {:?}", self.peek()),
+                        message: format!("Expected an identifier, found {:?}", self.peek()),
                         line, col,
                     });
                 }
@@ -235,7 +235,7 @@ impl Parser {
             TokenKind::TypeAny    => { self.pos += 1; "any".to_string() }
             TokenKind::TypeAuto   => { self.pos += 1; "auto".to_string() }
             TokenKind::Ident(n)   => { self.pos += 1; n }
-            _ => return Err(self.err("Se esperaba un tipo")),
+            _ => return Err(self.err("Expected a type")),
         };
         // Tipo genérico aplicado: List[T], Map[K, V], Stack[int], etc.
         if matches!(self.peek(), TokenKind::LBracket) {
@@ -298,7 +298,7 @@ impl Parser {
                 let line = self.current_line();
                 let col = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
                 return Err(ParseError {
-                    message: "un argumento posicional no puede ir después de uno con nombre".to_string(),
+                    message: "a positional argument cannot follow a named one".to_string(),
                     line, col,
                 });
             }
@@ -536,7 +536,7 @@ impl Parser {
                 TokenKind::Ident(k) => { self.pos += 1; k }
                 TokenKind::Str(k)   => { self.pos += 1; k }
                 _ => return Err(self.err(
-                    "se esperaba el nombre de un campo en el patrón".to_string(),
+                    "expected a field name in the pattern".to_string(),
                 )),
             };
             let pat = if matches!(self.peek(), TokenKind::Colon) {
@@ -938,7 +938,7 @@ impl Parser {
                     let key = match self.peek().clone() {
                         TokenKind::Str(s)   => { self.pos += 1; s }
                         TokenKind::Ident(n) => { self.pos += 1; n }
-                        _ => return Err(self.err("Se esperaba clave de diccionario")),
+                        _ => return Err(self.err("Expected a dictionary key")),
                     };
                     self.expect(&TokenKind::Colon)?;
                     let val = self.parse_expression()?;
@@ -972,7 +972,7 @@ impl Parser {
                 Ok(Expr::Await(Box::new(inner)))
             }
 
-            kind => Err(self.err(format!("Token inesperado en expresión: {:?}", kind))),
+            kind => Err(self.err(format!("Unexpected token in expression: {:?}", kind))),
         }
     }
 
@@ -1067,7 +1067,7 @@ impl Parser {
                             self.pos += 1;
                             lib_name
                         } else {
-                            return Err(self.err("Se esperaba nombre de librería como string después de 'from'"));
+                            return Err(self.err("Expected a library name as a string after 'from'"));
                         }
                     } else { String::new() }
                 } else { String::new() };
@@ -1168,7 +1168,7 @@ impl Parser {
                 let path = match self.peek().clone() {
                     TokenKind::Str(s)   => { self.pos += 1; s }
                     TokenKind::Ident(n) => { self.pos += 1; n }
-                    _ => return Err(self.err("Se esperaba una ruta de módulo después de 'use'")),
+                    _ => return Err(self.err("Expected a module path after 'use'")),
                 };
                 let alias = if matches!(self.peek(), TokenKind::As) {
                     self.pos += 1;
@@ -1218,7 +1218,7 @@ impl Parser {
                     Expr::CallMethod { receiver, .. }
                         if matches!(receiver.as_ref(), Expr::Ident(_)) => {}
                     _ => return Err(ParseError {
-                        message: "with espera un recurso de módulo: `with h = modulo.abrir(...) { ... }` (el bloque libera con modulo.free(h))".into(),
+                        message: "with expects a module resource: `with h = module.open(...) { ... }` (the block releases it with module.free(h))".into(),
                         line, col,
                     }),
                 }
@@ -1523,7 +1523,7 @@ impl Parser {
                     if let Expr::AttrAccess { object, attr } = expr {
                         return Ok(Stmt::AssignAttr { object: *object, attr, value, line, col });
                     }
-                    return Err(self.err("Objetivo de asignación inválido"));
+                    return Err(self.err("Invalid assignment target"));
                 }
 
                 // x += expr  |  x -= expr  |  etc.
@@ -1543,7 +1543,7 @@ impl Parser {
                     if let Expr::Ident(name) = expr {
                         return Ok(Stmt::AugAssign { name, op, value, line, col });
                     }
-                    return Err(self.err("Se esperaba un identificador en asignación compuesta"));
+                    return Err(self.err("Expected an identifier in compound assignment"));
                 }
 
                 // await var = await future
@@ -1570,13 +1570,13 @@ fn validate_with_body(body: &[Stmt], loop_depth: usize) -> Result<(), ParseError
         match s {
             Stmt::Return { line, col, .. } => {
                 return Err(ParseError {
-                    message: "return dentro de `with` se saltaría la liberación del recurso; asigna el resultado a una variable y retorna después del bloque".into(),
+                    message: "return inside `with` would skip releasing the resource; assign the result to a variable and return after the block".into(),
                     line: *line, col: *col,
                 });
             }
             Stmt::Break { line, col } | Stmt::Continue { line, col } if loop_depth == 0 => {
                 return Err(ParseError {
-                    message: "break/continue dentro de `with` saltaría fuera del bloque sin liberar el recurso; sal del loop después del bloque".into(),
+                    message: "break/continue inside `with` would jump out of the block without releasing the resource; leave the loop after the block".into(),
                     line: *line, col: *col,
                 });
             }
@@ -1631,7 +1631,7 @@ mod tests {
 
     #[test]
     fn test_show_multi_arg() {
-        // Estilo llamada: show("a: ", x) — antes fallaba con "Se esperaba RParen"
+        // Estilo llamada: show("a: ", x) — antes fallaba con "Expected ')'"
         let stmts = parse_src(r#"show("total: ", x)"#);
         assert!(matches!(&stmts[0], Stmt::Show { value: Expr::BinaryOp { .. }, .. }));
 
@@ -1703,7 +1703,7 @@ mod tests {
     fn test_with_rechaza_init_no_modulo() {
         let tokens = crate::lexer::lex("with h = [1, 2] { show h }").unwrap();
         let err = parse(tokens).expect_err("init sin modulo.fn(...) debe fallar");
-        assert!(err.message.contains("recurso de módulo"));
+        assert!(err.message.contains("module resource"));
     }
 
     #[test]

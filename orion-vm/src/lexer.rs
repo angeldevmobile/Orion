@@ -101,7 +101,7 @@ impl<'a> Lexer<'a> {
             b'-' if self.peek_at(1) == Some(b'-') => {
                 if self.peek_at(2) == Some(b'-') {
                     return Err(LexError {
-                        message: "Comentario inválido '---'. Usa '--' para comentarios".into(),
+                        message: "Invalid comment '---'. Use '--' for comments".into(),
                         line, col,
                     });
                 }
@@ -123,7 +123,7 @@ impl<'a> Lexer<'a> {
                 tok!(crate::token::TokenKind::DocComment(text))
             }
             b'/' if self.peek_at(1) == Some(b'/') => Err(LexError {
-                message: "Comentario inválido '//'. Usa '--' para comentarios".into(),
+                message: "Invalid comment '//'. Use '--' for comments".into(),
                 line, col,
             }),
 
@@ -203,7 +203,7 @@ impl<'a> Lexer<'a> {
 
             _ => {
                 let bad = self.advance().unwrap() as char;
-                Err(LexError { message: format!("Token inesperado: '{bad}'"), line, col })
+                Err(LexError { message: format!("Unexpected character: '{bad}'"), line, col })
             }
         }
     }
@@ -217,11 +217,11 @@ impl<'a> Lexer<'a> {
         self.skip_while(|c| c.is_ascii_hexdigit());
         let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         if s.is_empty() {
-            return Err(LexError { message: "Número hex vacío después de '0x'".into(), line, col });
+            return Err(LexError { message: "Empty hexadecimal literal after '0x'".into(), line, col });
         }
         i64::from_str_radix(s, 16)
             .map(TokenKind::Int)
-            .map_err(|_| LexError { message: format!("Número hex inválido: 0x{s}"), line, col })
+            .map_err(|_| LexError { message: format!("Invalid hexadecimal literal: 0x{s}"), line, col })
     }
 
     fn lex_binary(&mut self, line: u32, col: u32) -> Result<TokenKind, LexError> {
@@ -231,11 +231,11 @@ impl<'a> Lexer<'a> {
         self.skip_while(|c| c == b'0' || c == b'1');
         let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         if s.is_empty() {
-            return Err(LexError { message: "Número binario vacío después de '0b'".into(), line, col });
+            return Err(LexError { message: "Empty binary literal after '0b'".into(), line, col });
         }
         i64::from_str_radix(s, 2)
             .map(TokenKind::Int)
-            .map_err(|_| LexError { message: format!("Número binario inválido: 0b{s}"), line, col })
+            .map_err(|_| LexError { message: format!("Invalid binary literal: 0b{s}"), line, col })
     }
 
     fn lex_number(&mut self, line: u32, col: u32) -> Result<TokenKind, LexError> {
@@ -261,13 +261,13 @@ impl<'a> Lexer<'a> {
         let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         if has_dot || has_sci {
             s.parse().map(TokenKind::Float).map_err(|_| LexError {
-                message: format!("Número decimal inválido: {s}"), line, col,
+                message: format!("Invalid decimal literal: {s}"), line, col,
             })
         } else {
             // Un literal fuera de rango i64 debe ser un error léxico limpio,
             // NO un panic de Rust (lo cazó el fuzzer diferencial).
             s.parse().map(TokenKind::Int).map_err(|_| LexError {
-                message: format!("Entero fuera de rango (máx {}): {s}", i64::MAX),
+                message: format!("Integer literal out of range (max {}): {s}", i64::MAX),
                 line, col,
             })
         }
@@ -285,7 +285,7 @@ impl<'a> Lexer<'a> {
         }
         let content = std::str::from_utf8(&self.src[start..self.pos]).unwrap().to_string();
         if self.advance() != Some(b'"') {
-            return Err(LexError { message: "String raw sin cerrar".into(), line, col });
+            return Err(LexError { message: "Unterminated raw string".into(), line, col });
         }
         Ok(TokenKind::Str(content))
     }
@@ -295,7 +295,7 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
         loop {
             if self.peek().is_none() {
-                return Err(LexError { message: "String multi-línea sin cerrar".into(), line, col });
+                return Err(LexError { message: "Unterminated multi-line string".into(), line, col });
             }
             if self.peek() == Some(b'"')
                 && self.peek_at(1) == Some(b'"')
@@ -428,7 +428,7 @@ impl<'a> Lexer<'a> {
         }
 
         if self.advance() != Some(b'"') {
-            return Err(LexError { message: "String sin cerrar".into(), line, col });
+            return Err(LexError { message: "Unterminated string".into(), line, col });
         }
         Ok(TokenKind::Str(content))
     }
@@ -436,10 +436,10 @@ impl<'a> Lexer<'a> {
     fn lex_char(&mut self, line: u32, col: u32) -> Result<TokenKind, LexError> {
         self.advance(); // '\''
         let ch = self.advance()
-            .ok_or_else(|| LexError { message: "Literal de carácter vacío".into(), line, col })?
+            .ok_or_else(|| LexError { message: "Empty character literal".into(), line, col })?
             as char;
         if self.advance() != Some(b'\'') {
-            return Err(LexError { message: "Literal de carácter sin cerrar".into(), line, col });
+            return Err(LexError { message: "Unterminated character literal".into(), line, col });
         }
         Ok(TokenKind::Str(ch.to_string()))
     }
@@ -563,7 +563,7 @@ mod tests {
         // Regresión del bug que encontró el fuzzer diferencial.
         assert_eq!(i64::MAX, 9223372036854775807);
         let err = lex("9223372036854775808").expect_err("debe ser error léxico, no panic");
-        assert!(err.message.contains("fuera de rango"), "mensaje inesperado: {}", err.message);
+        assert!(err.message.contains("out of range"), "mensaje inesperado: {}", err.message);
         // El máximo exacto sí debe lexar bien.
         assert_eq!(kinds("9223372036854775807"), vec![TokenKind::Int(i64::MAX), TokenKind::Eof]);
     }

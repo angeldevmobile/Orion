@@ -55,6 +55,11 @@ jobs:
       - name: cargo test (stdlib smoke)
         run: cargo test --test modules_smoke
 
+      # SPEC.md afirma cosas sobre el lenguaje; esto las ejecuta. Si el
+      # compilador cambia, la spec queda desmentida aquí y no en silencio.
+      - name: cargo test (conformidad de SPEC.md)
+        run: cargo test --test spec_conformance
+
   # ── Análisis dinámico: AddressSanitizer + LeakSanitizer ────────────────────
   # Corre la suite completa con el heap instrumentado: detecta use-after-free,
   # buffer overflows y FUGAS de memoria (LSan viene incluido en ASan en Linux

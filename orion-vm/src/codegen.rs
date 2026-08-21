@@ -188,7 +188,7 @@ impl Codegen {
                 if seen_default {
                     return Err(CodegenError {
                         message: format!(
-                            "el parámetro '{}' no puede ir después de uno con valor por defecto",
+                            "parameter '{}' cannot follow one with a default value",
                             p.name
                         ),
                         line: 0,
@@ -313,7 +313,7 @@ impl Codegen {
                 self.emit(Instruction::LoadVar(name.clone()));
                 self.compile_expr_main(&value)?;
                 let instr = op_instr(&op).ok_or_else(|| CodegenError {
-                    message: format!("operador de asignación no soportado: '{op}='"),
+                    message: format!("unsupported assignment operator: '{op}='"),
                     line,
                 })?;
                 self.emit(instr);
@@ -363,14 +363,14 @@ impl Codegen {
             }
             Stmt::Break { line, .. } => {
                 if self.loop_stack.is_empty() {
-                    return Err(CodegenError { message: "break fuera de un loop".into(), line });
+                    return Err(CodegenError { message: "break outside a loop".into(), line });
                 }
                 let j = self.emit(Instruction::Jump(0));
                 self.loop_stack.last_mut().unwrap().breaks.push(j);
             }
             Stmt::Continue { line, .. } => {
                 if self.loop_stack.is_empty() {
-                    return Err(CodegenError { message: "continue fuera de un loop".into(), line });
+                    return Err(CodegenError { message: "continue outside a loop".into(), line });
                 }
                 let j = self.emit(Instruction::Jump(0));
                 self.loop_stack.last_mut().unwrap().continues.push(j);
@@ -554,7 +554,7 @@ impl Codegen {
                 let receiver = match &init {
                     Expr::CallMethod { receiver, .. } => receiver.as_ref().clone(),
                     _ => return Err(CodegenError {
-                        message: "with: el inicializador debe ser modulo.fn(...)".into(),
+                        message: "with: the initializer must be module.fn(...)".into(),
                         line,
                     }),
                 };
@@ -761,7 +761,7 @@ impl FnCompiler {
                 self.emit(Instruction::LoadVar(name.clone()));
                 self.compile_expr(value, async_fns)?;
                 let instr = op_instr(op).ok_or_else(|| CodegenError {
-                    message: format!("operador de asignación no soportado: '{op}='"),
+                    message: format!("unsupported assignment operator: '{op}='"),
                     line: *line,
                 })?;
                 self.emit(instr);
@@ -809,14 +809,14 @@ impl FnCompiler {
             }
             Stmt::Break { line, .. } => {
                 if self.loop_stack.is_empty() {
-                    return Err(CodegenError { message: "break fuera de un loop".into(), line: *line });
+                    return Err(CodegenError { message: "break outside a loop".into(), line: *line });
                 }
                 let j = self.emit(Instruction::Jump(0));
                 self.loop_stack.last_mut().unwrap().breaks.push(j);
             }
             Stmt::Continue { line, .. } => {
                 if self.loop_stack.is_empty() {
-                    return Err(CodegenError { message: "continue fuera de un loop".into(), line: *line });
+                    return Err(CodegenError { message: "continue outside a loop".into(), line: *line });
                 }
                 let j = self.emit(Instruction::Jump(0));
                 self.loop_stack.last_mut().unwrap().continues.push(j);
@@ -993,7 +993,7 @@ impl FnCompiler {
                 let receiver = match init {
                     Expr::CallMethod { receiver, .. } => receiver.as_ref().clone(),
                     _ => return Err(CodegenError {
-                        message: "with: el inicializador debe ser modulo.fn(...)".into(),
+                        message: "with: the initializer must be module.fn(...)".into(),
                         line: *line,
                     }),
                 };
@@ -1168,7 +1168,7 @@ fn compile_expr_into(
         Expr::Str(s)   => {
             // interpolación básica: si contiene ${ ... }
             if s.contains("${") {
-                compile_interpolated(instrs, lines, current_line, async_fns, s)?;
+                compile_interpolated(instrs, lines, current_line, async_fns, extra_fns, s)?;
             } else {
                 emit!(Instruction::LoadStr(s.clone()));
             }
@@ -1211,7 +1211,7 @@ fn compile_expr_into(
             recurse!(left);
             recurse!(right);
             let instr = op_instr(op).ok_or_else(|| CodegenError {
-                message: format!("operador binario no soportado: '{op}'"),
+                message: format!("unsupported binary operator: '{op}'"),
                 line: current_line,
             })?;
             emit!(instr);
@@ -1290,7 +1290,7 @@ fn compile_expr_into(
             if let Some((k, _)) = kwargs.first() {
                 return Err(CodegenError {
                     message: format!(
-                        "argumento con nombre '{} = ...' no soportado aquí; solo en funciones de usuario conocidas",
+                        "named argument '{} = ...' is not supported here; only in known user functions",
                         k
                     ),
                     line: current_line,
@@ -1336,7 +1336,7 @@ fn compile_expr_into(
             if let Some((k, _)) = kwargs.first() {
                 return Err(CodegenError {
                     message: format!(
-                        "argumento con nombre '{} = ...' no soportado en métodos; usa posicionales",
+                        "named argument '{} = ...' is not supported on methods; use positional ones",
                         k
                     ),
                     line: current_line,
@@ -1429,6 +1429,7 @@ fn compile_interpolated(
     lines:  &mut Vec<u32>,
     current_line: u32,
     async_fns: &std::collections::HashSet<String>,
+    extra_fns: &mut Vec<(String, FunctionDef)>,
     s: &str,
 ) -> Result<(), CodegenError> {
     // Parsear partes: texto literal y ${expr}
@@ -1489,7 +1490,7 @@ fn compile_interpolated(
     lines.push(current_line);
     for (is_expr, content) in &parts {
         if *is_expr {
-            compile_sub_expr(instrs, lines, current_line, async_fns, content)?;
+            compile_sub_expr(instrs, lines, current_line, async_fns, extra_fns, content)?;
         } else {
             instrs.push(Instruction::LoadStr(content.clone()));
             lines.push(current_line);
@@ -1505,6 +1506,7 @@ fn compile_sub_expr(
     lines:  &mut Vec<u32>,
     current_line: u32,
     async_fns: &std::collections::HashSet<String>,
+    extra_fns: &mut Vec<(String, FunctionDef)>,
     src: &str,
 ) -> Result<(), CodegenError> {
     use crate::lexer::lex;
@@ -1513,9 +1515,11 @@ fn compile_sub_expr(
     let tokens = lex(src).map_err(|e| CodegenError { message: e.message, line: current_line })?;
     let stmts  = parse(tokens).map_err(|e| CodegenError { message: e.message, line: e.line })?;
     if let Some(Stmt::Expr { expr, .. }) = stmts.into_iter().next() {
-        let mut extra_fns: Vec<(String, FunctionDef)> = Vec::new();
-        compile_expr_into(instrs, lines, current_line, async_fns, &mut extra_fns, &expr)?;
-        // Note: lambdas in string interpolation are dropped (edge case, uncommon)
+        // El vector de lambdas generadas es el DEL LLAMANTE, no uno local: una
+        // lambda dentro de `${...}` compila su cuerpo a una función con nombre
+        // sintético, y si ese cuerpo no sube hasta quien registra las funciones,
+        // la llamada sobrevive pero su destino no existe.
+        compile_expr_into(instrs, lines, current_line, async_fns, extra_fns, &expr)?;
     }
     Ok(())
 }

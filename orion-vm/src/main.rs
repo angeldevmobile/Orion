@@ -803,7 +803,7 @@ fn typecheck_gate(src: &str, path: &str, args: &[String]) {
         eprint!("{}", err.render(src));
     }
     cli::banner::fail(&format!(
-        "{} error(es) de tipo — ejecución abortada. Usa --no-typecheck para correr de todos modos.",
+        "{} type error(s) — execution aborted. Use --no-typecheck to run anyway.",
         errors.len()
     ));
     std::process::exit(1);

@@ -9,8 +9,9 @@ Clean syntax, optional typing, native OOP, 58 built-in modules and a full pipeli
 > `if`, `while`, `shape`, `serve`) and the standard library alike, so
 > `db.insert`, `cache.set` and `validate.required` are the canonical names.
 > Orion was designed by a Spanish-speaking developer, and the Spanish names
-> that came first are kept as permanent aliases: `db.insertar` still works and
-> always will, it is simply documented as an alias of `db.insert`.
+> that came first still work as **deprecated aliases**: `db.insertar` runs
+> today and will keep running for the rest of 0.1.x, but it is scheduled for
+> removal. Write `db.insert` in new code. See `SPEC.md` section 11.
 
 ---
 

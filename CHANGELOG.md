@@ -5,12 +5,68 @@ formato AAAA-MM-DD.
 
 ## 2026-08-20
 
+### Añadido
+- **`SPEC.md` — especificación del lenguaje, y es ejecutable**: 11 secciones
+  derivadas del compilador (lexer, parser, typechecker, VM), no de la memoria.
+  Cubre estructura léxica, comentarios, identificadores, keywords, literales,
+  precedencia completa de 14 niveles, el desugar de `|>`, resolución de
+  nombres, valores función, y semántica de evaluación.
+
+  Lo que la hace distinta de un documento: `tests/spec_examples.orx` +
+  `tests/spec_conformance.rs` ejecutan **45 afirmaciones** con valor exacto, y
+  el paso está en CI. Si el compilador cambia, el fallo no dice "algo se rompió",
+  dice `power_asocia_derecha: SPEC dice '512', el compilador da '64'`.
+
+  Escribirla desmintió tres cosas que se daban por ciertas: `**` asocia a la
+  derecha, `type()` de una función nombrada devuelve `string` (una función
+  nombrada **es** el string de su nombre, y `greet == "greet"` es `yes`), y la
+  notación exponencial sí existe. También dejó fijado que `null` y `undefined`
+  son el mismo valor, que `/` es división real, que el overflow es error, y que
+  `for .. in` no itera dicts.
+
+### Cambiado
+- **Los mensajes de error del núcleo están en inglés**: lexer, parser, codegen,
+  typechecker, VM y las cinco etiquetas de `error.rs` (`lexical error`,
+  `syntax error`, `compile error`, `type error`, `runtime error`). Es lo primero
+  que ve alguien que escribe mal una línea, y hasta ahora le contestaba en
+  español aunque el lenguaje se anunciara en inglés.
+
+  ```
+  antes:  error léxico   → Comentario inválido '//'. Usa '--' para comentarios
+  ahora:  lexical error  → Invalid comment '//'. Use '--' for comments
+  ```
+
+  Ojo con dos que no son lo que parecen y se tradujeron a mano: `Módulo por
+  cero` y `Módulo solo soporta enteros` hablan del operador `%`, no de un módulo
+  de la stdlib. Quedan **671 mensajes en `modules/`** sin traducir, que es la
+  siguiente tanda.
+
+### Arreglado
+- **Una lambda dentro de una interpolación `${...}` no compilaba**:
+  `show "${apply(fn(x) { return x + 1 }, 10)}"` moría con
+  `Función '__lambda_2__' no definida`. El compilador junta los cuerpos de
+  lambda generados en un vector `extra_fns` que sube hasta quien registra las
+  funciones; `compile_sub_expr`, que compila el trozo de dentro de `${}`,
+  se creaba uno **local** y lo descartaba al salir. La llamada quedaba emitida
+  y su destino no existía nunca.
+
+  El fallo solo aparecía dentro de un string, así que
+  `xs.map(fn(x) { return x * 2 })` funcionaba y
+  `"${xs.map(fn(x) { return x * 2 })}"` no. Ahora `extra_fns` se enhebra por
+  `compile_interpolated` y `compile_sub_expr`. Cubierto por
+  `regression::lambda_dentro_de_interpolacion_se_registra`, que verifica también
+  dos lambdas en la misma interpolación, una anidada dentro de otra, la forma
+  de flecha y un método con lambda inline.
+
+
 ### Cambiado
 - **La API pública de Orion es inglesa**: el inglés pasa a ser la forma canónica
-  de la stdlib, y los nombres españoles quedan como **alias permanentes**. No se
-  ha renombrado ni eliminado nada: `db.insertar`, `cache.guardar` o
-  `validate.requerido` siguen funcionando y seguirán funcionando; lo que cambia
-  es cuál documenta el registro, y con él el hover, el autocompletado,
+  de la stdlib, y los nombres españoles pasan a **alias obsoletos**. En esta
+  versión no se ha renombrado ni eliminado nada: `db.insertar`, `cache.guardar`
+  o `validate.requerido` siguen funcionando y lo harán durante toda la 0.1.x.
+  Pero quedan fuera de la superficie estable y **está previsto retirarlos en una
+  versión futura**; en código nuevo va el inglés. Lo que cambia ya es cuál
+  documenta el registro, y con él el hover, el autocompletado,
   `orion --builtins-json` y la referencia del sitio.
 
   Se aplicó reordenando los nombres dentro de cada brazo del `match` (en Rust el
