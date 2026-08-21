@@ -7,7 +7,7 @@
 -- lo que se ve en pantalla y lo que sale por consola no pueden divergir.
 use "process" as proc
 use "excel" as xl
-use "formato" as fmt
+use "format" as fmt
 use "demo/reporte_lib" as rep
 
 argv = proc.args()
@@ -50,14 +50,14 @@ if cab["observacion"] != "—" {
 }
 show ""
 show "  Certificados  : " + str(tot["certificados"])
-show "  Suma asegurada: " + fmt.numero(tot["suma"], 2) + " " + cab["moneda"]
-show "  Prima neta    : " + fmt.numero(tot["prima_neta"], 2)
-show "  Prima bruta   : " + fmt.numero(tot["prima_bruta"], 2)
+show "  Suma asegurada: " + fmt.number(tot["suma"], 2) + " " + cab["moneda"]
+show "  Prima neta    : " + fmt.number(tot["prima_neta"], 2)
+show "  Prima bruta   : " + fmt.number(tot["prima_bruta"], 2)
 show ""
 
 for c in certs {
     linea = "  " + c["numero"] + "  " + c["desde"] + " a " + c["hasta"]
-              + "  " + fmt.numero(c["suma"], 2)
+              + "  " + fmt.number(c["suma"], 2)
     if c.has_key("placa") {
         linea = linea + "  [" + c["placa"] + " " + c["marca"] + "]"
     }
@@ -79,9 +79,9 @@ if salida != "" {
         ["Aseguradora",    cab["aseguradora"]],
         ["Moneda",         cab["moneda"]],
         ["Certificados",   str(tot["certificados"])],
-        ["Suma asegurada", fmt.numero(tot["suma"], 2)],
-        ["Prima neta",     fmt.numero(tot["prima_neta"], 2)],
-        ["Prima bruta",    fmt.numero(tot["prima_bruta"], 2)]
+        ["Suma asegurada", fmt.number(tot["suma"], 2)],
+        ["Prima neta",     fmt.number(tot["prima_neta"], 2)],
+        ["Prima bruta",    fmt.number(tot["prima_bruta"], 2)]
     ] {
         resumen = push(resumen, { "Campo": par[0], "Valor": par[1] })
     }

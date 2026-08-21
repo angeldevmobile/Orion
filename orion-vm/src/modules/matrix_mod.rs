@@ -118,8 +118,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let b = parse_mat(&args[1])?;
             Ok(mat_to_eval(mat_mul(&a, &b)?))
         }
-        // rot2D(angle_deg) → matriz de rotación 2D
-        "rot2D" => {
+        // rot_2d(angle_deg) → matriz de rotación 2D
+        "rot_2d" | "rot2D" => {
             let deg = to_f64(args.first().ok_or("matrix.rot2D requiere (angle_deg)")?)?;
             let a = deg.to_radians();
             Ok(mat_to_eval(vec![

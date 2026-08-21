@@ -29,8 +29,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
 
         //    Filtros                                                               
-        // where_(s, key, val) / filter_eq → filtra dicts donde dict[key] == val
-        "where_" | "filter_eq" | "where" => {
+        // where(s, key, val) / filter_eq → filtra dicts donde dict[key] == val
+        "where" | "filter_eq" | "where_" => {
             if args.len() < 3 { return Err("stream.where requiere (list, key, value)".into()); }
             let key = to_str(&args[1]);
             let target = &args[2];
@@ -155,8 +155,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 _ => Err("stream.flatten: argumento debe ser una list".into()),
             }
         }
-        // zip_(s1, s2) → [{a: s1[0], b: s2[0]}, ...]
-        "zip_" | "zip_lists" => {
+        // zip_lists(s1, s2) → [{a: s1[0], b: s2[0]}, ...]
+        "zip_lists" | "zip_" => {
             if args.len() < 2 { return Err("stream.zip_ requiere (list1, list2)".into()); }
             match (&args[0], &args[1]) {
                 (EvalValue::List(a), EvalValue::List(b)) => {

@@ -3,6 +3,55 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## 2026-08-20
+
+### Cambiado
+- **La API pública de Orion es inglesa**: el inglés pasa a ser la forma canónica
+  de la stdlib, y los nombres españoles quedan como **alias permanentes**. No se
+  ha renombrado ni eliminado nada: `db.insertar`, `cache.guardar` o
+  `validate.requerido` siguen funcionando y seguirán funcionando; lo que cambia
+  es cuál documenta el registro, y con él el hover, el autocompletado,
+  `orion --builtins-json` y la referencia del sitio.
+
+  Se aplicó reordenando los nombres dentro de cada brazo del `match` (en Rust el
+  orden es indiferente, pero `scripts/gen_builtins.js` toma el primero como
+  principal) y volteando el comentario de contrato, que es de donde sale la
+  firma documentada. Alcance: **115 brazos** en 20 módulos y **101 comentarios**.
+
+- **Cuatro módulos tenían nombre español sin alternativa** y ahora responden
+  también en inglés: `task`/`tarea`, `queue`/`cola`, `format`/`formato`,
+  `graph`/`grafo`. Requiere mantener sincronizados cuatro sitios: el dispatch y
+  `is_known_module()` en `modules/mod.rs`, `canonical_module()` en el
+  typechecker y `canonical()` en `tests/builtins_registry_sync.rs`.
+
+- **Coherencia dentro del propio inglés**: `stream.where` (antes `where_`),
+  `stream.zip_lists` (antes `zip_`), `frame.where` (nuevo, `where_` no tenía
+  alternativa), `proto.encode_base64`/`decode_base64` (antes solo la forma
+  abreviada `_b64`) y `matrix.rot_2d` (antes solo `rot2D`, camelCase en una API
+  snake_case). Todas las formas anteriores siguen vivas como alias.
+
+  Se dejan a propósito dos cosas que parecen incoherencias y no lo son:
+  `excel_f.if_` lleva guion bajo porque `if` es keyword y `excel_f.if(...)` no
+  parsearía; y `quantum.gate_H`/`gate_CNOT` van en mayúscula porque es la
+  notación de la física, y además son funciones distintas de `h`/`cnot` (unas
+  devuelven la matriz de la puerta, las otras la aplican).
+
+### Roto
+- **`type(t)` sobre una tarea devuelve `"task"`, antes `"tarea"`**. Es el único
+  cambio de esta tanda que no se puede aliasar, porque un string devuelto no
+  tiene alias. Era el único tipo de runtime con nombre español entre diez
+  ingleses (`int`, `float`, `string`, `bool`, `list`, `dict`, `ptr`, `null`,
+  `fn`, `module`). Un programa que compare `type(t) == "tarea"` debe
+  actualizarse.
+
+### Tests
+- Suite completa en verde tras el cambio: **421 tests, 0 fallos** (unit,
+  regression, differential VM-JIT, typecheck, modules_smoke, concurrency,
+  packages_resolution, readme_examples_parse y builtins_registry_sync).
+- `tests/test_infra.orx` y `tests/test_utilidades.orx` se dejan **en español a
+  propósito**: son la cobertura de regresión que demuestra que los alias siguen
+  vivos.
+
 ## 2026-08-08
 
 ### Arreglado

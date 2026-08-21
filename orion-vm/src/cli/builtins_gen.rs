@@ -219,7 +219,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("matrix", "ones", "matrix.ones(rows, cols)", "Matriz de unos"));
     v.push(f("matrix", "shape", "matrix.shape(A)", "[rows, cols]"));
     v.push(f("matrix", "dot", "matrix.dot(A, B)", "Producto punto (misma que mul)"));
-    v.push(f("matrix", "rot2D", "matrix.rot2D(angle_deg)", "Matriz de rotación 2D"));
+    v.push(f("matrix", "rot_2d", "matrix.rot_2d(angle_deg)", "Matriz de rotación 2D"));
+    v.push(f("matrix", "rot2D", "matrix.rot2D(angle_deg)", "Alias de matrix.rot_2d."));
     v.push(f("matrix", "neuralify", "matrix.neuralify(A, activation?)", "Aplica función de activación"));
     v.push(f("matrix", "flatten", "matrix.flatten(A) -> list", "1D"));
     v.push(f("matrix", "scale", "matrix.scale(A, factor)", "Multiplica todos los elementos"));
@@ -552,7 +553,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("frame", "keep", "frame.keep(h: handle, columnas: list) -> handle", "Frame nuevo solo con esas columnas"));
     v.push(f("frame", "drop", "frame.drop(h: handle, columnas: list) -> handle", "Frame nuevo sin esas columnas"));
     v.push(f("frame", "rename", "frame.rename(h: handle, viejo: string, nuevo: string) -> handle", "Frame nuevo con la columna renombrada"));
-    v.push(f("frame", "where_", "frame.where_(h: handle, columna: string, valor: any) -> handle", "Frame nuevo con las filas cuya columna es igual a ese valor"));
+    v.push(f("frame", "where", "frame.where(h: handle, columna: string, valor: any) -> handle", "Frame nuevo con las filas cuya columna es igual a ese valor"));
+    v.push(f("frame", "where_", "frame.where_(h: handle, columna: string, valor: any) -> handle", "Alias de frame.where."));
     v.push(f("frame", "head", "frame.head(h: handle, n?: int) -> handle", "Frame nuevo con las n primeras filas"));
     v.push(f("frame", "tail", "frame.tail(h: handle, n?: int) -> handle", "Frame nuevo con las n últimas filas"));
     v.push(f("frame", "sort", "frame.sort(h: handle, columna: string, orden?: string) -> handle", "Frame nuevo ordenado; ascendente salvo que pases exactamente \"desc\""));
@@ -771,37 +773,37 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("mail", "enviar", "mail.enviar(smtp, usuario, clave, de, para, asunto, cuerpo) -> bool", "Alias de mail.send."));
     v.push(f("mail", "send_html", "mail.send_html(smtp, usuario, clave, de, para, asunto, html) -> bool", "Devuelve bool."));
     v.push(f("mail", "enviar_html", "mail.enviar_html(smtp, usuario, clave, de, para, asunto, html) -> bool", "Alias de mail.send_html."));
-    // tarea (tarea_mod.rs)
-    v.push(f("tarea", "sleep", "tarea.sleep(ms) -> nada", "Pausa la ejecución"));
-    v.push(f("tarea", "dormir", "tarea.dormir(ms) -> nada", "Alias de tarea.sleep."));
-    v.push(f("tarea", "now", "tarea.now()", "Timestamp Unix en ms"));
-    v.push(f("tarea", "ahora", "tarea.ahora()", "Alias de tarea.now."));
-    v.push(f("tarea", "start", "tarea.start(nombre) -> nada", "Arranca un cronómetro"));
-    v.push(f("tarea", "iniciar", "tarea.iniciar(nombre) -> nada", "Alias de tarea.start."));
-    v.push(f("tarea", "elapsed", "tarea.elapsed(nombre)", "Ms transcurridos desde iniciar()"));
-    v.push(f("tarea", "medir", "tarea.medir(nombre)", "Alias de tarea.elapsed."));
-    v.push(f("tarea", "reset", "tarea.reset(nombre) -> nada", "Devuelve nada."));
-    v.push(f("tarea", "reiniciar", "tarea.reiniciar(nombre) -> nada", "Alias de tarea.reset."));
-    v.push(f("tarea", "repeat", "tarea.repeat(n, intervalo_ms) -> nada", "Espera n veces con intervalo (bloqueante)"));
-    v.push(f("tarea", "repetir", "tarea.repetir(n, intervalo_ms) -> nada", "Alias de tarea.repeat."));
-    // cola (cola_mod.rs)
-    v.push(f("cola", "create", "cola.create(nombre) -> bool", "Devuelve bool."));
-    v.push(f("cola", "crear", "cola.crear(nombre) -> bool", "Alias de cola.create."));
-    v.push(f("cola", "push", "cola.push(nombre, valor) -> bool", "Agrega al final"));
-    v.push(f("cola", "enviar", "cola.enviar(nombre, valor) -> bool", "Alias de cola.push."));
-    v.push(f("cola", "pop", "cola.pop(nombre)", "Valor o Null  — extrae del frente (FIFO)"));
-    v.push(f("cola", "recibir", "cola.recibir(nombre)", "Alias de cola.pop."));
-    v.push(f("cola", "peek", "cola.peek(nombre)", "Ver el frente sin extraer"));
-    v.push(f("cola", "espiar", "cola.espiar(nombre)", "Alias de cola.peek."));
-    v.push(f("cola", "size", "cola.size(nombre) -> int", "Devuelve int."));
-    v.push(f("cola", "tamaño", "cola.tamaño(nombre) -> int", "Alias de cola.size."));
-    v.push(f("cola", "len", "cola.len(nombre) -> int", "Alias de cola.size."));
-    v.push(f("cola", "clear", "cola.clear(nombre) -> bool", "Devuelve bool."));
-    v.push(f("cola", "vaciar", "cola.vaciar(nombre) -> bool", "Alias de cola.clear."));
-    v.push(f("cola", "delete", "cola.delete(nombre) -> bool", "(true si la cola existía) — elimina la cola entera"));
-    v.push(f("cola", "eliminar", "cola.eliminar(nombre) -> bool", "Alias de cola.delete."));
-    v.push(f("cola", "list", "cola.list() -> list", "<Str> de nombres de colas existentes"));
-    v.push(f("cola", "lista", "cola.lista() -> list", "Alias de cola.list."));
+    // task (tarea_mod.rs)
+    v.push(f("task", "sleep", "task.sleep(ms) -> nada", "Pausa la ejecución"));
+    v.push(f("task", "dormir", "task.dormir(ms) -> nada", "Alias de task.sleep."));
+    v.push(f("task", "now", "task.now()", "Timestamp Unix en ms"));
+    v.push(f("task", "ahora", "task.ahora()", "Alias de task.now."));
+    v.push(f("task", "start", "task.start(nombre) -> nada", "Arranca un cronómetro"));
+    v.push(f("task", "iniciar", "task.iniciar(nombre) -> nada", "Alias de task.start."));
+    v.push(f("task", "elapsed", "task.elapsed(nombre)", "Ms transcurridos desde iniciar()"));
+    v.push(f("task", "medir", "task.medir(nombre)", "Alias de task.elapsed."));
+    v.push(f("task", "reset", "task.reset(nombre) -> nada", "Devuelve nada."));
+    v.push(f("task", "reiniciar", "task.reiniciar(nombre) -> nada", "Alias de task.reset."));
+    v.push(f("task", "repeat", "task.repeat(n, intervalo_ms) -> nada", "Espera n veces con intervalo (bloqueante)"));
+    v.push(f("task", "repetir", "task.repetir(n, intervalo_ms) -> nada", "Alias de task.repeat."));
+    // queue (cola_mod.rs)
+    v.push(f("queue", "create", "queue.create(nombre) -> bool", "Devuelve bool."));
+    v.push(f("queue", "crear", "queue.crear(nombre) -> bool", "Alias de queue.create."));
+    v.push(f("queue", "push", "queue.push(nombre, valor) -> bool", "Agrega al final"));
+    v.push(f("queue", "enviar", "queue.enviar(nombre, valor) -> bool", "Alias de queue.push."));
+    v.push(f("queue", "pop", "queue.pop(nombre)", "Valor o Null  — extrae del frente (FIFO)"));
+    v.push(f("queue", "recibir", "queue.recibir(nombre)", "Alias de queue.pop."));
+    v.push(f("queue", "peek", "queue.peek(nombre)", "Ver el frente sin extraer"));
+    v.push(f("queue", "espiar", "queue.espiar(nombre)", "Alias de queue.peek."));
+    v.push(f("queue", "size", "queue.size(nombre) -> int", "Devuelve int."));
+    v.push(f("queue", "tamaño", "queue.tamaño(nombre) -> int", "Alias de queue.size."));
+    v.push(f("queue", "len", "queue.len(nombre) -> int", "Alias de queue.size."));
+    v.push(f("queue", "clear", "queue.clear(nombre) -> bool", "Devuelve bool."));
+    v.push(f("queue", "vaciar", "queue.vaciar(nombre) -> bool", "Alias de queue.clear."));
+    v.push(f("queue", "delete", "queue.delete(nombre) -> bool", "(true si la cola existía) — elimina la cola entera"));
+    v.push(f("queue", "eliminar", "queue.eliminar(nombre) -> bool", "Alias de queue.delete."));
+    v.push(f("queue", "list", "queue.list() -> list", "<Str> de nombres de colas existentes"));
+    v.push(f("queue", "lista", "queue.lista() -> list", "Alias de queue.list."));
     // chan (chan_mod.rs)
     v.push(f("chan", "create", "chan.create(cap?) -> int", "(handle). cap=0 o ausente — ilimitado."));
     v.push(f("chan", "crear", "chan.crear(cap?) -> int", "Alias de chan.create."));
@@ -925,39 +927,39 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("template", "renderizar", "template.renderizar(template_str, vars_dict) -> string", "Alias de template.render."));
     v.push(f("template", "from_file", "template.from_file(path, vars_dict) -> string", "Devuelve string."));
     v.push(f("template", "desde_archivo", "template.desde_archivo(path, vars_dict) -> string", "Alias de template.from_file."));
-    // formato (formato_mod.rs)
-    v.push(f("formato", "table", "formato.table(encabezados, filas) -> string", "Tabla ASCII formateada filas puede ser List<List> o List<Dict>"));
-    v.push(f("formato", "tabla", "formato.tabla(encabezados, filas) -> string", "Alias de formato.table."));
-    v.push(f("formato", "divider", "formato.divider(ancho, caracter?) -> string", "Línea horizontal"));
-    v.push(f("formato", "separador", "formato.separador(ancho, caracter?) -> string", "Alias de formato.divider."));
-    v.push(f("formato", "number", "formato.number(n, decimales=0, miles=\",\", decimal=\".\")", "\"1,487,000.50\" Estilo español: numero(n, 2, \".\", \",\") — \"1.487.000,50\""));
-    v.push(f("formato", "numero", "formato.numero(n, decimales=0, miles=\",\", decimal=\".\")", "Alias de formato.number."));
-    v.push(f("formato", "currency", "formato.currency(n, simbolo=\"$\", decimales=2)", "\"$1,487,000.00\" Símbolo alfabético va con espacio: moneda(n, \"USD\") — \"USD 1,487,000.00\""));
-    v.push(f("formato", "moneda", "formato.moneda(n, simbolo=\"$\", decimales=2)", "Alias de formato.currency."));
-    v.push(f("formato", "percent", "formato.percent(x, decimales=1)", "0.156 — \"15.6%\""));
-    v.push(f("formato", "porcentaje", "formato.porcentaje(x, decimales=1)", "Alias de formato.percent."));
-    v.push(f("formato", "bytes", "formato.bytes(n)", "Tamaño humano en base 1024: \"512 B\", \"1.5 KB\", \"2 MB\""));
-    v.push(f("formato", "duration", "formato.duration(segundos)", "\"1d 2h 3m 4s\"; menos de 1s — \"500ms\""));
-    v.push(f("formato", "duracion", "formato.duracion(segundos)", "Alias de formato.duration."));
-    v.push(f("formato", "truncate", "formato.truncate(s, max)", "Corta a max caracteres agregando \"…\" si hizo falta"));
-    v.push(f("formato", "truncar", "formato.truncar(s, max)", "Alias de formato.truncate."));
-    v.push(f("formato", "center", "formato.center(s, ancho) -> string", "Texto centrado con espacios"));
-    v.push(f("formato", "centrar", "formato.centrar(s, ancho) -> string", "Alias de formato.center."));
-    // grafo (grafo_mod.rs)
-    v.push(f("grafo", "create", "grafo.create()", "Id Int"));
-    v.push(f("grafo", "crear", "grafo.crear()", "Alias de grafo.create."));
-    v.push(f("grafo", "node", "grafo.node(id, nombre) -> bool", "Agrega nodo si no existe"));
-    v.push(f("grafo", "nodo", "grafo.nodo(id, nombre) -> bool", "Alias de grafo.node."));
-    v.push(f("grafo", "edge", "grafo.edge(id, desde, hasta, peso?) -> bool", "Devuelve bool."));
-    v.push(f("grafo", "arista", "grafo.arista(id, desde, hasta, peso?) -> bool", "Alias de grafo.edge."));
-    v.push(f("grafo", "path", "grafo.path(id, desde, hasta) -> list", "<Str> de nodos o Null si no existe ruta"));
-    v.push(f("grafo", "camino", "grafo.camino(id, desde, hasta) -> list", "Alias de grafo.path."));
-    v.push(f("grafo", "neighbors", "grafo.neighbors(id, nodo) -> list", "<Str>"));
-    v.push(f("grafo", "vecinos", "grafo.vecinos(id, nodo) -> list", "Alias de grafo.neighbors."));
-    v.push(f("grafo", "nodes", "grafo.nodes(id) -> list", "<Str> de todos los nodos"));
-    v.push(f("grafo", "nodos", "grafo.nodos(id) -> list", "Alias de grafo.nodes."));
-    v.push(f("grafo", "delete", "grafo.delete(id) -> bool", "Devuelve bool."));
-    v.push(f("grafo", "eliminar", "grafo.eliminar(id) -> bool", "Alias de grafo.delete."));
+    // format (formato_mod.rs)
+    v.push(f("format", "table", "format.table(encabezados, filas) -> string", "Tabla ASCII formateada filas puede ser List<List> o List<Dict>"));
+    v.push(f("format", "tabla", "format.tabla(encabezados, filas) -> string", "Alias de format.table."));
+    v.push(f("format", "divider", "format.divider(ancho, caracter?) -> string", "Línea horizontal"));
+    v.push(f("format", "separador", "format.separador(ancho, caracter?) -> string", "Alias de format.divider."));
+    v.push(f("format", "number", "format.number(n, decimales=0, miles=\",\", decimal=\".\")", "\"1,487,000.50\" Estilo español: numero(n, 2, \".\", \",\") — \"1.487.000,50\""));
+    v.push(f("format", "numero", "format.numero(n, decimales=0, miles=\",\", decimal=\".\")", "Alias de format.number."));
+    v.push(f("format", "currency", "format.currency(n, simbolo=\"$\", decimales=2)", "\"$1,487,000.00\" Símbolo alfabético va con espacio: moneda(n, \"USD\") — \"USD 1,487,000.00\""));
+    v.push(f("format", "moneda", "format.moneda(n, simbolo=\"$\", decimales=2)", "Alias de format.currency."));
+    v.push(f("format", "percent", "format.percent(x, decimales=1)", "0.156 — \"15.6%\""));
+    v.push(f("format", "porcentaje", "format.porcentaje(x, decimales=1)", "Alias de format.percent."));
+    v.push(f("format", "bytes", "format.bytes(n)", "Tamaño humano en base 1024: \"512 B\", \"1.5 KB\", \"2 MB\""));
+    v.push(f("format", "duration", "format.duration(segundos)", "\"1d 2h 3m 4s\"; menos de 1s — \"500ms\""));
+    v.push(f("format", "duracion", "format.duracion(segundos)", "Alias de format.duration."));
+    v.push(f("format", "truncate", "format.truncate(s, max)", "Corta a max caracteres agregando \"…\" si hizo falta"));
+    v.push(f("format", "truncar", "format.truncar(s, max)", "Alias de format.truncate."));
+    v.push(f("format", "center", "format.center(s, ancho) -> string", "Texto centrado con espacios"));
+    v.push(f("format", "centrar", "format.centrar(s, ancho) -> string", "Alias de format.center."));
+    // graph (grafo_mod.rs)
+    v.push(f("graph", "create", "graph.create()", "Id Int"));
+    v.push(f("graph", "crear", "graph.crear()", "Alias de graph.create."));
+    v.push(f("graph", "node", "graph.node(id, nombre) -> bool", "Agrega nodo si no existe"));
+    v.push(f("graph", "nodo", "graph.nodo(id, nombre) -> bool", "Alias de graph.node."));
+    v.push(f("graph", "edge", "graph.edge(id, desde, hasta, peso?) -> bool", "Devuelve bool."));
+    v.push(f("graph", "arista", "graph.arista(id, desde, hasta, peso?) -> bool", "Alias de graph.edge."));
+    v.push(f("graph", "path", "graph.path(id, desde, hasta) -> list", "<Str> de nodos o Null si no existe ruta"));
+    v.push(f("graph", "camino", "graph.camino(id, desde, hasta) -> list", "Alias de graph.path."));
+    v.push(f("graph", "neighbors", "graph.neighbors(id, nodo) -> list", "<Str>"));
+    v.push(f("graph", "vecinos", "graph.vecinos(id, nodo) -> list", "Alias de graph.neighbors."));
+    v.push(f("graph", "nodes", "graph.nodes(id) -> list", "<Str> de todos los nodos"));
+    v.push(f("graph", "nodos", "graph.nodos(id) -> list", "Alias de graph.nodes."));
+    v.push(f("graph", "delete", "graph.delete(id) -> bool", "Devuelve bool."));
+    v.push(f("graph", "eliminar", "graph.eliminar(id) -> bool", "Alias de graph.delete."));
     // pdf (pdf_mod.rs)
     v.push(f("pdf", "create", "pdf.create(path, texto) -> bool", "Devuelve bool."));
     v.push(f("pdf", "crear", "pdf.crear(path, texto) -> bool", "Alias de pdf.create."));
@@ -1019,9 +1021,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     // stream (stream_mod.rs)
     v.push(f("stream", "from", "stream.from(list)", "Devuelve la lista tal cual (documenta intención de pipeline)"));
     v.push(f("stream", "range", "stream.range(start, end, step?)", "[start, start+step, ..., end-1]"));
-    v.push(f("stream", "where_", "stream.where_(s, key, val) / filter_eq", "Filtra dicts donde dict[key] == val"));
-    v.push(f("stream", "filter_eq", "stream.filter_eq(s, key, val) / filter_eq", "Alias de stream.where_."));
-    v.push(f("stream", "where", "stream.where(s, key, val) / filter_eq", "Alias de stream.where_."));
+    v.push(f("stream", "where", "stream.where(s, key, val) / filter_eq", "Filtra dicts donde dict[key] == val"));
+    v.push(f("stream", "filter_eq", "stream.filter_eq(s, key, val) / filter_eq", "Alias de stream.where."));
+    v.push(f("stream", "where_", "stream.where_(s, key, val) / filter_eq", "Alias de stream.where."));
     v.push(f("stream", "filter_gt", "stream.filter_gt(s, n)", "Mantiene números > n (o dicts donde el valor es > n no aplica)"));
     v.push(f("stream", "filter_lt", "stream.filter_lt(s, n)", "Mantiene números < n"));
     v.push(f("stream", "filter_gte", "stream.filter_gte(s, n)", "Función del módulo stream."));
@@ -1033,8 +1035,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("stream", "reverse", "stream.reverse(s) -> list", "Invertida"));
     v.push(f("stream", "unique", "stream.unique(s)", "Elimina duplicados (preserva orden de primera aparición)"));
     v.push(f("stream", "flatten", "stream.flatten(s)", "Aplana un nivel de listas anidadas"));
-    v.push(f("stream", "zip_", "stream.zip_(s1, s2)", "[{a: s1[0], b: s2[0]}, ...]"));
-    v.push(f("stream", "zip_lists", "stream.zip_lists(s1, s2)", "Alias de stream.zip_."));
+    v.push(f("stream", "zip_lists", "stream.zip_lists(s1, s2)", "[{a: s1[0], b: s2[0]}, ...]"));
+    v.push(f("stream", "zip_", "stream.zip_(s1, s2)", "Alias de stream.zip_lists."));
     v.push(f("stream", "collect", "stream.collect(s)", "Materializa el stream (passthrough)"));
     v.push(f("stream", "count", "stream.count(…)", "Función del módulo stream."));
     v.push(f("stream", "sum", "stream.sum(…)", "Función del módulo stream."));
@@ -1088,8 +1090,10 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     // proto (proto_mod.rs)
     v.push(f("proto", "encode", "proto.encode(value) -> list", "De Int (bytes MessagePack)"));
     v.push(f("proto", "decode", "proto.decode(bytes)", "EvalValue"));
-    v.push(f("proto", "encode_b64", "proto.encode_b64(value) -> string", "Base64"));
-    v.push(f("proto", "decode_b64", "proto.decode_b64(s)", "EvalValue"));
+    v.push(f("proto", "encode_base64", "proto.encode_base64(value) -> string", "Base64"));
+    v.push(f("proto", "encode_b64", "proto.encode_b64(value) -> string", "Alias de proto.encode_base64."));
+    v.push(f("proto", "decode_base64", "proto.decode_base64(s)", "EvalValue"));
+    v.push(f("proto", "decode_b64", "proto.decode_b64(s)", "Alias de proto.decode_base64."));
     v.push(f("proto", "size", "proto.size(value) -> int", "(tamaño en bytes del encoding MessagePack)"));
     v.push(f("proto", "json_size", "proto.json_size(value) -> int", "(tamaño en bytes como JSON, para comparar)"));
     // llm (llm_mod.rs)

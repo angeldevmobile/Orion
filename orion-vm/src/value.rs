@@ -266,7 +266,7 @@ impl Value {
             Value::Null                => "null".to_string(),
             Value::Instance(i)         => i.borrow().shape_name.clone(),
             Value::Closure { .. }      => "fn".to_string(),
-            Value::Task(_)             => "tarea".to_string(),
+            Value::Task(_)             => "task".to_string(),
             Value::Module(m)           => format!("module<{}>", m),
         }
     }

@@ -8,13 +8,13 @@
 -- (En un pipe o redirigido a archivo se auto-silencia — así no ensucia la salida.)
 
 use "packages/progress" as pg
-use "tarea" as tarea
+use "task" as task
 
 -- 1) Barra determinada: cuando conoces el total.
 show "Descargando paquetes:"
 for i in range(0, 101) {
     pg.barra(i, 100)
-    tarea.sleep(12)
+    task.sleep(12)
 }
 pg.fin()
 show "  \x1b[32m✓\x1b[0m 100 paquetes listos"
@@ -24,7 +24,7 @@ show ""
 show "Procesando flujo de datos:"
 for i in range(0, 45) {
     pg.spinner(i, "Leyendo filas")
-    tarea.sleep(55)
+    task.sleep(55)
 }
 pg.fin()
 show "  \x1b[32m✓\x1b[0m flujo completado"

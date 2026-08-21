@@ -21,6 +21,10 @@ fn canonical(name: &str) -> &str {
     match name {
         "df" => "table",
         "embeddings" => "embed",
+        "tarea" => "task",
+        "cola" => "queue",
+        "formato" => "format",
+        "grafo" => "graph",
         other => other,
     }
 }

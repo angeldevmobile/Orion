@@ -271,8 +271,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // rename(h: handle, viejo: string, nuevo: string) -> handle → frame nuevo con la columna renombrada
         "rename"     => fn_rename(args),
         // Filtrado
-        // where_(h: handle, columna: string, valor: any) -> handle → frame nuevo con las filas cuya columna es igual a ese valor
-        "where_"     => fn_where(args),
+        // where(h: handle, columna: string, valor: any) -> handle → frame nuevo con las filas cuya columna es igual a ese valor
+        "where" | "where_" => fn_where(args),
         // head(h: handle, n?: int) -> handle → frame nuevo con las n primeras filas
         "head"       => fn_head(args),
         // tail(h: handle, n?: int) -> handle → frame nuevo con las n últimas filas

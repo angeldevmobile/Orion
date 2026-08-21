@@ -12,7 +12,7 @@
 use "gui" as gui
 use "state" as state
 use "excel" as xl
-use "formato" as fmt
+use "format" as fmt
 use "demo/reporte_lib" as rep
 
 MAX_SUGERENCIAS = 12
@@ -101,9 +101,9 @@ if gui.pressed("exportar") and ficha != null {
                 ["Aseguradora",   cab["aseguradora"]],
                 ["Moneda",        cab["moneda"]],
                 ["Certificados",  str(tot["certificados"])],
-                ["Suma asegurada", fmt.numero(tot["suma"], 2)],
-                ["Prima neta",     fmt.numero(tot["prima_neta"], 2)],
-                ["Prima bruta",    fmt.numero(tot["prima_bruta"], 2)]
+                ["Suma asegurada", fmt.number(tot["suma"], 2)],
+                ["Prima neta",     fmt.number(tot["prima_neta"], 2)],
+                ["Prima bruta",    fmt.number(tot["prima_bruta"], 2)]
             ] {
                 resumen = push(resumen, { "Campo": par[0], "Valor": par[1] })
             }
@@ -190,8 +190,8 @@ if ruta == "" {
 
         gui.stats([
             ["CERTIFICADOS",   str(tot["certificados"])],
-            ["SUMA ASEGURADA", fmt.numero(tot["suma"], 2)],
-            ["PRIMA BRUTA",    fmt.numero(tot["prima_bruta"], 2)]
+            ["SUMA ASEGURADA", fmt.number(tot["suma"], 2)],
+            ["PRIMA BRUTA",    fmt.number(tot["prima_bruta"], 2)]
         ])
         gui.spacer(10)
 

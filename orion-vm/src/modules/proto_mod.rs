@@ -18,15 +18,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             from_msgpack(&bytes)
         }
 
-        // encode_b64(value) → Str base64
-        "encode_b64" => {
+        // encode_base64(value) → Str base64
+        "encode_base64" | "encode_b64" => {
             if args.is_empty() { return Err("proto.encode_b64 requiere (value)".into()); }
             let bytes = to_msgpack(&args[0])?;
             Ok(EvalValue::Str(BASE64.encode(&bytes)))
         }
 
-        // decode_b64(s) → EvalValue
-        "decode_b64" => {
+        // decode_base64(s) → EvalValue
+        "decode_base64" | "decode_b64" => {
             if args.is_empty() { return Err("proto.decode_b64 requiere (base64_str)".into()); }
             let s     = to_str(&args[0]);
             let bytes = BASE64.decode(s.trim())

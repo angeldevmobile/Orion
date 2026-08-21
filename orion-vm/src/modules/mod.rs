@@ -128,8 +128,8 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "session"  => session_mod::call(function, args),
         "mail"     => mail_mod::call(function, args),
         // Automatización
-        "tarea"    => tarea_mod::call(function, args),
-        "cola"     => cola_mod::call(function, args),
+        "task" | "tarea"       => tarea_mod::call(function, args),
+        "queue" | "cola"       => cola_mod::call(function, args),
         "chan"     => chan_mod::call(function, args),
         "watch"    => watch_mod::call(function, args),
         // Validación
@@ -138,8 +138,8 @@ pub fn call(module: &str, function: &str, args: Vec<EvalValue>) -> Result<EvalVa
         "browser"  => browser::call(function, args),
         "ws"       => ws_mod::call(function, args),
         "template" => template_mod::call(function, args),
-        "formato"  => formato_mod::call(function, args),
-        "grafo"    => grafo_mod::call(function, args),
+        "format" | "formato"   => formato_mod::call(function, args),
+        "graph" | "grafo"      => grafo_mod::call(function, args),
         "pdf"      => pdf_mod::call(function, args),
         // Bloque D — Sistema moderno
         "log"      => log_mod::call(function, args),
@@ -181,11 +181,11 @@ pub fn is_known_module(name: &str) -> bool {
         // Backend core
         "db" | "auth" | "cache" | "state" | "session" | "mail" |
         // Automatización
-        "tarea" | "cola" | "chan" | "watch" |
+        "task" | "tarea" | "queue" | "cola" | "chan" | "watch" |
         // Validación
         "validate" |
         // Utilidades modernas
-        "ws" | "browser" | "template" | "formato" | "grafo" | "pdf" |
+        "ws" | "browser" | "template" | "format" | "formato" | "graph" | "grafo" | "pdf" |
         // Bloque D
         "log" | "config" | "secret" | "zip" | "stream" | "crypto2" |
         // Bloque B
