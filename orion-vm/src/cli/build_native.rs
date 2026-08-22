@@ -12,7 +12,7 @@ use std::fs;
 use super::banner;
 
 pub fn run_build(src_path: &str, output: Option<&str>) {
-    banner::section("Compilación nativa AOT");
+    banner::section("Native AOT build");
 
     //   1. Lex → Parse → Codegen                      
     let src = read_src(src_path);
@@ -20,7 +20,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
     let tokens = match crate::lexer::lex(&src) {
         Ok(t) => t,
         Err(e) => {
-            banner::fail(&format!("Error léxico en {src_path}:{}: {}", e.line, e.message));
+            banner::fail(&format!("Lexical error in {src_path}:{}: {}", e.line, e.message));
             std::process::exit(1);
         }
     };
@@ -28,7 +28,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
     let ast = match crate::parser::parse(tokens) {
         Ok(a) => a,
         Err(e) => {
-            banner::fail(&format!("Error de sintaxis en {src_path}:{}: {}", e.line, e.message));
+            banner::fail(&format!("Syntax error in {src_path}:{}: {}", e.line, e.message));
             std::process::exit(1);
         }
     };
@@ -36,7 +36,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
     let bc = match crate::codegen::compile(ast) {
         Ok(b) => b,
         Err(e) => {
-            banner::fail(&format!("Error de codegen: {}", e.message));
+            banner::fail(&format!("Codegen error: {}", e.message));
             std::process::exit(1);
         }
     };
@@ -48,15 +48,15 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
     //   bytecode y el runtime lo ejecuta (JIT si puede, intérprete si no).
     let obj_bytes = match crate::jit::aot_backend::compile_to_native_object(&bc) {
         Ok(Some(b)) => {
-            banner::ok("Código:   nativo (Cranelift)");
+            banner::ok("Code:     native (Cranelift)");
             b
         }
         Ok(None) => {
-            banner::info("El programa usa construcciones sin soporte nativo; se embebe el bytecode.");
+            banner::info("The program uses constructs with no native support; embedding the bytecode instead.");
             build_bundle_object(&bc)
         }
         Err(e) => {
-            banner::info(&format!("Compilación nativa no disponible ({e}); se embebe el bytecode."));
+            banner::info(&format!("Native build unavailable ({e}); embedding the bytecode instead."));
             build_bundle_object(&bc)
         }
     };
@@ -74,7 +74,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
     let obj_path = tmp_dir.join(format!("{stem}.{obj_ext}"));
 
     if let Err(e) = fs::write(&obj_path, &obj_bytes) {
-        banner::fail(&format!("Error escribiendo objeto: {e}"));
+        banner::fail(&format!("Error writing object file: {e}"));
         std::process::exit(1);
     }
 
@@ -109,7 +109,7 @@ fn build_bundle_object(bc: &crate::bytecode::OrionBytecode) -> Vec<u8> {
     let bc_bytes = match serde_json::to_vec(bc) {
         Ok(b) => b,
         Err(e) => {
-            banner::fail(&format!("Error serializando bytecode: {e}"));
+            banner::fail(&format!("Error serializing bytecode: {e}"));
             std::process::exit(1);
         }
     };
@@ -118,7 +118,7 @@ fn build_bundle_object(bc: &crate::bytecode::OrionBytecode) -> Vec<u8> {
     match crate::aot::compile_to_object(&bc_bytes) {
         Ok(b) => b,
         Err(e) => {
-            banner::fail(&format!("Error AOT (cranelift-object): {e}"));
+            banner::fail(&format!("AOT error (cranelift-object): {e}"));
             std::process::exit(1);
         }
     }
@@ -128,7 +128,7 @@ fn read_src(path: &str) -> String {
     match fs::read_to_string(path) {
         Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
         Err(e) => {
-            banner::fail(&format!("No se puede leer '{path}': {e}"));
+            banner::fail(&format!("Cannot read '{path}': {e}"));
             std::process::exit(1);
         }
     }
@@ -168,7 +168,7 @@ fn build_staticlib(vm_dir: &Path, tmp_dir: &Path) -> PathBuf {
     // esto último congelaba el runtime del primer build para siempre, así que
     // los cambios en la VM nunca llegaban a los ejecutables AOT.
     if !cached.exists() {
-        banner::info("Compilando runtime de Orion (primera vez, puede tardar ~30s)...");
+        banner::info("Building the Orion runtime (first time, may take ~30s)...");
     }
 
     let status = Command::new("cargo")
@@ -181,15 +181,15 @@ fn build_staticlib(vm_dir: &Path, tmp_dir: &Path) -> PathBuf {
         // Sin fuentes o sin cargo se puede seguir con la staticlib ya
         // construida; solo hay que avisar de que puede estar desactualizada.
         _ if cached.exists() => {
-            banner::info("No se pudo recompilar el runtime; se usa la staticlib existente.");
+            banner::info("Could not rebuild the runtime; using the existing staticlib.");
             return cached;
         }
         Ok(s) => {
-            banner::fail(&format!("cargo build --lib falló con código {:?}", s.code()));
+            banner::fail(&format!("cargo build --lib failed with code {:?}", s.code()));
             std::process::exit(1);
         }
         Err(e) => {
-            banner::fail(&format!("No se pudo ejecutar cargo: {e}"));
+            banner::fail(&format!("Could not run cargo: {e}"));
             std::process::exit(1);
         }
     }
@@ -216,7 +216,7 @@ fn build_staticlib(vm_dir: &Path, tmp_dir: &Path) -> PathBuf {
     }
 
     if cached.exists() { cached } else {
-        banner::fail("No se encontró la staticlib de orion_vm tras compilar.");
+        banner::fail("Could not find the orion_vm staticlib after building.");
         std::process::exit(1);
     }
 }
@@ -238,12 +238,12 @@ fn link_native(obj: &Path, lib: &Path, out: &Path) {
     match status {
         Ok(s) if s.success() => {}
         Ok(s) => {
-            banner::fail(&format!("Linker '{linker}' falló con código {:?}", s.code()));
+            banner::fail(&format!("Linker '{linker}' failed with code {:?}", s.code()));
             suggest_linker_fix();
             std::process::exit(1);
         }
         Err(e) => {
-            banner::fail(&format!("No se pudo ejecutar el linker '{linker}': {e}"));
+            banner::fail(&format!("Could not run the linker '{linker}': {e}"));
             suggest_linker_fix();
             std::process::exit(1);
         }
@@ -437,7 +437,7 @@ fn which(name: &str) -> Option<PathBuf> {
 
 fn suggest_linker_fix() {
     if cfg!(windows) {
-        eprintln!("  Instala Visual Studio Build Tools o MinGW y asegúrate de que link.exe o gcc estén en PATH.");
+        eprintln!("  Install Visual Studio Build Tools or MinGW and make sure link.exe or gcc is on PATH.");
     } else {
         eprintln!("  Instala gcc o clang: sudo apt install gcc  (Ubuntu/Debian)");
     }

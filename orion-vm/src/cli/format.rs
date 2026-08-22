@@ -19,7 +19,7 @@ pub fn run_format(path: &str, write_back: bool, check_only: bool) {
     let tokens = match lexer::lex(&src) {
         Ok(t) => t,
         Err(e) => {
-            banner::fail(&format!("Error léxico en '{path}' (línea {}): {}", e.line, e.message));
+            banner::fail(&format!("Lexical error in '{path}' (line {}): {}", e.line, e.message));
             std::process::exit(1);
         }
     };
@@ -27,7 +27,7 @@ pub fn run_format(path: &str, write_back: bool, check_only: bool) {
     let stmts = match parser::parse(tokens) {
         Ok(s) => s,
         Err(e) => {
-            banner::fail(&format!("Error de sintaxis en '{path}' (línea {}): {}", e.line, e.message));
+            banner::fail(&format!("Syntax error in '{path}' (line {}): {}", e.line, e.message));
             std::process::exit(1);
         }
     };
@@ -36,10 +36,10 @@ pub fn run_format(path: &str, write_back: bool, check_only: bool) {
 
     if check_only {
         if src == formatted {
-            banner::ok(&format!("Formato correcto: {path}"));
+            banner::ok(&format!("Formatting is correct: {path}"));
         } else {
             banner::fail(&format!(
-                "'{path}' no está formateado — corre: orion fmt {path} --write"
+                "'{path}' is not formatted — run: orion fmt {path} --write"
             ));
             std::process::exit(1);
         }
@@ -50,7 +50,7 @@ pub fn run_format(path: &str, write_back: bool, check_only: bool) {
         match fs::write(path, &formatted) {
             Ok(_) => banner::ok(&format!("Formateado: {path}")),
             Err(e) => {
-                banner::fail(&format!("No se puede escribir '{path}': {e}"));
+                banner::fail(&format!("Cannot write '{path}': {e}"));
                 std::process::exit(1);
             }
         }

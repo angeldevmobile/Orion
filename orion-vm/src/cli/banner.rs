@@ -85,8 +85,8 @@ pub fn print_banner() {
              env!("CARGO_PKG_VERSION"));
     println!("  {ORANGE}{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{RESET}");
     // Capacidades reales — da confianza de que es un runtime serio
-    println!("  {DIM}JIT nativo{RESET} {BBLUE}·{RESET} {DIM}Motor de datos{RESET} {BBLUE}·{RESET} \
-              {DIM}GUI / TUI{RESET} {BBLUE}·{RESET} {DIM}Paquetes{RESET} {BBLUE}·{RESET} {DIM}FFI{RESET}");
+    println!("  {DIM}Native JIT{RESET} {BBLUE}·{RESET} {DIM}Data engine{RESET} {BBLUE}·{RESET} \
+              {DIM}GUI / TUI{RESET} {BBLUE}·{RESET} {DIM}Packages{RESET} {BBLUE}·{RESET} {DIM}FFI{RESET}");
     println!();
 }
 

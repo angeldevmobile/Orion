@@ -6,21 +6,21 @@ use crate::ast::Stmt;
 use super::banner;
 
 pub fn run_tests(folder: &str) {
-    banner::section("Test Runner Orion");
+    banner::section("Orion Test Runner");
 
     let dir = Path::new(folder);
     if !dir.exists() {
-        banner::fail(&format!("Carpeta no encontrada: '{folder}'"));
+        banner::fail(&format!("Folder not found: '{folder}'"));
         std::process::exit(1);
     }
 
     let files = collect_test_files(dir);
     if files.is_empty() {
-        banner::warn(&format!("No se encontraron archivos test_*.orx en '{folder}'"));
+        banner::warn(&format!("No test_*.orx files found in '{folder}'"));
         return;
     }
 
-    banner::info(&format!("Encontrados {} archivo(s) de prueba\n", files.len()));
+    banner::info(&format!("Found {} test file(s)\n", files.len()));
 
     let mut total_passed = 0usize;
     let mut total_failed = 0usize;
@@ -71,13 +71,13 @@ fn run_test_file(
     failed: &mut usize,
 ) -> Result<(), String> {
     let src = fs::read_to_string(path)
-        .map_err(|e| format!("No se puede leer: {e}"))?;
+        .map_err(|e| format!("Cannot read: {e}"))?;
 
     let tokens = lexer::lex(&src)
-        .map_err(|e| format!("Léxico línea {}:{} — {}", e.line, e.col, e.message))?;
+        .map_err(|e| format!("Lexical line {}:{} — {}", e.line, e.col, e.message))?;
 
     let stmts = parser::parse(tokens)
-        .map_err(|e| format!("Parse línea {} — {}", e.line, e.message))?;
+        .map_err(|e| format!("Parse line {} — {}", e.line, e.message))?;
 
     // Detectar funciones test_*
     let test_fns: Vec<String> = stmts.iter()
@@ -154,7 +154,7 @@ fn run_test_file(
 
 fn run_stmts(stmts: Vec<Stmt>) -> Result<(), String> {
     let bc = codegen::compile(stmts)
-        .map_err(|e| format!("Codegen línea {} — {}", e.line, e.message))?;
+        .map_err(|e| format!("Codegen line {} — {}", e.line, e.message))?;
     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
     machine.run()
 }

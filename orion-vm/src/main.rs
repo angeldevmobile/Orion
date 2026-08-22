@@ -210,7 +210,7 @@ fn main() {
             match path {
                 Some(p) => cli::check::run_check(p, check_types),
                 None => {
-                    cli::banner::fail("Uso: orion check <archivo.orx> [--types]");
+                    cli::banner::fail("Usage: orion check <file.orx> [--types]");
                     std::process::exit(1);
                 }
             }
@@ -236,7 +236,7 @@ fn main() {
                         diagnostics: vec![error::LspDiagnostic {
                             severity: 1,
                             kind: "IO".into(),
-                            message: format!("No se puede leer '{src_path}': {e}"),
+                            message: format!("Cannot read '{src_path}': {e}"),
                             line: 0, col: 0, len: 0, hint: None,
                         }],
                     };
@@ -308,7 +308,7 @@ fn main() {
         //    Hot reload
         "--watch" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --watch <archivo.orx>");
+                cli::banner::fail("Usage: orion --watch <file.orx>");
                 std::process::exit(1);
             }
             cli::watch::run_watch(&args[2]);
@@ -317,7 +317,7 @@ fn main() {
         //    Benchmark                                                          
         "--bench" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --bench <archivo.orx> [--runs=N]");
+                cli::banner::fail("Usage: orion --bench <file.orx> [--runs=N]");
                 std::process::exit(1);
             }
             let runs = parse_runs_flag(&args, 10);
@@ -338,7 +338,7 @@ fn main() {
         //    Scaffold proyecto                                                  
         "--new" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --new <nombre-proyecto>");
+                cli::banner::fail("Usage: orion --new <project-name>");
                 std::process::exit(1);
             }
             cli::new_project::run_new(&args[2]);
@@ -347,7 +347,7 @@ fn main() {
         //    Package manager                                                    
         "--add" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --add <paquete|url|gh:owner/repo|ruta.orx> [--force] [--sha256 <hex>]");
+                cli::banner::fail("Usage: orion --add <package|url|gh:owner/repo|path.orx> [--force] [--sha256 <hex>]");
                 std::process::exit(1);
             }
             let force = args.iter().any(|a| a == "--force");
@@ -361,7 +361,7 @@ fn main() {
 
         "--remove" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --remove <paquete>");
+                cli::banner::fail("Usage: orion --remove <package>");
                 std::process::exit(1);
             }
             pkg::remove_package(&args[2]);
@@ -371,7 +371,7 @@ fn main() {
 
         "--search" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --search <consulta>");
+                cli::banner::fail("Usage: orion --search <query>");
                 std::process::exit(1);
             }
             pkg::search_packages(&args[2]);
@@ -388,7 +388,7 @@ fn main() {
 
         "--build" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --build <archivo.orx> [-o <salida>]");
+                cli::banner::fail("Usage: orion --build <file.orx> [-o <output>]");
                 std::process::exit(1);
             }
             let output = args.windows(2)
@@ -402,7 +402,7 @@ fn main() {
             let src_path = match args.get(2) {
                 Some(p) if !p.starts_with("--") => p.as_str(),
                 _ => {
-                    cli::banner::fail("Uso: orion --debug <archivo.orx>");
+                    cli::banner::fail("Usage: orion --debug <file.orx>");
                     std::process::exit(1);
                 }
             };
@@ -414,7 +414,7 @@ fn main() {
             let src_path = match args.get(2) {
                 Some(p) if !p.starts_with("--") => p.as_str(),
                 _ => {
-                    eprintln!("[dap] Uso: orion --dap <archivo.orx>");
+                    eprintln!("[dap] Usage: orion --dap <file.orx>");
                     std::process::exit(1);
                 }
             };
@@ -426,7 +426,7 @@ fn main() {
             let src_path = match args[2..].iter().find(|a| !a.starts_with("--")) {
                 Some(p) => p.as_str(),
                 None => {
-                    cli::banner::fail("Uso: orion --format <archivo.orx> [--write | --check]");
+                    cli::banner::fail("Usage: orion --format <file.orx> [--write | --check]");
                     std::process::exit(1);
                 }
             };
@@ -438,7 +438,7 @@ fn main() {
         //    Generar documentación Markdown
         "--docs" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --docs <archivo.orx|carpeta> [--output=<dir>]");
+                cli::banner::fail("Usage: orion --docs <archivo.orx|carpeta> [--output=<dir>]");
                 std::process::exit(1);
             }
             let output = args.iter()
@@ -458,7 +458,7 @@ fn main() {
         //    Lexer                                                              
         "--lex" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --lex <archivo.orx>");
+                cli::banner::fail("Usage: orion --lex <file.orx>");
                 std::process::exit(1);
             }
             let src = read_src(&args[2]);
@@ -479,7 +479,7 @@ fn main() {
         //    Compile .orx → .orbc
         "--compile" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --compile <archivo.orx>");
+                cli::banner::fail("Usage: orion --compile <file.orx>");
                 std::process::exit(1);
             }
             let src_path = &args[2];
@@ -507,7 +507,7 @@ fn main() {
         //    JIT (Cranelift)
         "--jit" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --jit <archivo.orx>");
+                cli::banner::fail("Usage: orion --jit <file.orx>");
                 std::process::exit(1);
             }
             let src_path = &args[2];
@@ -526,8 +526,8 @@ fn main() {
                 }
                 other => {
                     match other {
-                        Err(e) => eprintln!("[JIT] {e} → fallback al intérprete"),
-                        _      => eprintln!("[JIT] Instrucciones no soportadas → fallback al intérprete"),
+                        Err(e) => eprintln!("[JIT] {e} → falling back to the interpreter"),
+                        _      => eprintln!("[JIT] Unsupported instructions → falling back to the interpreter"),
                     }
                     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
                     match machine.run() {
@@ -537,7 +537,7 @@ fn main() {
                             std::process::exit(1);
                         }
                     }
-                    eprintln!("[Intérprete] {:.3} ms", t0.elapsed().as_secs_f64() * 1000.0);
+                    eprintln!("[Interpreter] {:.3} ms", t0.elapsed().as_secs_f64() * 1000.0);
                 }
             }
         }
@@ -545,7 +545,7 @@ fn main() {
         //    Run .orx en memoria
         "--run" => {
             if args.len() < 3 {
-                cli::banner::fail("Uso: orion --run <archivo.orx>");
+                cli::banner::fail("Usage: orion --run <file.orx>");
                 std::process::exit(1);
             }
             let src_path = &args[2];
@@ -577,7 +577,7 @@ fn main() {
                 && !std::path::Path::new(path).exists()
             {
                 cli::banner::fail(&format!("Comando o archivo desconocido: '{path}'"));
-                eprintln!("  Prueba con {BOLD}orion help{RESET} para ver los comandos.",
+                eprintln!("  Try {BOLD}orion help{RESET} to see the commands.",
                     BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
                 std::process::exit(1);
             }
@@ -629,13 +629,13 @@ fn main() {
 fn print_hotspots(machine: &vm::VM) {
     let spots = machine.hotspots(10);
     if spots.is_empty() { return; }
-    eprintln!("\n  Hotspots (funciones más llamadas):");
-    eprintln!("  {:<30} {:>8}", "Función", "Llamadas");
+    eprintln!("\n  Hotspots (most-called functions):");
+    eprintln!("  {:<30} {:>8}", "Function", "Llamadas");
     eprintln!("  {}", "-".repeat(42));
     for (name, count) in spots {
         eprintln!("  {:<30} {:>8}", name, count);
     }
-    eprintln!("  Tip: usa 'orion --jit <archivo.orx>' para compilar con Cranelift.");
+    eprintln!("  Tip: use 'orion --jit <file.orx>' to compile with Cranelift.");
 }
 
 fn subcommand_to_flag(s: &str, argc: usize) -> Option<&'static str> {
@@ -674,41 +674,41 @@ fn subcommand_to_flag(s: &str, argc: usize) -> Option<&'static str> {
 fn print_help() {
     // Sin animación de arranque: `help` debe ser instantáneo.
     cli::banner::print_banner();
-    println!("  {BOLD}Uso:{RESET}  orion <comando> [opciones]",
+    println!("  {BOLD}Usage:{RESET}  orion <command> [options]",
         BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
     println!();
 
     // Grupos de subcomandos (estilo moderno). Los flags `--x` siguen valiendo.
     let groups: [(&str, &[(&str, &str)]); 4] = [
-        ("Ejecutar y compilar", &[
-            ("run <archivo.orx>",     "Compilar y ejecutar  [--no-typecheck]"),
-            ("jit <archivo.orx>",     "Ejecutar con JIT Cranelift"),
-            ("build <archivo.orx>",   "Compilar a ejecutable nativo  [-o salida]"),
-            ("compile <archivo.orx>", "Compilar a .orbc (bytecode)"),
-            ("check <archivo.orx>",   "Verificar sintaxis y tipos  [--types]"),
+        ("Run and build", &[
+            ("run <file.orx>",     "Compile and run  [--no-typecheck]"),
+            ("jit <file.orx>",     "Run with the Cranelift JIT"),
+            ("build <file.orx>",   "Build a native executable  [-o output]"),
+            ("compile <file.orx>", "Compile to .orbc (bytecode)"),
+            ("check <file.orx>",   "Check syntax and types  [--types]"),
         ]),
-        ("Proyecto", &[
-            ("new <proyecto>",        "Crear scaffold de proyecto"),
-            ("test [carpeta]",        "Ejecutar tests (test_*.orx)"),
-            ("repl",                  "Modo interactivo"),
-            ("doctor",                "Verificar el entorno"),
+        ("Project", &[
+            ("new <project>",        "Scaffold a new project"),
+            ("test [folder]",        "Run tests (test_*.orx)"),
+            ("repl",                  "Interactive mode"),
+            ("doctor",                "Check the environment"),
         ]),
-        ("Paquetes", &[
-            ("install",               "Instalar las dependencias de orion.json  (escribe orion.lock)"),
-            ("add <origen>",          "Añadir paquete: nombre | url | gh:owner/repo | ruta.orx  [--force] [--sha256 <hex>]"),
-            ("remove <paquete>",      "Desinstalar paquete  (alias: uninstall)"),
-            ("list",                  "Listar paquetes disponibles e instalados"),
-            ("search <consulta>",     "Buscar paquetes"),
-            ("update [paquete]",      "Actualizar uno o todos"),
-            ("publish",               "Publicar al registry (requiere orion.json)"),
+        ("Packages", &[
+            ("install",               "Install the dependencies in orion.json  (writes orion.lock)"),
+            ("add <source>",          "Add a package: name | url | gh:owner/repo | path.orx  [--force] [--sha256 <hex>]"),
+            ("remove <package>",      "Uninstall a package  (alias: uninstall)"),
+            ("list",                  "List available and installed packages"),
+            ("search <query>",     "Search packages"),
+            ("update [package]",      "Update one or all"),
+            ("publish",               "Publish to the registry (requires orion.json)"),
         ]),
-        ("Herramientas", &[
-            ("fmt <archivo.orx>",     "Formatear código fuente  [--write | --check]  (alias: format)"),
-            ("watch <archivo.orx>",   "Hot reload automático"),
-            ("bench <archivo.orx>",   "Benchmark  [--runs=N]"),
-            ("debug <archivo.orx>",   "Debugger interactivo (breakpoints, step, watch)"),
+        ("Tools", &[
+            ("fmt <file.orx>",     "Format source code  [--write | --check]  (alias: format)"),
+            ("watch <file.orx>",   "Automatic hot reload"),
+            ("bench <file.orx>",   "Benchmark  [--runs=N]"),
+            ("debug <file.orx>",   "Debugger interactivo (breakpoints, step, watch)"),
             ("docs <archivo|carpeta>","Generar docs Markdown  [--output=dir]"),
-            ("lex <archivo.orx>",     "Imprimir tokens"),
+            ("lex <file.orx>",     "Imprimir tokens"),
         ]),
     ];
 
@@ -723,9 +723,9 @@ fn print_help() {
         }
         println!();
     }
-    println!("  {dim}Atajo:{rst}  orion <archivo.orx>        {dim}ejecuta directamente (= orion run)");
-    println!("  {dim}Ayuda:{rst}  orion help  ·  orion version");
-    println!("  {dim}Los flags clásicos (--run, --build, …) siguen funcionando.{rst}");
+    println!("  {dim}Atajo:{rst}  orion <file.orx>        {dim}ejecuta directamente (= orion run)");
+    println!("  {dim}Help:{rst}   orion help  ·  orion version");
+    println!("  {dim}The classic flags (--run, --build, …) still work.{rst}");
     println!();
 }
 
@@ -734,7 +734,7 @@ fn read_src(path: &str) -> String {
     match fs::read_to_string(path) {
         Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
         Err(e) => {
-            cli::banner::fail(&format!("No se puede leer '{path}': {e}"));
+            cli::banner::fail(&format!("Cannot read '{path}': {e}"));
             std::process::exit(1);
         }
     }
@@ -844,7 +844,7 @@ fn run_repl() {
 
     cli::banner::animate_startup();
     cli::banner::print_banner();
-    println!("  REPL v{V}  —  {DIM}Ctrl+C / Ctrl+D para salir{RESET}",
+    println!("  REPL v{V}  —  {DIM}Ctrl+C / Ctrl+D to exit{RESET}",
         V = env!("CARGO_PKG_VERSION"),
         DIM = cli::banner::DIM, RESET = cli::banner::RESET);
     println!("  Comandos: {DIM}:help  :vars  :fns  :clear  :history{RESET}",
@@ -889,9 +889,9 @@ fn run_repl() {
                 ":vars" => {
                     let vars = session.vars();
                     if vars.is_empty() {
-                        cli::banner::info("Sin variables en esta sesión");
+                        cli::banner::info("No variables in this session");
                     } else {
-                        cli::banner::section("Variables de sesión");
+                        cli::banner::section("Session variables");
                         for v in vars { println!("    {v}"); }
                     }
                     continue;
@@ -899,16 +899,16 @@ fn run_repl() {
                 ":fns" => {
                     let fns = session.fns();
                     if fns.is_empty() {
-                        cli::banner::info("Sin funciones en esta sesión");
+                        cli::banner::info("No functions in this session");
                     } else {
-                        cli::banner::section("Funciones de sesión");
+                        cli::banner::section("Session functions");
                         for f in fns { println!("    {f}(...)"); }
                     }
                     continue;
                 }
                 ":history" => {
                     if session.history.is_empty() {
-                        cli::banner::info("Historial vacío");
+                        cli::banner::info("History is empty");
                     } else {
                         cli::banner::section("Historial");
                         for (i, src) in session.history.iter().enumerate() {
@@ -945,10 +945,10 @@ fn repl_help() {
     println!("  {BOLD}Comandos REPL:{RESET}", BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
     let cmds = [
         (":help",    "Mostrar esta ayuda"),
-        (":vars",    "Listar variables definidas en la sesión"),
-        (":fns",     "Listar funciones definidas en la sesión"),
+        (":vars",    "List variables defined in the session"),
+        (":fns",     "List functions defined in the session"),
         (":clear",   "Limpiar pantalla"),
-        (":history", "Mostrar historial de la sesión"),
+        (":history", "Show the session history"),
     ];
     let dim = cli::banner::DIM;
     let rst = cli::banner::RESET;
@@ -957,7 +957,7 @@ fn repl_help() {
         println!("  {cy}{cmd:<12}{rst} {dim}{desc}{rst}");
     }
     println!();
-    println!("  {dim}Bloque multilínea: termina con una línea en blanco.{rst}");
+    println!("  {dim}Multi-line block: end it with a blank line.{rst}");
     println!();
 }
 

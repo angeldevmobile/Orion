@@ -3,9 +3,9 @@
 //! Uso:  orion --debug <archivo.orx>
 //!
 //! Comandos:
-//!   b <línea> [if <cond>]   — breakpoint
-//!   rb <id|línea>           — eliminar breakpoint
-//!   tb <id|línea>           — toggle breakpoint
+//!   b <line> [if <cond>]   — breakpoint
+//!   rb <id|line>           — eliminar breakpoint
+//!   tb <id|line>           — toggle breakpoint
 //!   lb                      — listar breakpoints
 //!   n                       — next (step over)
 //!   s                       — step into
@@ -43,7 +43,7 @@ pub fn run_debug(path: &str) {
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
         Err(e) => {
-            banner::fail(&format!("No se puede leer '{}': {}", path, e));
+            banner::fail(&format!("Cannot read '{}': {}", path, e));
             return;
         }
     };
@@ -106,13 +106,13 @@ pub fn run_debug(path: &str) {
             "o" | "out"      => step_action(&mut session, DebugSession::do_step_out),
 
             "q" | "quit" | "exit" => {
-                println!("Saliendo del debugger.");
+                println!("Leaving the debugger.");
                 break;
             }
 
             "b" => {
                 if parts.len() < 2 {
-                    println!("{}Uso: b <línea> [if <condición>]{}", RED, RST);
+                    println!("{}Usage: b <line> [if <condition>]{}", RED, RST);
                     continue;
                 }
                 match parts[1].parse::<u32>() {
@@ -124,24 +124,24 @@ pub fn run_debug(path: &str) {
                         };
                         let id = session.add_breakpoint(n, cond.clone());
                         let cs = cond.map(|c| format!(" {}[if {}]{}", DIM, c, RST)).unwrap_or_default();
-                        println!("{}Breakpoint #{} en línea {}{}{}", GRN, id, n, cs, RST);
+                        println!("{}Breakpoint #{} on line {}{}{}", GRN, id, n, cs, RST);
                     }
-                    Err(_) => println!("{}Número de línea inválido{}", RED, RST),
+                    Err(_) => println!("{}Invalid line number{}", RED, RST),
                 }
             }
 
             "rb" => match parts.get(1).and_then(|s| s.parse::<u32>().ok()) {
-                Some(n) => { session.remove_breakpoint(n); println!("Breakpoint eliminado"); }
-                None    => println!("{}Uso: rb <id|línea>{}", RED, RST),
+                Some(n) => { session.remove_breakpoint(n); println!("Breakpoint removed"); }
+                None    => println!("{}Uso: rb <id|line>{}", RED, RST),
             },
 
             "tb" => match parts.get(1).and_then(|s| s.parse::<u32>().ok()) {
                 Some(n) => match session.toggle_breakpoint(n) {
-                    Some(true)  => println!("Breakpoint {} {}habilitado{}", n, GRN, RST),
-                    Some(false) => println!("Breakpoint {} {}deshabilitado{}", n, RED, RST),
-                    None        => println!("{}Breakpoint no encontrado{}", RED, RST),
+                    Some(true)  => println!("Breakpoint {} {}enabled{}", n, GRN, RST),
+                    Some(false) => println!("Breakpoint {} {}disabled{}", n, RED, RST),
+                    None        => println!("{}Breakpoint not found{}", RED, RST),
                 },
-                None => println!("{}Uso: tb <id|línea>{}", RED, RST),
+                None => println!("{}Uso: tb <id|line>{}", RED, RST),
             },
 
             "p" => {
@@ -149,7 +149,7 @@ pub fn run_debug(path: &str) {
                 let name = parts[1..].join(" ");
                 match session.lookup_var(name.trim()) {
                     Some(v) => println!("{}{}{} = {}", YLW, name.trim(), RST, dbg_val(&v)),
-                    None    => println!("{}'{}'  no está definida{}", RED, name.trim(), RST),
+                    None    => println!("{}'{}'  is not defined{}", RED, name.trim(), RST),
                 }
             }
 
@@ -157,9 +157,9 @@ pub fn run_debug(path: &str) {
                 if parts.len() < 2 { println!("{}Uso: w <variable>{}", RED, RST); continue; }
                 let expr = parts[1..].join(" ").trim().to_string();
                 if session.add_watch(expr.clone()) {
-                    println!("Watch agregado: {}{}{}", YLW, expr, RST);
+                    println!("Watch added: {}{}{}", YLW, expr, RST);
                 } else {
-                    println!("Ya existe ese watch");
+                    println!("That watch already exists");
                 }
             }
 
@@ -167,10 +167,10 @@ pub fn run_debug(path: &str) {
                 if parts.len() < 2 { println!("{}Uso: rw <variable>{}", RED, RST); continue; }
                 let expr = parts[1..].join(" ").trim().to_string();
                 session.remove_watch(&expr);
-                println!("Watch eliminado: {}{}{}", YLW, expr, RST);
+                println!("Watch removed: {}{}{}", YLW, expr, RST);
             }
 
-            _ => println!("{}Comando desconocido — escribe 'h' para ayuda{}", RED, RST),
+            _ => println!("{}Unknown command — type 'h' for help{}", RED, RST),
         }
     }
 }
@@ -205,7 +205,7 @@ fn show_pause(session: &DebugSession) {
         Some(PauseReason::Error(e))  => format!("{}error:{} {}", RED, RST, e),
         None                         => "desconocido".to_string(),
     };
-    println!("\n{}[DEBUG]{} Línea {} — {}", CYN, RST, line, reason);
+    println!("\n{}[DEBUG]{} Line {} — {}", CYN, RST, line, reason);
     print_context(session, 2);
     println!();
 }
@@ -213,7 +213,7 @@ fn show_pause(session: &DebugSession) {
 fn show_vars(session: &DebugSession) {
     let vars = session.vm.debug_frame_vars();
     if vars.is_empty() {
-        println!("{}(sin variables en el scope actual){}", DIM, RST);
+        println!("{}(no variables in the current scope){}", DIM, RST);
         return;
     }
     println!("{}Variables:{}", CYN, RST);
@@ -225,14 +225,14 @@ fn show_vars(session: &DebugSession) {
 fn show_backtrace(session: &DebugSession) {
     let frames = session.debug_frames();
     if frames.is_empty() {
-        println!("{}(call stack vacío){}", DIM, RST);
+        println!("{}(call stack is empty){}", DIM, RST);
         return;
     }
     println!("{}Call stack:{}", CYN, RST);
     for frame in &frames {
         let marker = if frame.id == 0 { "→" } else { " " };
         if frame.line > 0 {
-            println!("  {} #{} {}{}{}  {}(línea {}){}", marker, frame.id, BLD, frame.name, RST, DIM, frame.line, RST);
+            println!("  {} #{} {}{}{}  {}(line {}){}", marker, frame.id, BLD, frame.name, RST, DIM, frame.line, RST);
         } else {
             println!("  {} #{} {}{}{}", marker, frame.id, BLD, frame.name, RST);
         }
@@ -242,7 +242,7 @@ fn show_backtrace(session: &DebugSession) {
 fn show_stack(session: &DebugSession) {
     let stack = session.vm.debug_value_stack();
     if stack.is_empty() {
-        println!("{}(value stack vacío){}", DIM, RST);
+        println!("{}(value stack is empty){}", DIM, RST);
         return;
     }
     println!("{}Value stack{} {}(top → bottom):{}", CYN, RST, DIM, RST);
@@ -264,7 +264,7 @@ fn show_breakpoints(session: &DebugSession) {
         let cond   = bp.condition.as_deref()
             .map(|c| format!("  {}[if {}]{}", DIM, c, RST))
             .unwrap_or_default();
-        println!("  {}{} #{}{}  línea {}  hits: {}{}", color, status, bp.id, RST, bp.line, bp.hit_count, cond);
+        println!("  {}{} #{}{}  line {}  hits: {}{}", color, status, bp.id, RST, bp.line, bp.hit_count, cond);
     }
 }
 
@@ -278,7 +278,7 @@ fn show_watches(session: &DebugSession) {
     for (expr, val) in &watches {
         let display = val.as_ref()
             .map(|v| dbg_val(v))
-            .unwrap_or_else(|| format!("{}«no definida»{}", DIM, RST));
+            .unwrap_or_else(|| format!("{}«not defined»{}", DIM, RST));
         println!("  {}{:<20}{} = {}", YLW, expr, RST, display);
     }
 }
@@ -286,26 +286,26 @@ fn show_watches(session: &DebugSession) {
 fn show_help() {
     println!("\n{}{}Orion Debugger — Comandos:{}{}", BLD, CYN, RST, RST);
     let cmds: &[(&str, &str)] = &[
-        ("b <línea>",            "Poner breakpoint en esa línea"),
-        ("b <línea> if <cond>",  "Breakpoint condicional"),
-        ("rb <id|línea>",        "Eliminar breakpoint"),
-        ("tb <id|línea>",        "Habilitar / deshabilitar breakpoint"),
+        ("b <line>",            "Set a breakpoint on that line"),
+        ("b <line> if <cond>",  "Conditional breakpoint"),
+        ("rb <id|line>",        "Remove a breakpoint"),
+        ("tb <id|line>",        "Enable / disable a breakpoint"),
         ("lb",                   "Listar todos los breakpoints"),
         ("─────────────────────",  ""),
         ("n",                    "Next — step over (no entra en funciones)"),
-        ("s",                    "Step into (entra en la función llamada)"),
+        ("s",                    "Step into (enter the called function)"),
         ("o",                    "Step out (ejecuta hasta salir del frame)"),
-        ("c",                    "Continue (hasta el próximo breakpoint)"),
+        ("c",                    "Continue (until the next breakpoint)"),
         ("─────────────────────",  ""),
-        ("p <var>",              "Imprimir valor de una variable"),
-        ("w <var>",              "Agregar variable a watches"),
-        ("rw <var>",             "Eliminar watch"),
+        ("p <var>",              "Print the value of a variable"),
+        ("w <var>",              "Add a variable to the watch list"),
+        ("rw <var>",             "Remove a watch"),
         ("lw",                   "Listar watches con valores actuales"),
         ("─────────────────────",  ""),
         ("v",                    "Variables del scope actual"),
         ("bt",                   "Backtrace — call stack completo"),
-        ("stack",                "Value stack de la VM"),
-        ("l [n]",                "Código fuente alrededor de la línea actual (±n)"),
+        ("stack",                "VM value stack"),
+        ("l [n]",                "Source around the current line (±n)"),
         ("─────────────────────",  ""),
         ("h",                    "Esta ayuda"),
         ("q",                    "Salir del debugger"),

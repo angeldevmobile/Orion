@@ -189,4 +189,6 @@ pub fn module_canonical(name: &str) -> Option<&'static str> {
 }
 
 /// Todas las entradas, para el test de sincronía con el registro.
+/// Solo lo usa el crate de tests; el binario no lo llama.
+#[allow(dead_code)]
 pub fn todos() -> &'static [(&'static str, &'static str)] { ALIAS }

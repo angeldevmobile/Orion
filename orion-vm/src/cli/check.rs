@@ -31,7 +31,7 @@ pub fn lint_indentation(src: &str, tokens: &[Token]) -> Vec<(u32, String)> {
         if vistas.insert(t.line) {
             if let Some(l) = lineas.get(t.line as usize - 1) {
                 if sangria(l).1 {
-                    avisos.push((t.line, "sangría con tabs Y espacios mezclados".into()));
+                    avisos.push((t.line, "indentation mixes tabs AND spaces".into()));
                 }
             }
         }
@@ -51,7 +51,7 @@ pub fn lint_indentation(src: &str, tokens: &[Token]) -> Vec<(u32, String)> {
                         if let (Some(a_abre), Some(a_dentro)) = (ancho_de(t.line), ancho_de(sig.line)) {
                             if a_dentro <= a_abre {
                                 avisos.push((sig.line, format!(
-                                    "indentada como si estuviera FUERA del bloque abierto en la línea {}",
+                                    "indented as if it were OUTSIDE the block opened on line {}",
                                     t.line
                                 )));
                             }
@@ -67,7 +67,7 @@ pub fn lint_indentation(src: &str, tokens: &[Token]) -> Vec<(u32, String)> {
                         if let (Some(a_abre), Some(a_cierra)) = (ancho_de(abre), ancho_de(t.line)) {
                             if a_cierra != a_abre {
                                 avisos.push((t.line, format!(
-                                    "la llave de cierre no alinea con su apertura (línea {})",
+                                    "the closing brace does not align with its opening (line {})",
                                     abre
                                 )));
                             }
@@ -87,32 +87,32 @@ pub fn run_check(path: &str, check_types: bool) {
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
-            banner::fail(&format!("No se puede leer '{path}': {e}"));
+            banner::fail(&format!("Cannot read '{path}': {e}"));
             std::process::exit(1);
         }
     };
 
-    banner::info(&format!("Verificando: {BOLD}{path}{RESET}",
+    banner::info(&format!("Checking: {BOLD}{path}{RESET}",
         BOLD = super::banner::BOLD, RESET = super::banner::RESET, path = path));
 
     // Phase 1: lex
     let tokens = match lexer::lex(&src) {
         Ok(t) => t,
         Err(e) => {
-            banner::fail(&format!("Error léxico  línea {}:{} — {}", e.line, e.col, e.message));
+            banner::fail(&format!("Lexical error  line {}:{} — {}", e.line, e.col, e.message));
             std::process::exit(1);
         }
     };
 
     for (line, msg) in lint_indentation(&src, &tokens) {
-        banner::warn(&format!("[indentación] línea {line} — {msg}"));
+        banner::warn(&format!("[indentation] line {line} — {msg}"));
     }
 
     // Phase 2: parse
     let stmts = match parser::parse(tokens) {
         Ok(s) => s,
         Err(e) => {
-            banner::fail(&format!("Error sintáctico  línea {} — {}", e.line, e.message));
+            banner::fail(&format!("Syntax error  line {} — {}", e.line, e.message));
             std::process::exit(1);
         }
     };
@@ -132,7 +132,7 @@ pub fn run_check(path: &str, check_types: bool) {
 
     if check_types {
         for w in &warnings {
-            let prefix = if w.line > 0 { format!("línea {} — ", w.line) } else { String::new() };
+            let prefix = if w.line > 0 { format!("line {} — ", w.line) } else { String::new() };
             banner::warn(&format!("[advertencia] {}{}", prefix, w.message));
         }
         if errors.is_empty() && warnings.is_empty() {
@@ -140,7 +140,7 @@ pub fn run_check(path: &str, check_types: bool) {
         }
     }
     for e in &errors {
-        let prefix = if e.line > 0 { format!("línea {} — ", e.line) } else { String::new() };
+        let prefix = if e.line > 0 { format!("line {} — ", e.line) } else { String::new() };
         banner::fail(&format!("[tipo] {}{}", prefix, e.message));
     }
     if !errors.is_empty() {
@@ -149,11 +149,11 @@ pub fn run_check(path: &str, check_types: bool) {
 
     // Phase 4: codegen (detecta errores semánticos adicionales)
     if let Err(e) = codegen::compile(stmts) {
-        banner::fail(&format!("Error semántico  línea {} — {}", e.line, e.message));
+        banner::fail(&format!("Semantic error  line {} — {}", e.line, e.message));
         std::process::exit(1);
     }
 
-    banner::ok(&format!("'{path}' — sin errores"));
+    banner::ok(&format!("'{path}' — no errors"));
 }
 
 #[cfg(test)]

@@ -3,11 +3,11 @@ use std::path::Path;
 use super::banner;
 
 pub fn run_new(name: &str) {
-    banner::section(&format!("Nuevo proyecto Orion: {name}"));
+    banner::section(&format!("New Orion project: {name}"));
 
     let root = Path::new(name);
     if root.exists() {
-        banner::fail(&format!("Ya existe un directorio '{name}'"));
+        banner::fail(&format!("A directory '{name}' already exists"));
         std::process::exit(1);
     }
 
@@ -32,7 +32,7 @@ pub fn run_new(name: &str) {
     );
 
     println!();
-    banner::ok(&format!("Proyecto '{name}' creado"));
+    banner::ok(&format!("Project '{name}' created"));
     println!();
     println!("  {DIM}Para empezar:{RESET}", DIM = banner::DIM, RESET = banner::RESET);
     println!("    cd {name}");
@@ -45,19 +45,19 @@ pub fn run_new(name: &str) {
 fn create_dir(path: &Path) {
     fs::create_dir_all(path)
         .unwrap_or_else(|e| {
-            banner::fail(&format!("No se pudo crear directorio '{}': {e}", path.display()));
+            banner::fail(&format!("Could not create directory '{}': {e}", path.display()));
             std::process::exit(1);
         });
-    banner::info(&format!("Creado  {}/", path.display()));
+    banner::info(&format!("Created  {}/", path.display()));
 }
 
 fn write_file(path: &Path, content: &str) {
     fs::write(path, content)
         .unwrap_or_else(|e| {
-            banner::fail(&format!("No se pudo escribir '{}': {e}", path.display()));
+            banner::fail(&format!("Could not write '{}': {e}", path.display()));
             std::process::exit(1);
         });
-    banner::info(&format!("Creado  {}", path.display()));
+    banner::info(&format!("Created  {}", path.display()));
 }
 
 fn main_template(name: &str) -> String {
@@ -87,10 +87,10 @@ fn assert_eq(a, b, msg) {{
 }}
 
 -- Tests básicos
-assert_eq(1 + 1, 2, "suma básica")
+assert_eq(1 + 1, 2, "basic addition")
 assert_eq("hola", "hola", "strings iguales")
 
-show "Tests de {name}: OK"
+show "{name} tests: OK"
 "#
     )
 }
@@ -110,7 +110,7 @@ fn manifest_template(name: &str) -> String {
 r#"{{
   "name": "{name}",
   "version": "0.1.0",
-  "description": "Descripción breve del paquete {name}",
+  "description": "Short description of the {name} package",
   "author": "",
   "license": "MIT",
   "tags": [],

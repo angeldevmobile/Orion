@@ -15,12 +15,12 @@ pub fn run_docs(input: &str, output_dir: &str) {
     };
 
     if sources.is_empty() {
-        banner::warn("No se encontraron archivos .orx");
+        banner::warn("No .orx files found");
         return;
     }
 
     if let Err(e) = fs::create_dir_all(out_dir) {
-        banner::fail(&format!("No se pudo crear directorio de salida '{}': {}", output_dir, e));
+        banner::fail(&format!("Could not create output directory '{}': {}", output_dir, e));
         std::process::exit(1);
     }
 
@@ -29,7 +29,7 @@ pub fn run_docs(input: &str, output_dir: &str) {
         let src = match fs::read_to_string(src_path) {
             Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
             Err(e) => {
-                banner::warn(&format!("No se pudo leer {}: {}", src_path.display(), e));
+                banner::warn(&format!("Could not read {}: {}", src_path.display(), e));
                 continue;
             }
         };
@@ -39,7 +39,7 @@ pub fn run_docs(input: &str, output_dir: &str) {
         })) {
             Ok(s) => s,
             Err(e) => {
-                banner::warn(&format!("{}: error de parse — {}", src_path.display(), e));
+                banner::warn(&format!("{}: parse error — {}", src_path.display(), e));
                 continue;
             }
         };
@@ -53,12 +53,12 @@ pub fn run_docs(input: &str, output_dir: &str) {
                 banner::ok(&format!("{} → {}", src_path.display(), out_file.display()));
                 generated += 1;
             }
-            Err(e) => banner::warn(&format!("No se pudo escribir {}: {}", out_file.display(), e)),
+            Err(e) => banner::warn(&format!("Could not write {}: {}", out_file.display(), e)),
         }
     }
 
     println!();
-    banner::ok(&format!("{generated} archivo(s) generado(s) en '{output_dir}'"));
+    banner::ok(&format!("{generated} file(s) generated in '{output_dir}'"));
 }
 
 fn collect_orx(dir: &Path) -> Vec<PathBuf> {
@@ -86,7 +86,7 @@ fn render_markdown(src_path: &Path, stmts: &[Stmt]) -> String {
 
     let mut md = format!("# {module_name}\n\n");
     md.push_str(&format!(
-        "*Generado automáticamente desde `{}`*\n\n---\n\n",
+        "*Generated automatically from `{}`*\n\n---\n\n",
         src_path.display()
     ));
 
@@ -104,7 +104,7 @@ fn render_markdown(src_path: &Path, stmts: &[Stmt]) -> String {
                 md.push_str(&fn_signature(name, params, ret_type.as_deref()));
                 md.push_str("\n```\n\n");
                 if !params.is_empty() {
-                    md.push_str("**Parámetros:**\n\n");
+                    md.push_str("**Parameters:**\n\n");
                     for p in params {
                         let type_str = p.type_hint.as_deref().unwrap_or("any");
                         md.push_str(&format!("- `{}` — `{}`\n", p.name, type_str));
@@ -126,7 +126,7 @@ fn render_markdown(src_path: &Path, stmts: &[Stmt]) -> String {
                 md.push_str(&format!("async {}", fn_signature(name, params, ret_type.as_deref())));
                 md.push_str("\n```\n\n");
                 if !params.is_empty() {
-                    md.push_str("**Parámetros:**\n\n");
+                    md.push_str("**Parameters:**\n\n");
                     for p in params {
                         let type_str = p.type_hint.as_deref().unwrap_or("any");
                         md.push_str(&format!("- `{}` — `{}`\n", p.name, type_str));
@@ -150,7 +150,7 @@ fn render_markdown(src_path: &Path, stmts: &[Stmt]) -> String {
                     md.push('\n');
                 }
                 if !acts.is_empty() {
-                    md.push_str("**Métodos:**\n\n");
+                    md.push_str("**Methods:**\n\n");
                     for a in acts {
                         let param_list: Vec<_> = a.params.iter()
                             .map(|p| {
@@ -180,7 +180,7 @@ fn render_markdown(src_path: &Path, stmts: &[Stmt]) -> String {
     }
 
     if !has_content {
-        md.push_str("*Este módulo no tiene símbolos documentados.*\n");
+        md.push_str("*This module has no documented symbols.*\n");
     }
 
     md

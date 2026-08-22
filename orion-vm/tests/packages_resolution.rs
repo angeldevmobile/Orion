@@ -154,10 +154,10 @@ fn doctor_reporta_los_paquetes_realmente_instalados() {
 
     assert!(text.contains("saludo"), "doctor no listó el paquete instalado:\n{text}");
     assert!(text.contains("2.1.0"), "doctor no mostró la versión:\n{text}");
-    assert!(!text.contains("Ningún paquete instalado"),
+    assert!(!text.contains("No packages installed"),
             "doctor sigue diciendo que no hay paquetes:\n{text}");
     // Y debe informar de la raíz que de verdad está usando.
-    assert!(text.contains("Raíz de proyecto"), "doctor no informa de la raíz:\n{text}");
+    assert!(text.contains("Project root"), "doctor no informa de la raíz:\n{text}");
 }
 
 #[test]

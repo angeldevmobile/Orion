@@ -55,6 +55,17 @@ formato AAAA-MM-DD.
   búsqueda es por bisección.
 
 ### Cambiado
+- **Toda la salida del CLI está en inglés**: ayuda, banner, `doctor`, `check`,
+  `fmt`, `test`, `watch`, `bench`, `build`, `docs`, `new` y el debugger
+  interactivo. Antes el comando que enseñaba las deprecaciones en inglés las
+  rodeaba de español (`Verificando:`, `sin errores`), que era la peor mezcla
+  posible.
+
+  Fuera de esta tanda a propósito: `builtins.rs` y `builtins_gen.rs`, que no son
+  salida del CLI sino **documentación de la stdlib** (352 entradas generadas
+  desde los comentarios de contrato de los módulos). Se traducen junto con los
+  671 mensajes de `modules/`, que es el mismo eje.
+
 - **Los mensajes de error del núcleo están en inglés**: lexer, parser, codegen,
   typechecker, VM y las cinco etiquetas de `error.rs` (`lexical error`,
   `syntax error`, `compile error`, `type error`, `runtime error`). Es lo primero

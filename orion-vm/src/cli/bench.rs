@@ -9,7 +9,7 @@ pub fn run_bench(path: &str, runs: u32) {
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
-            banner::fail(&format!("No se puede leer '{path}': {e}"));
+            banner::fail(&format!("Cannot read '{path}': {e}"));
             std::process::exit(1);
         }
     };
@@ -19,7 +19,7 @@ pub fn run_bench(path: &str, runs: u32) {
     let t_compile = Instant::now();
     let tokens = match lexer::lex(&src) {
         Ok(t) => t,
-        Err(e) => { banner::fail(&format!("Léxico: {}", e.message)); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("Lexical: {}", e.message)); std::process::exit(1); }
     };
     let stmts = match parser::parse(tokens) {
         Ok(s) => s,
@@ -34,7 +34,7 @@ pub fn run_bench(path: &str, runs: u32) {
     // Serialize once to reuse cheaply
     let bc_json = serde_json::to_string(&bc).expect("serializar bytecode");
 
-    banner::info(&format!("Compilado en {compile_ms:.2} ms — ejecutando {runs} veces..."));
+    banner::info(&format!("Compiled in {compile_ms:.2} ms — running {runs} times..."));
     println!();
 
     let mut times: Vec<f64> = Vec::with_capacity(runs as usize);
@@ -47,7 +47,7 @@ pub fn run_bench(path: &str, runs: u32) {
         match machine.run() {
             Ok(_) => {}
             Err(e) => {
-                banner::fail(&format!("Error en ejecución #{}: {}", i + 1, e));
+                banner::fail(&format!("Runtime error on run #{}: {}", i + 1, e));
                 std::process::exit(1);
             }
         }
@@ -63,12 +63,12 @@ pub fn run_bench(path: &str, runs: u32) {
     let p95    = s[(s.len() as f64 * 0.95) as usize];
 
     println!();
-    banner::table_header(&["Métrica", "Tiempo"]);
-    banner::table_row(&["Mínimo",      &fmt_ms(min)]);
+    banner::table_header(&["Metric", "Tiempo"]);
+    banner::table_row(&["Min",      &fmt_ms(min)]);
     banner::table_row(&["Mediana",     &fmt_ms(median)]);
     banner::table_row(&["Promedio",    &fmt_ms(avg)]);
     banner::table_row(&["p95",         &fmt_ms(p95)]);
-    banner::table_row(&["Máximo",      &fmt_ms(max)]);
+    banner::table_row(&["Max",      &fmt_ms(max)]);
     println!();
     banner::info(&format!("{runs} ejecuciones completadas"));
 }

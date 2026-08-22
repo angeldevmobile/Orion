@@ -8,7 +8,7 @@ use super::banner;
 
 pub fn run_watch(path: &str) {
     banner::info(&format!(
-        "Watch activo: {BOLD}{path}{RESET}  {DIM}(Ctrl+C para detener){RESET}",
+        "Watch activo: {BOLD}{path}{RESET}  {DIM}(Ctrl+C to stop){RESET}",
         BOLD = banner::BOLD, RESET = banner::RESET, DIM = banner::DIM
     ));
     println!();
@@ -65,11 +65,11 @@ fn run_watch_server(path: &str) {
         ));
         match Command::new(&exe).arg("run").arg(path).spawn() {
             Ok(c) => Some(c),
-            Err(e) => { banner::fail(&format!("No se pudo lanzar el servidor: {e}")); None }
+            Err(e) => { banner::fail(&format!("Could not start the server: {e}")); None }
         }
     };
 
-    let mut child = spawn("Servidor iniciado");
+    let mut child = spawn("Server started");
     let mut last_mtime = mtime(path);
 
     loop {
@@ -79,7 +79,7 @@ fn run_watch_server(path: &str) {
         if let Some(c) = child.as_mut() {
             if let Ok(Some(status)) = c.try_wait() {
                 banner::fail(&format!(
-                    "El servidor terminó ({status}) — esperando cambios para reiniciar"
+                    "The server exited ({status}) — waiting for changes to restart"
                 ));
                 child = None;
             }
@@ -96,7 +96,7 @@ fn run_watch_server(path: &str) {
                 let _ = c.kill();
                 let _ = c.wait();
             }
-            child = spawn("Servidor reiniciado");
+            child = spawn("Server restarted");
         }
     }
 }
@@ -111,15 +111,15 @@ fn compile_and_run(path: &str) {
 
     let tokens = match lexer::lex(&src) {
         Ok(t) => t,
-        Err(e) => { banner::fail(&format!("Léxico  línea {}:{} — {}", e.line, e.col, e.message)); return; }
+        Err(e) => { banner::fail(&format!("Lexical  line {}:{} — {}", e.line, e.col, e.message)); return; }
     };
     let stmts = match parser::parse(tokens) {
         Ok(s) => s,
-        Err(e) => { banner::fail(&format!("Parse  línea {} — {}", e.line, e.message)); return; }
+        Err(e) => { banner::fail(&format!("Parse  line {} — {}", e.line, e.message)); return; }
     };
     let bc = match codegen::compile(stmts) {
         Ok(b) => b,
-        Err(e) => { banner::fail(&format!("Codegen  línea {} — {}", e.line, e.message)); return; }
+        Err(e) => { banner::fail(&format!("Codegen  line {} — {}", e.line, e.message)); return; }
     };
 
     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
