@@ -16,6 +16,7 @@ mod codegen;
 mod named_args;
 mod paths;
 mod pkg;
+mod deprecated;
 mod typechecker;
 mod cli;
 mod jit;
@@ -523,13 +524,6 @@ fn main() {
                 Ok(true) => {
                     eprintln!("[JIT] {:.3} ms — Cranelift nativo", t0.elapsed().as_secs_f64() * 1000.0);
                 }
-                // Dos motivos distintos para no compilar, un mismo desenlace: el
-                // programa se ejecuta igual, por el intérprete. `Ok(false)` es
-                // "hay instrucciones que el JIT no cubre"; `Err` es "empezó a
-                // compilar y se topó con algo que no sabe traducir". Ninguno de
-                // los dos es un error DEL PROGRAMA —el fuente es válido y la VM
-                // lo corre—, así que abortar en el segundo caso convertía una
-                // limitación del backend en un fallo de ejecución.
                 other => {
                     match other {
                         Err(e) => eprintln!("[JIT] {e} → fallback al intérprete"),
@@ -563,10 +557,6 @@ fn main() {
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
             let profile = args.iter().any(|a| a == "--profile");
-            // Registrar ruta para que gui.run() re-evalúe en modo reactivo.
-            // Sin esto, `orion run app.orx` abría la GUI en modo estático:
-            // los botones se dibujaban pero ningún evento re-corría el script
-            // (la ruta solo se registraba en la invocación directa `orion app.orx`).
             modules::gui::state::set_script_path(src_path);
             let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
             match machine.run() {
@@ -648,14 +638,6 @@ fn print_hotspots(machine: &vm::VM) {
     eprintln!("  Tip: usa 'orion --jit <archivo.orx>' para compilar con Cranelift.");
 }
 
-//    Helpers
-
-/// Traduce un subcomando moderno (`run`, `build`, `add`, …) a su flag `--x`.
-/// Devuelve `None` si no es un subcomando conocido (p.ej. una ruta de archivo).
-///
-/// `argc` desempata `install`: con un paquete detrás instala ese paquete, y a
-/// secas instala las dependencias del manifiesto. Es la convención que ya
-/// espera cualquiera que venga de npm, y evita tener dos verbos para lo mismo.
 fn subcommand_to_flag(s: &str, argc: usize) -> Option<&'static str> {
     if s == "install" {
         return Some(if argc > 2 { "--add" } else { "--install" });
@@ -748,11 +730,6 @@ fn print_help() {
 }
 
 fn read_src(path: &str) -> String {
-    // Único embudo por el que pasa el archivo de entrada, y por tanto el sitio
-    // donde se ancla el proyecto: a partir de aquí `use` resuelve respecto a la
-    // raíz del programa y no respecto al directorio desde el que se invocó.
-    // `set_entry_file` solo atiende la primera llamada, así que los módulos que
-    // se carguen después no reubican nada.
     paths::set_entry_file(path);
     match fs::read_to_string(path) {
         Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
@@ -774,13 +751,6 @@ fn parse_runs_flag(args: &[String], default: u32) -> u32 {
     default
 }
 
-/// Gate de tipos: corre el type checker ANTES de ejecutar. Bloquea con código de
-/// salida 1 si hay errores de tipo (estricto por defecto, como Rust/TS/Go), salvo
-/// que se pase `--no-typecheck`. Los warnings (variable no usada, etc.) NO se
-/// muestran aquí — son ruido para ejecutar; pertenecen a `orion --check --types`.
-///
-/// Si lex/parse fallan, no reporta nada: deja que `compile_source` emita el error
-/// real (evita doble reporte).
 fn typecheck_gate(src: &str, path: &str, args: &[String]) {
     if args.iter().any(|a| a == "--no-typecheck") {
         return;

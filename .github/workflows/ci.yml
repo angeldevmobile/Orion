@@ -60,6 +60,11 @@ jobs:
       - name: cargo test (conformidad de SPEC.md)
         run: cargo test --test spec_conformance
 
+      # La tabla de alias obsoletos es curada a mano; si se desincroniza
+      # del registro, el aviso mandaría al usuario a un nombre inexistente.
+      - name: cargo test (tabla de deprecaciones)
+        run: cargo test --test deprecated_sync
+
   # ── Análisis dinámico: AddressSanitizer + LeakSanitizer ────────────────────
   # Corre la suite completa con el heap instrumentado: detecta use-after-free,
   # buffer overflows y FUGAS de memoria (LSan viene incluido en ASan en Linux

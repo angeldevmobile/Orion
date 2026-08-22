@@ -18,6 +18,7 @@ pub mod lexer;
 pub mod parser;
 pub mod codegen;
 pub mod named_args;
+pub mod deprecated;
 pub mod typechecker;
 pub mod vm;
 pub mod eval_value;

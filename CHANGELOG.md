@@ -24,6 +24,36 @@ formato AAAA-MM-DD.
   son el mismo valor, que `/` es división real, que el overflow es error, y que
   `for .. in` no itera dicts.
 
+### Añadido
+- **`orion check` avisa de los alias españoles obsoletos**, con el nombre inglés
+  que los sustituye:
+
+  ```
+  !  [deprecated] line 1 — use "formato" uses a deprecated Spanish module name;
+                           write use "format" instead — see SPEC.md section 11.
+  !  [deprecated] line 6 — db.insertar() is a deprecated Spanish alias of
+                           db.insert(). It still works, but it is scheduled for
+                           removal — see SPEC.md section 11.
+  ```
+
+  Sin esto, la retirada anunciada en SPEC.md §11 era una trampa: el usuario se
+  enteraría el día que su programa dejara de compilar. Los avisos van con `kind`
+  propio (`deprecation`, no `warning`) y se enseñan **siempre**, con o sin
+  `--types`; esconder una deprecación tras un flag es no avisar. `orion run` no
+  los muestra, para no dar la lata en cada ejecución.
+
+  La tabla vive en `src/deprecated.rs`, **144 entradas curadas a mano**. No se
+  deriva del registro a propósito: el registro marca todos los alias, pero
+  `log.warn` comparte brazo con `log.info` sin estar obsoleto, y
+  `state.increment` es alias inglés de `state.incr`. Avisar de esos sería
+  decirle al usuario que su código está obsoleto cuando no lo está. `df` y
+  `embeddings` tampoco están: son abreviaturas inglesas deliberadas.
+
+  `tests/deprecated_sync.rs` comprueba que cada entrada siga existiendo en el
+  registro, que su destino inglés exista (un aviso que manda a un nombre
+  inexistente es peor que no avisar) y que la tabla esté ordenada, porque la
+  búsqueda es por bisección.
+
 ### Cambiado
 - **Los mensajes de error del núcleo están en inglés**: lexer, parser, codegen,
   typechecker, VM y las cinco etiquetas de `error.rs` (`lexical error`,

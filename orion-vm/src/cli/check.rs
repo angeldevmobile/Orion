@@ -121,14 +121,22 @@ pub fn run_check(path: &str, check_types: bool) {
     let issues = typechecker::type_check(&stmts);
     let errors: Vec<_> = issues.iter().filter(|i| i.kind == "error").collect();
     let warnings: Vec<_> = issues.iter().filter(|i| i.kind == "warning").collect();
+    let deprecations: Vec<_> = issues.iter().filter(|i| i.kind == "deprecation").collect();
+
+    // Las deprecaciones se enseñan siempre, con o sin --types: el punto de
+    // avisar es que llegue antes de que el nombre desaparezca.
+    for d in &deprecations {
+        let prefix = if d.line > 0 { format!("line {} — ", d.line) } else { String::new() };
+        banner::warn(&format!("[deprecated] {}{}", prefix, d.message));
+    }
 
     if check_types {
         for w in &warnings {
             let prefix = if w.line > 0 { format!("línea {} — ", w.line) } else { String::new() };
             banner::warn(&format!("[advertencia] {}{}", prefix, w.message));
         }
-        if issues.is_empty() {
-            banner::ok("Type check — sin errores de tipos");
+        if errors.is_empty() && warnings.is_empty() {
+            banner::ok("Type check — no type errors");
         }
     }
     for e in &errors {

@@ -19,6 +19,13 @@ impl TypeIssue {
     fn warning(msg: impl Into<String>, line: u32, col: u32) -> Self {
         TypeIssue { message: msg.into(), kind: "warning", line, col }
     }
+
+    /// Un nombre que aún funciona pero está en retirada (SPEC.md §11).
+    /// Va con `kind` propio para que `orion check` lo enseñe SIEMPRE: esconder
+    /// una deprecación tras un flag es no avisar.
+    fn deprecation(msg: impl Into<String>, line: u32, col: u32) -> Self {
+        TypeIssue { message: msg.into(), kind: "deprecation", line, col }
+    }
 }
 
 //    Firma de función                                                           
@@ -44,14 +51,7 @@ pub struct TypeChecker {
     current_col:  u32,
     /// Variables asignadas pero nunca leídas en el scope actual
     written_not_read: Vec<HashMap<String, u32>>,
-    /// Cuando está activo, `scope_set` no registra escrituras en `written_not_read`.
-    /// Se usa en la segunda pasada de los bucles: re-marcamos las lecturas (que un
-    /// bucle ejecuta también DESPUÉS de las escrituras del cuerpo) sin volver a
-    /// registrar esas escrituras, evitando falsos "asignada pero nunca usada".
     suppress_write_tracking: bool,
-    /// namespace en el código → módulo nativo canónico. Solo se puebla con
-    /// módulos NATIVOS importados por nombre; los `.orx` del usuario quedan
-    /// fuera porque su superficie no se conoce en tiempo de chequeo.
     module_ns: HashMap<String, String>,
 }
 
@@ -85,8 +85,6 @@ fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
-/// El candidato más parecido, si está lo bastante cerca como para que sugerirlo
-/// ayude en vez de confundir (un tercio del nombre, mínimo 1 edición).
 fn closest_name(name: &str, candidates: &HashSet<String>) -> Option<String> {
     let limit = (name.chars().count() / 3).max(1);
     candidates.iter()
@@ -96,9 +94,6 @@ fn closest_name(name: &str, candidates: &HashSet<String>) -> Option<String> {
         .map(|(_, c)| c.clone())
 }
 
-/// Funciones que existen en el dispatch pero a propósito NO se documentan:
-/// siguen invocables solo para devolver un error de migración mejor que un
-/// "no existe" genérico. Marcarlas aquí evita pisar ese mensaje.
 fn is_retired_builtin(module: &str, function: &str) -> bool {
     matches!((module, function), ("timewarp", "measure_time" | "measureMtime"))
 }
@@ -138,18 +133,6 @@ fn module_signatures() -> &'static HashMap<String, Vec<crate::cli::builtins::Par
     })
 }
 
-/// ¿Se puede comprobar este tipo declarado, o es mejor callarse?
-///
-/// Se comprueba SOLO contra una lista cerrada de tipos que el chequeo sabe
-/// comparar. Todo lo demás se ignora, y esa es la parte importante: las firmas
-/// las escriben personas en comentarios, y ahí aparecen marcadores como
-/// `[campos]` o nombres de tipo de otro módulo que no significan nada aquí.
-/// Compararlos daría avisos sobre código correcto, que es la forma más rápida de
-/// que alguien desactive los avisos y deje de leerlos.
-///
-/// `handle` queda fuera aunque sea un tipo nuestro: en ejecución un handle de
-/// `frame` es una cadena y uno de `browser` un entero, así que el tipo inferido
-/// nunca va a coincidir con la palabra "handle".
 fn tipo_comprobable(t: &str) -> bool {
     matches!(
         normalize(t).as_str(),
@@ -158,13 +141,6 @@ fn tipo_comprobable(t: &str) -> bool {
 }
 
 impl TypeChecker {
-    /// Compara los argumentos de `modulo.funcion(...)` con los tipos que declara
-    /// su contrato.
-    ///
-    /// Sale como ADVERTENCIA, nunca como error. Estos tipos no los verifica el
-    /// compilador: los escribió una persona en el comentario del módulo, y una
-    /// errata ahí no puede tumbar un programa que funciona. Cuando la cobertura
-    /// suba y se confíe en ellos, subir el nivel es cambiar una línea.
     fn check_module_arg_types(&mut self, receiver: &Expr, method: &str, args: &[Expr]) {
         let Expr::Ident(ns) = receiver else { return };
         let Some(module) = self.module_ns.get(ns).cloned() else { return };
@@ -210,31 +186,9 @@ impl TypeChecker {
         self.collect_fn_sigs(stmts);
         self.infer_untyped_fn_returns(stmts);
         self.check_stmts(stmts, None);
-        // El scope del programa se deja SIN cerrar a propósito: el aviso de
-        // variable muerta se emite al hacer pop, así que las del nivel superior
-        // no se reportan.
-        //
-        // Cerrarlo aquí parece la mejora obvia, pero destapa que el marcado de
-        // lecturas no cubre todas las rutas (argumentos de método, slices…), y
-        // el resultado son avisos sobre variables que sí se usan. Mientras esas
-        // rutas no estén completas, un falso positivo es mucho peor que un
-        // falso negativo: el aviso deja de merecer confianza y se ignora.
         self.issues
     }
 
-    //    Inferencia de retorno para funciones SIN anotación
-
-    /// Para cada `fn`/`async fn` sin `-> tipo`, infiere su retorno a partir del
-    /// cuerpo, para que la inferencia se propague a través de las funciones del
-    /// usuario (hoy una llamada a una fn sin anotar valía `any`).
-    ///
-    /// CONSERVADOR a propósito: solo fija un tipo cuando TODOS los `return`
-    /// coinciden en un mismo tipo concreto. Si hay returns mixtos, vacíos, o
-    /// alguno depende de un valor desconocido (p. ej. un parámetro sin tipo),
-    /// se deja en `any`. Así nunca infiere un tipo equivocado que dispare un
-    /// falso error en el call site (que ahora aborta la ejecución).
-    ///
-    /// Itera hasta punto fijo (acotado) para resolver cadenas A→B→C.
     fn infer_untyped_fn_returns(&mut self, stmts: &[Stmt]) {
         for _ in 0..6 {
             let mut changed = false;
@@ -394,24 +348,10 @@ impl TypeChecker {
         self.written_not_read.push(HashMap::new());
     }
 
-    /// Scope de un bloque de control (if/while/for/attempt/with).
-    ///
-    /// En Orion estos bloques NO delimitan variables: lo que se asigna dentro
-    /// sigue vivo al salir, y solo las funciones abren un ámbito nuevo. Se
-    /// empuja igualmente un scope para poder alojar los nombres que el bloque
-    /// sí introduce por su cuenta (la variable de iteración, el error del
-    /// handler), pero al cerrarlo el resto se devuelve al scope de fuera.
     fn push_block_scope(&mut self) {
         self.push_scope();
     }
 
-    /// Cierra un scope de bloque propagando hacia fuera lo que se asignó dentro.
-    ///
-    /// `propios` son los nombres que pertenecen al bloque y mueren con él. Todo
-    /// lo demás pasa al scope padre: su tipo, para que usarlo después no sea
-    /// "no definida", y su marca de escritura pendiente, para que una lectura
-    /// posterior la cancele y el aviso de variable muerta se decida al cerrar
-    /// la función, que es donde de verdad termina su vida.
     fn pop_block_scope(&mut self, propios: &[&str]) {
         let tipos = self.scope_stack.pop().unwrap_or_default();
         let pend  = self.written_not_read.pop().unwrap_or_default();
@@ -452,18 +392,29 @@ impl TypeChecker {
         self.issues.push(TypeIssue::error(msg, line, col));
     }
 
-    /// `modulo.funcion(...)`: comprueba que la función exista en el módulo.
-    ///
-    /// Antes esto solo reventaba en ejecución, y `orion check` daba el visto
-    /// bueno a un `db.buscar(...)` inexistente. Solo se valida sobre módulos
-    /// nativos importados por nombre; cualquier otra cosa se deja pasar.
+    fn warn(&mut self, msg: impl Into<String>, line: u32, col: u32) {
+        self.issues.push(TypeIssue::deprecation(msg, line, col));
+    }
+
     fn check_module_fn(&mut self, receiver: &Expr, method: &str) {
         let Expr::Ident(ns) = receiver else { return };
         let Some(module) = self.module_ns.get(ns).cloned() else { return };
         if is_retired_builtin(&module, method) { return; }
 
         let Some(known) = module_functions().get(&module) else { return };
-        if known.contains(method) { return; }
+        if known.contains(method) {
+            // Existe, pero puede ser un nombre español en retirada.
+            if let Some(ingles) = crate::deprecated::canonical_for(&module, method) {
+                let (line, col) = (self.current_line, self.current_col);
+                self.warn(
+                    format!(
+                        "{ns}.{method}() is a deprecated Spanish alias of {ns}.{ingles}(). It still works, but it is scheduled for removal — see SPEC.md section 11."
+                    ),
+                    line, col,
+                );
+            }
+            return;
+        }
 
         let line = self.current_line;
         let col  = self.current_col;
@@ -670,18 +621,7 @@ impl TypeChecker {
                 self.infer_type(cond);
                 self.push_block_scope();
                 self.check_stmts(body, return_type);
-                // Segunda pasada de solo-marcado: el bucle re-ejecuta, así que las
-                // lecturas de la condición y del cuerpo también ocurren DESPUÉS de
-                // las escrituras del cuerpo (p.ej. `while k <= 6 { ...; k = k + 1 }`).
-                // Re-marcamos esas lecturas sin registrar escrituras ni duplicar
-                // diagnósticos, eliminando el falso "asignada pero nunca usada".
                 let saved = self.issues.len();
-                // Se GUARDA el valor anterior en vez de apagarlo a secas: un
-                // bucle dentro de otro ejecuta esto mismo, y al terminar su
-                // segunda pasada apagaba el flag con la del bucle externo aún en
-                // marcha. El resto del cuerpo de fuera volvía a registrar
-                // escrituras después de las lecturas, y el contador del bucle
-                // externo salía como "asignado pero nunca usado".
                 let flag_previo = self.suppress_write_tracking;
                 self.suppress_write_tracking = true;
                 self.infer_type(cond);
@@ -704,12 +644,7 @@ impl TypeChecker {
                     top.remove(var);
                 }
                 self.check_stmts(body, return_type);
-                // Segunda pasada de solo-marcado (ver nota en While): captura las
-                // lecturas que ocurren en iteraciones posteriores, tras las
-                // escrituras del cuerpo del bucle.
                 let saved = self.issues.len();
-                // Mismo motivo que en While: el flag se restaura, no se apaga,
-                // porque un bucle anidado ejecuta este mismo camino.
                 let flag_previo = self.suppress_write_tracking;
                 self.suppress_write_tracking = true;
                 self.check_stmts(body, return_type);
@@ -823,10 +758,6 @@ impl TypeChecker {
                 self.check_call_types(expr);
             }
 
-            // import de módulo: registra el namespace (y los nombres selectivos)
-            // en scope para que `math.sqrt(...)` no se reporte como "no definido".
-            // Imita la resolución del runtime (codegen.rs): alias, o el nombre del
-            // archivo sin extensión del path.
             Stmt::Use { path, alias, selective, line, col } => {
                 self.current_line = *line;
                 self.current_col  = *col;
@@ -838,18 +769,23 @@ impl TypeChecker {
                         .to_string()
                 });
                 self.scope_set(ns.clone(), "module".to_string());
-                // El namespace importado no es una "variable asignada y no usada".
                 if let Some(top) = self.written_not_read.last_mut() {
                     top.remove(&ns);
                 }
-                // Solo se puede validar la superficie de un módulo NATIVO
-                // importado por nombre. Con una ruta explícita ("packages/x",
-                // "lib/utils") gana el .orx del usuario — ver load_module en
-                // vm.rs — y ahí no sabemos qué funciones existen.
                 let explicit_path = path.contains('/') || path.contains('\\');
                 let base = canonical_module(path.as_str());
                 if !explicit_path && crate::modules::is_known_module(base) {
                     self.module_ns.insert(ns.clone(), base.to_string());
+                    // quite.
+                    if let Some(ingles) = crate::deprecated::module_canonical(path.as_str()) {
+                        let (l, c) = (*line, *col);
+                        self.warn(
+                            format!(
+                                "use \"{path}\" uses a deprecated Spanish module name; write use \"{ingles}\" instead — see SPEC.md section 11."
+                            ),
+                            l, c,
+                        );
+                    }
                 }
                 // `use "x" take [a, b]` trae a/b como nombres sueltos invocables.
                 if let Some(names) = selective {
@@ -866,10 +802,6 @@ impl TypeChecker {
                 self.current_line = *line;
                 self.current_col  = *col;
                 self.shape_type_params.insert(name.clone(), type_params.clone());
-                // Verificar on_create y acts con type params + campos en scope.
-                // Dentro de un shape los campos se acceden sin `self.` (`top`,
-                // `count`...), así que hay que registrarlos para no reportarlos
-                // como "no definidos". Incluye los campos heredados vía `using`.
                 let all_fields = self.collect_all_fields(name);
                 let check_with_type_params = |checker: &mut TypeChecker, params: &[crate::ast::Param], body: &[Stmt], con_instancia: bool| {
                     checker.push_scope();
@@ -883,24 +815,10 @@ impl TypeChecker {
                         };
                         checker.scope_set(fname.clone(), fty);
                     }
-                    // La instancia, disponible en todo cuerpo que la tenga.
-                    //
-                    // Se registraba como `self`, que en Orion no es nada: la
-                    // palabra es `me` (la que codegen convierte en PushSelf). Se
-                    // declaraba un nombre que nadie escribe y se dejaba sin
-                    // declarar el que sí, y por eso TODO shape con un `act` que
-                    // usara `me` arrastraba un "Variable 'me' usada pero no
-                    // definida" por cada aparición.
-                    //
-                    // Un `static act` NO la tiene: registrarla ahí taparía el
-                    // error de usar `me` donde no hay instancia.
                     if con_instancia {
                         checker.scope_set("me".to_string(), name.clone());
                     }
                     for p in params {
-                        // Igual que en `Fn`: los params sin anotación valen "any"
-                        // (antes solo se registraban los tipados → falsos positivos
-                        // sobre params sin tipo como `on_create(o, initial)`).
                         let resolved = match &p.type_hint {
                             Some(th) if type_params.contains(th) => "any".to_string(),
                             Some(th) => normalize(th),
@@ -910,15 +828,6 @@ impl TypeChecker {
                     }
                     checker.check_stmts(body, None);
 
-                    // Campos, parámetros de tipo, instancia y params no son
-                    // "asignados y nunca usados".
-                    //
-                    // La limpieza va DESPUÉS de recorrer el cuerpo, no antes:
-                    // hacerlo antes no servía de nada porque el propio cuerpo los
-                    // vuelve a marcar al escribirlos. Un campo asignado en
-                    // `on_create` y leído en otro `act` —el caso normal de un
-                    // shape— se reportaba como muerto, porque cada act tiene su
-                    // scope y la lectura ocurre en otro.
                     if let Some(top) = checker.written_not_read.last_mut() {
                         for (fname, _) in &all_fields { top.remove(fname); }
                         for p in params { top.remove(&p.name); }
@@ -943,12 +852,6 @@ impl TypeChecker {
     fn check_call_types(&mut self, expr: &Expr) {
         match expr {
             Expr::Call { callee, args, .. } => {
-                // Llamar a algo LO LEE, y hay que marcarlo aquí porque el callee
-                // de una llamada nunca pasa por el brazo de `Expr::Ident`. Sin
-                // esto, una lambda guardada en una variable y llamada dentro de
-                // otra llamada —`assert_eq(f(3), 6, "...")`, que es como se
-                // escribe medio archivo de tests— se reportaba como "asignada
-                // pero nunca usada".
                 if let Expr::Ident(fn_name) = callee.as_ref() {
                     self.scope_get(fn_name);
                 }
@@ -989,8 +892,6 @@ impl TypeChecker {
                 self.check_call_types(right);
             }
             Expr::UnaryOp { op: _, expr } => self.check_call_types(expr),
-            // Sin estos dos, una llamada escrita dentro de un ternario o de un
-            // spread se quedaba sin comprobar los argumentos.
             Expr::Spread(inner) => self.check_call_types(inner),
             Expr::Ternary { cond, then_e, else_e } => {
                 self.check_call_types(cond);
@@ -1042,11 +943,6 @@ impl TypeChecker {
         }
     }
 
-    /// Marca como leídas las variables que aparecen dentro de `${…}`.
-    ///
-    /// Solo cancela el aviso de "asignada pero nunca usada": no se reporta nada
-    /// desde aquí, porque el contenido no está parseado y un nombre podría ser
-    /// un módulo, un método o una clave, no una variable.
     fn mark_interpolated_reads(&mut self, lit: &str) {
         let bytes = lit.as_bytes();
         let mut i = 0;
@@ -1090,19 +986,12 @@ impl TypeChecker {
         match expr {
             Expr::Int(_)       => Some("int".into()),
             Expr::Float(_)     => Some("float".into()),
-            // `"total: ${n}"` LEE n. La interpolación se resuelve en la VM y el
-            // literal llega entero hasta aquí, así que hay que mirar dentro
-            // para no dar por muerta una variable usada solo ahí.
             Expr::Str(s)       => {
                 self.mark_interpolated_reads(s);
                 Some("string".into())
             }
             Expr::Bool(_)      => Some("bool".into()),
             Expr::Null         => Some("any".into()),
-            // Los elementos se visitan aunque el tipo del literal ya se sepa:
-            // dentro puede haber lecturas de variables (`[["a", cab["k"]]]`) y
-            // sin recorrerlas no quedaban registradas, lo que hacía pasar por
-            // muerta a una variable que sí se usa.
             Expr::List(items)  => {
                 for e in items { self.infer_type(e); }
                 Some("list".into())
@@ -1150,11 +1039,6 @@ impl TypeChecker {
             Expr::Call { callee, args, .. } => {
                 for arg in args { self.infer_type(arg); }
                 match callee.as_ref() {
-                    // El nombre en posición de llamada es una FUNCIÓN/builtin, no
-                    // una variable: lo marcamos leído (por si es un closure en una
-                    // variable) pero NO emitimos "usada pero no definida" —eso
-                    // evita falsos positivos sobre builtins (has_key, len, …) sin
-                    // tener que mantener una lista hardcodeada completa de ellos.
                     Expr::Ident(fn_name) => {
                         self.scope_get(fn_name);
                         self.call_return_type(fn_name, args)
@@ -1163,9 +1047,6 @@ impl TypeChecker {
                 }
             }
 
-            // Llamada a método `recv.metodo(args)`: hay que visitar receptor y
-            // argumentos para marcarlos como leídos (sin esto, una variable usada
-            // solo en `x.push(v)` se reportaba como "nunca usada").
             Expr::CallMethod { receiver, args, kwargs, .. } => {
                 self.infer_type(receiver);
                 for arg in args { self.infer_type(arg); }
@@ -1178,27 +1059,14 @@ impl TypeChecker {
                 Some("any".into())
             }
 
-            // `cab["clave"]` LEE `cab`. Sin este brazo la indexación caía en el
-            // comodín de abajo sin visitar nada, así que una variable usada solo
-            // a través de un índice pasaba por muerta. El tipo del elemento se
-            // deja sin determinar, como antes.
             Expr::Index { object, index } => {
                 self.infer_type(object);
                 self.infer_type(index);
                 None
             }
 
-            // `...expr` — expande una lista, así que el tipo sigue siendo el de
-            // dentro. Sin este brazo caía al `_` y su interior no se visitaba:
-            // una variable usada SOLO dentro de un spread salía como "asignada
-            // pero nunca usada", y un error ahí dentro no se reportaba.
             Expr::Spread(inner) => self.infer_type(inner),
 
-            // `cond ? a : b`. El tipo es el común de las dos ramas, y `None` si
-            // difieren: decir que un ternario de int y string es int sería peor
-            // que no decir nada. Las tres partes se recorren siempre, aunque el
-            // tipo no se determine, para que las lecturas queden registradas y
-            // los errores de dentro salgan.
             Expr::Ternary { cond, then_e, else_e } => {
                 self.infer_type(cond);
                 let a = self.infer_type(then_e);
@@ -1213,19 +1081,6 @@ impl TypeChecker {
         }
     }
 
-    //    Unificación de type params                                              
-
-    /// Dado `fn f[T, U](a: T, b: U)` y los args reales, devuelve {T→"int", U→"string"}.
-    /// Tipo que devuelve una llamada, con los genéricos ya resueltos.
-    ///
-    /// `fn primero[T](l: T) -> T` llamada con una cadena devuelve `string`, no
-    /// `T`. Antes se devolvía el tipo declarado tal cual, y el error que salía
-    /// era "se asignó valor de tipo 'T'": técnicamente cierto y prácticamente
-    /// inútil, porque `T` es un nombre del que escribió la función, no del que
-    /// la llama, y no dice cuál es el tipo que de verdad llegó.
-    ///
-    /// Se unifica en silencio: los choques entre argumentos ya los reporta
-    /// `check_call_types`, y hacerlo también aquí duplicaría cada aviso.
     fn call_return_type(&mut self, fn_name: &str, args: &[Expr]) -> Option<String> {
         let sig = self.fn_sigs.get(fn_name).cloned()?;
         let declared = sig.return_type.clone()?;
@@ -1264,18 +1119,6 @@ impl TypeChecker {
     }
 }
 
-//    Helpers de tipos                                                          
-
-/// Builtins que siempre existen sin declaración explícita.
-///
-/// Solo se consulta en posición de VALOR (pasar un builtin como dato, p. ej.
-/// `map(double, xs)`). En posición de LLAMADA (`has_key(d, k)`) ya no se valida
-/// el nombre contra esta lista —ver `infer_type`/`Expr::Call`—, así que no hace
-/// falta que esté 100% completa para evitar falsos "no definido".
-///
-/// La fuente de verdad real es `VM::call_builtin` (vm.rs). El test
-/// `builtins_in_sync_with_runtime` verifica que estos nombres sigan siendo
-/// builtins reales del runtime.
 fn is_builtin(name: &str) -> bool {
     matches!(
         name,
@@ -1314,9 +1157,6 @@ fn normalize(t: &str) -> String {
     }.to_string()
 }
 
-/// Resuelve un tipo declarado usando los bindings de type params.
-/// Ej: declared="T", bindings={"T":"int"} → "int"
-/// Ej: declared="List[T]", bindings={"T":"int"} → "List[int]"
 fn resolve_generic(declared: &str, bindings: &HashMap<String, String>) -> String {
     if let Some(concrete) = bindings.get(declared) {
         return concrete.clone();

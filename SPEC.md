@@ -255,6 +255,8 @@ Behaviour that exists but is not pinned down, and may change:
   will keep working for the rest of 0.1.x, but they are scheduled for
   removal in a future version and should not be used in new code. They are
   not part of the stable surface: `db.insert` is, `db.insertar` is not.
+  `orion check` reports every use of one, with the English name to replace
+  it, so nobody has to find out on the day it is removed.
 - Runtime type names as returned by `type(x)` are stable:
   `int` `float` `string` `bool` `list` `dict` `ptr` `null` `fn` `task`
   `module<...>`, or the shape name for an instance. Note that `fn` covers
