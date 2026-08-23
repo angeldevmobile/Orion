@@ -75,7 +75,7 @@ fn compile_err(src: &str) -> String {
 #[test]
 fn test_named_arg_param_inexistente() {
     let e = compile_err("fn f(a, b = 2) { return a }\nshow f(a = 1, zzz = 9)");
-    assert!(e.contains("no tiene un parámetro"), "mensaje: {}", e);
+    assert!(e.contains("has no parameter named"), "mensaje: {}", e);
 }
 
 #[test]

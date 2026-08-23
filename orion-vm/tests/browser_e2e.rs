@@ -2615,3 +2615,595 @@ attempt {
     assert!(salida.contains("--remote-debugging-port"),
             "el error debe decir qué bandera falta:\n{salida}");
 }
+
+//    Shadow DOM
+//
+// Un componente web guarda su contenido en una shadow root, y el
+// `querySelector` del documento no entra. Sin esto, el selector correcto
+// devuelve "no aparece" y no hay pista de por qué.
+
+const PAGINA_SHADOW: &str = r#"<!doctype html>
+<html><head><meta charset="utf-8"><title>Componentes</title></head><body>
+<mi-ficha></mi-ficha>
+<mi-lista></mi-lista>
+<div id="log">nada</div>
+<script>
+class MiFicha extends HTMLElement {
+  constructor() {
+    super();
+    const r = this.attachShadow({mode: 'open'});
+    r.innerHTML = '<h2 class="titulo">Dentro del shadow</h2>' +
+                  '<input id="campo" value="">' +
+                  '<button id="btn">Pulsar</button>' +
+                  '<hijo-hondo></hijo-hondo>';
+    r.getElementById('btn').onclick = () =>
+      document.getElementById('log').textContent = 'CLICADO';
+  }
+}
+class HijoHondo extends HTMLElement {
+  constructor() { super(); this.attachShadow({mode:'open'}).innerHTML = '<p class="hondo">nivel dos</p>'; }
+}
+class MiCerrada extends HTMLElement {
+  constructor() { super(); this.attachShadow({mode:'closed'}).innerHTML = '<p class="secreto">no se ve</p>'; }
+}
+class MiLista extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({mode:'open'}).innerHTML = [1,2,3].map(i =>
+      '<div class="fila"><span class="nom">Producto ' + i + '</span>' +
+      '<span class="precio">' + (i*10) + ',50 EUR</span></div>').join('');
+  }
+}
+customElements.define('mi-ficha', MiFicha);
+customElements.define('hijo-hondo', HijoHondo);
+customElements.define('mi-cerrada', MiCerrada);
+customElements.define('mi-lista', MiLista);
+document.body.appendChild(document.createElement('mi-cerrada'));
+</script>
+</body></html>"#;
+
+#[test]
+fn los_selectores_entran_en_el_shadow_dom() {
+    let dir = tmp_dir("shadow_lee");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SHADOW);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("T=" + web.text(p, ".titulo"))
+    show("H=" + web.text(p, ".hondo"))
+    show("E=" + str(web.exists(p, "#btn")))
+    show("C=" + str(web.count(p, ".fila")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("T=Dentro del shadow"), "no leyó dentro del shadow:\n{salida}");
+    assert!(salida.contains("H=nivel dos"), "no bajó dos niveles de shadow:\n{salida}");
+    assert!(salida.contains("E=yes"), "exists no ve el shadow:\n{salida}");
+    assert!(salida.contains("C=3"), "count no cuenta filas del shadow:\n{salida}");
+}
+
+#[test]
+fn se_interactua_con_un_elemento_del_shadow_dom() {
+    let dir = tmp_dir("shadow_actua");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SHADOW);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.click(p, "#btn")
+    show("L=" + web.text(p, "#log"))
+    web.fill(p, {{ "#campo": "escrito" }})
+    show("V=" + web.value(p, "#campo"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // El hit-test tiene que bajar por la shadow root: si no, el host tapa a su
+    // propio hijo y el clic falla con un motivo que no hay forma de entender.
+    assert!(salida.contains("L=CLICADO"), "el clic no atravesó la frontera:\n{salida}");
+    assert!(salida.contains("V=escrito"), "fill no llegó al campo del shadow:\n{salida}");
+}
+
+#[test]
+fn extract_saca_filas_de_dentro_de_un_componente() {
+    let dir = tmp_dir("shadow_extract");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SHADOW);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    r = web.extract(p, ".fila", {{ nom: ".nom", precio: ".precio|num" }})
+    show("N=" + str(len(r)))
+    show("P=" + str(r[0]["precio"]))
+    show("U=" + str(r[2]["nom"]))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("N=3"), "extract no vio las filas del shadow:\n{salida}");
+    assert!(salida.contains("P=10.5"), "la conversión no se aplicó:\n{salida}");
+    assert!(salida.contains("U=Producto 3"), "{salida}");
+}
+
+#[test]
+fn una_shadow_root_cerrada_no_se_finge_accesible() {
+    let dir = tmp_dir("shadow_cerrada");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SHADOW);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("X=" + str(web.exists(p, ".secreto")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // `mode: closed` no es accesible ni para el navegador desde fuera. Lo
+    // honesto es decir que no está, no inventar una forma de entrar.
+    assert!(salida.contains("X=no"), "una shadow root cerrada no debería verse:\n{salida}");
+}
+
+#[test]
+fn el_shadow_se_puede_apagar() {
+    let dir = tmp_dir("shadow_off");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_SHADOW);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open({{ shadow: no }}) {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("X=" + str(web.exists(p, ".titulo")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("X=no"), "con shadow: no no debería entrar:\n{salida}");
+}
+
+//    Intercepción de peticiones (route)
+//
+// Hasta aquí el módulo solo sabía mirar la red y cortarla por dominio. Sin
+// poder responder por el servidor no se puede probar el camino de error, ni
+// trabajar sin backend, ni quitarse de encima lo que no se mira.
+
+/// Sirve la página y una API que **devuelve la cabecera Authorization que
+/// recibió**: así se comprueba que la reescritura llegó al servidor de verdad,
+/// y no solo que Orion creyó haberla mandado.
+fn serve_eco(pagina: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
+    let port = listener.local_addr().unwrap().port();
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            let peticion = String::from_utf8_lossy(&buf[..n]).to_string();
+            let ruta = peticion.split_whitespace().nth(1).unwrap_or("/").to_string();
+            let auth = peticion.lines()
+                .find_map(|l| l.strip_prefix("Authorization: "))
+                .unwrap_or("sin-cabecera")
+                .trim()
+                .to_string();
+
+            let (tipo, cuerpo) = if ruta.starts_with("/api/") {
+                ("application/json".to_string(),
+                 format!("{{\"origen\":\"real\",\"auth\":\"{auth}\",\"items\":[{{\"nombre\":\"Real 1\"}},{{\"nombre\":\"Real 2\"}}]}}"))
+            } else {
+                ("text/html; charset=utf-8".to_string(), pagina.to_string())
+            };
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                tipo, cuerpo.len(), cuerpo
+            );
+            let _ = s.write_all(resp.as_bytes());
+            let _ = s.flush();
+        }
+    });
+
+    format!("http://127.0.0.1:{port}/")
+}
+
+const PAGINA_RUTAS: &str = r#"<!doctype html>
+<html><head><meta charset="utf-8"><title>Rutas</title></head><body>
+<div id="estado">cargando</div><div id="lista"></div>
+<script>
+(async () => {
+  try {
+    const r = await fetch('/api/productos');
+    if (!r.ok) { document.getElementById('estado').textContent = 'ERROR-' + r.status; return; }
+    const d = await r.json();
+    document.getElementById('estado').textContent = 'OK-' + d.origen + '-' + d.auth;
+    document.getElementById('lista').innerHTML =
+      d.items.map(i => '<div class="it">' + i.nombre + '</div>').join('');
+  } catch (e) { document.getElementById('estado').textContent = 'CAIDO'; }
+})();
+</script>
+</body></html>"#;
+
+#[test]
+fn un_mock_responde_por_el_servidor() {
+    let dir = tmp_dir("route_mock");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_eco(PAGINA_RUTAS);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.route(p, "*/api/*", {{ mock: {{ status: 200, json: {{
+        origen: "MOCK", auth: "x",
+        items: [{{ nombre: "Falso A" }}, {{ nombre: "Falso B" }}, {{ nombre: "Falso C" }}]
+    }} }} }})
+    web.goto(p, "{url}")
+    web.wait(p, {{ idle: 800 }})
+    show("E=" + web.text(p, "#estado"))
+    show("N=" + str(web.count(p, ".it")))
+    show("R=" + str(web.routes(p)))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("E=OK-MOCK-x"), "la página no recibió el mock:\n{salida}");
+    assert!(salida.contains("N=3"), "el mock no pintó sus filas:\n{salida}");
+    assert!(salida.contains("hits: 1"), "la regla no cuenta sus disparos:\n{salida}");
+}
+
+#[test]
+fn un_error_del_servidor_se_puede_provocar() {
+    let dir = tmp_dir("route_500");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_eco(PAGINA_RUTAS);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.route(p, "*/api/*", {{ mock: {{ status: 500, json: {{ "error": "caido" }} }} }})
+    web.goto(p, "{url}")
+    web.wait(p, {{ idle: 800 }})
+    show("E=" + web.text(p, "#estado"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("E=ERROR-500"),
+            "no se pudo probar el camino de error:\n{salida}");
+}
+
+#[test]
+fn una_peticion_puede_fallar_como_falla_la_red() {
+    let dir = tmp_dir("route_fail");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_eco(PAGINA_RUTAS);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.route(p, "*/api/*", {{ fail: "connectionrefused" }})
+    web.goto(p, "{url}")
+    web.wait(p, {{ idle: 800 }})
+    show("E=" + web.text(p, "#estado"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("E=CAIDO"), "el fetch debería haber lanzado:\n{salida}");
+}
+
+#[test]
+fn una_cabecera_reescrita_llega_al_servidor() {
+    let dir = tmp_dir("route_headers");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_eco(PAGINA_RUTAS);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.route(p, "*/api/*", {{ headers: {{ Authorization: "Bearer TOKEN-123" }} }})
+    web.goto(p, "{url}")
+    web.wait(p, {{ idle: 800 }})
+    show("E=" + web.text(p, "#estado"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    // El servidor devuelve la cabecera que recibió: esto prueba que viajó de
+    // verdad, no que Orion creyera mandarla.
+    assert!(salida.contains("E=OK-real-Bearer TOKEN-123"),
+            "la cabecera no llegó al servidor:\n{salida}");
+}
+
+#[test]
+fn el_limite_de_veces_deja_probar_un_reintento() {
+    let dir = tmp_dir("route_times");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_eco(PAGINA_RUTAS);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.route(p, "*/api/*", {{ mock: {{ status: 503, body: "no" }} }}, {{ times: 1 }})
+    web.goto(p, "{url}")
+    web.wait(p, {{ idle: 500 }})
+    show("UNA=" + web.text(p, "#estado"))
+    web.reload(p)
+    web.wait(p, {{ idle: 800 }})
+    show("DOS=" + web.text(p, "#estado"))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("UNA=ERROR-503"), "la primera vez debía fallar:\n{salida}");
+    assert!(salida.contains("DOS=OK-real"),
+            "agotada la regla, la petición debe salir de verdad:\n{salida}");
+}
+
+#[test]
+fn manda_la_primera_regla_y_unroute_las_quita() {
+    let dir = tmp_dir("route_orden");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_eco(PAGINA_RUTAS);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    -- La concreta va primero: si mandara la general, saldría CAIDO.
+    web.route(p, "*/api/productos*", {{ mock: {{ status: 200, json: {{ origen: "CONCRETA", auth: "-", items: [] }} }} }})
+    web.route(p, "*/api/*", {{ fail: "timedout" }})
+    web.goto(p, "{url}")
+    web.wait(p, {{ idle: 800 }})
+    show("E=" + web.text(p, "#estado"))
+    show("Q=" + str(web.unroute(p)))
+    show("V=" + str(len(web.routes(p))))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("E=OK-CONCRETA"), "ganó la regla general:\n{salida}");
+    assert!(salida.contains("Q=2"), "unroute debería devolver cuántas quitó:\n{salida}");
+    assert!(salida.contains("V=0"), "quedaron reglas puestas:\n{salida}");
+}
+
+#[test]
+fn una_accion_inventada_dice_cuales_valen() {
+    let dir = tmp_dir("route_mala");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_eco(PAGINA_RUTAS);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.route(p, "*", {{ fail: "explota" }}) }}
+    handle e {{ show("E1=" + str(e)) }}
+    attempt {{ web.route(p, "*", {{ hazlo: yes }}) }}
+    handle e {{ show("E2=" + str(e)) }}
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("E1=") && salida.contains("timedout"),
+            "no listó los motivos válidos:\n{salida}");
+    assert!(salida.contains("E2=") && salida.contains("mock"),
+            "no explicó qué acciones hay:\n{salida}");
+}
+
+#[test]
+fn la_lista_blanca_manda_sobre_las_reglas() {
+    let dir = tmp_dir("route_allow");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_eco(PAGINA_RUTAS);
+
+    // `allow` es una medida de seguridad: una regla de conveniencia no puede
+    // reabrir con un mock un dominio que se cerró a propósito.
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open({{ allow: ["ejemplo-que-no-existe.test"] }}) {{
+    p = web.page(b)
+    web.route(p, "*", {{ mock: {{ status: 200, body: "COLADO" }} }})
+    attempt {{ web.goto(p, "{url}") }} handle e {{ show("BLOQUEADO") }}
+    show("N=" + str(len(web.blocked(b))))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(!salida.contains("COLADO"), "una regla saltó la lista blanca:\n{salida}");
+}
+
+//    Emulación y cookies
+
+const PAGINA_EMULA: &str = r#"<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emulacion</title></head><body>
+<div id="w"></div>
+<script>document.getElementById('w').textContent = innerWidth + 'x' + innerHeight;</script>
+</body></html>"#;
+
+#[test]
+fn emular_un_movil_cambia_lo_que_ve_la_pagina() {
+    let dir = tmp_dir("emul_movil");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_EMULA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.emulate(p, {{ device: "iphone" }})
+    web.goto(p, "{url}")
+    show("W=" + web.text(p, "#w"))
+    show("T=" + str(web.eval(p, "navigator.maxTouchPoints")))
+    show("U=" + str(web.eval(p, "navigator.userAgent.includes('iPhone')")))
+    show("D=" + str(web.eval(p, "devicePixelRatio")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("W=390x844"), "no aplicó las medidas del móvil:\n{salida}");
+    assert!(salida.contains("T=5"), "un móvil es táctil:\n{salida}");
+    assert!(salida.contains("U=yes"), "el sitio vería un escritorio:\n{salida}");
+    assert!(salida.contains("D=3"), "la densidad de pantalla no se aplicó:\n{salida}");
+}
+
+#[test]
+fn el_preset_se_puede_ajustar_y_luego_quitar() {
+    let dir = tmp_dir("emul_ajusta");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_EMULA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.emulate(p, {{ device: "iphone", width: 1000 }})
+    show("A=" + str(web.eval(p, "innerWidth")))
+    show("M=" + str(web.eval(p, "navigator.maxTouchPoints")))
+    web.emulate(p, no)
+    show("Q=" + str(web.eval(p, "navigator.maxTouchPoints")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("A=1000"), "no se pudo sobrescribir el ancho:\n{salida}");
+    assert!(salida.contains("M=5"), "cambiar el ancho no debe dejar de ser un móvil:\n{salida}");
+    assert!(salida.contains("Q=0"), "emulate(p, no) no deshizo la emulación:\n{salida}");
+}
+
+#[test]
+fn la_zona_horaria_y_el_idioma_se_fijan() {
+    let dir = tmp_dir("emul_zona");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_EMULA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.emulate(p, {{ timezone: "Asia/Tokyo", locale: "ja-JP" }})
+    show("Z=" + str(web.eval(p, "Intl.DateTimeFormat().resolvedOptions().timeZone")))
+    show("I=" + str(web.eval(p, "navigator.language")))
+    show("W=" + str(web.eval(p, "innerWidth > 0")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("Z=Asia/Tokyo"), "no se fijó la zona horaria:\n{salida}");
+    assert!(salida.contains("I=ja-JP"), "no se fijó el idioma:\n{salida}");
+    // Pedir solo la zona horaria no debe redimensionar la ventana.
+    assert!(salida.contains("W=yes"), "{salida}");
+}
+
+#[test]
+fn la_ubicacion_emulada_no_se_queda_en_el_dialogo_de_permiso() {
+    let dir = tmp_dir("emul_geo");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_EMULA);
+
+    // Sin conceder el permiso, la página recibe PERMISSION_DENIED y la
+    // posición emulada no llega a usarse nunca.
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.emulate(p, {{ geo: {{ lat: 40.4168, lon: -3.7038 }} }})
+    pos = web.eval(p, "new Promise(r => navigator.geolocation.getCurrentPosition(s => r(s.coords.latitude.toFixed(4)), e => r('ERR:' + e.code)))")
+    show("G=" + str(pos))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("G=40.4168"), "la ubicación no llegó a la página:\n{salida}");
+}
+
+#[test]
+fn un_dispositivo_inventado_lista_los_que_hay() {
+    let dir = tmp_dir("emul_malo");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_EMULA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.emulate(p, {{ device: "nokia3310" }}) }}
+    handle e {{ show("E=" + str(e)) }}
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("E=") && salida.contains("iphone") && salida.contains("desktop"),
+            "no listó los dispositivos válidos:\n{salida}");
+}
+
+#[test]
+fn las_cookies_se_ponen_leen_y_borran() {
+    let dir = tmp_dir("cookies");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_EMULA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.set_cookie(p, {{ name: "sesion", value: "abc123" }})
+    show("D=" + str(web.eval(p, "document.cookie")))
+    c = web.cookies(p, "sesion")
+    show("N=" + str(len(c)))
+    show("V=" + str(c[0]["value"]))
+    web.clear_cookies(p)
+    show("Q=" + str(len(web.cookies(p))))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("D=sesion=abc123"), "la cookie no llegó a la página:\n{salida}");
+    assert!(salida.contains("N=1") && salida.contains("V=abc123"), "{salida}");
+    assert!(salida.contains("Q=0"), "clear_cookies no las borró:\n{salida}");
+}
+
+#[test]
+fn una_cookie_sin_nombre_lo_dice() {
+    let dir = tmp_dir("cookie_sin_nombre");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_EMULA);
+
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    attempt {{ web.set_cookie(p, {{ value: "x" }}) }}
+    handle e {{ show("E=" + str(e)) }}
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("E=") && salida.contains("name"), "{salida}");
+}

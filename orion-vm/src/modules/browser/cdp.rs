@@ -221,10 +221,6 @@ impl Conn {
             .collect()
     }
 
-    pub fn hay_routes(&self) -> bool {
-        !self.routes.lock().unwrap().is_empty()
-    }
-
     fn answer_fetch(&self, session: Option<&str>, request_id: &str, url: &str) {
         // La lista blanca manda sobre las reglas: es una medida de seguridad, y
         // una regla de conveniencia no puede reabrir un dominio cerrado a

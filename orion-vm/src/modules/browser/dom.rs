@@ -299,9 +299,14 @@ pub fn box_for_click(
       }}
       return enc;
     }};
+    // El `id` va antes que la clase: es lo que identifica al culpable de verdad
+    // y lo que el usuario puede buscar en su propia página. Sin él, un banner
+    // sin clase sale como un `<div>` cualquiera y el error no ayuda.
     const __nombre = (e) => {{
+      const id  = String(e.id || '').trim();
       const cls = String(e.className || '').split(' ').filter(Boolean)[0];
-      return '<' + e.tagName.toLowerCase() + (cls ? '.' + cls : '') + '>';
+      const marca = id ? '#' + id : (cls ? '.' + cls : '');
+      return '<' + e.tagName.toLowerCase() + marca + '>';
     }};
 
     return new Promise((resolve) => {{

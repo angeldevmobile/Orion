@@ -266,7 +266,7 @@ fn stack_web_e2e() {
     // 19. Estático inexistente → 404 directo
     let (st, _, body) = get(&format!("{}/static/nope.css", BASE));
     assert_eq!(st, 404);
-    assert_eq!(body, "archivo no encontrado");
+    assert_eq!(body, "file not found");
 
     // 20. Respuesta { "file": ruta } → binario con MIME automático
     let (st, hs, bytes) = get_bytes(&format!("{}/descarga", BASE));

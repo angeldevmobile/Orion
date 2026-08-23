@@ -99,15 +99,9 @@ impl Plan {
         *self == Plan::default()
     }
 
-    /// Los mensajes CDP que aplican el plan, en orden.
-    ///
-    /// Se devuelven en vez de mandarse para poder comprobar qué se manda sin
-    /// levantar un navegador: lo delicado es decidir, no enviar.
     pub fn mensajes(&self) -> Vec<(&'static str, serde_json::Value)> {
         let mut out = Vec::new();
 
-        // Las medidas van juntas: CDP no acepta cambiar solo el ancho, y
-        // mandar la mitad de los campos deja la ventana en un estado raro.
         if self.width.is_some() || self.height.is_some() || self.movil.is_some() {
             out.push(("Emulation.setDeviceMetricsOverride", serde_json::json!({
                 "width":  self.width.unwrap_or(0),
@@ -152,6 +146,36 @@ impl Plan {
         }
         out
     }
+}
+
+/// Permisos que el navegador pregunta con un diálogo, con el nombre corto que
+/// se escribe en Orion.
+///
+/// El diálogo de permisos es un bloqueo de los de verdad: aparece encima de la
+/// página, no se puede clicar desde JavaScript y deja la automatización parada
+/// sin decir por qué. Concederlo por adelantado hace que no llegue a existir.
+pub const PERMISOS: &[(&str, &str)] = &[
+    ("geolocation",  "geolocation"),
+    ("notifications","notifications"),
+    ("camera",       "videoCapture"),
+    ("microphone",   "audioCapture"),
+    ("clipboard",    "clipboardReadWrite"),
+    ("clipboardread","clipboardReadWrite"),
+    ("midi",         "midi"),
+    ("sensors",      "sensors"),
+    ("background",   "backgroundSync"),
+];
+
+pub fn permiso(nombre: &str) -> Result<&'static str, String> {
+    let limpio: String = nombre.chars().filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_lowercase()).collect();
+    PERMISOS.iter().find(|(k, _)| *k == limpio).map(|(_, v)| *v).ok_or_else(|| {
+        let ns: Vec<&str> = PERMISOS.iter().map(|(k, _)| *k).collect();
+        format!(
+            "browser.emulate: unknown permission '{nombre}'.\n  Accepted: {}",
+            ns.join(", ")
+        )
+    })
 }
 
 /// Los mensajes que deshacen cualquier emulación.

@@ -3,6 +3,80 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## 2026-08-23
+
+### Añadido
+- **`browser` entra en el shadow DOM.** Los selectores atraviesan las shadow
+  roots abiertas a cualquier profundidad, igual que ya atravesaban los iframes.
+  Un componente web guarda su contenido en una shadow root y el
+  `querySelector` del documento no entra: el selector correcto "no existe" y no
+  hay pista de por qué. Media web moderna es exactamente eso.
+
+  Entra la búsqueda **y el clic**: el hit-test baja por las shadow roots,
+  porque `elementFromPoint` devuelve el host y `host.contains(boton)` es false
+  —`contains` no cruza la frontera—, así que sin esto todo componente parecería
+  tapado por sí mismo y `click` fallaría con un motivo imposible de entender.
+
+  Las roots cerradas (`mode: 'closed'`) no son accesibles ni para el navegador:
+  `exists` dice `no`, que es la respuesta honesta. El caso normal no paga el
+  recorrido (3 ms en una página de 500 filas), y se apaga con
+  `open({ shadow: no })`.
+
+- **`browser.route` — intercepción de peticiones.** `watch`/`capture` miraban
+  la red; ahora se puede decidir:
+
+  ```orion
+  web.route(p, "*/api/stock*", { mock: { status: 500, json: { "error": "caido" } } })
+  web.route(p, "*.png",        { block: yes })
+  web.route(p, "*/api/*",      { headers: { Authorization: "Bearer " + token } })
+  web.route(p, "*/lento*",     { fail: "timedout" })
+  ```
+
+  Con esto se puede probar el camino de error sin tocar el servidor, trabajar
+  con el backend a medias, quitarse de encima lo que no se mira, y autenticarse
+  donde no hay formulario. `{ times: n }` dispara solo las n primeras veces, que
+  es la única forma de comprobar que un reintento reintenta.
+
+  Las reglas se prueban en orden y manda la primera que casa, como en un
+  cortafuegos. `unroute` las quita y `routes` dice cuántas veces ha disparado
+  cada una. La lista blanca de `open({ allow })` se comprueba **antes**: un
+  `mock` no puede reabrir un dominio cerrado a propósito.
+
+- **`browser.emulate` — dispositivo, idioma, zona horaria y ubicación.**
+  Presets (`iphone`, `ipad`, `android`, `laptop`, `desktop`) que son un punto de
+  partida, no una lista cerrada: cualquier campo se sobrescribe en la misma
+  llamada. Sin esto no se pueden automatizar los sitios que sirven otro HTML al
+  móvil, ni reproducir un fallo que depende de la zona horaria, ni evitar que el
+  `Accept-Language` del contenedor de CI cambie los textos.
+
+  Poner `geo` concede el permiso de geolocalización solo: sin ello la página
+  recibe `PERMISSION_DENIED` y la posición emulada no llega a usarse nunca.
+
+- **`browser.cookies` / `set_cookie` / `clear_cookies`**, para cuando
+  `save_state`/`load_state` (la sesión entera) es demasiado.
+
+- **`fn main()` se llama sola.** Un programa cuyo código entero vivía dentro de
+  `main` terminaba con éxito, sin salida y sin aviso: el peor fallo posible,
+  porque no se parece a un fallo. Ahora la llamada se añade si el programa
+  define `main` y **no la nombra en ninguna parte** —ni a nivel superior, ni
+  desde otra función, ni pasándola como valor—, así que los programas que ya
+  escribían `main()` a mano siguen ejecutándose una sola vez.
+
+  Los módulos cargados con `use` no pasan por ahí: su `main` no debe correr al
+  importarlos. El REPL tampoco. Un `main` con parámetros obligatorios no se
+  puede llamar sin argumentos, y en vez de callarse lo dice.
+
+### Cambiado
+- **Los mensajes de error están en inglés**, como el resto del lenguaje. Eran
+  ~920 cadenas repartidas por el núcleo (VM, value, named args, pkg, JIT/AOT),
+  el módulo `browser` entero —incluido el JavaScript que se inyecta en la
+  página— y la librería estándar. La traza de pila (`at f (line 3)`) y el
+  prefijo que el renderizador de errores parsea cambiaron con ellas.
+
+  Quedan en español los nombres de los alias obsoletos (`db.insertar`,
+  `cache.guardar`), que son nombres y no texto, y el catálogo de documentación
+  que alimenta el hover de la extensión.
+
 ## 2026-08-20
 
 ### Añadido

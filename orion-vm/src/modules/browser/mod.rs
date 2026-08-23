@@ -1477,8 +1477,36 @@ fn do_emulate(args: &[EvalValue]) -> Result<EvalValue, String> {
         plan.geo = Some((lat, lon, acc));
     }
 
-    if plan.vacio() {
+    // Permisos: los que pida, más `geolocation` si fijó una posición. Sin
+    // conceder, el navegador abre su diálogo, la página recibe
+    // PERMISSION_DENIED y la posición emulada no llega a usarse nunca — que es
+    // el fallo más difícil de entender de todo esto.
+    let mut permisos: Vec<String> = Vec::new();
+    if let Some(EvalValue::List(ps)) = m.get("permissions") {
+        for x in ps.iter() {
+            permisos.push(emulate::permiso(&to_str(x))?.to_string());
+        }
+    }
+    if plan.geo.is_some() && !permisos.iter().any(|p| p == "geolocation") {
+        permisos.push("geolocation".into());
+    }
+
+    if plan.vacio() && permisos.is_empty() {
         return Err(format!("browser.emulate: nothing to emulate.\n  {USO}"));
+    }
+
+    if !permisos.is_empty() {
+        let origen = conn.call("Runtime.evaluate", serde_json::json!({
+            "expression": "location.origin", "returnByValue": true,
+        }), Some(&session), timeout)?;
+        let mut params = serde_json::json!({ "permissions": permisos });
+        // Sin origen (una pestaña recién abierta está en about:blank) se
+        // conceden para todo el navegador, que es lo que hace falta para que
+        // valgan en cuanto se navegue.
+        if let Some(o) = origen.get("result").and_then(|r| r.get("value")).and_then(|x| x.as_str()) {
+            if o.starts_with("http") { params["origin"] = serde_json::Value::String(o.to_string()); }
+        }
+        conn.call("Browser.grantPermissions", params, Some(&session), timeout)?;
     }
 
     // Un ancho sin alto deja la ventana en un estado que el navegador acepta y

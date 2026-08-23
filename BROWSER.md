@@ -17,14 +17,15 @@ with b = web.open() {
 `with` desugara a `web.free(b)` incluso si el cuerpo lanza un error, y `free`
 cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
-> **Estado**: transporte, arranque, navegación, interacción, formularios,
-> tablas, modales, ventanas, extracción (con descubrimiento de esquema),
-> archivos, sesión, estabilidad, captura de red y recorrido paralelo (`crawl`)
-> verificados de punta a punta (72 tests e2e en
+> **Estado**: transporte, arranque, navegación, interacción (iframes y shadow
+> DOM incluidos), formularios, tablas, modales, ventanas, extracción (con
+> descubrimiento de esquema), archivos, sesión, cookies, estabilidad, captura de
+> red, intercepción de peticiones, emulación de dispositivo y recorrido paralelo
+> (`crawl`) verificados de punta a punta (94 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Medido contra
-> Selenium y Playwright en 16.3, con la metodología en
+> Selenium y Playwright en 19.3, con la metodología en
 > [`bench/web/README.md`](bench/web/README.md).
 
 ## 1. Arranque
@@ -95,6 +96,8 @@ niveles según lo que sean:
 | `drag_steps` | 10 | pasos intermedios de un arrastre |
 | `force_layers` | 12 | capas superpuestas que `force` atraviesa |
 | `iframe_depth` | 8 | profundidad de iframes anidados que se recorre |
+| `shadow` | `yes` | si los selectores entran en las shadow roots abiertas |
+| `shadow_depth` | 8 | profundidad de shadow roots anidadas que se recorre |
 | `hit_inset` | 24 | margen en píxeles al probar puntos de un elemento |
 | `nav_settle` | 5000 | cuánto se tolera que la página esté cambiando de documento |
 
@@ -163,7 +166,7 @@ congelada, lo dice con el texto del diálogo en vez de un timeout genérico.
 | Forma | Significa |
 |---|---|
 | `.card > button` | CSS |
-| `//li[@data-n='2']` | XPath (empieza por `//` o `(//`) |
+| `//li[data-n='2']` | XPath (empieza por `//` o `(//`) |
 | `text=Comprar` | por texto visible |
 
 La variante por texto existe porque la mayoría de los XPath que escribe la gente
@@ -172,6 +175,37 @@ son para buscar por contenido, y salen frágiles e ilegibles.
 **Los selectores atraviesan los iframes accesibles**, que es donde viven casi
 todos los modales de consentimiento de cookies. Los iframes de otro origen se
 saltan sin romper la búsqueda.
+
+### 3.1 Shadow DOM
+
+**Los selectores también entran en las shadow roots abiertas**, a cualquier
+profundidad. Un componente web guarda su contenido en una shadow root y el
+`querySelector` del documento no entra ahí: el selector correcto "no existe" y
+no hay pista de por qué. Media web moderna —de un reproductor de vídeo a los
+formularios de Salesforce— es exactamente esto.
+
+```orion
+-- <mi-ficha> guarda su botón en una shadow root: no hace falta decir nada.
+web.click(p, "#btn")
+web.extract(p, ".fila", { nombre: ".nom" })
+```
+
+Entra la búsqueda **y el clic**: el hit-test baja por las shadow roots, porque
+si no `elementFromPoint` devuelve el host, `host.contains(boton)` es false —
+`contains` no cruza la frontera— y todo componente parecería tapado por sí
+mismo.
+
+Tres cosas que conviene saber:
+
+- **Las shadow roots cerradas** (`mode: 'closed'`) no son accesibles ni para el
+  navegador desde fuera. No hay truco que valga: `exists` dice `no`, que es la
+  respuesta honesta.
+- **XPath no cruza** la frontera del shadow, por definición del estándar.
+  Dentro de un componente hay que usar CSS o `text=`.
+- **El caso normal no paga.** Las shadow roots se recorren después de los
+  documentos, así que un elemento del DOM de siempre se resuelve en el primer
+  intento. Medido en una página de 500 filas sin componentes: 3 ms de
+  diferencia. Se apaga con `open({ shadow: no })`.
 
 ## 4. Interacción
 
@@ -495,11 +529,11 @@ una sola llamada** que corre dentro de la página.
 
 ```orion
 esquema = {
-    id:     "@data-id",
+    id:     "data-id",
     nombre: ".title",
     precio: ".price|num",
-    stock:  "[data-qty]@data-qty|int",
-    url:    "a@href",
+    stock:  "[data-qty]data-qty|int",
+    url:    "ahref",
     hay:    ".disp|bool"
 }
 items = web.extract(p, ".card", esquema)
@@ -521,19 +555,19 @@ problema de tiempo en un resultado vacío silencioso.
 
 ### 7.2 Gramática de una especificación
 
-Las tres partes son opcionales: `<selector> @<atributo> |<conversión>`
+Las tres partes son opcionales: `<selector> <atributo> |<conversión>`
 
 | Ejemplo | Significa |
 |---|---|
 | `.price` | texto del elemento |
-| `a@href` | atributo de un descendiente |
-| `@data-id` | atributo de la propia fila |
+| `ahref` | atributo de un descendiente |
+| `data-id` | atributo de la propia fila |
 | `.price\|num` | texto convertido a número |
 | `//td[2]\|num` | XPath **relativo a la fila** |
 | `\|num` | el texto de la fila entera, como número |
 | `.tag\|list` | **todas** las coincidencias, no la primera |
 | `.p\|list:num` | todas, convertidas a número |
-| `a@href\|list` | todos los enlaces de la fila |
+| `ahref\|list` | todos los enlaces de la fila |
 
 Conversiones: `num`, `int`, `bool`, `html`, `text`, `trim`, `list`,
 `list:<conversión>`.
@@ -570,7 +604,7 @@ BeautifulSoup.
 ```
 browser.extract: 2 campo(s) no encontraron nada en ninguna de las 3 filas:
     precio  ←  .precio-viejo
-    sku  ←  @data-sku
+    sku  ←  data-sku
   Revisa esos selectores, o usa { strict: no } si de verdad pueden faltar.
 ```
 
@@ -638,7 +672,7 @@ esquema que se rompe en la página siguiente.
 ```orion
 e = web.discover(p)
 show(e["row"])       -- ".quote"     (el selector de la fila que se repite)
-show(e["fields"])    -- {text: ".text", author: ".author", url: "a@href"}
+show(e["fields"])    -- {text: ".text", author: ".author", url: "ahref"}
 show(e["sample"])    -- las primeras filas ya extraídas con esa propuesta
 
 -- y se usa tal cual:
@@ -878,7 +912,7 @@ ir: lo que no esté, no se carga.
 
 `*.empresa.com` cubre los subdominios y el dominio pelado; sin comodín es solo
 ese host exacto. El puerto no cuenta, y lo que va antes de una arroba tampoco:
-`http://empresa.com@malo.net/` es una petición a **malo.net**, y ese truco de
+`http://empresa.commalo.net/` es una petición a **malo.net**, y ese truco de
 suplantación no pasa la lista.
 
 `web.blocked(navegador)` devuelve lo que se ha cortado, que es lo primero que
@@ -1043,7 +1077,183 @@ Playwright tiene `page.on("response")`: un callback donde hay que filtrar a
 mano, pedir el cuerpo con otro `await` y acordarse de que puede no estar.
 Selenium no tiene nada equivalente sin poner un proxy delante.
 
-## 13. JavaScript
+## 13. Intercepción: decidir qué hace el navegador con cada petición
+
+`watch`/`capture` **miran** la red. `route` la **decide**. Es la diferencia
+entre observar un problema y poder provocarlo.
+
+```orion
+web.route(p, "*/api/stock*", { mock: { status: 500, json: { "error": "caido" } } })
+web.route(p, "*.png",        { block: yes })
+web.route(p, "*/api/*",      { headers: { Authorization: "Bearer " + token } })
+web.route(p, "*/lento*",     { fail: "timedout" })
+```
+
+El patrón es el mismo de `watch`: sin `*` es "contiene", con `*` es comodín.
+Nunca una expresión regular, porque una URL lleva `?`, `.` y `+`.
+
+### 13.1 Para qué sirve
+
+| Situación | Sin `route` | Con `route` |
+|---|---|---|
+| Probar qué hace la web si la API devuelve 500 | tocar el servidor de verdad | una línea |
+| El front está y el backend no | esperar | `mock` |
+| Un listado con imágenes y tres trazadores | se descarga todo | `block` y el trabajo entero baja |
+| Autenticarse donde no hay formulario | simular un login | `headers` |
+| Probar un reintento | no se puede | `{ times: 1 }` |
+
+### 13.2 Las cuatro acciones
+
+| Acción | Qué hace |
+|---|---|
+| `{ block: yes }` | corta la petición, como un bloqueador de anuncios |
+| `{ fail: "timedout" }` | corta con un motivo de red concreto, para probar el camino de error |
+| `{ mock: { status, json\|body, headers } }` | responde desde Orion; la petición no llega a salir |
+| `{ headers: {...} }` | la deja pasar con esas cabeceras añadidas o reescritas |
+
+Una acción por regla. `{ block: yes, mock: {...} }` no significa nada, y
+aceptarlo obligaría a inventar una precedencia que nadie recordaría.
+
+Con `json:` se serializa y **además se pone el `Content-Type`**: sin él la
+página recibe el texto correcto y su `response.json()` falla, que es un rato
+perdido persiguiendo un fallo que no está donde parece.
+
+Los motivos de `fail` son los del navegador: `failed`, `aborted`, `timedout`,
+`accessdenied`, `connectionclosed`, `connectionreset`, `connectionrefused`,
+`connectionaborted`, `connectionfailed`, `namenotresolved`,
+`internetdisconnected`, `addressunreachable`, `blockedbyclient`,
+`blockedbyresponse`. Se escriben como uno quiera —`timedout`, `TimedOut`,
+`timed_out`— y uno inventado lista los válidos.
+
+### 13.3 El orden manda, como en un cortafuegos
+
+Las reglas se prueban en orden y decide **la primera que casa**. Así una regla
+concreta puede ir delante de otra general sin que el orden de evaluación sea un
+misterio:
+
+```orion
+web.route(p, "*/api/productos*", { mock: { status: 200, json: datos } })
+web.route(p, "*/api/*",          { fail: "timedout" })   -- todo lo demás
+```
+
+### 13.4 `{ times: n }` — fallar solo las primeras veces
+
+```orion
+web.route(p, "*/api/*", { mock: { status: 503, body: "no" } }, { times: 1 })
+```
+
+La primera petición recibe el 503 y la segunda sale de verdad. Es justo lo que
+hace falta para comprobar que un reintento reintenta, y no hay forma de probarlo
+tocando el servidor.
+
+### 13.5 `web.unroute(pestaña, patrón?)` y `web.routes(pestaña)`
+
+`unroute` sin patrón quita todas y devuelve cuántas quitó. `routes` devuelve lo
+que hay puesto y **cuántas veces ha disparado cada regla**, que es la forma de
+saber si una regla que creías activa no está casando nada:
+
+```orion
+show(web.routes(p))
+-- [{pattern: */api/*, hits: 3, times: null}]
+```
+
+### 13.6 La lista blanca manda sobre las reglas
+
+`open({ allow: [...] })` se comprueba **antes** que las rutas, y un `mock` no
+puede reabrir un dominio cerrado a propósito. Es una medida de seguridad; una
+regla de conveniencia no debe poder levantarla.
+
+## 14. Emulación: qué dispositivo, idioma y sitio cree ser el navegador
+
+```orion
+web.emulate(p, { device: "iphone" })
+web.emulate(p, { width: 1920, height: 1080, locale: "es-ES", timezone: "Europe/Madrid" })
+web.emulate(p, { dark: yes, geo: { lat: 40.4168, lon: -3.7038 } })
+web.emulate(p, no)                       -- deshace todo
+```
+
+Sin esto hay sitios que sencillamente no se pueden automatizar:
+
+- **Los que sirven otro HTML al móvil.** El menú que hay que pulsar no existe en
+  la versión de escritorio: el selector correcto "no aparece" y no hay manera de
+  que aparezca.
+- **Los que dependen de la zona horaria.** Un panel que muestra "hoy" cambia de
+  datos según dónde crea el navegador que está. Reproducir desde una máquina en
+  UTC el error que ve un compañero en Madrid es imposible sin fijarla.
+- **Los que cambian con el idioma.** `text=Comprar` contra un sitio que decidió
+  servir inglés por el `Accept-Language` del contenedor de CI.
+- **Los que piden ubicación.** El diálogo bloquea el flujo y no se puede clicar
+  desde JavaScript.
+
+### 14.1 Presets
+
+`iphone`, `iphone-se`, `ipad`, `android`, `laptop`, `desktop`. Se escriben como
+uno quiera (`iPhone SE`, `iphone_se`) y uno inventado lista los que hay.
+
+Un preset es **un punto de partida, no una lista cerrada**: cualquiera de sus
+campos se sobrescribe en la misma llamada.
+
+```orion
+web.emulate(p, { device: "iphone", width: 1000 })   -- móvil, pero más ancho
+```
+
+### 14.2 Todos los campos
+
+| Campo | Qué controla |
+|---|---|
+| `device` | preset de partida |
+| `width` / `height` / `scale` | medidas y densidad de pantalla |
+| `mobile` / `touch` | si el sitio ve un móvil y si hay eventos táctiles |
+| `ua` | User-Agent |
+| `locale` | idioma; viaja también en `Accept-Language` |
+| `timezone` | zona horaria IANA (`Europe/Madrid`) |
+| `dark` | `prefers-color-scheme` |
+| `geo` | `{ lat, lon, accuracy? }` |
+| `permissions` | permisos concedidos por adelantado |
+
+**Lo que no se pide no se toca.** Cambiar la zona horaria no redimensiona la
+ventana.
+
+**Emula antes de navegar.** Algunas cosas —el táctil, sobre todo— las mira la
+página al cargar: `emulate` y luego `goto`.
+
+**Un ancho sin alto** se completa con el que ya tiene la pestaña: CDP acepta
+medidas a medias y deja la ventana en un estado que el sitio no entiende.
+
+**Una página sin `<meta name="viewport">`** se dispone a 980 px aunque emules un
+móvil. No es un fallo: es lo que hace el navegador, y lo mismo que verías en sus
+herramientas de desarrollo.
+
+### 14.3 Permisos
+
+El diálogo de permisos es un bloqueo de los de verdad: aparece encima de la
+página y no se puede clicar. Concederlo por adelantado hace que no exista.
+
+```orion
+web.emulate(p, { permissions: ["clipboard", "notifications"] })
+```
+
+Admite `geolocation`, `notifications`, `camera`, `microphone`, `clipboard`,
+`midi`, `sensors`, `background`.
+
+Poner `geo` concede `geolocation` **solo**: sin ello la página recibiría
+`PERMISSION_DENIED` y la posición emulada no llegaría a usarse nunca, que es el
+fallo más difícil de entender de todo esto.
+
+## 15. Cookies
+
+`save_state`/`load_state` (9.1) mueven la sesión entera. Para una sola cookie:
+
+| Función | Qué hace |
+|---|---|
+| `web.cookies(pestaña, nombre?)` | las cookies visibles, o solo la que se nombra |
+| `web.set_cookie(pestaña, cookie)` | `{ name, value, domain?, path?, expires?, http_only?, secure?, same_site? }` |
+| `web.clear_cookies(pestaña)` | borra todas las del navegador |
+
+Sin `domain` la cookie se ata a la url de la pestaña. Hace falta: sin dominio ni
+url el navegador la descarta **en silencio**.
+
+## 16. JavaScript
 
 `web.eval(pestaña, js)` evalúa y devuelve el valor ya convertido a Orion.
 
@@ -1054,7 +1264,7 @@ n = web.eval(p, "document.querySelectorAll('.card').length")
 Una excepción del JavaScript se convierte en error de Orion, no en un `null`
 silencioso.
 
-## 14. Memoria
+## 17. Memoria
 
 Decisiones tomadas con el consumo como criterio, no como consecuencia:
 
@@ -1073,7 +1283,7 @@ Decisiones tomadas con el consumo como criterio, no como consecuencia:
 - **Las pestañas se cierran de verdad** al hacer `free`: es lo que libera la
   memoria del proceso de render.
 
-## 15. Arquitectura
+## 18. Arquitectura
 
 ```
 orion-vm/src/modules/browser/
@@ -1095,9 +1305,9 @@ vuelve a medir **inmediatamente antes** de cada despacho, no al empezar una
 cadena de acciones: ahí está la diferencia práctica con `ActionChains`, que
 entre localizar y clicar deja que la página mueva el elemento.
 
-## 16. Despliegue
+## 19. Despliegue
 
-### 16.1 Qué entregas
+### 19.1 Qué entregas
 
 ```powershell
 orion --build app.orx -o app.exe
@@ -1142,13 +1352,13 @@ recursión, shapes, cadenas— y por eso nadie se enteró.
 también *con qué programa*. Un "hola mundo" compilado no prueba que tu
 aplicación compile.
 
-### 16.2 Qué necesita la máquina del usuario
+### 19.2 Qué necesita la máquina del usuario
 
 **Un navegador basado en Chromium, y nada más.** En Windows ya está: Edge viene
 con el sistema. Si su instalación está en una ruta poco habitual, se resuelve
 sin recompilar con la variable `ORION_CHROME` o pasando `chrome:` en `open()`.
 
-### 16.3 Comparado con Python
+### 19.3 Comparado con Python
 
 | | Python + Selenium | Orion |
 |---|---|---|
@@ -1171,11 +1381,17 @@ avisos en [`bench/web/README.md`](bench/web/README.md).
 
 | variante | extracción | proceso entero | RAM de la pila | auxiliar |
 |---|---:|---:|---:|---|
-| Selenium, idiomático | 14.132 ms | 24.953 ms | 62,3 MB | chromedriver |
-| Selenium, con JS a mano | 7,7 ms | 8.088 ms | 59,5 MB | chromedriver |
-| Playwright, idiomático | 9.234 ms | 12.175 ms | 317,3 MB | node |
-| Playwright, con JS a mano | 31,0 ms | 1.430 ms | 156,5 MB | node |
-| **Orion `extract`** | **8 ms** | **745 ms** | **16,2 MB** | **ninguno** |
+| Selenium, idiomático | 14.844 ms | 27.028 ms | 62,3 MB | chromedriver |
+| Selenium, con JS a mano | 10,4 ms | 8.188 ms | 61,7 MB | chromedriver |
+| Playwright, idiomático | 13.200 ms | 12.407 ms | 318,2 MB | node |
+| Playwright, con JS a mano | 29,6 ms | 1.729 ms | 156,8 MB | node |
+| **Orion `extract`** | **14 ms** | **858 ms** | **16,8 MB** | **ninguno** |
+
+Medido el 2026-08-23, con el recorrido de shadow roots activado (lo que trae
+`extract` de serie desde esa fecha). Aislado en esta misma página: 17 ms con
+shadow y 15 ms sin él, así que ese recorrido explica ~2 ms. Las cifras de una
+medición anterior eran algo mejores en las cinco variantes — la máquina no
+estaba en el mismo estado, y por eso la tabla lleva fecha.
 
 La RAM es la del proceso de automatización **más el auxiliar que arranca**, que
 no es el navegador y no es el mismo en los tres: Selenium necesita
@@ -1187,11 +1403,11 @@ idéntico para las tres.
 
 Dos lecturas honestas de esta tabla:
 
-**Orion no ejecuta JavaScript más rápido que nadie.** Sus 8 ms están en el mismo
-orden que los 7,7 ms de Selenium mandando JavaScript a mano, y esa diferencia
-cabe en el ruido. El resultado no es ese.
+**Orion no ejecuta JavaScript más rápido que nadie.** Sus 14 ms están en el
+mismo orden que los 10,4 ms de Selenium mandando JavaScript a mano, y esa
+diferencia cabe en el ruido. El resultado no es ese.
 
-**El resultado es la primera fila contra la última: 14 segundos contra 8
+**El resultado es la primera fila contra la última: 15 segundos contra 14
 milisegundos.** Esa primera fila es cómo enseñan a hacerlo las dos
 documentaciones — localizar los elementos y pedirles el texto uno a uno, que con
 500 filas × 4 campos son 2.000 viajes. Lo que aporta `extract` no es velocidad
@@ -1199,17 +1415,17 @@ bruta: es que **el camino rápido es el único que hay**. En las otras dos hay q
 saber que el problema existe y escribir JavaScript a mano dentro de Python, que
 es justo el trabajo que uno esperaba no tener que hacer.
 
-De los 8 segundos de Selenium, la extracción son 8 ms: el resto es arrancar
+De los 8 segundos de Selenium, la extracción son 10 ms: el resto es arrancar
 `chromedriver` (~1,4 s), `quit()` (~2,1 s) y **~4,2 s después de la última línea
 del script**, esperando a que su árbol de procesos termine de irse. Para una
 tarea suelta da igual; para un trabajo que corre cada cinco minutos, no.
 
-En memoria la diferencia es de otro orden: **16 MB contra 60 y contra 157**. La
-versión idiomática de Playwright llega a 317 MB porque retiene un handle por
+En memoria la diferencia es de otro orden: **17 MB contra 62 y contra 157**. La
+versión idiomática de Playwright llega a 318 MB porque retiene un handle por
 cada elemento consultado, y aquí son 2.000 vivos a la vez. Eso pesa cuando el
 trabajo corre en un servidor con varias tareas en paralelo.
 
-### 16.4 Redes corporativas
+### 19.4 Redes corporativas
 
 Este es el escenario donde la diferencia deja de ser comodidad y pasa a ser
 "puedo o no puedo".
@@ -1241,7 +1457,7 @@ navegador:
 web.open({ args: ["--proxy-server=http://proxy.empresa:8080"] })
 ```
 
-### 16.5 Lo que conviene saber
+### 19.5 Lo que conviene saber
 
 **Tamaño.** El ejecutable ronda los 58 MB. Es el binario completo de Orion:
 lleva GUI, TUI, tres motores de base de datos, OCR con sus modelos… todo, se use
@@ -1255,7 +1471,7 @@ probado compilar con el CRT estático.
 lo importante, pero un Windows recién instalado sin herramientas de desarrollo
 es la comprobación definitiva y cuesta cinco minutos.
 
-## 17. Diagnóstico
+## 20. Diagnóstico
 
 | Síntoma | Qué mirar |
 |---|---|

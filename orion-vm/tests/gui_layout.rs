@@ -270,7 +270,7 @@ fn stats_rechaza_un_argumento_que_no_sea_lista() {
     with_state(|s| { s.components.clear(); s.container_stack.clear(); });
     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
     let err = machine.run().expect_err("debe fallar con un argumento que no es lista");
-    assert!(err.contains("lista"), "el error debe explicar qué se esperaba: {err}");
+    assert!(err.contains("list"), "el error debe explicar qué se esperaba: {err}");
     let _ = EvalValue::Null;
 }
 

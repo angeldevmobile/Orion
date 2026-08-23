@@ -529,7 +529,7 @@ fn firma_sin_claves_de_confianza_avisa_pero_instala() {
     );
 
     assert!(out.status.success(), "debería instalar avisando, no bloquear:\n{text}");
-    assert!(text.contains("claves de confianza"), "no se avisó de la falta de claves:\n{text}");
+    assert!(text.contains("no trusted keys"), "no se avisó de la falta de claves:\n{text}");
 }
 
 #[test]
