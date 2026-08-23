@@ -223,13 +223,18 @@ impl From<crate::codegen::CodegenError> for OrionError {
 /// Convierte el string de error del VM en un OrionError estructurado.
 ///
 /// El VM produce strings con formato:
-///   "Linea 5 | mensaje del error\n    en foo (linea 3)\n    en main (linea 1)"
+///   "Line 5 | mensaje del error\n    at foo (line 3)\n    at main (line 1)"
+///
+/// El prefijo es un contrato entre el VM y este renderizador, no texto suelto:
+/// de él salen el número de línea y el fragmento de código que se pinta debajo
+/// del error. `Linea ` se sigue aceptando por si queda algún productor viejo.
 pub fn parse_vm_error(raw: &str, file: &str) -> OrionError {
     let mut lines = raw.lines();
     let first = lines.next().unwrap_or(raw);
 
-    // Intentar extraer "Linea N | mensaje"
-    let (line_num, message) = if let Some(rest) = first.strip_prefix("Linea ") {
+    // Intentar extraer "Line N | mensaje"
+    let prefijo = first.strip_prefix("Line ").or_else(|| first.strip_prefix("Linea "));
+    let (line_num, message) = if let Some(rest) = prefijo {
         let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
         let after_digits = &rest[digits.len()..];
         let msg = after_digits

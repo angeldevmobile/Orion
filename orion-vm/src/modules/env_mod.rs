@@ -5,7 +5,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // pull(key, default?) → valor de la variable de entorno
         "pull" | "get" => {
-            if args.is_empty() { return Err("env.pull requiere (key, default?)".into()); }
+            if args.is_empty() { return Err("env.pull requires (key, default?)".into()); }
             let key = to_str(&args[0]);
             match std::env::var(&key) {
                 Ok(v)  => Ok(EvalValue::Str(v)),
@@ -17,7 +17,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // push(key, value) → establece variable de entorno
         "push" | "set" => {
-            if args.len() < 2 { return Err("env.push requiere (key, value)".into()); }
+            if args.len() < 2 { return Err("env.push requires (key, value)".into()); }
             let key = to_str(&args[0]);
             let val = to_str(&args[1]);
             std::env::set_var(&key, &val);
@@ -40,19 +40,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // has(key) → bool
         "has" => {
-            if args.is_empty() { return Err("env.has requiere (key)".into()); }
+            if args.is_empty() { return Err("env.has requires (key)".into()); }
             let key = to_str(&args[0]);
             Ok(EvalValue::Bool(std::env::var(&key).is_ok()))
         }
         // remove(key)
         "remove" => {
-            if args.is_empty() { return Err("env.remove requiere (key)".into()); }
+            if args.is_empty() { return Err("env.remove requires (key)".into()); }
             let key = to_str(&args[0]);
             std::env::remove_var(&key);
             Ok(EvalValue::Null)
         }
 
-        f => Err(format!("env.{}() no existe", f)),
+        f => Err(format!("env.{}() does not exist", f)),
     }
 }
 

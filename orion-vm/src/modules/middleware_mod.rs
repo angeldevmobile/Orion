@@ -25,7 +25,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // rate_limit(max_req, window_secs) → Int (limiter ID)
         "rate_limit" => {
-            if args.len() < 2 { return Err("middleware.rate_limit requiere (max_req, window_secs)".into()); }
+            if args.len() < 2 { return Err("middleware.rate_limit requires (max_req, window_secs)".into()); }
             let max_req     = args[0].to_i64()? as u64;
             let window_secs = args[1].to_i64()? as u64;
             let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
@@ -39,13 +39,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // check_rate(limiter_id, client_ip) → Bool (true = permitido)
         "check_rate" => {
-            if args.len() < 2 { return Err("middleware.check_rate requiere (limiter_id, client_ip)".into()); }
+            if args.len() < 2 { return Err("middleware.check_rate requires (limiter_id, client_ip)".into()); }
             let id  = to_u64(&args[0])?;
             let ip  = to_str(&args[1]);
             let now = now_secs();
             let mut store = limiters().lock().unwrap();
             let lim = store.get_mut(&id)
-                .ok_or_else(|| format!("middleware: limiter {} no existe", id))?;
+                .ok_or_else(|| format!("middleware: limiter {} does not exist", id))?;
             // poda de ventanas vencidas para que el mapa no crezca sin límite
             if lim.clients.len() > 4096 {
                 let w = lim.window_secs;
@@ -65,11 +65,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // reset_rate(limiter_id, client_ip?) → Bool  (resetea contadores)
         "reset_rate" => {
-            if args.is_empty() { return Err("middleware.reset_rate requiere (limiter_id, ip?)".into()); }
+            if args.is_empty() { return Err("middleware.reset_rate requires (limiter_id, ip?)".into()); }
             let id = to_u64(&args[0])?;
             let mut store = limiters().lock().unwrap();
             let lim = store.get_mut(&id)
-                .ok_or_else(|| format!("middleware: limiter {} no existe", id))?;
+                .ok_or_else(|| format!("middleware: limiter {} does not exist", id))?;
             if args.len() > 1 {
                 lim.clients.shift_remove(&to_str(&args[1]));
             } else {
@@ -97,7 +97,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // auth_bearer(token, secret) → Dict {valid, sub?, payload?, error?}
         // Acepta el header completo: el prefijo "Bearer " se quita solo.
         "auth_bearer" => {
-            if args.len() < 2 { return Err("middleware.auth_bearer requiere (token, secret)".into()); }
+            if args.len() < 2 { return Err("middleware.auth_bearer requires (token, secret)".into()); }
             let raw = to_str(&args[0]);
             let token = raw.trim().strip_prefix("Bearer ").unwrap_or(raw.trim()).trim();
             validate_jwt(token, &to_str(&args[1]))
@@ -105,7 +105,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // log_req(method, path, status, ms) → Bool
         "log_req" => {
-            if args.len() < 4 { return Err("middleware.log_req requiere (method, path, status, ms)".into()); }
+            if args.len() < 4 { return Err("middleware.log_req requires (method, path, status, ms)".into()); }
             let method = to_str(&args[0]);
             let path   = to_str(&args[1]);
             let status = args[2].to_i64().unwrap_or(0);
@@ -120,12 +120,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // drop_rate(limiter_id) → Bool
         "drop_rate" => {
-            if args.is_empty() { return Err("middleware.drop_rate requiere (limiter_id)".into()); }
+            if args.is_empty() { return Err("middleware.drop_rate requires (limiter_id)".into()); }
             limiters().lock().unwrap().shift_remove(&to_u64(&args[0])?);
             Ok(EvalValue::Bool(true))
         }
 
-        f => Err(format!("middleware.{}() no existe", f)),
+        f => Err(format!("middleware.{}() does not exist", f)),
     }
 }
 
@@ -199,7 +199,7 @@ fn now_str() -> String {
 fn to_u64(v: &EvalValue) -> Result<u64, String> {
     match v {
         EvalValue::Int(n) if *n > 0 => Ok(*n as u64),
-        _ => Err("middleware: ID debe ser un Int positivo".into()),
+        _ => Err("middleware: the ID must be a positive Int".into()),
     }
 }
 

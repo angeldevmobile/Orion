@@ -11,7 +11,7 @@ pub fn run_format(path: &str, write_back: bool, check_only: bool) {
     let src = match fs::read_to_string(path) {
         Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
         Err(e) => {
-            banner::fail(&format!("No se puede leer '{path}': {e}"));
+            banner::fail(&format!("Cannot read '{path}': {e}"));
             std::process::exit(1);
         }
     };

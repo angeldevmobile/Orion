@@ -902,6 +902,13 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "upload", "browser.upload(pestaña, selector, archivos)", "Adjunta sin que se abra la ventana del sistema; el selector puede ser el <input type=file> o el botón que lo abre"));
     v.push(f("browser", "download", "browser.download(pestaña, selector, opts?)", "Pulsa y espera a que la descarga TERMINE; devuelve {path, name, bytes, url} y no hay diálogo \"Guardar como\""));
     v.push(f("browser", "pdf", "browser.pdf(pestaña, ruta, opts?)", "Imprime la página a PDF sin abrir el diálogo de impresión"));
+    v.push(f("browser", "emulate", "browser.emulate(page: handle, opts: dict|no) -> bool", "Device, viewport, user agent, language, timezone, geolocation and dark mode. { device: \"iphone\" } is a starting point, and any of its fields can be overridden in the same call; `no` clears it"));
+    v.push(f("browser", "cookies", "browser.cookies(page: handle, name?: string) -> list", "The cookies visible to the page, or just the one named"));
+    v.push(f("browser", "set_cookie", "browser.set_cookie(page: handle, cookie: dict) -> bool", "{ name, value, domain?, path?, expires?, http_only?, secure?, same_site? }; without a domain it is attached to the page's own url"));
+    v.push(f("browser", "clear_cookies", "browser.clear_cookies(page: handle) -> bool", "Removes every cookie in the browser"));
+    v.push(f("browser", "route", "browser.route(page: handle, pattern: string, action: dict, opts?: dict) -> bool", "Decides what the browser does with each matching request: { block: yes } · { fail: \"timedout\" } · { mock: { status, json|body, headers } } · { headers: {...} }. The first rule that matches wins; { times: n } fires only n times"));
+    v.push(f("browser", "unroute", "browser.unroute(page: handle, pattern?: string) -> int", "Removes the rules with that exact pattern, or all of them; returns how many were removed"));
+    v.push(f("browser", "routes", "browser.routes(page: handle) -> list", "The rules in place and how many times each has fired: { pattern, hits, times }"));
     v.push(f("browser", "watch", "browser.watch(pestaña, patrón)", "Arma la escucha; hay que llamarlo ANTES de provocar la petición"));
     v.push(f("browser", "capture", "browser.capture(pestaña, opts?)", "Devuelve lo que la página pidió y casó, con el JSON ya parseado"));
     v.push(f("browser", "save_state", "browser.save_state(pestaña, ruta)", "Guarda cookies y almacenamiento en un JSON; ese archivo VALE COMO CREDENCIAL"));

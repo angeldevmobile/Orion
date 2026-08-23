@@ -4,21 +4,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // load(path) → dict con la configuración
         "load" => {
-            if args.is_empty() { return Err("config.load requiere (path)".into()); }
+            if args.is_empty() { return Err("config.load requires (path)".into()); }
             load_config(&to_str(&args[0]))
         }
         // get(dict, key) → valor o null
         "get" => {
-            if args.len() < 2 { return Err("config.get requiere (dict, key)".into()); }
+            if args.len() < 2 { return Err("config.get requires (dict, key)".into()); }
             let key = to_str(&args[1]);
             match &args[0] {
                 EvalValue::Dict(m) => Ok(m.get(&key).cloned().unwrap_or(EvalValue::Null)),
-                _ => Err("config.get: primer argumento debe ser un dict".into()),
+                _ => Err("config.get: the first argument must be a dict".into()),
             }
         }
         // merge(base_dict, path) → dict fusionado (extra sobreescribe base)
         "merge" => {
-            if args.len() < 2 { return Err("config.merge requiere (base_dict, path)".into()); }
+            if args.len() < 2 { return Err("config.merge requires (base_dict, path)".into()); }
             let extra = load_config(&to_str(&args[1]))?;
             match (&args[0], extra) {
                 (EvalValue::Dict(base), EvalValue::Dict(ext)) => {
@@ -26,21 +26,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     for (k, v) in ext { merged.insert(k, v); }
                     Ok(EvalValue::Dict(merged))
                 }
-                _ => Err("config.merge: ambos valores deben ser dicts".into()),
+                _ => Err("config.merge: both values must be dicts".into()),
             }
         }
         // keys(dict) → lista de claves
         "keys" => {
-            if args.is_empty() { return Err("config.keys requiere (dict)".into()); }
+            if args.is_empty() { return Err("config.keys requires (dict)".into()); }
             match &args[0] {
                 EvalValue::Dict(m) => {
                     let keys: Vec<EvalValue> = m.keys().map(|k| EvalValue::Str(k.clone())).collect();
                     Ok(EvalValue::List(keys))
                 }
-                _ => Err("config.keys: argumento debe ser un dict".into()),
+                _ => Err("config.keys: the argument must be a dict".into()),
             }
         }
-        f => Err(format!("config.{}() no existe", f)),
+        f => Err(format!("config.{}() does not exist", f)),
     }
 }
 

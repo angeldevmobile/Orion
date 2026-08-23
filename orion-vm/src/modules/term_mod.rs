@@ -59,7 +59,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        other => Err(format!("term.{} no existe (usa: write, err, flush, is_tty, is_etty, clear_line)", other)),
+        other => Err(format!("term.{} does not exist (use: write, err, flush, is_tty, is_etty, clear_line)", other)),
     }
 }
 

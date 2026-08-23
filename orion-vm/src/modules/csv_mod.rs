@@ -7,7 +7,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // read(path, delimiter) → list of dicts con delimitador custom
         "read" => {
             if args.is_empty() {
-                return Err("csv.read requiere (path) o (path, delimiter)".into());
+                return Err("csv.read requires (path) o (path, delimiter)".into());
             }
             let path = str_arg("read", &args, 0)?;
             let delimiter = if args.len() >= 2 {
@@ -22,7 +22,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .has_headers(true)
                 .flexible(true)
                 .from_path(&path)
-                .map_err(|e| format!("csv.read: no se pudo abrir '{}': {}", path, e))?;
+                .map_err(|e| format!("csv.read: could not open '{}': {}", path, e))?;
 
             let headers: Vec<String> = rdr.headers()
                 .map_err(|e| format!("csv.read: error leyendo cabeceras: {}", e))?
@@ -67,7 +67,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // write(path, list_of_dicts, delimiter) → null
         "write" => {
             if args.len() < 2 {
-                return Err("csv.write requiere (path, datos) o (path, datos, delimiter)".into());
+                return Err("csv.write requires (path, datos) o (path, datos, delimiter)".into());
             }
             let path = str_arg("write", &args, 0)?;
             let rows = list_arg("write", &args, 1)?;
@@ -81,7 +81,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let mut wtr = csv::WriterBuilder::new()
                 .delimiter(delimiter)
                 .from_path(&path)
-                .map_err(|e| format!("csv.write: no se pudo crear '{}': {}", path, e))?;
+                .map_err(|e| format!("csv.write: could not create '{}': {}", path, e))?;
 
             // Extraer cabeceras del primer dict
             let headers = match rows.first() {
@@ -91,7 +91,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     h
                 }
                 Some(EvalValue::List(_)) => vec![],
-                _ => return Err("csv.write: los datos deben ser una lista de dicts o listas".into()),
+                _ => return Err("csv.write: the data must be a list of dicts or lists".into()),
             };
 
             if !headers.is_empty() {
@@ -113,7 +113,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                         wtr.write_record(&record)
                             .map_err(|e| format!("csv.write: error en fila: {}", e))?;
                     }
-                    _ => return Err("csv.write: cada fila debe ser un dict o lista".into()),
+                    _ => return Err("csv.write: each row must be a dict o lista".into()),
                 }
             }
             wtr.flush().map_err(|e| format!("csv.write: {}", e))?;
@@ -138,7 +138,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // column(list_of_dicts, "col_name") → list of values
         "column" => {
             if args.len() < 2 {
-                return Err("csv.column requiere (datos, columna)".into());
+                return Err("csv.column requires (datos, columna)".into());
             }
             let rows = list_arg("column", &args, 0)?;
             let col = str_arg("column", &args, 1)?;
@@ -157,7 +157,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // filter(list_of_dicts, "col", value) → list of dicts donde col == value
         "filter" => {
             if args.len() < 3 {
-                return Err("csv.filter requiere (datos, columna, valor)".into());
+                return Err("csv.filter requires (data, column, value)".into());
             }
             let rows = list_arg("filter", &args, 0)?;
             let col = str_arg("filter", &args, 1)?;
@@ -177,7 +177,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // select(list_of_dicts, ["col1", "col2"]) → list of dicts solo con esas columnas
         "select" => {
             if args.len() < 2 {
-                return Err("csv.select requiere (datos, [columnas])".into());
+                return Err("csv.select requires (datos, [columnas])".into());
             }
             let rows = list_arg("select", &args, 0)?;
             let cols_raw = list_arg("select", &args, 1)?;
@@ -206,7 +206,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // sort(list_of_dicts, "col", "desc") → descendente
         "sort" => {
             if args.len() < 2 {
-                return Err("csv.sort requiere (datos, columna) o (datos, columna, \"desc\")".into());
+                return Err("csv.sort requires (datos, columna) o (datos, columna, \"desc\")".into());
             }
             let mut rows = list_arg("sort", &args, 0)?;
             let col = str_arg("sort", &args, 1)?;
@@ -227,7 +227,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // group_by(list_of_dicts, "col") → dict { valor → list of dicts }
         "group_by" => {
             if args.len() < 2 {
-                return Err("csv.group_by requiere (datos, columna)".into());
+                return Err("csv.group_by requires (datos, columna)".into());
             }
             let rows = list_arg("group_by", &args, 0)?;
             let col = str_arg("group_by", &args, 1)?;
@@ -255,7 +255,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // stats(list_of_dicts, "col") → dict { min, max, sum, avg, std, median, p25, p75, count }
         "stats" => {
             if args.len() < 2 {
-                return Err("csv.stats requiere (datos, columna)".into());
+                return Err("csv.stats requires (datos, columna)".into());
             }
             let rows = list_arg("stats", &args, 0)?;
             let col = str_arg("stats", &args, 1)?;
@@ -270,7 +270,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 }
             }
             if nums.is_empty() {
-                return Err(format!("csv.stats: columna '{}' no tiene valores numéricos", col));
+                return Err(format!("csv.stats: columna '{}' has no numeric values", col));
             }
             let mut sorted = nums.clone();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -305,7 +305,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // dedupe(list_of_dicts, "col") → list sin duplicados por columna
         "dedupe" => {
             if args.len() < 2 {
-                return Err("csv.dedupe requiere (datos, columna)".into());
+                return Err("csv.dedupe requires (datos, columna)".into());
             }
             let rows = list_arg("dedupe", &args, 0)?;
             let col = str_arg("dedupe", &args, 1)?;
@@ -326,7 +326,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // rename(list_of_dicts, "viejo", "nuevo") → list con columna renombrada
         "rename" => {
             if args.len() < 3 {
-                return Err("csv.rename requiere (datos, viejo, nuevo)".into());
+                return Err("csv.rename requires (datos, viejo, nuevo)".into());
             }
             let rows = list_arg("rename", &args, 0)?;
             let old_col = str_arg("rename", &args, 1)?;
@@ -349,7 +349,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // slice(list, start, end) → subconjunto de filas
         "slice" => {
             if args.len() < 3 {
-                return Err("csv.slice requiere (datos, inicio, fin)".into());
+                return Err("csv.slice requires (datos, inicio, fin)".into());
             }
             let rows = list_arg("slice", &args, 0)?;
             let start = int_arg("slice", &args, 1)? as usize;
@@ -456,7 +456,7 @@ fn int_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<i64, String>
 fn list_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<Vec<EvalValue>, String> {
     match args.get(idx) {
         Some(EvalValue::List(v)) => Ok(v.clone()),
-        Some(other) => Err(format!("csv.{}: se esperaba lista, se recibió {}", fn_name, other.type_name())),
+        Some(other) => Err(format!("csv.{}: expected a list, got {}", fn_name, other.type_name())),
         None => Err(format!("csv.{}: argumento {} requerido", fn_name, idx + 1)),
     }
 }

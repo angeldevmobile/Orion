@@ -8,37 +8,37 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // compress(src, dest) → crea un .zip (archivo o carpeta)
         "compress" => {
-            if args.len() < 2 { return Err("zip.compress requiere (src, dest)".into()); }
+            if args.len() < 2 { return Err("zip.compress requires (src, dest)".into()); }
             compress_zip(&to_str(&args[0]), &to_str(&args[1]))
         }
         // decompress(src, dest) / extract(src, dest)
         "decompress" | "extract" => {
-            if args.len() < 2 { return Err("zip.decompress requiere (src, dest)".into()); }
+            if args.len() < 2 { return Err("zip.decompress requires (src, dest)".into()); }
             decompress_zip(&to_str(&args[0]), &to_str(&args[1]))
         }
         // list(path) → lista de entradas del zip
         "list" => {
-            if args.is_empty() { return Err("zip.list requiere (path)".into()); }
+            if args.is_empty() { return Err("zip.list requires (path)".into()); }
             list_zip(&to_str(&args[0]))
         }
         // gzip(src, dest) → comprime un archivo con gzip
         "gzip" => {
-            if args.len() < 2 { return Err("zip.gzip requiere (src, dest)".into()); }
+            if args.len() < 2 { return Err("zip.gzip requires (src, dest)".into()); }
             gzip_file(&to_str(&args[0]), &to_str(&args[1]))
         }
         // gunzip(src, dest) → descomprime un archivo gzip
         "gunzip" => {
-            if args.len() < 2 { return Err("zip.gunzip requiere (src, dest)".into()); }
+            if args.len() < 2 { return Err("zip.gunzip requires (src, dest)".into()); }
             gunzip_file(&to_str(&args[0]), &to_str(&args[1]))
         }
-        f => Err(format!("zip.{}() no existe", f)),
+        f => Err(format!("zip.{}() does not exist", f)),
     }
 }
 
 fn compress_zip(src: &str, dest: &str) -> Result<EvalValue, String> {
     let src_path = Path::new(src);
     if !src_path.exists() {
-        return Err(format!("zip.compress: '{}' no existe", src));
+        return Err(format!("zip.compress: '{}' does not exist", src));
     }
     let out_file = fs::File::create(dest)
         .map_err(|e| format!("zip.compress: {}", e))?;

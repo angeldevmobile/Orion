@@ -58,7 +58,7 @@ pub fn load_orx_module_jit(path: &str) -> i64 {
     };
 
     let src = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| fail(format!("No se pudo leer '{}': {}", path, e)));
+        .unwrap_or_else(|e| fail(format!("Could not read '{}': {}", path, e)));
     let tokens = lex(&src).unwrap_or_else(|e| fail(format!("lex '{}': {:?}", path, e)));
     let ast = parse(tokens).unwrap_or_else(|e| fail(format!("parse '{}': {:?}", path, e)));
     let bc = compile(ast).unwrap_or_else(|e| fail(format!("compile '{}': {:?}", path, e)));

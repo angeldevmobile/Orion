@@ -55,7 +55,7 @@ fn resolve_call(
     };
 
     if args.len() > params.len() {
-        return Err(err(format!("'{}' recibió demasiados argumentos", fname)));
+        return Err(err(format!("'{}' got too many arguments", fname)));
     }
     // índice de cada parámetro por nombre
     let mut by_name: HashMap<&str, usize> = HashMap::new();
@@ -71,7 +71,7 @@ fn resolve_call(
     for (k, v) in kwargs.drain(..) {
         let idx = *by_name
             .get(k.as_str())
-            .ok_or_else(|| err(format!("'{}' no tiene un parámetro llamado '{}'", fname, k)))?;
+            .ok_or_else(|| err(format!("'{}' has no parameter named '{}'", fname, k)))?;
         if slots[idx].is_some() {
             return Err(err(format!("argumento '{}' de '{}' dado dos veces", k, fname)));
         }
@@ -92,7 +92,7 @@ fn resolve_call(
         } else if let Some(def) = &params[i].default {
             new_args.push(def.clone());
         } else {
-            return Err(err(format!("falta el argumento '{}' de '{}'", params[i].name, fname)));
+            return Err(err(format!("missing argument '{}' of '{}'", params[i].name, fname)));
         }
     }
     *args = new_args;

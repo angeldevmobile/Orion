@@ -5,7 +5,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // embed.text(text, model?) → List<float>
         "text" => {
-            if args.is_empty() { return Err("embed.text requiere (text, model?)".into()); }
+            if args.is_empty() { return Err("embed.text requires (text, model?)".into()); }
             let text  = to_str(&args[0]);
             let model = if args.len() > 1 { to_str(&args[1]) } else { "auto".into() };
             let emb   = get_embedding(&text, &model)?;
@@ -13,10 +13,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // embed.batch(texts, model?) → List<List<float>>
         "batch" => {
-            if args.is_empty() { return Err("embed.batch requiere (texts, model?)".into()); }
+            if args.is_empty() { return Err("embed.batch requires (texts, model?)".into()); }
             let texts = match &args[0] {
                 EvalValue::List(v) => v.clone(),
-                _ => return Err("embed.batch: texts debe ser una lista de strings".into()),
+                _ => return Err("embed.batch: texts must be a list de strings".into()),
             };
             let model = if args.len() > 1 { to_str(&args[1]) } else { "auto".into() };
             let mut result = Vec::new();
@@ -28,21 +28,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // embed.similarity(v1, v2) → float  (-1..1)
         "similarity" => {
-            if args.len() < 2 { return Err("embed.similarity requiere (v1, v2)".into()); }
+            if args.len() < 2 { return Err("embed.similarity requires (v1, v2)".into()); }
             let v1 = to_float_vec(&args[0])?;
             let v2 = to_float_vec(&args[1])?;
             Ok(EvalValue::Float(cosine_similarity(&v1, &v2)))
         }
         // embed.distance(v1, v2) → float  (0..2, donde 0 = idénticos)
         "distance" => {
-            if args.len() < 2 { return Err("embed.distance requiere (v1, v2)".into()); }
+            if args.len() < 2 { return Err("embed.distance requires (v1, v2)".into()); }
             let v1 = to_float_vec(&args[0])?;
             let v2 = to_float_vec(&args[1])?;
             Ok(EvalValue::Float(1.0 - cosine_similarity(&v1, &v2)))
         }
         // embed.normalize(v) → List<float>  (L2)
         "normalize" => {
-            if args.is_empty() { return Err("embed.normalize requiere (vector)".into()); }
+            if args.is_empty() { return Err("embed.normalize requires (vector)".into()); }
             let v = to_float_vec(&args[0])?;
             let n = l2_norm(&v);
             if n == 0.0 { return Ok(EvalValue::List(v.into_iter().map(EvalValue::Float).collect())); }
@@ -50,7 +50,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // embed.dot(v1, v2) → float  (producto punto)
         "dot" => {
-            if args.len() < 2 { return Err("embed.dot requiere (v1, v2)".into()); }
+            if args.len() < 2 { return Err("embed.dot requires (v1, v2)".into()); }
             let v1 = to_float_vec(&args[0])?;
             let v2 = to_float_vec(&args[1])?;
             let dot: f64 = v1.iter().zip(v2.iter()).map(|(a, b)| a * b).sum();
@@ -59,11 +59,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // embed.search(query_text, texts, top?, model?) → List<{text, score, index}>
         // Nota: hace N+1 llamadas a la API. Para corpus grandes usa el módulo `vector`.
         "search" => {
-            if args.len() < 2 { return Err("embed.search requiere (query, texts, top?, model?)".into()); }
+            if args.len() < 2 { return Err("embed.search requires (query, texts, top?, model?)".into()); }
             let query = to_str(&args[0]);
             let texts = match &args[1] {
                 EvalValue::List(v) => v.clone(),
-                _ => return Err("embed.search: texts debe ser una lista de strings".into()),
+                _ => return Err("embed.search: texts must be a list de strings".into()),
             };
             let top   = if args.len() > 2 { to_usize(&args[2]).unwrap_or(5) } else { 5 };
             let model = if args.len() > 3 { to_str(&args[3]) } else { "auto".into() };
@@ -87,7 +87,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }).collect();
             Ok(EvalValue::List(result))
         }
-        f => Err(format!("embed.{}() no existe", f)),
+        f => Err(format!("embed.{}() does not exist", f)),
     }
 }
 
@@ -133,7 +133,7 @@ fn embed_openai(env: &HashMap<String, String>, model: &str, text: &str) -> Resul
         .map_err(|e| format!("embed[openai]: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     let arr = json["data"][0]["embedding"].as_array()
-        .ok_or_else(|| format!("embed[openai]: respuesta inesperada: {}", json))?;
+        .ok_or_else(|| format!("embed[openai]: unexpected response: {}", json))?;
     Ok(arr.iter().filter_map(|v| v.as_f64()).collect())
 }
 
@@ -149,7 +149,7 @@ fn embed_gemini(env: &HashMap<String, String>, model: &str, text: &str) -> Resul
         .map_err(|e| format!("embed[gemini]: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     let arr = json["embedding"]["values"].as_array()
-        .ok_or_else(|| format!("embed[gemini]: respuesta inesperada: {}", json))?;
+        .ok_or_else(|| format!("embed[gemini]: unexpected response: {}", json))?;
     Ok(arr.iter().filter_map(|v| v.as_f64()).collect())
 }
 
@@ -162,7 +162,7 @@ fn embed_ollama(env: &HashMap<String, String>, model: &str, text: &str) -> Resul
         .map_err(|e| format!("embed[ollama]: {}. ¿Está Ollama corriendo en {}?", e, base))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     let arr = json["embedding"].as_array()
-        .ok_or_else(|| format!("embed[ollama]: respuesta inesperada: {}", json))?;
+        .ok_or_else(|| format!("embed[ollama]: unexpected response: {}", json))?;
     Ok(arr.iter().filter_map(|v| v.as_f64()).collect())
 }
 
@@ -188,9 +188,9 @@ pub fn to_float_vec(v: &EvalValue) -> Result<Vec<f64>, String> {
         EvalValue::List(items) => items.iter().map(|x| match x {
             EvalValue::Float(f) => Ok(*f),
             EvalValue::Int(i)   => Ok(*i as f64),
-            other => Err(format!("embed: vector debe contener números, encontró {}", other.type_name())),
+            other => Err(format!("embed: vector must contain numbers, found {}", other.type_name())),
         }).collect(),
-        _ => Err("embed: se esperaba un vector (lista de números)".into()),
+        _ => Err("embed: expected a vector (list of numbers)".into()),
     }
 }
 
@@ -198,7 +198,7 @@ fn to_usize(v: &EvalValue) -> Result<usize, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n as usize),
         EvalValue::Float(f) => Ok(*f as usize),
-        _ => Err("embed: se esperaba un número entero".into()),
+        _ => Err("embed: expected an integer".into()),
     }
 }
 

@@ -131,9 +131,9 @@ impl EvalValue {
             EvalValue::Int(n)   => Ok(*n),
             EvalValue::Float(f) => Ok(*f as i64),
             EvalValue::Str(s)   => s.trim().parse::<i64>()
-                .map_err(|_| format!("No se puede convertir '{}' a int", s)),
+                .map_err(|_| format!("Cannot convert '{}' to int", s)),
             EvalValue::Bool(b)  => Ok(if *b { 1 } else { 0 }),
-            other => Err(format!("No se puede convertir {} a int", other.type_name())),
+            other => Err(format!("Cannot convert {} to int", other.type_name())),
         }
     }
 
@@ -142,8 +142,8 @@ impl EvalValue {
             EvalValue::Float(f) => Ok(*f),
             EvalValue::Int(n)   => Ok(*n as f64),
             EvalValue::Str(s)   => s.trim().parse::<f64>()
-                .map_err(|_| format!("No se puede convertir '{}' a float", s)),
-            other => Err(format!("No se puede convertir {} a float", other.type_name())),
+                .map_err(|_| format!("Cannot convert '{}' to float", s)),
+            other => Err(format!("Cannot convert {} to float", other.type_name())),
         }
     }
 }

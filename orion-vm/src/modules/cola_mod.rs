@@ -20,7 +20,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // push(nombre, valor) → Bool  — agrega al final
         "push" | "enviar" => {
-            if args.len() < 2 { return Err("cola.enviar requiere (nombre, valor)".into()); }
+            if args.len() < 2 { return Err("cola.enviar requires (name, value)".into()); }
             let name = to_str(&args[0]);
             let val  = crate::modules::json_mod::eval_to_json(args[1].clone());
             queues().lock().unwrap()
@@ -71,12 +71,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .keys().map(|k| EvalValue::Str(k.clone())).collect();
             Ok(EvalValue::List(names))
         }
-        f => Err(format!("cola.{}() no existe", f)),
+        f => Err(format!("cola.{}() does not exist", f)),
     }
 }
 
 fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("{} requiere (nombre)", fn_name)); }
+    if args.is_empty() { return Err(format!("{} requires (nombre)", fn_name)); }
     Ok(to_str(&args[0]))
 }
 

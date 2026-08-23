@@ -997,3 +997,72 @@ fn lambda_dentro_de_interpolacion_se_registra() {
         if e != "[2, 4, 6]" { error "map con lambda en interpolacion: " + e }
     "#);
 }
+
+// ── `main` se llama sola: compile_entry ─────────────────────────────────────
+//
+// Un programa cuyo código entero vive dentro de `fn main()` terminaba con
+// éxito, sin salida y sin aviso. `compile_entry` añade la llamada; `compile`
+// (el que usan los módulos cargados con `use`, el REPL y el LSP) no.
+
+use orion_vm::instruction::Instruction;
+
+/// Cuántas veces se llama a `main` en el cuerpo principal.
+fn llamadas_a_main(src: &str, entry: bool) -> usize {
+    let tokens = lexer::lex(src).expect("lex");
+    let stmts = parser::parse(tokens).expect("parse");
+    let bc = if entry {
+        codegen::compile_entry(stmts).expect("codegen")
+    } else {
+        codegen::compile(stmts).expect("codegen")
+    };
+    bc.main.iter()
+        .filter(|i| matches!(i, Instruction::Call(n, 0) if n == "main"))
+        .count()
+}
+
+#[test]
+fn main_sin_llamar_se_invoca_sola() {
+    assert_eq!(llamadas_a_main("fn main() { show 1 }", true), 1);
+}
+
+#[test]
+fn main_ya_llamada_no_se_duplica() {
+    // Los demos que ya escriben `main()` a mano deben seguir corriendo una vez.
+    assert_eq!(llamadas_a_main("fn main() { show 1 }\nmain()", true), 1);
+}
+
+#[test]
+fn main_llamada_desde_otra_funcion_no_se_duplica() {
+    // `arranca()` ya la ejecuta. Si además se añadiera la llamada automática al
+    // cuerpo principal, el programa correría dos veces.
+    let src = "fn main() { show 1 }\nfn arranca() { return main() }\narranca()";
+    assert_eq!(llamadas_a_main(src, true), 0);
+}
+
+#[test]
+fn main_usada_como_valor_no_se_invoca_sola() {
+    // Pasarla a otra función es nombrarla: el programa decide cuándo corre.
+    let src = "fn main() { show 1 }\nfn ejecuta(f) { return f() }\nejecuta(main)";
+    assert_eq!(llamadas_a_main(src, true), 0);
+}
+
+#[test]
+fn main_con_argumentos_obligatorios_no_se_inventa_la_llamada() {
+    assert_eq!(llamadas_a_main("fn main(x) { show x }", true), 0);
+}
+
+#[test]
+fn main_con_defaults_si_se_invoca() {
+    assert_eq!(llamadas_a_main("fn main(x = 1) { show x }", true), 1);
+}
+
+#[test]
+fn un_modulo_importado_no_ejecuta_su_main() {
+    // `compile` es el camino de los módulos: aquí NO se añade la llamada.
+    assert_eq!(llamadas_a_main("fn main() { show 1 }", false), 0);
+}
+
+#[test]
+fn sin_main_no_cambia_nada() {
+    assert_eq!(llamadas_a_main("show 1", true), 0);
+}

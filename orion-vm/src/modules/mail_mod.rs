@@ -7,15 +7,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // send(smtp, usuario, clave, de, para, asunto, cuerpo) → Bool
         "send" | "enviar" => {
-            check_len(&args, 7, "mail.enviar requiere (smtp, usuario, clave, de, para, asunto, cuerpo)")?;
+            check_len(&args, 7, "mail.enviar requires (smtp, usuario, clave, de, para, asunto, cuerpo)")?;
             send_mail(&args, false)
         }
         // send_html(smtp, usuario, clave, de, para, asunto, html) → Bool
         "send_html" | "enviar_html" => {
-            check_len(&args, 7, "mail.enviar_html requiere (smtp, usuario, clave, de, para, asunto, html)")?;
+            check_len(&args, 7, "mail.enviar_html requires (smtp, usuario, clave, de, para, asunto, html)")?;
             send_mail(&args, true)
         }
-        f => Err(format!("mail.{}() no existe", f)),
+        f => Err(format!("mail.{}() does not exist", f)),
     }
 }
 
@@ -40,7 +40,7 @@ fn send_mail(args: &[EvalValue], html: bool) -> Result<EvalValue, String> {
 
     let creds  = Credentials::new(usuario, clave);
     let mailer = SmtpTransport::relay(&smtp)
-        .map_err(|e| format!("mail: no se pudo conectar a '{}': {}", smtp, e))?
+        .map_err(|e| format!("mail: could not connect a '{}': {}", smtp, e))?
         .credentials(creds)
         .build();
 

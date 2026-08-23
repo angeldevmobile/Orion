@@ -68,14 +68,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // step(universe, dt?, opts?) → universo actualizado
         // opts = { g, softening }
         "step" => {
-            if args.is_empty() { return Err("cosmos.step requiere (universe, dt?, opts?)".into()); }
+            if args.is_empty() { return Err("cosmos.step requires (universe, dt?, opts?)".into()); }
             let dt = if args.len() > 1 { to_f64(&args[1])? } else { 1.0 };
             let phys = physics_from(args.get(2))?;
             step_universe(args[0].clone(), dt, phys)
         }
         // run(universe, steps?, dt?, opts?) → universo final
         "run" => {
-            if args.is_empty() { return Err("cosmos.run requiere (universe, steps?, dt?, opts?)".into()); }
+            if args.is_empty() { return Err("cosmos.run requires (universe, steps?, dt?, opts?)".into()); }
             let mut universe = args[0].clone();
             let steps = if args.len() > 1 { to_i64(&args[1])? as usize } else { 10 };
             let dt    = if args.len() > 2 { to_f64(&args[2])? } else { 1.0 };
@@ -87,13 +87,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // summary(universe) → {time, bodies}
         "summary" => {
-            if args.is_empty() { return Err("cosmos.summary requiere (universe)".into()); }
+            if args.is_empty() { return Err("cosmos.summary requires (universe)".into()); }
             universe_summary(&args[0])
         }
         // gravity(b1, b2, G|opts?) → fuerza [fx, fy, fz]
         // El tercer argumento admite un número (G) o un Dict { g, softening }.
         "gravity" => {
-            if args.len() < 2 { return Err("cosmos.gravity requiere (b1, b2, G|opts?)".into()); }
+            if args.len() < 2 { return Err("cosmos.gravity requires (b1, b2, G|opts?)".into()); }
             let phys = physics_from(args.get(2))?;
             let b1 = parse_body(&args[0])?;
             let b2 = parse_body(&args[1])?;
@@ -102,13 +102,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // energy(universe, G|opts?) → {kinetic, potential, total}
         "energy" => {
-            if args.is_empty() { return Err("cosmos.energy requiere (universe, G|opts?)".into()); }
+            if args.is_empty() { return Err("cosmos.energy requires (universe, G|opts?)".into()); }
             let phys = physics_from(args.get(1))?;
             universe_energy(&args[0], phys)
         }
         // distance(b1, b2) → f64
         "distance" => {
-            if args.len() < 2 { return Err("cosmos.distance requiere (b1, b2)".into()); }
+            if args.len() < 2 { return Err("cosmos.distance requires (b1, b2)".into()); }
             let b1 = parse_body(&args[0])?;
             let b2 = parse_body(&args[1])?;
             let d  = body_distance(&b1, &b2);
@@ -124,7 +124,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 if let Some(v) = opt_f64(m, &["max", "maximo"]) { hi = v; }
                 seed = opt_u64(m, &["seed", "semilla"]);
                 if lo > hi {
-                    return Err(format!("cosmos.stardust: rango inválido ({lo} > {hi})"));
+                    return Err(format!("cosmos.stardust: invalid range ({lo} > {hi})"));
                 }
             }
             let mut rng: Box<dyn RngCore> = match seed {
@@ -139,7 +139,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(dust))
         }
 
-        f => Err(format!("cosmos.{}() no existe", f)),
+        f => Err(format!("cosmos.{}() does not exist", f)),
     }
 }
 
@@ -161,7 +161,7 @@ fn make_body(name: &str, mass: f64, pos: [f64;3], vel: [f64;3]) -> EvalValue {
 }
 
 fn parse_body(v: &EvalValue) -> Result<Body, String> {
-    let EvalValue::Dict(m) = v else { return Err("cosmos: se esperaba un body (dict)".into()); };
+    let EvalValue::Dict(m) = v else { return Err("cosmos: expected a body (dict)".into()); };
     Ok(Body {
         name: m.get("name").map(|x| format!("{}", x)).unwrap_or_default(),
         mass: to_f64(m.get("mass").ok_or("cosmos: body sin campo 'mass'")?)?,
@@ -213,7 +213,7 @@ fn physics_from(arg: Option<&EvalValue>) -> Result<Physics, String> {
         Some(EvalValue::Dict(m)) => {
             if let Some(g) = opt_f64(m, &["g", "G", "gravedad", "gravity"]) { p.g = g; }
             if let Some(s) = opt_f64(m, &["softening", "suavizado", "epsilon"]) {
-                if s < 0.0 { return Err("cosmos: 'softening' no puede ser negativo".into()); }
+                if s < 0.0 { return Err("cosmos: 'softening' cannot be negative".into()); }
                 p.softening = s;
             }
         }
@@ -258,7 +258,7 @@ impl SpawnRange {
             if let Some(v) = opt_f64(m, keys[1]) { target.1 = v; }
             if target.0 > target.1 {
                 return Err(format!(
-                    "cosmos: rango inválido ({} > {}): el mínimo no puede superar al máximo",
+                    "cosmos: invalid range ({} > {}): el mínimo no puede superar al máximo",
                     target.0, target.1
                 ));
             }
@@ -319,11 +319,11 @@ fn spawn_body(name: &str, r: &SpawnRange, rng: &mut dyn RngCore) -> EvalValue {
 
 fn step_universe(universe: EvalValue, dt: f64, phys: Physics) -> Result<EvalValue, String> {
     let EvalValue::Dict(mut uni_map) = universe else {
-        return Err("cosmos.step: se esperaba un universo (dict)".into());
+        return Err("cosmos.step: expected a universe (dict)".into());
     };
     let bodies_val = uni_map.get("bodies").cloned().ok_or("cosmos.step: universo sin 'bodies'")?;
     let EvalValue::List(body_vals) = bodies_val else {
-        return Err("cosmos.step: 'bodies' debe ser una lista".into());
+        return Err("cosmos.step: 'bodies' must be a list".into());
     };
 
     let mut bodies: Vec<Body> = body_vals.iter().map(parse_body).collect::<Result<_, _>>()?;
@@ -356,7 +356,7 @@ fn step_universe(universe: EvalValue, dt: f64, phys: Physics) -> Result<EvalValu
 }
 
 fn universe_summary(universe: &EvalValue) -> Result<EvalValue, String> {
-    let EvalValue::Dict(m) = universe else { return Err("cosmos.summary: se esperaba un universo".into()); };
+    let EvalValue::Dict(m) = universe else { return Err("cosmos.summary: expected a universe".into()); };
     let count = match m.get("bodies") {
         Some(EvalValue::List(v)) => v.len() as i64,
         _ => 0,
@@ -369,9 +369,9 @@ fn universe_summary(universe: &EvalValue) -> Result<EvalValue, String> {
 }
 
 fn universe_energy(universe: &EvalValue, phys: Physics) -> Result<EvalValue, String> {
-    let EvalValue::Dict(m) = universe else { return Err("cosmos.energy: se esperaba un universo".into()); };
+    let EvalValue::Dict(m) = universe else { return Err("cosmos.energy: expected a universe".into()); };
     let bodies_val = m.get("bodies").ok_or("cosmos.energy: universo sin 'bodies'")?;
-    let EvalValue::List(body_vals) = bodies_val else { return Err("cosmos.energy: 'bodies' debe ser lista".into()); };
+    let EvalValue::List(body_vals) = bodies_val else { return Err("cosmos.energy: 'bodies' must be a list".into()); };
     let bodies: Vec<Body> = body_vals.iter().map(parse_body).collect::<Result<_, _>>()?;
 
     let kinetic: f64 = bodies.iter().map(|b| {
@@ -404,7 +404,7 @@ fn to_f64(v: &EvalValue) -> Result<f64, String> {
     match v {
         EvalValue::Float(f) => Ok(*f),
         EvalValue::Int(n)   => Ok(*n as f64),
-        other => Err(format!("cosmos: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("cosmos: expected a number, got {}", other.type_name())),
     }
 }
 
@@ -412,7 +412,7 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("cosmos: esperaba entero, recibió {}", other.type_name())),
+        other => Err(format!("cosmos: expected an integer, got {}", other.type_name())),
     }
 }
 

@@ -56,7 +56,7 @@ pub fn run_debug(path: &str) {
     let mut session = DebugSession::new(bc, &src);
 
     banner::section("Orion Debugger");
-    println!("  {}Archivo :{} {}", CYN, RST, path);
+    println!("  {}File    :{} {}", CYN, RST, path);
     println!("  {}{}h{} — ayuda   {}q{} — salir{}", DIM, YLW, RST, YLW, RST, RST);
     println!();
 
@@ -200,10 +200,10 @@ fn show_pause(session: &DebugSession) {
     let reason = match &session.pause_reason {
         Some(PauseReason::Breakpoint { id, .. }) => format!("breakpoint #{}", id),
         Some(PauseReason::Step)      => "step".to_string(),
-        Some(PauseReason::Entry)     => "inicio del programa".to_string(),
+        Some(PauseReason::Entry)     => "program start".to_string(),
         Some(PauseReason::UserPause) => "pausado".to_string(),
         Some(PauseReason::Error(e))  => format!("{}error:{} {}", RED, RST, e),
-        None                         => "desconocido".to_string(),
+        None                         => "unknown".to_string(),
     };
     println!("\n{}[DEBUG]{} Line {} — {}", CYN, RST, line, reason);
     print_context(session, 2);
@@ -357,6 +357,6 @@ fn compile_src(src: &str, path: &str) -> Result<crate::bytecode::OrionBytecode, 
         .map_err(|e| OrionError::from(e).with_file(path))?;
     let stmts = crate::parser::parse(tokens)
         .map_err(|e| OrionError::from(e).with_file(path))?;
-    crate::codegen::compile(stmts)
+    crate::codegen::compile_entry(stmts)
         .map_err(|e| OrionError::from(e).with_file(path))
 }

@@ -29,14 +29,14 @@ fn new_handle() -> String {
 fn arg_handle(args: &[EvalValue], pos: usize) -> Result<String, String> {
     match args.get(pos) {
         Some(EvalValue::Str(s)) => Ok(s.clone()),
-        _ => Err("serie: se esperaba un handle de serie (string)".into()),
+        _ => Err("serie: expected a serie handle (string)".into()),
     }
 }
 
 fn arg_window(args: &[EvalValue], pos: usize, name: &str) -> Result<usize, String> {
     match args.get(pos) {
         Some(EvalValue::Int(n)) if *n > 0 => Ok(*n as usize),
-        _ => Err(format!("serie.{}: window debe ser un entero positivo", name)),
+        _ => Err(format!("serie.{}: window must be a positive integer", name)),
     }
 }
 
@@ -47,9 +47,9 @@ fn list_to_floats(list: &[EvalValue]) -> Result<Vec<f64>, String> {
         EvalValue::Dict(d)  => match d.get("v").or_else(|| d.get("value")) {
             Some(EvalValue::Int(n))   => Ok(*n as f64),
             Some(EvalValue::Float(f)) => Ok(*f),
-            _ => Err("serie: dict debe tener campo 'v' numérico".into()),
+            _ => Err("serie: the dict must have a numeric 'v' field".into()),
         },
-        _ => Err("serie: la lista debe contener números o {t, v}".into()),
+        _ => Err("serie: the list must contain numbers or {t, v}".into()),
     }).collect()
 }
 
@@ -131,7 +131,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "free"        => fn_free(args),
         // count() → número de series vivas en memoria
         "count"       => Ok(EvalValue::Int(with_series(|s| s.len() as i64))),
-        _ => Err(format!("serie.{} no existe", function)),
+        _ => Err(format!("serie.{} does not exist", function)),
     }
 }
 
@@ -151,7 +151,7 @@ fn fn_new(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let timestamps = list_to_timestamps(items);
             Ok(EvalValue::Str(store_serie(values, timestamps)))
         }
-        _ => Err("serie.new: se esperaba una lista".into()),
+        _ => Err("serie.new: expected a list".into()),
     }
 }
 
@@ -159,7 +159,7 @@ fn fn_from_table(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("serie.from_table(tabla, columna)".into()); }
     let col = match &args[1] {
         EvalValue::Str(s) => s.clone(),
-        _ => return Err("serie.from_table: columna debe ser string".into()),
+        _ => return Err("serie.from_table: the column must be a string".into()),
     };
     match &args[0] {
         EvalValue::List(rows) => {
@@ -186,7 +186,7 @@ fn fn_from_table(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let ts = if has_ts && timestamps.len() == values.len() { Some(timestamps) } else { None };
             Ok(EvalValue::Str(store_serie(values, ts)))
         }
-        _ => Err("serie.from_table: se esperaba una lista de dicts".into()),
+        _ => Err("serie.from_table: expected a list of dicts".into()),
     }
 }
 
@@ -196,7 +196,7 @@ fn fn_values(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_series(|s| match s.get(&id) {
         Some(sr) => Ok(EvalValue::List(sr.values.iter().map(|&v| EvalValue::Float(v)).collect())),
-        None => Err(format!("serie '{}' no existe", id)),
+        None => Err(format!("serie '{}' does not exist", id)),
     })
 }
 
@@ -207,7 +207,7 @@ fn fn_timestamps(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             sr.timestamps.as_deref().unwrap_or(&[]).iter()
                 .map(|t| EvalValue::Str(t.clone())).collect()
         )),
-        None => Err(format!("serie '{}' no existe", id)),
+        None => Err(format!("serie '{}' does not exist", id)),
     })
 }
 
@@ -215,34 +215,34 @@ fn fn_len(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_series(|s| match s.get(&id) {
         Some(sr) => Ok(EvalValue::Int(sr.values.len() as i64)),
-        None => Err(format!("serie '{}' no existe", id)),
+        None => Err(format!("serie '{}' does not exist", id)),
     })
 }
 
 fn fn_add(args: Vec<EvalValue>) -> Result<EvalValue, String> {
-    if args.len() < 2 { return Err("serie.add(handle, valor)".into()); }
+    if args.len() < 2 { return Err("serie.add(handle, value)".into()); }
     let id = arg_handle(&args, 0)?;
     let v  = match &args[1] {
         EvalValue::Int(n)   => *n as f64,
         EvalValue::Float(f) => *f,
-        _ => return Err("serie.add: valor debe ser número".into()),
+        _ => return Err("serie.add: the value must be a number".into()),
     };
     with_series(|s| match s.get_mut(&id) {
         Some(sr) => { sr.values.push(v); Ok(EvalValue::Int(sr.values.len() as i64)) }
-        None => Err(format!("serie '{}' no existe", id)),
+        None => Err(format!("serie '{}' does not exist", id)),
     })
 }
 
 fn fn_slice(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 3 { return Err("serie.slice(handle, desde, hasta)".into()); }
     let id    = arg_handle(&args, 0)?;
-    let desde = match &args[1] { EvalValue::Int(n) => *n as usize, _ => return Err("serie.slice: índices deben ser int".into()) };
-    let hasta = match &args[2] { EvalValue::Int(n) => *n as usize, _ => return Err("serie.slice: índices deben ser int".into()) };
+    let desde = match &args[1] { EvalValue::Int(n) => *n as usize, _ => return Err("serie.slice: the indexes must be ints".into()) };
+    let hasta = match &args[2] { EvalValue::Int(n) => *n as usize, _ => return Err("serie.slice: the indexes must be ints".into()) };
     // OJO: store_serie vuelve a tomar el lock de SERIES — llamarlo DENTRO del
     // closure de with_series deadlockea (Mutex no reentrante). Calcular dentro,
     // guardar fuera. (Aplica a todas las transformaciones de este módulo.)
     let (values, timestamps) = with_series(|s| {
-        let sr  = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr  = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         let end = hasta.min(sr.values.len());
         let ini = desde.min(end);
         Ok::<_, String>((
@@ -257,10 +257,10 @@ fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     let n  = match args.get(1) { Some(EvalValue::Int(n)) => *n as usize, _ => 10 };
     with_series(|s| {
-        let sr    = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr    = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         let total = sr.values.len();
         let show  = n.min(total);
-        println!("Serie ({} valores{}):", total,
+        println!("Series ({} values{}):", total,
             if sr.timestamps.is_some() { " con timestamps" } else { "" });
         for i in 0..show {
             match sr.timestamps.as_ref().and_then(|ts| ts.get(i)) {
@@ -279,7 +279,7 @@ fn fn_moving_avg(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id     = arg_handle(&args, 0)?;
     let window = arg_window(&args, 1, "moving_avg")?;
     let (result, ts) = with_series(|s| {
-        let sr     = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr     = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         let vals   = &sr.values;
         let result: Vec<f64> = (0..vals.len()).map(|i| {
             let start = i.saturating_sub(window - 1);
@@ -295,7 +295,7 @@ fn fn_rolling_std(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id     = arg_handle(&args, 0)?;
     let window = arg_window(&args, 1, "rolling_std")?;
     let (result, ts) = with_series(|s| {
-        let sr   = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr   = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         let vals = &sr.values;
         let result: Vec<f64> = (0..vals.len()).map(|i| {
             let start = i.saturating_sub(window - 1);
@@ -310,7 +310,7 @@ fn fn_rolling_std(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_diff(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     let out = with_series(|s| {
-        let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         if sr.values.len() < 2 { return Ok::<_, String>(None); }
         let result: Vec<f64> = sr.values.windows(2).map(|w| w[1] - w[0]).collect();
         Ok(Some((result, sr.timestamps.as_ref().map(|ts| ts[1..].to_vec()))))
@@ -324,7 +324,7 @@ fn fn_diff(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_pct_change(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     let out = with_series(|s| {
-        let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         if sr.values.len() < 2 { return Ok::<_, String>(None); }
         let result: Vec<f64> = sr.values.windows(2).map(|w| {
             if w[0] == 0.0 { 0.0 } else { (w[1] - w[0]) / w[0] * 100.0 }
@@ -340,7 +340,7 @@ fn fn_pct_change(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_cumsum(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     let (result, ts) = with_series(|s| {
-        let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         let mut acc = 0.0_f64;
         let result: Vec<f64> = sr.values.iter().map(|&v| { acc += v; acc }).collect();
         Ok::<_, String>((result, sr.timestamps.clone()))
@@ -349,15 +349,15 @@ fn fn_cumsum(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 }
 
 fn fn_smooth(args: Vec<EvalValue>) -> Result<EvalValue, String> {
-    if args.len() < 2 { return Err("serie.smooth(handle, alpha)  — alpha entre 0.0 y 1.0".into()); }
+    if args.len() < 2 { return Err("serie.smooth(handle, alpha)  — alpha between 0.0 and 1.0".into()); }
     let id    = arg_handle(&args, 0)?;
     let alpha = match &args[1] {
         EvalValue::Float(f) => *f,
         EvalValue::Int(n)   => *n as f64,
-        _ => return Err("serie.smooth: alpha debe ser número".into()),
+        _ => return Err("serie.smooth: alpha must be a number".into()),
     };
     let out = with_series(|s| {
-        let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         if sr.values.is_empty() { return Ok::<_, String>(None); }
         let mut result = Vec::with_capacity(sr.values.len());
         result.push(sr.values[0]);
@@ -380,10 +380,10 @@ fn fn_forecast(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     let n  = match &args[1] {
         EvalValue::Int(n) if *n > 0 => *n as usize,
-        _ => return Err("serie.forecast: n debe ser entero positivo".into()),
+        _ => return Err("serie.forecast: n must be a positive integer".into()),
     };
     with_series(|s| {
-        let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         if sr.values.len() < 2 { return Err("serie.forecast: necesita al menos 2 puntos".into()); }
         let (slope, intercept) = linear_regression(&sr.values);
         let base = sr.values.len();
@@ -397,7 +397,7 @@ fn fn_forecast(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_trend(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_series(|s| {
-        let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         if sr.values.len() < 2 { return Err("serie.trend: necesita al menos 2 puntos".into()); }
         let (slope, intercept) = linear_regression(&sr.values);
         let my     = mean_of(&sr.values);
@@ -417,7 +417,7 @@ fn fn_trend(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_anomalies(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_series(|s| {
-        let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         let mut sorted = sr.values.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let q1  = percentile_of(&sorted, 25.0);
@@ -436,7 +436,7 @@ fn fn_anomalies(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_describe(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_series(|s| {
-        let sr = s.get(&id).ok_or(format!("serie '{}' no existe", id))?;
+        let sr = s.get(&id).ok_or(format!("serie '{}' does not exist", id))?;
         if sr.values.is_empty() { return Err("serie.describe: serie vacía".into()); }
         let mut sorted = sr.values.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());

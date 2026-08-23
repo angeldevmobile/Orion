@@ -70,11 +70,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .keys().map(|k| EvalValue::Str(k.clone())).collect();
             Ok(EvalValue::List(paths))
         }
-        f => Err(format!("watch.{}() no existe", f)),
+        f => Err(format!("watch.{}() does not exist", f)),
     }
 }
 
 fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("{} requiere (path)", fn_name)); }
+    if args.is_empty() { return Err(format!("{} requires (path)", fn_name)); }
     Ok(match &args[0] { EvalValue::Str(s) => s.clone(), other => format!("{}", other) })
 }

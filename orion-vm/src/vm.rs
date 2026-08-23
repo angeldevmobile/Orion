@@ -264,7 +264,7 @@ impl VM {
         let frames: Vec<String> = self.call_stack.iter().rev().map(|f| {
             let line = f.current_line();
             if line > 0 {
-                format!("    en {} (linea {})", f.name, line)
+                format!("    at {} (line {})", f.name, line)
             } else {
                 format!("    en {}", f.name)
             }
@@ -283,7 +283,7 @@ impl VM {
         run_result.map_err(|e| {
             let trace = self.stack_trace();
             let line_info = if self.current_line > 0 {
-                format!("Linea {} | ", self.current_line)
+                format!("Line {} | ", self.current_line)
             } else {
                 String::new()
             };
@@ -621,7 +621,7 @@ impl VM {
                                     self.call_stack.last_mut().unwrap().vars.insert(name.clone(), v);
                                 }
                                 None => return Err(format!(
-                                    "use ... take: '{}' no existe en el módulo '{}'", name, path
+                                    "use ... take: '{}' does not exist en el módulo '{}'", name, path
                                 )),
                             }
                         }
@@ -1453,7 +1453,7 @@ impl VM {
     }
 
     fn pop(&mut self) -> Result<Value, String> {
-        self.value_stack.pop().ok_or_else(|| "Stack vacío".to_string())
+        self.value_stack.pop().ok_or_else(|| "Empty stack".to_string())
     }
 
     /// Traduce un nombre al nombre de función que hay que llamar de verdad.
@@ -1577,7 +1577,7 @@ impl VM {
             .map_err(|e| format!("Could not read '{}': {}", path, e))?;
         let tokens = lex(&src).map_err(|e| format!("Error lexando '{}': {:?}", path, e))?;
         let ast = parse(tokens).map_err(|e| format!("Error parseando '{}': {:?}", path, e))?;
-        let bc = compile(ast).map_err(|e| format!("Error compilando '{}': {:?}", path, e))?;
+        let bc = compile(ast).map_err(|e| format!("Error compiling '{}': {:?}", path, e))?;
 
         use std::collections::HashSet;
         let own_fns: HashSet<String> = bc.functions.keys().cloned().collect();
@@ -2169,7 +2169,7 @@ impl VM {
         let n_workers = std::thread::available_parallelism()
             .map(|n| n.get()).unwrap_or(4).clamp(2, 16);
 
-        eprintln!("[Orion] Servidor escuchando en http://{}  ({} hilos · Ctrl+C para detener)", addr, n_workers);
+        eprintln!("[Orion] Server listening on http://{}  ({} threads · Ctrl+C to stop)", addr, n_workers);
 
         let mut handles = Vec::with_capacity(n_workers);
         for _ in 0..n_workers {
@@ -2441,7 +2441,7 @@ impl VM {
                 Ok(Value::Null) => continue,
                 Ok(other) => { early_response = Some(other); break; }
                 Err(e) => {
-                    eprintln!("[Orion] middleware '{}' falló: {}", mw, e);
+                    eprintln!("[Orion] middleware '{}' failed: {}", mw, e);
                     early_response = Some(Value::Str(format!("error interno: {}", e)));
                     break;
                 }
@@ -2996,7 +2996,7 @@ impl VM {
                 let msg  = it.next();
                 if !cond.is_truthy() {
                     let text = msg.map(|v| v.to_string())
-                        .unwrap_or_else(|| "Aserción falló".to_string());
+                        .unwrap_or_else(|| "Assertion failed".to_string());
                     return Err(format!("assert: {}", text));
                 }
                 Ok(Some(Value::Null))
@@ -3146,7 +3146,7 @@ impl VM {
                     let v: *const () = match arg {
                         Value::Str(s) => {
                             let cs = CString::new(s.as_bytes())
-                                .map_err(|_| format!("FFI: string para '{}' contiene byte nulo", name))?;
+                                .map_err(|_| format!("FFI: the string for '{}' contains a null byte", name))?;
                             let p = cs.as_ptr() as *const ();
                             _cstrs.push(cs);
                             p
@@ -3571,7 +3571,7 @@ fn bit_op(a: Value, b: Value, op: &str) -> Result<Value, String> {
             let n = shift_amount()?;
             if n >= 64 { if x < 0 { -1 } else { 0 } } else { x >> n }
         }
-        _ => return Err(format!("operador de bits desconocido: {op}")),
+        _ => return Err(format!("unknown bitwise operator: {op}")),
     }))
 }
 

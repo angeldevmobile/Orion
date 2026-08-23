@@ -7,10 +7,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // int(a, b) → entero aleatorio en [a, b]
         "int" => {
-            if args.len() < 2 { return Err("random.int requiere (a, b)".into()); }
+            if args.len() < 2 { return Err("random.int requires (a, b)".into()); }
             let a = to_i64(&args[0])?;
             let b = to_i64(&args[1])?;
-            if a > b { return Err("random.int: a debe ser <= b".into()); }
+            if a > b { return Err("random.int: a must be <= b".into()); }
             Ok(EvalValue::Int(rng.gen_range(a..=b)))
         }
         // float() → float en [0, 1)
@@ -19,7 +19,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // between(a, b) → float en [a, b)
         "between" => {
-            if args.len() < 2 { return Err("random.between requiere (a, b)".into()); }
+            if args.len() < 2 { return Err("random.between requires (a, b)".into()); }
             let a = to_f64(&args[0])?;
             let b = to_f64(&args[1])?;
             Ok(EvalValue::Float(rng.gen_range(a..b)))
@@ -35,11 +35,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 }
                 EvalValue::Str(s) => {
                     let chars: Vec<char> = s.chars().collect();
-                    if chars.is_empty() { return Err("random.choice: string vacío".into()); }
+                    if chars.is_empty() { return Err("random.choice: empty string".into()); }
                     let idx = rng.gen_range(0..chars.len());
                     Ok(EvalValue::Str(chars[idx].to_string()))
                 }
-                _ => Err("random.choice requiere una lista o string".into()),
+                _ => Err("random.choice requires a list or a string".into()),
             }
         }
         // shuffle(list) → lista mezclada
@@ -50,15 +50,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     list.shuffle(&mut rng);
                     Ok(EvalValue::List(list))
                 }
-                _ => Err("random.shuffle requiere una lista".into()),
+                _ => Err("random.shuffle requires a list".into()),
             }
         }
         // sample(list, n) → n elementos aleatorios sin repetición
         "sample" => {
-            if args.len() < 2 { return Err("random.sample requiere (list, n)".into()); }
+            if args.len() < 2 { return Err("random.sample requires (list, n)".into()); }
             let list = match &args[0] {
                 EvalValue::List(v) => v.clone(),
-                _ => return Err("random.sample requiere una lista".into()),
+                _ => return Err("random.sample requires a list".into()),
             };
             let n = to_i64(&args[1])? as usize;
             if n > list.len() { return Err("random.sample: n mayor que la lista".into()); }
@@ -89,13 +89,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Bool(rng.gen::<bool>()))
         }
 
-        f => Err(format!("random.{}() no existe", f)),
+        f => Err(format!("random.{}() does not exist", f)),
     }
 }
 
 fn one_arg(fn_name: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.is_empty() {
-        return Err(format!("random.{}() requiere 1 argumento", fn_name));
+        return Err(format!("random.{}() requires 1 argument", fn_name));
     }
     Ok(args.into_iter().next().unwrap())
 }
@@ -104,7 +104,7 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("random: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("random: expected a number, got {}", other.type_name())),
     }
 }
 
@@ -112,6 +112,6 @@ fn to_f64(v: &EvalValue) -> Result<f64, String> {
     match v {
         EvalValue::Float(f) => Ok(*f),
         EvalValue::Int(n)   => Ok(*n as f64),
-        other => Err(format!("random: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("random: expected a number, got {}", other.type_name())),
     }
 }

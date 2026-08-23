@@ -39,7 +39,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "histogram"   => fn_histogram(args),
         // describe(datos: list) -> dict → resumen de un vistazo: { count, mean, std, min, p25, median, p75, max }
         "describe"    => fn_describe(args),
-        _ => Err(format!("stat.{} no existe", function)),
+        _ => Err(format!("stat.{} does not exist", function)),
     }
 }
 
@@ -50,9 +50,9 @@ fn to_floats(val: &EvalValue) -> Result<Vec<f64>, String> {
         EvalValue::List(items) => items.iter().map(|v| match v {
             EvalValue::Int(n)   => Ok(*n as f64),
             EvalValue::Float(f) => Ok(*f),
-            _ => Err("stat: la lista debe contener números".into()),
+            _ => Err("stat: the list must contain numbers".into()),
         }).collect(),
-        _ => Err("stat: se esperaba una lista de números".into()),
+        _ => Err("stat: expected a list of numbers".into()),
     }
 }
 
@@ -147,7 +147,7 @@ fn fn_percentile(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let p = match &args[1] {
         EvalValue::Int(n)   => *n as f64,
         EvalValue::Float(f) => *f,
-        _ => return Err("stat.percentile: p debe ser número (0-100)".into()),
+        _ => return Err("stat.percentile: p must be a number (0-100)".into()),
     };
     data.sort_by(|a, b| a.partial_cmp(b).unwrap());
     Ok(EvalValue::Float(percentile_of(&data, p)))
@@ -189,7 +189,7 @@ fn fn_correlation(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let x = to_floats(&args[0])?;
     let y = to_floats(&args[1])?;
     if x.len() != y.len() || x.is_empty() {
-        return Err("stat.correlation: listas deben tener la misma longitud".into());
+        return Err("stat.correlation: the lists must be the same length".into());
     }
     let mx = mean_of(&x);
     let my = mean_of(&y);
@@ -249,7 +249,7 @@ fn fn_histogram(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         _ => 10,
     };
     if data.is_empty() || bins == 0 {
-        return Err("stat.histogram: datos o bins inválidos".into());
+        return Err("stat.histogram: invalid data or bins".into());
     }
     let min = data.iter().cloned().fold(f64::INFINITY, f64::min);
     let max = data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);

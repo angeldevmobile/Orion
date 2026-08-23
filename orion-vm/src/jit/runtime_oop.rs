@@ -201,11 +201,11 @@ pub extern "C" fn rt_get_attr(obj: i64, name_ptr: i64) -> i64 {
                 for (k, v) in entries {
                     if k == name { return *v; }
                 }
-                eprintln!("[JIT] GetAttr '{}': clave no encontrada en dict/módulo", name);
+                eprintln!("[JIT] GetAttr '{}': key not found in dict/module", name);
                 std::process::exit(1)
             }
             _ => {
-                eprintln!("[JIT] GetAttr: no es instancia ni dict (tag={})", oval.tag);
+                eprintln!("[JIT] GetAttr: not an instance or a dict (tag={})", oval.tag);
                 std::process::exit(1)
             }
         }
@@ -218,7 +218,7 @@ pub extern "C" fn rt_set_attr(obj: i64, name_ptr: i64, val: i64) {
     unsafe {
         let oval = val_ref(obj);
         if oval.tag != TAG_INSTANCE {
-            eprintln!("[JIT] SetAttr: no es una instancia (tag={})", oval.tag);
+            eprintln!("[JIT] SetAttr: not an instance (tag={})", oval.tag);
             std::process::exit(1);
         }
         let inst = get_inst_mut(obj);
@@ -374,7 +374,7 @@ unsafe fn call_method_str(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             alloc_val(TAG_FLOAT, 0, s.trim().parse::<f64>().unwrap_or(0.0))
         }
         _ => {
-            eprintln!("[JIT] String no tiene método '{}'", name);
+            eprintln!("[JIT] String has no method '{}'", name);
             std::process::exit(1)
         }
     }
@@ -460,7 +460,7 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         "pop" => {
             items.pop().unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }
-        _ => { eprintln!("[JIT] List no tiene método '{}'", name); std::process::exit(1) }
+        _ => { eprintln!("[JIT] List has no method '{}'", name); std::process::exit(1) }
     }
 }
 
@@ -515,7 +515,7 @@ unsafe fn call_method_dict(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             entries.iter().find(|(k, _)| k == &key).map(|(_, v)| *v)
                 .unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }
-        _ => { eprintln!("[JIT] Dict no tiene método '{}'", name); std::process::exit(1) }
+        _ => { eprintln!("[JIT] Dict has no method '{}'", name); std::process::exit(1) }
     }
 }
 

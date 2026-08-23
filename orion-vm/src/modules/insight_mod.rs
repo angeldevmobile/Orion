@@ -8,9 +8,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // analyze(path, question?, opts?) → análisis con AI Vision
         // opts = { model, max_tokens, provider }
         "analyze" => {
-            if args.is_empty() { return Err("insight.analyze requiere (path, question?, opts?)".into()); }
+            if args.is_empty() { return Err("insight.analyze requires (path, question?, opts?)".into()); }
             let path     = to_str(&args[0]);
-            let question = if args.len() > 1 { to_str(&args[1]) } else { "Describe el contenido de esta imagen en detalle.".into() };
+            let question = if args.len() > 1 { to_str(&args[1]) } else { "Describe the contents of this image in detail.".into() };
             let opts     = Opts::from(args.get(2))?;
             analyze_with_ai(&path, &question, &opts)
         }
@@ -55,13 +55,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str(img_to_base64(&img)?))
         }
 
-        f => Err(format!("insight.{}() no existe", f)),
+        f => Err(format!("insight.{}() does not exist", f)),
     }
 }
 
 fn path_and_opts(fn_name: &str, args: &[EvalValue]) -> Result<(String, Opts), String> {
     let Some(first) = args.first() else {
-        return Err(format!("insight.{}() requiere (path, opts?)", fn_name));
+        return Err(format!("insight.{}() requires (path, opts?)", fn_name));
     };
     Ok((to_str(first), Opts::from(args.get(1))?))
 }
@@ -684,9 +684,9 @@ fn num(m: &HashMap<String, EvalValue>, keys: &[&str]) -> Option<f64> {
 
 fn open_img(path: &str) -> Result<DynamicImage, String> {
     ImageReader::open(path)
-        .map_err(|e| format!("insight: no se pudo abrir '{}': {}", path, e))?
+        .map_err(|e| format!("insight: could not open '{}': {}", path, e))?
         .decode()
-        .map_err(|e| format!("insight: no se pudo decodificar '{}': {}", path, e))
+        .map_err(|e| format!("insight: could not decode '{}': {}", path, e))
 }
 
 fn load_env() -> std::collections::HashMap<String, String> {

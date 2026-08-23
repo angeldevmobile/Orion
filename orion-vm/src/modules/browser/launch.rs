@@ -61,6 +61,12 @@ pub struct Tuning {
     pub force_layers:  u32,
     /// Profundidad máxima de iframes anidados que se recorre.
     pub iframe_depth:  u32,
+    /// ¿Los selectores entran en las shadow roots abiertas? Encendido: media
+    /// web moderna es componentes web, y sin esto su contenido es invisible.
+    /// Se puede apagar en una página enorme donde el recorrido no compense.
+    pub shadow:        bool,
+    /// Profundidad máxima de shadow roots anidadas que se recorre.
+    pub shadow_depth:  u32,
     /// Margen en píxeles al probar puntos dentro de un elemento.
     pub hit_inset:     f64,
     pub nav_settle_ms: u64,
@@ -96,6 +102,8 @@ impl Default for Tuning {
             drag_steps:    10,
             force_layers:  12,
             iframe_depth:  8,
+            shadow:        true,
+            shadow_depth:  8,
             hit_inset:     24.0,
             nav_settle_ms: 5_000,
             max_events:    512,
@@ -169,23 +177,23 @@ pub fn resolve_browser(preferido: Option<&str>) -> Result<PathBuf, String> {
         let ruta = PathBuf::from(p);
         if ruta.is_file() { return Ok(ruta); }
         return Err(format!(
-            "el navegador indicado no existe: {p}\n  Revisa `chrome` en las opciones de browser.open()."
+            "the browser you pointed at does not exist: {p}\n  Check `chrome` in the browser.open() options."
         ));
     }
     if let Ok(p) = std::env::var("ORION_CHROME") {
         if !p.trim().is_empty() {
             let ruta = PathBuf::from(p.trim());
             if ruta.is_file() { return Ok(ruta); }
-            return Err(format!("ORION_CHROME apunta a un archivo que no existe: {p}"));
+            return Err(format!("ORION_CHROME points to a file that does not exist: {p}"));
         }
     }
     if let Some(hit) = candidatos().into_iter().find(|p| p.is_file()) {
         return Ok(hit);
     }
     Err(concat!(
-        "no se encontró ningún navegador basado en Chromium.\n",
-        "  Instala Chrome, Chromium, Brave o Edge, o indica la ruta:\n",
-        "    browser.open({ chrome: \"C:/ruta/chrome.exe\" })\n",
+        "no Chromium-based browser was found.\n",
+        "  Install Chrome, Chromium, Brave or Edge, or give the path:\n",
+        "    browser.open({ chrome: \"C:/path/chrome.exe\" })\n",
         "  o define la variable de entorno ORION_CHROME."
     ).to_string())
 }
@@ -286,7 +294,7 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
         }
     };
     std::fs::create_dir_all(&user_data)
-        .map_err(|e| format!("no se pudo crear el perfil en {}: {e}", user_data.display()))?;
+        .map_err(|e| format!("could not create the profile in {}: {e}", user_data.display()))?;
 
     let puerto_file = user_data.join("DevToolsActivePort");
     let _ = std::fs::remove_file(&puerto_file);
@@ -296,10 +304,10 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("no se pudo arrancar {}: {e}", exe.display()))?;
+        .map_err(|e| format!("could not start {}: {e}", exe.display()))?;
 
     let stderr = child.stderr.take()
-        .ok_or("no se pudo leer la salida del navegador")?;
+        .ok_or("could not read the browser's output")?;
 
     let (tx, rx) = mpsc::channel::<String>();
     let diag = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
@@ -316,7 +324,7 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
                 if d.len() < 20 { d.push(linea); }
             }
         })
-        .map_err(|e| format!("no se pudo leer la salida del navegador: {e}"))?;
+        .map_err(|e| format!("could not read the browser's output: {e}"))?;
 
     let limite = std::time::Instant::now() + opts.timeout;
     let mut encontrado: Option<String> = None;
@@ -340,7 +348,7 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
             if temporal { let _ = std::fs::remove_dir_all(&user_data); }
             let pistas = diag.lock().unwrap().join("\n    ");
             Err(format!(
-                "{} arrancó pero no anunció su puerto CDP en {} s.{}",
+                "{} started but did not announce its CDP port within {} s.{}",
                 exe.display(),
                 opts.timeout.as_secs(),
                 if pistas.is_empty() { String::new() } else { format!("\n  Dijo:\n    {pistas}") }
@@ -356,7 +364,7 @@ mod tests {
     #[test]
     fn una_ruta_inexistente_se_explica() {
         let e = resolve_browser(Some("/no/existe/chrome.exe")).unwrap_err();
-        assert!(e.contains("no existe"), "{e}");
+        assert!(e.contains("does not exist"), "{e}");
         assert!(e.contains("browser.open"), "el error no dice cómo arreglarlo: {e}");
     }
 
@@ -478,7 +486,7 @@ mod tests_arranque {
         assert!(leer_puerto(&f).is_none(), "falta la segunda línea");
 
         std::fs::write(&f, "").unwrap();
-        assert!(leer_puerto(&f).is_none(), "archivo vacío");
+        assert!(leer_puerto(&f).is_none(), "empty file");
 
         std::fs::write(&f, "no-es-un-puerto\n/devtools/x\n").unwrap();
         assert!(leer_puerto(&f).is_none(), "puerto no numérico");

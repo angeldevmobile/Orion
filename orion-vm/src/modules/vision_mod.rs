@@ -22,7 +22,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // opts = { "engine": "ocrs"|"tesseract", "lang": "spa" } — con "tesseract"
         // llama al binario del sistema si el developer lo tiene instalado.
         "ocr" | "leer_texto" | "read_text" => {
-            if args.is_empty() { return Err("vision.ocr requiere (path, opts?)".into()); }
+            if args.is_empty() { return Err("vision.ocr requires (path, opts?)".into()); }
             let path = to_str(&args[0]);
             let (engine, lang, prep) = ocr_opts(args.get(1));
             let text = match engine.as_str() {
@@ -34,7 +34,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // threshold(path, out?) → out  — binariza (blanco/negro) con Otsu
         // automático. Ideal como pre-paso del OCR: limpia fondo y ruido.
         "threshold" | "umbral" | "binarize" => {
-            if args.is_empty() { return Err("vision.threshold requiere (path, out?)".into()); }
+            if args.is_empty() { return Err("vision.threshold requires (path, out?)".into()); }
             let path = to_str(&args[0]);
             let out  = if args.len() > 1 { to_str(&args[1]) } else { format!("{}_bw.png", strip_ext(&path)) };
             let gray = open_img(&path)?.to_luma8();
@@ -45,7 +45,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // edges(path, out?, low?, high?) → out  — detección de bordes Canny
         "edges" | "bordes" | "canny" => {
-            if args.is_empty() { return Err("vision.edges requiere (path, out?, low?, high?)".into()); }
+            if args.is_empty() { return Err("vision.edges requires (path, out?, low?, high?)".into()); }
             let path = to_str(&args[0]);
             let out  = if args.len() > 1 { to_str(&args[1]) } else { format!("{}_edges.png", strip_ext(&path)) };
             let low  = if args.len() > 2 { to_f32(&args[2])? } else { 50.0 };
@@ -57,7 +57,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // contrast(path, factor, out?) → out  — ajusta contraste (>0 aumenta)
         "contrast" | "contraste" => {
-            if args.len() < 2 { return Err("vision.contrast requiere (path, factor, out?)".into()); }
+            if args.len() < 2 { return Err("vision.contrast requires (path, factor, out?)".into()); }
             let path   = to_str(&args[0]);
             let factor = to_f32(&args[1])?;
             let out    = if args.len() > 2 { to_str(&args[2]) } else { format!("{}_contrast.png", strip_ext(&path)) };
@@ -67,7 +67,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // sharpen(path, out?) → out  — realce de nitidez (unsharp mask)
         "sharpen" | "nitidez" => {
-            if args.is_empty() { return Err("vision.sharpen requiere (path, out?)".into()); }
+            if args.is_empty() { return Err("vision.sharpen requires (path, out?)".into()); }
             let path = to_str(&args[0]);
             let out  = if args.len() > 1 { to_str(&args[1]) } else { format!("{}_sharp.png", strip_ext(&path)) };
             let img = open_img(&path)?.unsharpen(2.0, 5);
@@ -76,7 +76,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // invert(path, out?) → out  — invierte los colores (negativo)
         "invert" | "invertir" => {
-            if args.is_empty() { return Err("vision.invert requiere (path, out?)".into()); }
+            if args.is_empty() { return Err("vision.invert requires (path, out?)".into()); }
             let path = to_str(&args[0]);
             let out  = if args.len() > 1 { to_str(&args[1]) } else { format!("{}_inv.png", strip_ext(&path)) };
             let mut img = open_img(&path)?;
@@ -86,7 +86,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // resize(path, width, height, out_path?) → out_path
         "resize" => {
-            if args.len() < 3 { return Err("vision.resize requiere (path, width, height, out_path?)".into()); }
+            if args.len() < 3 { return Err("vision.resize requires (path, width, height, out_path?)".into()); }
             let path = to_str(&args[0]);
             let w    = to_u32(&args[1])?;
             let h    = to_u32(&args[2])?;
@@ -98,7 +98,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // resize_exact(path, w, h, out?) → out_path (sin mantener ratio)
         "resize_exact" => {
-            if args.len() < 3 { return Err("vision.resize_exact requiere (path, w, h, out?)".into()); }
+            if args.len() < 3 { return Err("vision.resize_exact requires (path, w, h, out?)".into()); }
             let path = to_str(&args[0]);
             let w    = to_u32(&args[1])?;
             let h    = to_u32(&args[2])?;
@@ -110,7 +110,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // crop(path, x, y, w, h, out?) → out_path
         "crop" => {
-            if args.len() < 5 { return Err("vision.crop requiere (path, x, y, w, h, out?)".into()); }
+            if args.len() < 5 { return Err("vision.crop requires (path, x, y, w, h, out?)".into()); }
             let path = to_str(&args[0]);
             let x    = to_u32(&args[1])?;
             let y    = to_u32(&args[2])?;
@@ -132,7 +132,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // blur(path, sigma, out?) → out_path
         "blur" => {
-            if args.is_empty() { return Err("vision.blur requiere (path, sigma?, out?)".into()); }
+            if args.is_empty() { return Err("vision.blur requires (path, sigma?, out?)".into()); }
             let path  = to_str(&args[0]);
             let sigma = if args.len() > 1 { to_f32(&args[1])? } else { 2.0 };
             let out   = if args.len() > 2 { to_str(&args[2]) } else { format!("{}_blur.png", strip_ext(&path)) };
@@ -142,7 +142,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // brighten(path, value, out?) → out_path (value: positive=brighter, negative=darker)
         "brighten" => {
-            if args.is_empty() { return Err("vision.brighten requiere (path, value, out?)".into()); }
+            if args.is_empty() { return Err("vision.brighten requires (path, value, out?)".into()); }
             let path  = to_str(&args[0]);
             let value = if args.len() > 1 { to_i32(&args[1])? } else { 20 };
             let out   = if args.len() > 2 { to_str(&args[2]) } else { format!("{}_bright.png", strip_ext(&path)) };
@@ -199,7 +199,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // from_base64(b64_string, out_path) → guarda imagen
         "from_base64" | "decode" => {
-            if args.len() < 2 { return Err("vision.from_base64 requiere (b64_string, out_path)".into()); }
+            if args.len() < 2 { return Err("vision.from_base64 requires (b64_string, out_path)".into()); }
             let b64  = to_str(&args[0]);
             let out  = to_str(&args[1]);
             let bytes = b64_decode(&b64).map_err(|e| format!("vision.from_base64: {}", e))?;
@@ -209,7 +209,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // convert(path, out_path) → convierte formato por extensión
         "convert" => {
-            if args.len() < 2 { return Err("vision.convert requiere (path, out_path)".into()); }
+            if args.len() < 2 { return Err("vision.convert requires (path, out_path)".into()); }
             let path = to_str(&args[0]);
             let out  = to_str(&args[1]);
             open_img(&path)?.save(&out).map_err(|e| format!("vision.convert: {}", e))?;
@@ -217,7 +217,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // thumbnail(path, max_dim, out?) → miniatura cuadrada
         "thumbnail" => {
-            if args.is_empty() { return Err("vision.thumbnail requiere (path, max_dim?, out?)".into()); }
+            if args.is_empty() { return Err("vision.thumbnail requires (path, max_dim?, out?)".into()); }
             let path    = to_str(&args[0]);
             let max_dim = if args.len() > 1 { to_u32(&args[1])? } else { 128 };
             let out     = if args.len() > 2 { to_str(&args[2]) } else { format!("{}_thumb.png", strip_ext(&path)) };
@@ -246,15 +246,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(pixels))
         }
 
-        f => Err(format!("vision.{}() no existe", f)),
+        f => Err(format!("vision.{}() does not exist", f)),
     }
 }
 
 fn open_img(path: &str) -> Result<DynamicImage, String> {
     ImageReader::open(path)
-        .map_err(|e| format!("vision: no se pudo abrir '{}': {}", path, e))?
+        .map_err(|e| format!("vision: could not open '{}': {}", path, e))?
         .decode()
-        .map_err(|e| format!("vision: no se pudo decodificar '{}': {}", path, e))
+        .map_err(|e| format!("vision: could not decode '{}': {}", path, e))
 }
 
 fn strip_ext(path: &str) -> String {
@@ -265,7 +265,7 @@ fn strip_ext(path: &str) -> String {
 }
 
 fn one_str(fn_name: &str, args: Vec<EvalValue>) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("vision.{}() requiere 1 argumento", fn_name)); }
+    if args.is_empty() { return Err(format!("vision.{}() requires 1 argument", fn_name)); }
     Ok(to_str(&args[0]))
 }
 
@@ -277,7 +277,7 @@ fn to_u32(v: &EvalValue) -> Result<u32, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n as u32),
         EvalValue::Float(f) => Ok(*f as u32),
-        other => Err(format!("vision: esperaba entero, recibió {}", other.type_name())),
+        other => Err(format!("vision: expected an integer, got {}", other.type_name())),
     }
 }
 
@@ -285,7 +285,7 @@ fn to_i32(v: &EvalValue) -> Result<i32, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n as i32),
         EvalValue::Float(f) => Ok(*f as i32),
-        other => Err(format!("vision: esperaba entero, recibió {}", other.type_name())),
+        other => Err(format!("vision: expected an integer, got {}", other.type_name())),
     }
 }
 
@@ -293,7 +293,7 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("vision: esperaba entero, recibió {}", other.type_name())),
+        other => Err(format!("vision: expected an integer, got {}", other.type_name())),
     }
 }
 
@@ -301,7 +301,7 @@ fn to_f32(v: &EvalValue) -> Result<f32, String> {
     match v {
         EvalValue::Float(f) => Ok(*f as f32),
         EvalValue::Int(n)   => Ok(*n as f32),
-        other => Err(format!("vision: esperaba float, recibió {}", other.type_name())),
+        other => Err(format!("vision: expected a float, got {}", other.type_name())),
     }
 }
 
@@ -328,7 +328,7 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
     let clean: Vec<u8> = input.chars().filter(|c| !c.is_whitespace() && *c != '=')
         .map(|c| {
             let v = table[c as usize];
-            if v == 255 { Err(format!("carácter inválido: {}", c)) } else { Ok(v) }
+            if v == 255 { Err(format!("invalid character: {}", c)) } else { Ok(v) }
         })
         .collect::<Result<_, _>>()?;
     let mut out = Vec::new();
@@ -366,21 +366,21 @@ fn ocr_engine() -> Result<&'static Mutex<ocrs::OcrEngine>, String> {
 
 fn build_ocr_engine() -> Result<Mutex<ocrs::OcrEngine>, String> {
     let det = rten::Model::load_static_slice(DETECTION_MODEL)
-        .map_err(|e| format!("vision.ocr: modelo de detección inválido: {}", e))?;
+        .map_err(|e| format!("vision.ocr: invalid detection model: {}", e))?;
     let rec = rten::Model::load_static_slice(RECOGNITION_MODEL)
-        .map_err(|e| format!("vision.ocr: modelo de reconocimiento inválido: {}", e))?;
+        .map_err(|e| format!("vision.ocr: invalid recognition model: {}", e))?;
     let engine = ocrs::OcrEngine::new(ocrs::OcrEngineParams {
         detection_model: Some(det),
         recognition_model: Some(rec),
         ..Default::default()
-    }).map_err(|e| format!("vision.ocr: no se pudo crear el motor: {}", e))?;
+    }).map_err(|e| format!("vision.ocr: could not create el motor: {}", e))?;
     Ok(Mutex::new(engine))
 }
 
 /// OCR con el motor local `ocrs`, desde una ruta de archivo.
 fn ocr_ocrs(path: &str, preprocess: bool) -> Result<String, String> {
     let img = image::open(path)
-        .map_err(|e| format!("vision.ocr: no se pudo abrir '{}': {}", path, e))?;
+        .map_err(|e| format!("vision.ocr: could not open '{}': {}", path, e))?;
     ocr_dynamic(&img, preprocess)
 }
 

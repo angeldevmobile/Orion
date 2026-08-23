@@ -37,7 +37,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // replace(text, pattern, replacement, count) → reemplaza solo N veces
         "replace" => {
             if args.len() < 3 {
-                return Err("regex.replace requiere (texto, patron, reemplazo)".into());
+                return Err("regex.replace requires (texto, patron, reemplazo)".into());
             }
             let text        = str_arg("replace", &args, 0)?;
             let pattern     = str_arg("replace", &args, 1)?;
@@ -152,7 +152,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 fn compile(pattern: &str, fn_name: &str) -> Result<Regex, String> {
     Regex::new(pattern)
-        .map_err(|e| format!("regex.{}: patrón inválido '{}': {}", fn_name, pattern, e))
+        .map_err(|e| format!("regex.{}: invalid pattern '{}': {}", fn_name, pattern, e))
 }
 
 fn str_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<String, String> {

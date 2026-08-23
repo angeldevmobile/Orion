@@ -5,14 +5,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // llm.query(model, prompt) → string
         "query" => {
-            if args.len() < 2 { return Err("llm.query requiere (model, prompt)".into()); }
+            if args.len() < 2 { return Err("llm.query requires (model, prompt)".into()); }
             let model  = to_str(&args[0]);
             let prompt = to_str(&args[1]);
             Ok(EvalValue::Str(llm_ask(&model, &prompt, "")?))
         }
         // llm.query_with(model, prompt, system) → string
         "query_with" => {
-            if args.len() < 3 { return Err("llm.query_with requiere (model, prompt, system)".into()); }
+            if args.len() < 3 { return Err("llm.query_with requires (model, prompt, system)".into()); }
             let model  = to_str(&args[0]);
             let prompt = to_str(&args[1]);
             let system = to_str(&args[2]);
@@ -20,17 +20,17 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // llm.chat(model, messages) → string  (messages: [{role, content}, ...])
         "chat" => {
-            if args.len() < 2 { return Err("llm.chat requiere (model, messages)".into()); }
+            if args.len() < 2 { return Err("llm.chat requires (model, messages)".into()); }
             let model = to_str(&args[0]);
             let msgs  = match &args[1] {
                 EvalValue::List(v) => v.clone(),
-                _ => return Err("llm.chat: messages debe ser una lista de dicts {role, content}".into()),
+                _ => return Err("llm.chat: messages must be a list de dicts {role, content}".into()),
             };
             Ok(EvalValue::Str(llm_chat(&model, msgs)?))
         }
         // llm.embed(model, text) → List<float>
         "embed" => {
-            if args.len() < 2 { return Err("llm.embed requiere (model, text)".into()); }
+            if args.len() < 2 { return Err("llm.embed requires (model, text)".into()); }
             let model = to_str(&args[0]);
             let text  = to_str(&args[1]);
             let emb   = get_embedding_for_model(&model, &text)?;
@@ -137,7 +137,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if list.is_empty() { list.push(EvalValue::Str("none".into())); }
             Ok(EvalValue::List(list))
         }
-        f => Err(format!("llm.{}() no existe", f)),
+        f => Err(format!("llm.{}() does not exist", f)),
     }
 }
 
@@ -162,7 +162,7 @@ fn llm_ask(model: &str, prompt: &str, system: &str) -> Result<String, String> {
             }
             let fallback = if model == "auto" { default_model(&env, "ollama", "chat") } else { model.to_string() };
             call_ollama(&env, &fallback, prompt, system)
-                .map_err(|e| format!("llm: no hay API key configurada ni Ollama disponible. Configura ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY o inicia Ollama. ({})", e))
+                .map_err(|e| format!("llm: no API key is configured and Ollama is not available. Set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY, or start Ollama. ({})", e))
         }
     }
 }
@@ -195,7 +195,7 @@ fn llm_chat(model: &str, msgs: Vec<EvalValue>) -> Result<String, String> {
             if env.contains_key("GEMINI_API_KEY") || env.contains_key("GOOGLE_API_KEY") {
                 return chat_gemini(&env, &default_model(&env, "gemini", "chat"), messages, 2048);
             }
-            Err("llm.chat: no hay API key configurada. Agrega ANTHROPIC_API_KEY, OPENAI_API_KEY o GEMINI_API_KEY".into())
+            Err("llm.chat: no API key is configured. Add ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY".into())
         }
     }
 }
@@ -206,7 +206,7 @@ pub fn get_embedding_for_model(model: &str, text: &str) -> Result<Vec<f64>, Stri
         "openai"    => embed_openai(&env, model, text),
         "gemini"    => embed_gemini(&env, model, text),
         "ollama"    => embed_ollama(&env, strip_ollama(model), text),
-        "anthropic" => Err("llm.embed: Anthropic no ofrece API de embeddings. Usa text-embedding-3-small (OpenAI) o nomic-embed-text (Ollama)".into()),
+        "anthropic" => Err("llm.embed: Anthropic has no embeddings API. Use text-embedding-3-small (OpenAI) or nomic-embed-text (Ollama)".into()),
         _ => {
             if env.contains_key("OPENAI_API_KEY") { return embed_openai(&env, &default_model(&env, "openai", "embed"), text); }
             if env.contains_key("GEMINI_API_KEY") || env.contains_key("GOOGLE_API_KEY") { return embed_gemini(&env, &default_model(&env, "gemini", "embed"), text); }
@@ -234,7 +234,7 @@ fn call_anthropic(env: &HashMap<String, String>, model: &str, prompt: &str, syst
         .map_err(|e| format!("llm[anthropic]: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     json["content"][0]["text"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| format!("llm[anthropic]: respuesta inesperada: {}", json))
+        .ok_or_else(|| format!("llm[anthropic]: unexpected response: {}", json))
 }
 
 fn chat_anthropic(env: &HashMap<String, String>, model: &str, messages: Vec<serde_json::Value>, max_tokens: u32) -> Result<String, String> {
@@ -248,7 +248,7 @@ fn chat_anthropic(env: &HashMap<String, String>, model: &str, messages: Vec<serd
         .map_err(|e| format!("llm[anthropic] chat: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     json["content"][0]["text"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| "llm[anthropic]: respuesta inesperada".into())
+        .ok_or_else(|| "llm[anthropic]: unexpected response".into())
 }
 
 //   OpenAI                                   
@@ -266,7 +266,7 @@ fn call_openai(env: &HashMap<String, String>, model: &str, prompt: &str, system:
         .map_err(|e| format!("llm[openai]: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     json["choices"][0]["message"]["content"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| format!("llm[openai]: respuesta inesperada: {}", json))
+        .ok_or_else(|| format!("llm[openai]: unexpected response: {}", json))
 }
 
 fn chat_openai(env: &HashMap<String, String>, model: &str, messages: Vec<serde_json::Value>, max_tokens: u32) -> Result<String, String> {
@@ -279,7 +279,7 @@ fn chat_openai(env: &HashMap<String, String>, model: &str, messages: Vec<serde_j
         .map_err(|e| format!("llm[openai] chat: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     json["choices"][0]["message"]["content"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| "llm[openai]: respuesta inesperada".into())
+        .ok_or_else(|| "llm[openai]: unexpected response".into())
 }
 
 fn embed_openai(env: &HashMap<String, String>, model: &str, text: &str) -> Result<Vec<f64>, String> {
@@ -292,7 +292,7 @@ fn embed_openai(env: &HashMap<String, String>, model: &str, text: &str) -> Resul
         .map_err(|e| format!("llm.embed[openai]: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     let arr = json["data"][0]["embedding"].as_array()
-        .ok_or_else(|| format!("llm.embed[openai]: respuesta inesperada: {}", json))?;
+        .ok_or_else(|| format!("llm.embed[openai]: unexpected response: {}", json))?;
     Ok(arr.iter().filter_map(|v| v.as_f64()).collect())
 }
 
@@ -318,7 +318,7 @@ fn call_gemini(env: &HashMap<String, String>, model: &str, prompt: &str, system:
         .map_err(|e| format!("llm[gemini]: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     json["candidates"][0]["content"]["parts"][0]["text"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| format!("llm[gemini]: respuesta inesperada: {}", json))
+        .ok_or_else(|| format!("llm[gemini]: unexpected response: {}", json))
 }
 
 fn chat_gemini(env: &HashMap<String, String>, model: &str, messages: Vec<serde_json::Value>, max_tokens: u32) -> Result<String, String> {
@@ -341,7 +341,7 @@ fn chat_gemini(env: &HashMap<String, String>, model: &str, messages: Vec<serde_j
         .map_err(|e| format!("llm[gemini] chat: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     json["candidates"][0]["content"]["parts"][0]["text"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| "llm[gemini]: respuesta inesperada".into())
+        .ok_or_else(|| "llm[gemini]: unexpected response".into())
 }
 
 fn embed_gemini(env: &HashMap<String, String>, model: &str, text: &str) -> Result<Vec<f64>, String> {
@@ -356,7 +356,7 @@ fn embed_gemini(env: &HashMap<String, String>, model: &str, text: &str) -> Resul
         .map_err(|e| format!("llm.embed[gemini]: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     let arr = json["embedding"]["values"].as_array()
-        .ok_or_else(|| format!("llm.embed[gemini]: respuesta inesperada: {}", json))?;
+        .ok_or_else(|| format!("llm.embed[gemini]: unexpected response: {}", json))?;
     Ok(arr.iter().filter_map(|v| v.as_f64()).collect())
 }
 
@@ -372,7 +372,7 @@ fn call_ollama(env: &HashMap<String, String>, model: &str, prompt: &str, system:
         .map_err(|e| format!("llm[ollama]: {}. ¿Está Ollama corriendo en {}?", e, base))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     json["response"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| format!("llm[ollama]: respuesta inesperada: {}", json))
+        .ok_or_else(|| format!("llm[ollama]: unexpected response: {}", json))
 }
 
 fn chat_ollama(env: &HashMap<String, String>, model: &str, messages: Vec<serde_json::Value>) -> Result<String, String> {
@@ -384,7 +384,7 @@ fn chat_ollama(env: &HashMap<String, String>, model: &str, messages: Vec<serde_j
         .map_err(|e| format!("llm[ollama] chat: {}", e))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     json["message"]["content"].as_str().map(|s| s.to_string())
-        .ok_or_else(|| "llm[ollama]: respuesta inesperada".into())
+        .ok_or_else(|| "llm[ollama]: unexpected response".into())
 }
 
 fn embed_ollama(env: &HashMap<String, String>, model: &str, text: &str) -> Result<Vec<f64>, String> {
@@ -396,7 +396,7 @@ fn embed_ollama(env: &HashMap<String, String>, model: &str, text: &str) -> Resul
         .map_err(|e| format!("llm.embed[ollama]: {}. ¿Está Ollama corriendo en {}?", e, base))?;
     let json: serde_json::Value = resp.into_json().map_err(|e| e.to_string())?;
     let arr = json["embedding"].as_array()
-        .ok_or_else(|| format!("llm.embed[ollama]: respuesta inesperada: {}", json))?;
+        .ok_or_else(|| format!("llm.embed[ollama]: unexpected response: {}", json))?;
     Ok(arr.iter().filter_map(|v| v.as_f64()).collect())
 }
 

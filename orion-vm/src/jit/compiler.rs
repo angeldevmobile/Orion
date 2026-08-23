@@ -687,7 +687,7 @@ impl<M: Module> CodeGen<M> {
         let mut sorted_starts: Vec<usize> = block_starts.iter().cloned().collect();
         sorted_starts.sort_unstable();
 
-        let rt = self.rt.as_ref().expect("runtime debe estar inicializado").clone();
+        let rt = self.rt.as_ref().expect("the runtime must be initialized").clone();
         let cached_fns: Vec<(String, FuncId)> = self.fn_cache
             .iter().map(|(k, &v)| (k.clone(), v)).collect();
 
@@ -1283,7 +1283,7 @@ impl<M: Module> CodeGen<M> {
                 }
 
                 other => {
-                    return Err(format!("JIT: instrucción no soportada en esta fase: {other:?}"));
+                    return Err(format!("JIT: instruction not supported at this stage: {other:?}"));
                 }
             }
         }

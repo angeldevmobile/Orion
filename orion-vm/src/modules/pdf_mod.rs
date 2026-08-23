@@ -9,7 +9,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // create(path, texto) → Bool
         "create" | "crear" => {
-            if args.len() < 2 { return Err("pdf.crear requiere (path, texto)".into()); }
+            if args.len() < 2 { return Err("pdf.crear requires (path, texto)".into()); }
             create_pdf(&to_str(&args[0]), &to_str(&args[1]))
         }
         // pages(path) → Int
@@ -21,7 +21,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // template(path, titulo, campos) → Bool   campos: Dict<Str,Str>
         "template" | "plantilla" => {
-            if args.len() < 3 { return Err("pdf.plantilla requiere (path, titulo, campos)".into()); }
+            if args.len() < 3 { return Err("pdf.plantilla requires (path, titulo, campos)".into()); }
             let path   = to_str(&args[0]);
             let titulo = to_str(&args[1]);
             let campos = to_dict(&args[2]);
@@ -29,7 +29,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // report(path, titulo, filas) → Bool   filas: List<List<Str>>
         "report" | "reporte" => {
-            if args.len() < 3 { return Err("pdf.reporte requiere (path, titulo, filas)".into()); }
+            if args.len() < 3 { return Err("pdf.reporte requires (path, titulo, filas)".into()); }
             let path   = to_str(&args[0]);
             let titulo = to_str(&args[1]);
             let filas  = to_list_of_list(&args[2]);
@@ -37,12 +37,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // watermark(path, salida, texto) → Bool
         "watermark" | "marca" => {
-            if args.len() < 3 { return Err("pdf.marca requiere (path, salida, texto)".into()); }
+            if args.len() < 3 { return Err("pdf.marca requires (path, salida, texto)".into()); }
             add_watermark(&to_str(&args[0]), &to_str(&args[1]), &to_str(&args[2]))
         }
         // paginate(path, salida, inicio, fin) → Bool   páginas 1-indexadas
         "paginate" | "paginar" => {
-            if args.len() < 4 { return Err("pdf.paginar requiere (path, salida, inicio, fin)".into()); }
+            if args.len() < 4 { return Err("pdf.paginar requires (path, salida, inicio, fin)".into()); }
             let path   = to_str(&args[0]);
             let salida = to_str(&args[1]);
             let inicio = to_int(&args[2]) as u32;
@@ -65,7 +65,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // ocr(path, opts?) → String  — OCR de un PDF escaneado: extrae las
         // imágenes embebidas de cada página y las pasa por el motor de vision.
         "ocr" => {
-            if args.is_empty() { return Err("pdf.ocr requiere (path, opts?)".into()); }
+            if args.is_empty() { return Err("pdf.ocr requires (path, opts?)".into()); }
             ocr_pdf(&to_str(&args[0]), args.get(1))
         }
         // text(path) → String  — inteligente: intenta el texto embebido; si el
@@ -81,10 +81,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // from_image(imagen, salida_pdf) → salida  — convierte una imagen a PDF.
         "from_image" | "desde_imagen" => {
-            if args.len() < 2 { return Err("pdf.desde_imagen requiere (imagen, salida_pdf)".into()); }
+            if args.len() < 2 { return Err("pdf.desde_imagen requires (imagen, salida_pdf)".into()); }
             image_to_pdf(&to_str(&args[0]), &to_str(&args[1]))
         }
-        f => Err(format!("pdf.{}() no existe", f)),
+        f => Err(format!("pdf.{}() does not exist", f)),
     }
 }
 
@@ -172,7 +172,7 @@ fn create_template(path: &str, titulo: &str, campos: &[(String, String)]) -> Res
 
     let file = File::create(path).map_err(|e| format!("pdf.plantilla: {}", e))?;
     doc.save(&mut BufWriter::new(file))
-        .map_err(|e| format!("pdf.plantilla guardar: {}", e))?;
+        .map_err(|e| format!("pdf.plantilla save: {}", e))?;
     Ok(EvalValue::Bool(true))
 }
 
@@ -210,7 +210,7 @@ fn create_report(path: &str, titulo: &str, filas: &[Vec<String>]) -> Result<Eval
 
     let file = File::create(path).map_err(|e| format!("pdf.reporte: {}", e))?;
     doc.save(&mut BufWriter::new(file))
-        .map_err(|e| format!("pdf.reporte guardar: {}", e))?;
+        .map_err(|e| format!("pdf.reporte save: {}", e))?;
     Ok(EvalValue::Bool(true))
 }
 
@@ -302,7 +302,7 @@ fn add_watermark(path: &str, salida: &str, texto: &str) -> Result<EvalValue, Str
         }
     }
 
-    doc.save(salida).map_err(|e| format!("pdf.marca guardar: {}", e))?;
+    doc.save(salida).map_err(|e| format!("pdf.marca save: {}", e))?;
     Ok(EvalValue::Bool(true))
 }
 
@@ -332,7 +332,7 @@ fn extract_pages(path: &str, salida: &str, inicio: u32, fin: u32) -> Result<Eval
     let fin    = fin.min(total);
 
     if inicio > fin {
-        return Err(format!("pdf.paginar: rango {}-{} inválido (total: {})", inicio, fin, total));
+        return Err(format!("pdf.paginar: invalid range {}-{} (total: {})", inicio, fin, total));
     }
 
     // Páginas a eliminar: antes de inicio y después de fin
@@ -341,7 +341,7 @@ fn extract_pages(path: &str, salida: &str, inicio: u32, fin: u32) -> Result<Eval
         doc.delete_pages(&to_delete);
     }
 
-    doc.save(salida).map_err(|e| format!("pdf.paginar guardar: {}", e))?;
+    doc.save(salida).map_err(|e| format!("pdf.paginar save: {}", e))?;
     Ok(EvalValue::Bool(true))
 }
 
@@ -377,7 +377,7 @@ fn get_pdf_info(path: &str) -> Result<EvalValue, String> {
 //    utilidades                                                                 
 
 fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("{} requiere (path)", fn_name)); }
+    if args.is_empty() { return Err(format!("{} requires (path)", fn_name)); }
     Ok(to_str(&args[0]))
 }
 
@@ -390,7 +390,7 @@ fn to_str(v: &EvalValue) -> String {
 fn image_to_pdf(img_path: &str, out: &str) -> Result<EvalValue, String> {
     use std::io::Cursor;
     let img = image::open(img_path)
-        .map_err(|e| format!("pdf.desde_imagen: no se pudo abrir '{}': {}", img_path, e))?;
+        .map_err(|e| format!("pdf.desde_imagen: could not open '{}': {}", img_path, e))?;
     let (w, h) = (img.width(), img.height());
     // Codificar a JPEG → va directo como stream DCTDecode (sin recomprimir en PDF).
     let mut jpeg = Vec::new();
@@ -500,7 +500,7 @@ fn ocr_pdf(path: &str, _opts: Option<&EvalValue>) -> Result<EvalValue, String> {
     }
 
     if partes.is_empty() {
-        return Err("pdf.ocr: no se pudo extraer texto por OCR del PDF.".into());
+        return Err("pdf.ocr: could not extract text from the PDF with OCR.".into());
     }
     Ok(EvalValue::Str(partes.join("\n")))
 }
@@ -560,7 +560,7 @@ fn rasterize_pdf(path: &str) -> Result<Vec<image::DynamicImage>, String> {
     use pdfium_render::prelude::*;
     let lib = ensure_pdfium()?;
     let bindings = Pdfium::bind_to_library(&lib)
-        .map_err(|e| format!("pdf.ocr: no se pudo cargar pdfium: {}", e))?;
+        .map_err(|e| format!("pdf.ocr: could not load pdfium: {}", e))?;
     let pdfium = Pdfium::new(bindings);
     let doc = pdfium.load_pdf_from_file(path, None)
         .map_err(|e| format!("pdf.ocr: {}", e))?;

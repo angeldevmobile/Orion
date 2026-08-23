@@ -35,7 +35,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // emit(path, value) → escribe JSON al archivo
         "emit" => {
-            if args.len() < 2 { return Err("json.emit requiere (path, value)".into()); }
+            if args.len() < 2 { return Err("json.emit requires (path, value)".into()); }
             let path = match &args[0] { EvalValue::Str(s) => s.clone(), v => format!("{}", v) };
             let j = eval_to_json(args[1].clone());
             let s = serde_json::to_string_pretty(&j)
@@ -45,7 +45,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // trace(obj, "user.name") → valor anidado
         "trace" => {
-            if args.len() < 2 { return Err("json.trace requiere (obj, path)".into()); }
+            if args.len() < 2 { return Err("json.trace requires (obj, path)".into()); }
             let path = match &args[1] { EvalValue::Str(s) => s.clone(), v => format!("{}", v) };
             let mut cur = args[0].clone();
             for key in path.split('.') {
@@ -58,7 +58,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // fuse(a, b) → merge superficial de dos dicts
         "fuse" => {
-            if args.len() < 2 { return Err("json.fuse requiere (a, b)".into()); }
+            if args.len() < 2 { return Err("json.fuse requires (a, b)".into()); }
             let mut result: HashMap<String, EvalValue> = HashMap::new();
             for arg in args {
                 if let EvalValue::Dict(m) = arg {
@@ -74,7 +74,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // validate(obj, schema) → bool
         "validate" => {
-            if args.len() < 2 { return Err("json.validate requiere (obj, schema)".into()); }
+            if args.len() < 2 { return Err("json.validate requires (obj, schema)".into()); }
             let obj    = args[0].clone();
             let schema = args[1].clone();
             Ok(EvalValue::Bool(validate(&obj, &schema)))
@@ -85,7 +85,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             match v {
                 EvalValue::Dict(m) =>
                     Ok(EvalValue::List(m.into_keys().map(EvalValue::Str).collect())),
-                _ => Err("json.keys requiere un objeto".into()),
+                _ => Err("json.keys requires an object".into()),
             }
         }
         "values" => {
@@ -93,11 +93,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             match v {
                 EvalValue::Dict(m) =>
                     Ok(EvalValue::List(m.into_values().collect())),
-                _ => Err("json.values requiere un objeto".into()),
+                _ => Err("json.values requires an object".into()),
             }
         }
 
-        f => Err(format!("json.{}() no existe", f)),
+        f => Err(format!("json.{}() does not exist", f)),
     }
 }
 
@@ -190,7 +190,7 @@ fn one_str(fn_name: &str, args: Vec<EvalValue>) -> Result<String, String> {
 
 fn one_arg(fn_name: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.is_empty() {
-        return Err(format!("json.{}() requiere al menos 1 argumento", fn_name));
+        return Err(format!("json.{}() requires at least 1 argument", fn_name));
     }
     Ok(args.into_iter().next().unwrap())
 }

@@ -33,7 +33,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
         }
     };
 
-    let bc = match crate::codegen::compile(ast) {
+    let bc = match crate::codegen::compile_entry(ast) {
         Ok(b) => b,
         Err(e) => {
             banner::fail(&format!("Codegen error: {}", e.message));
@@ -42,10 +42,7 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
     };
 
     //   2. cranelift-object → .orx
-    //
-    //   Se prefiere compilar el programa a código máquina. Si usa algo que el
-    //   backend nativo no cubre, se recurre al modo bundle: el objeto lleva el
-    //   bytecode y el runtime lo ejecuta (JIT si puede, intérprete si no).
+
     let obj_bytes = match crate::jit::aot_backend::compile_to_native_object(&bc) {
         Ok(Some(b)) => {
             banner::ok("Code:     native (Cranelift)");
@@ -103,8 +100,6 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
 
 //   Helpers
 
-/// Objeto en modo bundle: bytecode embebido + un `main` que llama al runtime.
-/// Es el camino de reserva cuando el programa no se puede compilar entero.
 fn build_bundle_object(bc: &crate::bytecode::OrionBytecode) -> Vec<u8> {
     let bc_bytes = match serde_json::to_vec(bc) {
         Ok(b) => b,
@@ -164,9 +159,6 @@ fn build_staticlib(vm_dir: &Path, tmp_dir: &Path) -> PathBuf {
     let lib_name    = if cfg!(windows) { "orion_vm.lib" } else { "liborion_vm.a" };
     let cached      = profile_dir.join(lib_name);
 
-    // Se delega el cacheo a cargo en vez de saltárselo cuando el .lib existe:
-    // esto último congelaba el runtime del primer build para siempre, así que
-    // los cambios en la VM nunca llegaban a los ejecutables AOT.
     if !cached.exists() {
         banner::info("Building the Orion runtime (first time, may take ~30s)...");
     }
@@ -178,8 +170,6 @@ fn build_staticlib(vm_dir: &Path, tmp_dir: &Path) -> PathBuf {
 
     match status {
         Ok(s) if s.success() => {}
-        // Sin fuentes o sin cargo se puede seguir con la staticlib ya
-        // construida; solo hay que avisar de que puede estar desactualizada.
         _ if cached.exists() => {
             banner::info("Could not rebuild the runtime; using the existing staticlib.");
             return cached;

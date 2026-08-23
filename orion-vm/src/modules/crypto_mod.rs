@@ -21,7 +21,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // hash(data, algo?) → "sha256$salt$hexhash"
         "hash" => {
-            if args.is_empty() { return Err("crypto.hash requiere (data, algo?)".into()); }
+            if args.is_empty() { return Err("crypto.hash requires (data, algo?)".into()); }
             let data = to_str(&args[0]);
             let algo = if args.len() > 1 { to_str(&args[1]) } else { "sha256".into() };
             let salt = random_hex(8);
@@ -30,7 +30,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // verify_hash(data, hashed) → bool
         "verify_hash" => {
-            if args.len() < 2 { return Err("crypto.verify_hash requiere (data, hashed)".into()); }
+            if args.len() < 2 { return Err("crypto.verify_hash requires (data, hashed)".into()); }
             let data   = to_str(&args[0]);
             let hashed = to_str(&args[1]);
             let parts: Vec<&str> = hashed.splitn(3, '$').collect();
@@ -58,7 +58,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // sign(data, key) → hex signature (HMAC-SHA256)
         "sign" => {
-            if args.len() < 2 { return Err("crypto.sign requiere (data, key)".into()); }
+            if args.len() < 2 { return Err("crypto.sign requires (data, key)".into()); }
             let data = to_str(&args[0]);
             let key  = to_str(&args[1]);
             let sig  = hmac_sign(data.as_bytes(), key.as_bytes())?;
@@ -66,7 +66,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // verify(data, signature, key) → bool
         "verify" => {
-            if args.len() < 3 { return Err("crypto.verify requiere (data, signature, key)".into()); }
+            if args.len() < 3 { return Err("crypto.verify requires (data, signature, key)".into()); }
             let data = to_str(&args[0]);
             let sig  = to_str(&args[1]);
             let key  = to_str(&args[2]);
@@ -75,7 +75,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // encrypt(data, key?) → {cipher, key, mode}  — AES-256-GCM (autenticado)
         "encrypt" => {
-            if args.is_empty() { return Err("crypto.encrypt requiere (data, key?)".into()); }
+            if args.is_empty() { return Err("crypto.encrypt requires (data, key?)".into()); }
             let data = to_str(&args[0]);
             let key  = if args.len() > 1 { to_str(&args[1]) } else { random_hex(16) };
             let cipher_b64 = aes_encrypt(data.as_bytes(), &key)?;
@@ -88,7 +88,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // decrypt(cipher, key, mode?) → string
         // mode "xor" descifra datos del formato antiguo (inseguro, solo migración).
         "decrypt" => {
-            if args.len() < 2 { return Err("crypto.decrypt requiere (cipher, key)".into()); }
+            if args.len() < 2 { return Err("crypto.decrypt requires (cipher, key)".into()); }
             let cipher_b64 = to_str(&args[0]);
             let key        = to_str(&args[1]);
             let mode = args.get(2).map(to_str).unwrap_or_else(|| "aes-256-gcm".into());
@@ -98,7 +98,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 let (plain, _) = xor_encrypt(&cipher, &key);
                 return String::from_utf8(plain)
                     .map(EvalValue::Str)
-                    .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".into());
+                    .map_err(|_| "crypto.decrypt: the result is not valid UTF-8".into());
             }
             aes_decrypt(&cipher_b64, &key).map(EvalValue::Str)
         }
@@ -122,7 +122,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // context_token(context, ttl?) → token ligado a tiempo
         "context_token" => {
-            if args.is_empty() { return Err("crypto.context_token requiere (context, ttl?)".into()); }
+            if args.is_empty() { return Err("crypto.context_token requires (context, ttl?)".into()); }
             let context = to_str(&args[0]);
             let ttl = if args.len() > 1 { to_i64(&args[1])? as u64 } else { 60 };
             use std::time::{SystemTime, UNIX_EPOCH};
@@ -140,7 +140,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str(random_hex(length)))
         }
 
-        f => Err(format!("crypto.{}() no existe", f)),
+        f => Err(format!("crypto.{}() does not exist", f)),
     }
 }
 
@@ -160,7 +160,7 @@ fn do_hash(data: &str, salt: &str, _algo: &str) -> String {
 fn hmac_sign(data: &[u8], key: &[u8]) -> Result<String, String> {
     // Desambiguar: aes_gcm::KeyInit también aporta new_from_slice al scope.
     let mut mac = <HmacSha256 as Mac>::new_from_slice(key)
-        .map_err(|e| format!("crypto.sign: clave inválida: {}", e))?;
+        .map_err(|e| format!("crypto.sign: invalid key: {}", e))?;
     mac.update(data);
     Ok(hex_encode(&mac.finalize().into_bytes()))
 }
@@ -181,7 +181,7 @@ fn kdf_argon2(key: &str, salt: &[u8]) -> Result<[u8; 32], String> {
     let mut out = [0u8; 32];
     argon2::Argon2::default()
         .hash_password_into(key.as_bytes(), salt, &mut out)
-        .map_err(|e| format!("crypto: derivación de clave: {}", e))?;
+        .map_err(|e| format!("crypto: key derivation: {}", e))?;
     Ok(out)
 }
 
@@ -215,7 +215,7 @@ fn aes_decrypt(cipher_b64: &str, key: &str) -> Result<String, String> {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k));
         if let Ok(plain) = cipher.decrypt(Nonce::from_slice(&raw[17..29]), &raw[29..]) {
             return String::from_utf8(plain)
-                .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".to_string());
+                .map_err(|_| "crypto.decrypt: the result is not valid UTF-8".to_string());
         }
     }
 
@@ -225,11 +225,11 @@ fn aes_decrypt(cipher_b64: &str, key: &str) -> Result<String, String> {
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&k));
         if let Ok(plain) = cipher.decrypt(Nonce::from_slice(&raw[..12]), &raw[12..]) {
             return String::from_utf8(plain)
-                .map_err(|_| "crypto.decrypt: resultado no es UTF-8 válido".to_string());
+                .map_err(|_| "crypto.decrypt: the result is not valid UTF-8".to_string());
         }
     }
 
-    Err("crypto.decrypt: clave incorrecta o datos manipulados".into())
+    Err("crypto.decrypt: wrong key, or tampered data".into())
 }
 
 //     XOR — LEGACY, inseguro. Solo para descifrar datos del formato antiguo
@@ -302,7 +302,7 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
     let clean: Vec<u8> = input.chars().filter(|c| !c.is_whitespace() && *c != '=')
         .map(|c| {
             let v = table[c as usize];
-            if v == 255 { Err(format!("carácter inválido: {}", c)) } else { Ok(v) }
+            if v == 255 { Err(format!("invalid character: {}", c)) } else { Ok(v) }
         })
         .collect::<Result<_, _>>()?;
     let mut out = Vec::new();
@@ -321,7 +321,7 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
 //     Helpers
 
 fn one_str(fn_name: &str, args: Vec<EvalValue>) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("crypto.{}() requiere 1 argumento", fn_name)); }
+    if args.is_empty() { return Err(format!("crypto.{}() requires 1 argument", fn_name)); }
     Ok(to_str(&args[0]))
 }
 
@@ -333,6 +333,6 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("crypto: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("crypto: expected a number, got {}", other.type_name())),
     }
 }

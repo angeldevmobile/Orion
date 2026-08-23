@@ -35,12 +35,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // node(id, nombre) → Bool  — agrega nodo si no existe
         "node" | "nodo" => {
-            if args.len() < 2 { return Err("grafo.nodo requiere (id, nombre)".into()); }
+            if args.len() < 2 { return Err("grafo.nodo requires (id, nombre)".into()); }
             let gid  = to_u64(&args[0])?;
             let name = to_str(&args[1]);
             let mut st = store().lock().unwrap();
             if !st.graphs.contains_key(&gid) {
-                return Err(format!("grafo {}: no existe", gid));
+                return Err(format!("grafo {}: does not exist", gid));
             }
             if !st.node_index[&gid].contains_key(&name) {
                 let idx = st.graphs.get_mut(&gid).unwrap().add_node(name.clone());
@@ -50,14 +50,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // edge(id, desde, hasta, peso?) → Bool
         "edge" | "arista" => {
-            if args.len() < 3 { return Err("grafo.arista requiere (id, desde, hasta, peso?)".into()); }
+            if args.len() < 3 { return Err("grafo.arista requires (id, desde, hasta, peso?)".into()); }
             let gid   = to_u64(&args[0])?;
             let desde = to_str(&args[1]);
             let hasta = to_str(&args[2]);
             let peso  = args.get(3).and_then(|v| to_f64(v).ok()).unwrap_or(1.0);
             let mut st = store().lock().unwrap();
             if !st.graphs.contains_key(&gid) {
-                return Err(format!("grafo {}: no existe", gid));
+                return Err(format!("grafo {}: does not exist", gid));
             }
             // Agregar nodos si no existen (borrows secuenciales, no simultáneos)
             if !st.node_index[&gid].contains_key(&desde) {
@@ -75,15 +75,15 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // path(id, desde, hasta) → List<Str> de nodos o Null si no existe ruta
         "path" | "camino" => {
-            if args.len() < 3 { return Err("grafo.camino requiere (id, desde, hasta)".into()); }
+            if args.len() < 3 { return Err("grafo.camino requires (id, desde, hasta)".into()); }
             let gid   = to_u64(&args[0])?;
             let desde = to_str(&args[1]);
             let hasta = to_str(&args[2]);
             let st = store().lock().unwrap();
-            let g  = st.graphs.get(&gid).ok_or_else(|| format!("grafo {}: no existe", gid))?;
+            let g  = st.graphs.get(&gid).ok_or_else(|| format!("grafo {}: does not exist", gid))?;
             let nm = st.node_index.get(&gid).unwrap();
-            let src = *nm.get(&desde).ok_or_else(|| format!("grafo: nodo '{}' no existe", desde))?;
-            let dst = *nm.get(&hasta).ok_or_else(|| format!("grafo: nodo '{}' no existe", hasta))?;
+            let src = *nm.get(&desde).ok_or_else(|| format!("grafo: node '{}' does not exist", desde))?;
+            let dst = *nm.get(&hasta).ok_or_else(|| format!("grafo: node '{}' does not exist", hasta))?;
             match astar(g, src, |n| n == dst, |e| *e.weight(), |_| 0.0) {
                 Some((_, path)) => Ok(EvalValue::List(
                     path.iter().map(|idx| EvalValue::Str(g[*idx].clone())).collect()
@@ -93,13 +93,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // neighbors(id, nodo) → List<Str>
         "neighbors" | "vecinos" => {
-            if args.len() < 2 { return Err("grafo.vecinos requiere (id, nodo)".into()); }
+            if args.len() < 2 { return Err("grafo.vecinos requires (id, nodo)".into()); }
             let gid  = to_u64(&args[0])?;
             let name = to_str(&args[1]);
             let st = store().lock().unwrap();
-            let g  = st.graphs.get(&gid).ok_or_else(|| format!("grafo {}: no existe", gid))?;
+            let g  = st.graphs.get(&gid).ok_or_else(|| format!("grafo {}: does not exist", gid))?;
             let nm = st.node_index.get(&gid).unwrap();
-            let idx = *nm.get(&name).ok_or_else(|| format!("grafo: nodo '{}' no existe", name))?;
+            let idx = *nm.get(&name).ok_or_else(|| format!("grafo: node '{}' does not exist", name))?;
             let vecinos: Vec<EvalValue> = g.neighbors(idx)
                 .map(|n| EvalValue::Str(g[n].clone()))
                 .collect();
@@ -107,20 +107,20 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // nodes(id) → List<Str> de todos los nodos
         "nodes" | "nodos" => {
-            let gid = to_u64(args.first().ok_or("grafo.nodos requiere (id)")?)?;
+            let gid = to_u64(args.first().ok_or("grafo.nodos requires (id)")?)?;
             let st  = store().lock().unwrap();
-            let g   = st.graphs.get(&gid).ok_or_else(|| format!("grafo {}: no existe", gid))?;
+            let g   = st.graphs.get(&gid).ok_or_else(|| format!("grafo {}: does not exist", gid))?;
             Ok(EvalValue::List(g.node_weights().map(|n| EvalValue::Str(n.clone())).collect()))
         }
         // delete(id) → Bool
         "delete" | "eliminar" => {
-            let gid = to_u64(args.first().ok_or("grafo.eliminar requiere (id)")?)?;
+            let gid = to_u64(args.first().ok_or("grafo.eliminar requires (id)")?)?;
             let mut st = store().lock().unwrap();
             st.graphs.shift_remove(&gid);
             st.node_index.shift_remove(&gid);
             Ok(EvalValue::Bool(true))
         }
-        f => Err(format!("grafo.{}() no existe", f)),
+        f => Err(format!("grafo.{}() does not exist", f)),
     }
 }
 
@@ -131,7 +131,7 @@ fn to_str(v: &EvalValue) -> String {
 fn to_u64(v: &EvalValue) -> Result<u64, String> {
     match v {
         EvalValue::Int(n) if *n > 0 => Ok(*n as u64),
-        other => Err(format!("grafo: id debe ser positivo, recibió {}", other.type_name())),
+        other => Err(format!("grafo: the id must be positive, got {}", other.type_name())),
     }
 }
 
@@ -139,6 +139,6 @@ fn to_f64(v: &EvalValue) -> Result<f64, String> {
     match v {
         EvalValue::Float(f) => Ok(*f),
         EvalValue::Int(n)   => Ok(*n as f64),
-        other => Err(format!("grafo: peso debe ser número, recibió {}", other.type_name())),
+        other => Err(format!("grafo: the weight must be a number, got {}", other.type_name())),
     }
 }

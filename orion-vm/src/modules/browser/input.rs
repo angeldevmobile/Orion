@@ -158,7 +158,7 @@ pub fn type_text(
 /// Pulsa una tecla con nombre sobre lo que tenga el foco.
 pub fn press(conn: &Conn, session: &str, nombre: &str, timeout: Duration) -> Result<(), String> {
     let (key, code) = tecla(nombre)
-        .ok_or_else(|| format!("browser.press: tecla '{nombre}' desconocida.\n  Admitidas: {TECLAS}"))?;
+        .ok_or_else(|| format!("browser.press: unknown key '{nombre}'.\n  Accepted: {TECLAS}"))?;
 
     let mut abajo = serde_json::json!({
         "type": "rawKeyDown", "key": key,

@@ -23,7 +23,7 @@ pub struct CodegenError {
 
 impl std::fmt::Display for CodegenError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CodegenError [línea {}]: {}", self.line, self.message)
+        write!(f, "CodegenError [line {}]: {}", self.line, self.message)
     }
 }
 
@@ -33,6 +33,24 @@ pub fn compile(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
     // Pase previo: reordenar argumentos con nombre (`f(x = 1)`) a posicional.
     crate::named_args::resolve(&mut stmts)?;
     let mut cg = Codegen::new();
+    cg.compile_program(stmts)?;
+    Ok(cg.into_bytecode())
+}
+
+/// Compila el archivo que el usuario ejecuta (`orion run x.orx`, `--build`,
+/// `watch`, el depurador).
+///
+/// Igual que [`compile`], salvo que si el programa define `main` y no la llama
+/// en ninguna parte, la llamada se añade al final. Sin esto, un programa cuyo
+/// código entero vive dentro de `fn main()` terminaba con éxito y sin imprimir
+/// nada: el peor fallo posible, porque no se parece a un fallo.
+///
+/// Los módulos cargados con `use` NO pasan por aquí — su cuerpo se ejecuta al
+/// importarlos, así que llamar a su `main` sería ejecutar el programa ajeno.
+pub fn compile_entry(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
+    crate::named_args::resolve(&mut stmts)?;
+    let mut cg = Codegen::new();
+    cg.auto_main = true;
     cg.compile_program(stmts)?;
     Ok(cg.into_bytecode())
 }
@@ -59,6 +77,9 @@ struct Codegen {
     for_counter:  usize,
     match_counter: usize,
     loop_stack:   Vec<LoopCtx>,
+    /// Solo el archivo que se ejecuta: añade la llamada a `main` si el programa
+    /// la define y no la llama. Ver [`compile_entry`].
+    auto_main:    bool,
 }
 
 impl Codegen {
@@ -74,6 +95,7 @@ impl Codegen {
             for_counter:   0,
             match_counter: 0,
             loop_stack:    Vec::new(),
+            auto_main:     false,
         }
     }
 
@@ -165,11 +187,65 @@ impl Codegen {
                 _ => self.compile_stmt(stmt)?,
             }
         }
+        if self.auto_main && self.needs_auto_main() {
+            self.emit(Instruction::Call("main".into(), 0));
+            self.emit(Instruction::Pop);
+        }
+
         self.emit(Instruction::Halt);
         Ok(())
     }
 
-    //    Función / act                                                          
+    /// ¿Hay que añadir la llamada a `main`?
+    ///
+    /// Solo si se cumplen las tres cosas: existe, se puede llamar sin
+    /// argumentos, y **nadie la nombra ya**. Lo último se comprueba sobre el
+    /// bytecode ya emitido, no sobre el AST, porque así se cubre por igual la
+    /// llamada de nivel superior (`main()`), la que hace otra función, pasarla
+    /// como valor (`spawn main()`, `f(main)`) y usarla de handler de `serve`.
+    /// Un programa que ya llama a `main` a mano sigue ejecutándola una sola vez.
+    fn needs_auto_main(&self) -> bool {
+        let Some(def) = self.functions.get("main") else { return false };
+
+        // Un `main` con parámetros obligatorios no se puede llamar sin
+        // argumentos. No se inventa una llamada que fallaría, pero tampoco se
+        // calla: el programa terminaría con éxito y sin hacer nada, que es
+        // justo el silencio que esto viene a quitar.
+        let required = def.params.len().saturating_sub(
+            def.param_defaults.iter().filter(|d| d.is_some()).count(),
+        );
+
+        let nombra_main = |instrs: &[Instruction]| {
+            instrs.iter().any(|i| matches!(i,
+                Instruction::Call(n, _)
+                | Instruction::CallAsync(n, _)
+                | Instruction::LoadVar(n)
+                | Instruction::MakeClosure(n)
+                | Instruction::MakeFunction(n, _, _)
+                | Instruction::ServeHTTP(n) if n == "main"))
+        };
+
+        if nombra_main(&self.main_instrs) { return false; }
+        if self.functions.values().any(|f| nombra_main(&f.body)) { return false; }
+        for s in self.shapes.values() {
+            if s.acts.values().any(|a| nombra_main(&a.body)) { return false; }
+            if s.on_create.as_ref().is_some_and(|a| nombra_main(&a.body)) { return false; }
+            if s.on_error.as_ref().is_some_and(|a| nombra_main(&a.body)) { return false; }
+        }
+
+        if required > 0 {
+            eprintln!(
+                "  \x1b[1m\x1b[33m!\x1b[0m  'main' is defined but never called, and it takes {} \
+                 required argument(s), so it cannot be called automatically. \
+                 Give its parameters defaults, or call it yourself.",
+                required
+            );
+            return false;
+        }
+        true
+    }
+
+    //    Función / act
 
     fn compile_fn_body(&mut self, params: &[Param], body: &[Stmt]) -> Result<FunctionDef, CodegenError> {
         // Defaults como mini-bytecode (igual que FieldDef.default). Regla: un

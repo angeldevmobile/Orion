@@ -314,9 +314,9 @@ impl Value {
             Value::Module(m) =>
                 Ok(SendValue::Str(format!("<module {}>", m))),
             Value::Instance(_) =>
-                Err("No se puede pasar una instancia a una función async".to_string()),
+                Err("Cannot pass an instance to an async function".to_string()),
             Value::Task(_) =>
-                Err("No se puede pasar una tarea como argumento async".to_string()),
+                Err("Cannot pass a task as an async argument".to_string()),
         }
     }
 
@@ -337,18 +337,18 @@ impl Value {
                 result.extend(b.borrow().iter().cloned());
                 Ok(Value::list(result))
             }
-            _ => Err(format!("No se puede sumar {} + {}", self.type_name(), other.type_name())),
+            _ => Err(format!("Cannot add {} + {}", self.type_name(), other.type_name())),
         }
     }
 
     pub fn sub(&self, other: &Value) -> Result<Value, String> {
         match (self, other) {
             (Value::Int(a), Value::Int(b))     => a.checked_sub(*b).map(Value::Int)
-                .ok_or_else(|| "Desbordamiento aritmético en resta de enteros".to_string()),
+                .ok_or_else(|| "Integer subtraction overflow".to_string()),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 - b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a - *b as f64)),
-            _ => Err(format!("No se puede restar {} - {}", self.type_name(), other.type_name())),
+            _ => Err(format!("Cannot subtract {} - {}", self.type_name(), other.type_name())),
         }
     }
 
@@ -359,7 +359,7 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 * b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a * *b as f64)),
-            _ => Err(format!("No se puede multiplicar {} * {}", self.type_name(), other.type_name())),
+            _ => Err(format!("Cannot multiply {} * {}", self.type_name(), other.type_name())),
         }
     }
 
@@ -371,7 +371,7 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 / b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a / *b as f64)),
-            _ => Err(format!("No se puede dividir {} / {}", self.type_name(), other.type_name())),
+            _ => Err(format!("Cannot divide {} / {}", self.type_name(), other.type_name())),
         }
     }
 
@@ -393,7 +393,7 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => Ok(a < b),
             (Value::Int(a), Value::Float(b))   => Ok((*a as f64) < *b),
             (Value::Float(a), Value::Int(b))   => Ok(*a < (*b as f64)),
-            _ => Err(format!("No se puede comparar {} < {}", self.type_name(), other.type_name())),
+            _ => Err(format!("Cannot compare {} < {}", self.type_name(), other.type_name())),
         }
     }
 }

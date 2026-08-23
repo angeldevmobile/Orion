@@ -60,7 +60,7 @@ pub fn save(
 ) -> Result<Guardado, String> {
     let c = conn.call("Storage.getCookies", serde_json::json!({}), None, timeout)
         .or_else(|_| conn.call("Network.getCookies", serde_json::json!({}), Some(sesion_cdp), timeout))
-        .map_err(|e| format!("browser.save_state: no se pudieron leer las cookies: {e}"))?;
+        .map_err(|e| format!("browser.save_state: could not read the cookies: {e}"))?;
     let cookies = c.get("cookies").cloned().unwrap_or(serde_json::Value::Array(vec![]));
 
     let s = conn.call(
@@ -86,9 +86,9 @@ pub fn save(
     });
 
     let texto = serde_json::to_string_pretty(&doc)
-        .map_err(|e| format!("browser.save_state: no se pudo serializar: {e}"))?;
+        .map_err(|e| format!("browser.save_state: could not serialize: {e}"))?;
     std::fs::write(ruta, texto)
-        .map_err(|e| format!("browser.save_state: no se pudo escribir '{ruta}': {e}"))?;
+        .map_err(|e| format!("browser.save_state: could not write '{ruta}': {e}"))?;
 
     Ok(Guardado {
         cookies: cookies.as_array().map(|a| a.len()).unwrap_or(0),
@@ -131,18 +131,18 @@ pub fn load(
     conn: &Conn, sesion_cdp: &str, ruta: &str, timeout: Duration,
 ) -> Result<Cargado, String> {
     let texto = std::fs::read_to_string(ruta).map_err(|e| format!(
-        "browser.load_state: no se pudo leer '{ruta}': {e}\n  \
-         ¿Se guardó antes con save_state?"
+        "browser.load_state: could not read '{ruta}': {e}\n  \
+         Was it saved with save_state first?"
     ))?;
     let doc: serde_json::Value = serde_json::from_str(&texto)
-        .map_err(|e| format!("browser.load_state: '{ruta}' no es un estado válido: {e}"))?;
+        .map_err(|e| format!("browser.load_state: '{ruta}' is not a valid state file: {e}"))?;
 
     let cookies = doc.get("cookies").and_then(|x| x.as_array()).cloned().unwrap_or_default();
     let listas: Vec<serde_json::Value> = cookies.iter().map(para_poner).collect();
     if !listas.is_empty() {
         conn.call("Network.setCookies", serde_json::json!({ "cookies": listas }),
                   Some(sesion_cdp), timeout)
-            .map_err(|e| format!("browser.load_state: no se pudieron poner las cookies: {e}"))?;
+            .map_err(|e| format!("browser.load_state: could not set the cookies: {e}"))?;
     }
 
     let actual = conn.call(

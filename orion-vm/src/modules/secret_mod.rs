@@ -16,7 +16,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // get(key, default?) → valor del secret o default/null
         "get" => {
-            if args.is_empty() { return Err("secret.get requiere (key, default?)".into()); }
+            if args.is_empty() { return Err("secret.get requires (key, default?)".into()); }
             let key = to_str(&args[0]);
             if let Some(val) = secrets_lookup(&key) {
                 return Ok(EvalValue::Str(val));
@@ -25,7 +25,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // require(key) → valor o error claro
         "require" => {
-            if args.is_empty() { return Err("secret.require requiere (key)".into()); }
+            if args.is_empty() { return Err("secret.require requires (key)".into()); }
             let key = to_str(&args[0]);
             match secrets_lookup(&key) {
                 Some(val) => Ok(EvalValue::Str(val)),
@@ -37,7 +37,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // mask(value) → "ab***cd" (oculta parte central)
         "mask" => {
-            if args.is_empty() { return Err("secret.mask requiere (value)".into()); }
+            if args.is_empty() { return Err("secret.mask requires (value)".into()); }
             let val = to_str(&args[0]);
             let masked = if val.len() <= 4 {
                 "*".repeat(val.len())
@@ -48,7 +48,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // has(key) → bool
         "has" => {
-            if args.is_empty() { return Err("secret.has requiere (key)".into()); }
+            if args.is_empty() { return Err("secret.has requires (key)".into()); }
             let key = to_str(&args[0]);
             Ok(EvalValue::Bool(secrets_lookup(&key).is_some()))
         }
@@ -65,7 +65,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 }
             }
         }
-        f => Err(format!("secret.{}() no existe", f)),
+        f => Err(format!("secret.{}() does not exist", f)),
     }
 }
 

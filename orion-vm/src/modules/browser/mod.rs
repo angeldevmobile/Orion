@@ -30,7 +30,9 @@ pub mod extract;
 pub mod files;
 pub mod form;
 pub mod input;
+pub mod emulate;
 pub mod launch;
+pub mod route;
 pub mod state;
 
 use crate::eval_value::EvalValue;
@@ -81,13 +83,13 @@ fn page_ctx(h: u64) -> Result<(Arc<Conn>, String, Duration, Tuning), String> {
     let reg = handles().lock().unwrap();
     let Some(Handle::Page(p)) = reg.get(&h) else {
         return Err(match reg.get(&h) {
-            Some(Handle::Browser(_)) => format!("browser: {h} es un navegador, no una pestaña"),
-            _ => format!("browser: la pestaña {h} no existe (¿ya se cerró?)"),
+            Some(Handle::Browser(_)) => format!("browser: {h} is a browser, not a page"),
+            _ => format!("browser: page {h} does not exist (already closed?)"),
         });
     };
     let session = p.session.clone();
     let Some(Handle::Browser(b)) = reg.get(&p.browser) else {
-        return Err(format!("browser: el navegador de la pestaña {h} ya no existe"));
+        return Err(format!("browser: the browser owning page {h} no longer exists"));
     };
     Ok((Arc::clone(&b.conn), session, b.timeout, b.tuning.clone()))
 }
@@ -96,8 +98,8 @@ fn browser_ctx(h: u64) -> Result<(Arc<Conn>, Duration, Tuning), String> {
     let reg = handles().lock().unwrap();
     match reg.get(&h) {
         Some(Handle::Browser(b)) => Ok((Arc::clone(&b.conn), b.timeout, b.tuning.clone())),
-        Some(Handle::Page(_))    => Err(format!("browser: {h} es una pestaña, no un navegador")),
-        None                     => Err(format!("browser: el navegador {h} no existe")),
+        Some(Handle::Page(_))    => Err(format!("browser: {h} is a page, not a browser")),
+        None                     => Err(format!("browser: browser {h} does not exist")),
     }
 }
 
@@ -219,6 +221,25 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Captura de red: leer el JSON que la página le pide a su propia API,
         // en vez de deshacer el HTML que ese JSON produjo.
         //
+        // emulate(page: handle, opts: dict|no) -> bool → device, viewport, user agent, language, timezone, geolocation and dark mode. { device: "iphone" } is a starting point, and any of its fields can be overridden in the same call; `no` clears it
+        "emulate" => do_emulate(&args),
+
+        // cookies(page: handle, name?: string) -> list → the cookies visible to the page, or just the one named
+        "cookies"       => do_cookies(&args),
+        // set_cookie(page: handle, cookie: dict) -> bool → { name, value, domain?, path?, expires?, http_only?, secure?, same_site? }; without a domain it is attached to the page's own url
+        "set_cookie"    => do_set_cookie(&args),
+        // clear_cookies(page: handle) -> bool → removes every cookie in the browser
+        "clear_cookies" => do_clear_cookies(&args),
+
+        // Intercepción: decidir qué hace el navegador con cada petición.
+        //
+        // route(page: handle, pattern: string, action: dict, opts?: dict) -> bool → decides what the browser does with each matching request: { block: yes } · { fail: "timedout" } · { mock: { status, json|body, headers } } · { headers: {...} }. The first rule that matches wins; { times: n } fires only n times
+        "route"   => do_route(&args),
+        // unroute(page: handle, pattern?: string) -> int → removes the rules with that exact pattern, or all of them; returns how many were removed
+        "unroute" => do_unroute(&args),
+        // routes(page: handle) -> list → the rules in place and how many times each has fired: { pattern, hits, times }
+        "routes"  => do_routes(&args),
+
         // watch(pestaña, patrón) → arma la escucha; hay que llamarlo ANTES de provocar la petición
         "watch"   => do_watch(&args),
         // capture(pestaña, opts?) → devuelve lo que la página pidió y casó, con el JSON ya parseado
@@ -241,7 +262,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "free" | "close" => free(&args),
         // info() -> dict → diagnóstico sin abrir nada: { found, path, env, open_browsers, in_use, open_pages }. Lo primero que mirar cuando "no me funciona"
         "info"    => info(),
-        f => Err(format!("browser.{f}() no existe")),
+        f => Err(format!("browser.{f}() does not exist")),
     }
 }
 
@@ -264,8 +285,8 @@ fn open(args: &[EvalValue]) -> Result<EvalValue, String> {
     };
     if let Some(EvalValue::Dict(m)) = args.first() {
         if m.contains_key("allow") && allow.is_empty() {
-            return Err("browser.open: `allow` está vacío. Quítalo si no quieres restringir; \
-                        una lista vacía bloquearía todo y es casi seguro un descuido.".into());
+            return Err("browser.open: `allow` is empty. Drop it if you do not want to restrict anything; \
+                        an empty list would block everything, which is almost certainly a slip.".into());
         }
     }
 
@@ -310,11 +331,11 @@ fn attach(args: &[EvalValue]) -> Result<EvalValue, String> {
             let url  = m.get("url").or_else(|| m.get("endpoint")).map(to_str);
             let port = m.get("port").and_then(|v| to_u64(v).ok());
             if url.is_none() && port.is_none() {
-                return Err(format!("{uso}: hace falta `port` o `url`"));
+                return Err(format!("{uso}: `port` or `url` is required"));
             }
             (url, port, Some(m.clone()))
         }
-        _ => return Err(format!("{uso}: falta el puerto o la url")),
+        _ => return Err(format!("{uso}: the port or the url is missing")),
     };
 
     let tuning = Tuning::default();
@@ -341,15 +362,15 @@ fn attach(args: &[EvalValue]) -> Result<EvalValue, String> {
         retry:      Duration::from_millis(tuning.retry_ms),
     };
     let conn = Conn::connect(&ws_url, limits)
-        .map_err(|e| format!("browser.attach: no se pudo hablar con el navegador en {ws_url}: {e}"))?;
+        .map_err(|e| format!("browser.attach: could not talk to the browser at {ws_url}: {e}"))?;
 
     // La lista blanca de dominios vale igual estando enganchados.
     if let Some(m) = &opts_dict {
         if let Some(EvalValue::List(xs)) = m.get("allow") {
             let allow: Vec<String> = xs.iter().map(to_str).collect();
             if allow.is_empty() {
-                return Err("browser.attach: `allow` está vacío. Quítalo si no quieres \
-                            restringir; una lista vacía bloquearía todo.".into());
+                return Err("browser.attach: `allow` is empty. Drop it if you do not want to \
+                            restrict anything; an empty list would block everything.".into());
             }
             conn.set_allowlist(allow);
         }
@@ -375,28 +396,28 @@ fn descubrir_endpoint(host_port: &str, timeout: Duration) -> Result<String, Stri
         .timeout(timeout)
         .call()
         .map_err(|e| format!(
-            "browser.attach: no hay ningún navegador escuchando en {host_port} ({e}).\n  \
-             El navegador tiene que estar arrancado con --remote-debugging-port={}.\n  \
-             Uno abierto de la forma normal no expone CDP.",
+            "browser.attach: no browser is listening on {host_port} ({e}).\n  \
+             The browser has to be started with --remote-debugging-port={}.\n  \
+             One opened the normal way does not expose CDP.",
             host_port.rsplit(':').next().unwrap_or("9222")
         ))?;
 
     let v: serde_json::Value = resp.into_json()
-        .map_err(|e| format!("browser.attach: respuesta ilegible de {url}: {e}"))?;
+        .map_err(|e| format!("browser.attach: unreadable response from {url}: {e}"))?;
 
     v.get("webSocketDebuggerUrl")
         .and_then(|x| x.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| format!(
-            "browser.attach: {host_port} respondió, pero sin endpoint de depuración. \
-             ¿Es de verdad un navegador con CDP abierto?"
+            "browser.attach: {host_port} answered, but with no debugging endpoint. \
+             Is it really a browser with CDP open?"
         ))
 }
 
 //    page(browser) → handle de pestaña
 
 fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let b = arg_handle(args, 0, "browser.page(navegador)")?;
+    let b = arg_handle(args, 0, "browser.page(browser)")?;
     let (conn, timeout, _t) = browser_ctx(b)?;
 
     let creado = conn.call(
@@ -405,7 +426,7 @@ fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
         None, timeout,
     )?;
     let target_id = creado["targetId"].as_str()
-        .ok_or("browser.page: el navegador no devolvió targetId")?
+        .ok_or("browser.page: the browser returned no targetId")?
         .to_string();
 
     // `flatten` multiplexa la sesión sobre el mismo socket; sin él haría falta
@@ -416,7 +437,7 @@ fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
         None, timeout,
     )?;
     let session = adjunto["sessionId"].as_str()
-        .ok_or("browser.page: el navegador no devolvió sessionId")?
+        .ok_or("browser.page: the browser returned no sessionId")?
         .to_string();
 
     // Los eventos de página hacen falta para saber cuándo terminó de cargar.
@@ -438,9 +459,9 @@ fn page(args: &[EvalValue]) -> Result<EvalValue, String> {
 //    goto(page, url) → url final
 
 fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.goto(pestaña, url)")?;
+    let p = arg_handle(args, 0, "browser.goto(page, url)")?;
     let url = args.get(1).map(to_str)
-        .ok_or("browser.goto(pestaña, url): falta la url")?;
+        .ok_or("browser.goto(page, url): the url is missing")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
 
     let marca = conn.event_mark();
@@ -469,7 +490,7 @@ fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
                 Some(&session), Duration::from_millis(t.close_ms),
             );
             return Err(format!(
-                "browser.goto '{url}': la página abrió un {tipo} ({texto:?}) y quedó bloqueada."
+                "browser.goto '{url}': the page opened a {tipo} ({texto:?}) and blocked."
             ));
         }
     }
@@ -483,7 +504,7 @@ fn goto(args: &[EvalValue]) -> Result<EvalValue, String> {
 //    title / url / content
 
 fn read_str(args: &[EvalValue], expr: &str, quien: &str) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, &format!("{quien}(pestaña)"))?;
+    let p = arg_handle(args, 0, &format!("{quien}(page)"))?;
     let (conn, session, timeout, _t) = page_ctx(p)?;
     evaluate(&conn, &session, expr, timeout)
 }
@@ -491,9 +512,9 @@ fn read_str(args: &[EvalValue], expr: &str, quien: &str) -> Result<EvalValue, St
 //    eval(page, js)
 
 fn eval(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.eval(pestaña, js)")?;
+    let p = arg_handle(args, 0, "browser.eval(page, js)")?;
     let js = args.get(1).map(to_str)
-        .ok_or("browser.eval(pestaña, js): falta el código")?;
+        .ok_or("browser.eval(page, js): the code is missing")?;
     let (conn, session, timeout, _t) = page_ctx(p)?;
     evaluate(&conn, &session, &js, timeout)
 }
@@ -551,6 +572,8 @@ fn parse_tuning(v: Option<&EvalValue>) -> Tuning {
     if let Some(x) = u64_de(m, "drag_steps")    { t.drag_steps    = x.max(1) as u32; }
     if let Some(x) = u64_de(m, "force_layers")  { t.force_layers  = x as u32; }
     if let Some(x) = u64_de(m, "iframe_depth")  { t.iframe_depth  = x as u32; }
+    if let Some(x) = u64_de(m, "shadow_depth")  { t.shadow_depth  = x as u32; }
+    if let Some(x) = m.get("shadow").map(truthy) { t.shadow        = x; }
     if let Some(x) = u64_de(m, "nav_settle")    { t.nav_settle_ms = x; }
     if let Some(x) = m.get("hit_inset").and_then(to_f64) { t.hit_inset = x.max(0.0); }
 
@@ -579,9 +602,9 @@ fn force_de(args: &[EvalValue], i: usize) -> input::Force {
 }
 
 fn do_click(args: &[EvalValue], boton: &str, veces: i64) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.click(pestaña, selector)")?;
+    let p = arg_handle(args, 0, "browser.click(page, selector)")?;
     let sel = args.get(1).map(to_str)
-        .ok_or("browser.click(pestaña, selector): falta el selector")?;
+        .ok_or("browser.click(page, selector): the selector is missing")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
     input::click(&conn, &session, &sel, boton, veces,
                  espera_de(args, 2, &t), force_de(args, 2), &t, timeout)?;
@@ -589,25 +612,25 @@ fn do_click(args: &[EvalValue], boton: &str, veces: i64) -> Result<EvalValue, St
 }
 
 fn do_hover(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.hover(pestaña, selector)")?;
+    let p = arg_handle(args, 0, "browser.hover(page, selector)")?;
     let sel = args.get(1).map(to_str)
-        .ok_or("browser.hover(pestaña, selector): falta el selector")?;
+        .ok_or("browser.hover(page, selector): the selector is missing")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
     input::hover(&conn, &session, &sel, espera_de(args, 2, &t), &t, timeout)?;
     Ok(EvalValue::Bool(true))
 }
 
 fn do_drag(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.drag(pestaña, origen, destino)")?;
-    let a = args.get(1).map(to_str).ok_or("browser.drag: falta el origen")?;
-    let z = args.get(2).map(to_str).ok_or("browser.drag: falta el destino")?;
+    let p = arg_handle(args, 0, "browser.drag(page, from, to)")?;
+    let a = args.get(1).map(to_str).ok_or("browser.drag: the source selector is missing")?;
+    let z = args.get(2).map(to_str).ok_or("browser.drag: the target selector is missing")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
     input::drag(&conn, &session, &a, &z, espera_de(args, 3, &t), &t, timeout)?;
     Ok(EvalValue::Bool(true))
 }
 
 fn do_scroll(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.scroll(pestaña, dx, dy)")?;
+    let p = arg_handle(args, 0, "browser.scroll(page, dx, dy)")?;
     let dx = args.get(1).and_then(|v| to_f64(v)).unwrap_or(0.0);
     let dy = args.get(2).and_then(|v| to_f64(v)).unwrap_or(0.0);
     let (conn, session, timeout, _t) = page_ctx(p)?;
@@ -616,9 +639,9 @@ fn do_scroll(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_type(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.type(pestaña, selector, texto)")?;
-    let sel = args.get(1).map(to_str).ok_or("browser.type: falta el selector")?;
-    let txt = args.get(2).map(to_str).ok_or("browser.type: falta el texto")?;
+    let p = arg_handle(args, 0, "browser.type(page, selector, text)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.type: the selector is missing")?;
+    let txt = args.get(2).map(to_str).ok_or("browser.type: the text is missing")?;
     // Limpiar antes de escribir es lo que casi siempre se quiere; lo contrario
     // se pide con `{ clear: no }`.
     let limpiar = match args.get(3) {
@@ -633,32 +656,32 @@ fn do_type(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_press(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.press(pestaña, tecla)")?;
+    let p = arg_handle(args, 0, "browser.press(page, key)")?;
     let k = args.get(1).map(to_str)
-        .ok_or_else(|| format!("browser.press(pestaña, tecla): falta la tecla.\n  Admitidas: {}", input::TECLAS))?;
+        .ok_or_else(|| format!("browser.press(page, key): the key is missing.\n  Accepted: {}", input::TECLAS))?;
     let (conn, session, timeout, _t) = page_ctx(p)?;
     input::press(&conn, &session, &k, timeout)?;
     Ok(EvalValue::Bool(true))
 }
 
 fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.select(pestaña, selector, opción)")?;
-    let sel = args.get(1).map(to_str).ok_or("browser.select: falta el selector")?;
-    let opt = args.get(2).map(to_str).ok_or("browser.select: falta la opción")?;
+    let p = arg_handle(args, 0, "browser.select(page, selector, option)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.select: the selector is missing")?;
+    let opt = args.get(2).map(to_str).ok_or("browser.select: the option is missing")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
 
     let quiere = serde_json::Value::String(opt.clone()).to_string();
     let cuerpo = format!(r#"
     const el = __find(sel);
-    if (!el) return {{ ok: false, why: 'no existe' }};
-    if (el.tagName !== 'SELECT') return {{ ok: false, why: 'no es un <select> (es <' + el.tagName.toLowerCase() + '>)' }};
+    if (!el) return {{ ok: false, why: 'it does not exist' }};
+    if (el.tagName !== 'SELECT') return {{ ok: false, why: 'it is not a <select> (it is a <' + el.tagName.toLowerCase() + '>)' }};
     const q = {quiere};
     const ops = Array.from(el.options);
     let i = ops.findIndex(o => o.value === q);
     if (i < 0) i = ops.findIndex(o => (o.textContent || '').trim() === q);
     if (i < 0 && /^[0-9]+$/.test(q)) i = parseInt(q, 10);
     if (i < 0 || i >= ops.length) {{
-      return {{ ok: false, why: 'no hay opción ' + JSON.stringify(q),
+      return {{ ok: false, why: 'no option ' + JSON.stringify(q),
                 opciones: ops.map(o => (o.textContent || '').trim()) }};
     }}
     el.selectedIndex = i;
@@ -693,14 +716,14 @@ fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_fill(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.fill(pestaña, campos, opts?)")?;
+    let p = arg_handle(args, 0, "browser.fill(page, fields, opts?)")?;
     let EvalValue::Dict(campos) = args.get(1)
-        .ok_or("browser.fill(pestaña, campos, opts?): faltan los campos")?
+        .ok_or("browser.fill(page, fields, opts?): the fields are missing")?
     else {
-        return Err("browser.fill: los campos son un diccionario { selector: valor }".into());
+        return Err("browser.fill: the fields are a dict { selector: value }".into());
     };
     if campos.is_empty() {
-        return Err("browser.fill: el diccionario de campos está vacío".into());
+        return Err("browser.fill: the field dict is empty".into());
     }
     let (conn, session, _timeout, t) = page_ctx(p)?;
     let ms = espera_de(args, 2, &t);
@@ -729,7 +752,7 @@ fn do_fill(args: &[EvalValue]) -> Result<EvalValue, String> {
         };
         for (sel, why) in r.fallidos.iter_mut() {
             if marcados.iter().any(|m| m == sel) {
-                *why = "el valor no fue admitido (oculto por secret)".into();
+                *why = "the value was not accepted (hidden by secret)".into();
             }
         }
     }
@@ -772,7 +795,7 @@ fn fill_con_teclas(
         }
     }
     if estricto && !ausentes.is_empty() {
-        return Err(format!("browser.fill: no se pudieron rellenar {} campo(s):\n    {}",
+        return Err(format!("browser.fill: could not fill {} field(s):\n    {}",
                            ausentes.len(), ausentes.join("\n    ")));
     }
     Ok(EvalValue::Int(puestos as i64))
@@ -780,9 +803,9 @@ fn fill_con_teclas(
 
 fn do_check(args: &[EvalValue], querer: bool) -> Result<EvalValue, String> {
     let quien = if querer { "check" } else { "uncheck" };
-    let p = arg_handle(args, 0, &format!("browser.{quien}(pestaña, selector)"))?;
+    let p = arg_handle(args, 0, &format!("browser.{quien}(page, selector)"))?;
     let sel = args.get(1).map(to_str)
-        .ok_or_else(|| format!("browser.{quien}(pestaña, selector): falta el selector"))?;
+        .ok_or_else(|| format!("browser.{quien}(page, selector): the selector is missing"))?;
     let (conn, session, timeout, t) = page_ctx(p)?;
     let ms = espera_de(args, 2, &t);
 
@@ -791,7 +814,7 @@ fn do_check(args: &[EvalValue], querer: bool) -> Result<EvalValue, String> {
 
     if tipo == "radio" && !querer {
         return Err(format!(
-            "browser.uncheck: '{sel}' es un radio y un radio no se desmarca; marca otro del grupo"
+            "browser.uncheck: '{sel}' is a radio, and a radio cannot be unchecked; check another one in the group"
         ));
     }
     if actual != querer {
@@ -802,9 +825,9 @@ fn do_check(args: &[EvalValue], querer: bool) -> Result<EvalValue, String> {
 }
 
 fn do_value(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.value(pestaña, selector)")?;
+    let p = arg_handle(args, 0, "browser.value(page, selector)")?;
     let sel = args.get(1).map(to_str)
-        .ok_or("browser.value(pestaña, selector): falta el selector")?;
+        .ok_or("browser.value(page, selector): the selector is missing")?;
     let (conn, session, _timeout, t) = page_ctx(p)?;
     let ms = espera_de(args, 2, &t);
 
@@ -831,9 +854,9 @@ fn do_value(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 /// Lee una `<table>` completa.
 fn do_table(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.table(pestaña, selector, opts?)")?;
+    let p = arg_handle(args, 0, "browser.table(page, selector, opts?)")?;
     let sel = args.get(1).map(to_str)
-        .ok_or("browser.table(pestaña, selector, opts?): falta el selector")?;
+        .ok_or("browser.table(page, selector, opts?): the selector is missing")?;
     let (conn, session, _timeout, t) = page_ctx(p)?;
     let ms = espera_de(args, 2, &t);
 
@@ -880,7 +903,7 @@ fn wait_ready(conn: &Conn, session: &str, ms: u64, t: &Tuning) -> Result<(), Str
 }
 
 fn do_dialogs(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.dialogs(pestaña, política)")?;
+    let p = arg_handle(args, 0, "browser.dialogs(page, policy)")?;
     let (conn, session, _to, _t) = page_ctx(p)?;
 
     let pol = args.get(1).map(to_str);
@@ -893,7 +916,7 @@ fn do_dialogs(args: &[EvalValue]) -> Result<EvalValue, String> {
                 || v.starts_with("answer:") || v.starts_with("responder:");
             if !valido {
                 return Err(format!(
-                    "browser.dialogs: política '{v}' desconocida.\n  Admitidas: accept, dismiss, answer:<texto>, off"
+                    "browser.dialogs: unknown policy '{v}'.\n  Accepted: accept, dismiss, answer:<text>, off"
                 ));
             }
             conn.set_dialog_policy(&session, Some(v.to_string()));
@@ -904,12 +927,12 @@ fn do_dialogs(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 /// Clic que abre una pestaña nueva; devuelve el handle de la que se abrió.
 fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.click_opens(pestaña, selector)")?;
-    let sel = args.get(1).map(to_str).ok_or("browser.click_opens: falta el selector")?;
+    let p = arg_handle(args, 0, "browser.click_opens(page, selector)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.click_opens: the selector is missing")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
     let browser = match handles().lock().unwrap().get(&p) {
         Some(Handle::Page(ps)) => ps.browser,
-        _ => return Err(format!("browser.click_opens: la pestaña {p} no existe")),
+        _ => return Err(format!("browser.click_opens: page {p} does not exist")),
     };
 
     conn.call("Target.setDiscoverTargets", serde_json::json!({ "discover": true }),
@@ -924,11 +947,11 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
         .filter(|e| e.params.get("targetInfo")
             .and_then(|t| t.get("type")).and_then(|t| t.as_str()) == Some("page"))
         .ok_or_else(|| format!(
-            "browser.click_opens '{sel}': el clic no abrió ninguna pestaña en {ms} ms"
+            "browser.click_opens '{sel}': the click opened no page within {ms} ms"
         ))?;
 
     let target_id = ev.params["targetInfo"]["targetId"].as_str()
-        .ok_or("browser.click_opens: la pestaña nueva no trae targetId")?
+        .ok_or("browser.click_opens: the new page carries no targetId")?
         .to_string();
 
     let adjunto = conn.call(
@@ -937,7 +960,7 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
         None, timeout,
     )?;
     let nueva_ses = adjunto["sessionId"].as_str()
-        .ok_or("browser.click_opens: no se pudo adjuntar a la pestaña nueva")?
+        .ok_or("browser.click_opens: could not attach to the new page")?
         .to_string();
     conn.call("Page.enable", serde_json::json!({}), Some(&nueva_ses), timeout)?;
 
@@ -957,7 +980,7 @@ fn do_click_opens(args: &[EvalValue]) -> Result<EvalValue, String> {
 //    Lectura del DOM
 
 fn do_wait(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.wait(pestaña, selector, ms?)")?;
+    let p = arg_handle(args, 0, "browser.wait(page, selector, ms?)")?;
 
     // nombres para lo mismo.
     if let Some(EvalValue::Dict(m)) = args.get(1) {
@@ -967,14 +990,14 @@ fn do_wait(args: &[EvalValue]) -> Result<EvalValue, String> {
             let tope = m.get("wait").and_then(|x| to_u64(x).ok()).unwrap_or(t.wait_ms);
             return do_wait_idle(&conn, &session, quieto, tope, &t);
         }
-        return Err("browser.wait: el diccionario admite { idle: ms }".into());
+        return Err("browser.wait: the dict accepts { idle: ms }".into());
     }
 
-    let sel = args.get(1).map(to_str).ok_or("browser.wait: falta el selector")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.wait: the selector is missing")?;
     let (conn, session, _to, t) = page_ctx(p)?;
     let ms = espera_de(args, 2, &t);
     if !dom::wait_for(&conn, &session, &sel, ms, &t)? {
-        return Err(format!("browser.wait: '{sel}' no apareció en {ms} ms"));
+        return Err(format!("browser.wait: '{sel}' did not appear within {ms} ms"));
     }
     Ok(EvalValue::Bool(true))
 }
@@ -1023,8 +1046,8 @@ fn do_wait_idle(
     )?;
     if matches!(v, EvalValue::Bool(false)) {
         return Err(format!(
-            "browser.wait: la red no se quedó {quieto_ms} ms sin actividad en {tope_ms} ms.\n  \
-             Hay páginas que sondean el servidor para siempre; en esas, espera por un selector."
+            "browser.wait: the network never went {quieto_ms} ms without activity within {tope_ms} ms.\n  \
+             Some pages poll their server forever; on those, wait for a selector instead."
         ));
     }
     Ok(EvalValue::Bool(true))
@@ -1032,7 +1055,7 @@ fn do_wait_idle(
 
 fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
     let quien = match salto { 0 => "reload", -1 => "back", _ => "forward" };
-    let p = arg_handle(args, 0, &format!("browser.{quien}(pestaña)"))?;
+    let p = arg_handle(args, 0, &format!("browser.{quien}(page)"))?;
     let (conn, session, timeout, t) = page_ctx(p)?;
     let ms = espera_de(args, 1, &t);
 
@@ -1058,8 +1081,8 @@ fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
         let destino = actual + salto;
         if destino < 0 || destino >= entradas {
             return Err(format!(
-                "browser.{quien}: no hay {} en el historial de esta pestaña",
-                if salto < 0 { "página anterior" } else { "página siguiente" }
+                "browser.{quien}: there is no {} in this page's history",
+                if salto < 0 { "previous page" } else { "next page" }
             ));
         }
         let id = h["entries"][destino as usize]["id"].clone();
@@ -1091,7 +1114,7 @@ fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
     match v {
         EvalValue::Str(s) => Ok(EvalValue::Str(s)),
         _ => Err(format!(
-            "browser.{quien}: la página no terminó de cambiar en {ms} ms"
+            "browser.{quien}: the page did not finish changing within {ms} ms"
         )),
     }
 }
@@ -1101,9 +1124,9 @@ fn do_history(args: &[EvalValue], salto: i64) -> Result<EvalValue, String> {
 enum Espera { Si, No }
 
 fn query(args: &[EvalValue], quien: &str, espera: Espera, cuerpo: &str) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, &format!("{quien}(pestaña, selector)"))?;
+    let p = arg_handle(args, 0, &format!("{quien}(page, selector)"))?;
     let sel = args.get(1).map(to_str)
-        .ok_or_else(|| format!("{quien}(pestaña, selector): falta el selector"))?;
+        .ok_or_else(|| format!("{quien}(page, selector): the selector is missing"))?;
     let (conn, session, timeout, t) = page_ctx(p)?;
 
     let (js, limite) = match espera {
@@ -1117,9 +1140,9 @@ fn query(args: &[EvalValue], quien: &str, espera: Espera, cuerpo: &str) -> Resul
 }
 
 fn do_attr(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.attr(pestaña, selector, atributo)")?;
-    let sel = args.get(1).map(to_str).ok_or("browser.attr: falta el selector")?;
-    let at  = args.get(2).map(to_str).ok_or("browser.attr: falta el nombre del atributo")?;
+    let p = arg_handle(args, 0, "browser.attr(page, selector, attribute)")?;
+    let sel = args.get(1).map(to_str).ok_or("browser.attr: the selector is missing")?;
+    let at  = args.get(2).map(to_str).ok_or("browser.attr: the attribute name is missing")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
 
     // El nombre del atributo también se serializa: puede traer comillas.
@@ -1138,19 +1161,19 @@ fn do_attr(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 //    Extracción declarativa
 fn do_extract(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.extract(pestaña, selector, esquema)")?;
+    let p = arg_handle(args, 0, "browser.extract(page, selector, schema)")?;
     let fila_sel = args.get(1).map(to_str)
-        .ok_or("browser.extract(pestaña, selector, esquema): falta el selector de fila")?;
+        .ok_or("browser.extract(page, selector, schema): the row selector is missing")?;
 
     let Some(EvalValue::Dict(esquema)) = args.get(2) else {
         return Err(concat!(
-            "browser.extract: el esquema debe ser un diccionario campo → especificación.
+            "browser.extract: the schema must be a field → spec dict.
 ",
-            "  Ejemplo: { nombre: \".title\", precio: \".price|num\" }"
+            "  Example: { name: \".title\", price: \".price|num\" }"
         ).to_string());
     };
     if esquema.is_empty() {
-        return Err("browser.extract: el esquema está vacío".into());
+        return Err("browser.extract: the schema is empty".into());
     }
 
     let campos: Vec<extract::Campo> = esquema.iter()
@@ -1171,9 +1194,9 @@ fn do_extract(args: &[EvalValue]) -> Result<EvalValue, String> {
             .map(|(campo, spec)| format!("    {campo}  ←  {spec}"))
             .collect();
         return Err(format!(
-            "browser.extract: {} campo(s) no encontraron nada en ninguna de las {} filas:
+            "browser.extract: {} field(s) matched nothing in any of the {} rows:
 {}
-  Revisa esos selectores, o usa {{ strict: no }} si de verdad pueden faltar.",
+  Check those selectors, or use {{ strict: no }} if they really may be absent.",
             r.muertos.len(), r.filas, detalle.join("
 ")
         ));
@@ -1183,7 +1206,7 @@ fn do_extract(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_discover(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.discover(pestaña, opts?)")?;
+    let p = arg_handle(args, 0, "browser.discover(page, opts?)")?;
     let (conn, session, _to, t) = page_ctx(p)?;
     let ms = espera_de(args, 1, &t);
 
@@ -1232,7 +1255,7 @@ fn do_discover(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let nav = arg_handle(args, 0, "browser.crawl(navegador, opts)")?;
+    let nav = arg_handle(args, 0, "browser.crawl(browser, opts)")?;
     let Some(EvalValue::Dict(o)) = args.get(1) else {
         return Err("browser.crawl(navegador, opts): las opciones son un diccionario \
                     con al menos { urls, row, schema, out }".into());
@@ -1241,18 +1264,18 @@ fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
     let urls: Vec<String> = match o.get("urls") {
         Some(EvalValue::List(l)) => l.iter().map(to_str).collect(),
         Some(v) => vec![to_str(v)],
-        None => return Err("browser.crawl: falta `urls` (la lista de páginas a recorrer)".into()),
+        None => return Err("browser.crawl: `urls` is missing (the list of pages to walk)".into()),
     };
     if urls.is_empty() {
-        return Err("browser.crawl: la lista `urls` está vacía".into());
+        return Err("browser.crawl: the `urls` list is empty".into());
     }
     let fila_sel = o.get("row").map(to_str)
-        .ok_or("browser.crawl: falta `row` (el selector de la fila que se repite)")?;
+        .ok_or("browser.crawl: `row` is missing (the selector of the repeating row)")?;
     let Some(EvalValue::Dict(esquema)) = o.get("schema") else {
-        return Err("browser.crawl: falta `schema` (el diccionario campo → especificación)".into());
+        return Err("browser.crawl: `schema` is missing (the field → spec dict)".into());
     };
     let salida = o.get("out").map(to_str)
-        .ok_or("browser.crawl: falta `out` (la ruta de salida, .csv o .odf)")?;
+        .ok_or("browser.crawl: `out` is missing (the output path, .csv or .odf)")?;
 
     let campos: Vec<extract::Campo> = esquema.iter()
         .map(|(k, v)| extract::parse_campo(k, &to_str(v)))
@@ -1263,8 +1286,8 @@ fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
 
     let resume = o.get("resume").map(truthy).unwrap_or(false);
     if resume && !salida.to_lowercase().ends_with(".csv") {
-        return Err("browser.crawl: `resume` solo funciona con salida .csv; \
-                    el .odf obliga a empezar de cero".into());
+        return Err("browser.crawl: `resume` only works with a .csv output; \
+                    .odf forces a fresh start".into());
     }
 
     let opts = crawl::Opciones {
@@ -1283,8 +1306,8 @@ fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
     let estricto = o.get("strict").map(truthy).unwrap_or(true);
     if estricto && !r.muertos.is_empty() {
         return Err(format!(
-            "browser.crawl: {} campo(s) no trajeron valor en ninguna página:\n    {}\n  \
-             Los datos ya se escribieron en {salida}. Revisa esos selectores, o usa {{ strict: no }}.",
+            "browser.crawl: {} field(s) brought back no value on any page:\n    {}\n  \
+             The data was already written to {salida}. Check those selectors, or use {{ strict: no }}.",
             r.muertos.len(), r.muertos.join("\n    ")
         ));
     }
@@ -1302,21 +1325,21 @@ fn do_crawl(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_extract_to(args: &[EvalValue]) -> Result<EvalValue, String> {
-    const USO: &str = "browser.extract_to(pestaña, urls, selector, esquema, salida)";
+    const USO: &str = "browser.extract_to(page, urls, selector, schema, out)";
     let p = arg_handle(args, 0, USO)?;
 
     let urls: Vec<String> = match args.get(1) {
         Some(EvalValue::List(l)) => l.iter().map(to_str).collect(),
         Some(v) => vec![to_str(v)],
-        None => return Err(format!("{USO}: faltan las urls")),
+        None => return Err(format!("{USO}: the urls are missing")),
     };
-    if urls.is_empty() { return Err("browser.extract_to: la lista de urls está vacía".into()); }
+    if urls.is_empty() { return Err("browser.extract_to: the url list is empty".into()); }
 
-    let fila_sel = args.get(2).map(to_str).ok_or(format!("{USO}: falta el selector de fila"))?;
+    let fila_sel = args.get(2).map(to_str).ok_or(format!("{USO}: the row selector is missing"))?;
     let Some(EvalValue::Dict(esquema)) = args.get(3) else {
-        return Err(format!("{USO}: el esquema debe ser un diccionario campo → especificación"));
+        return Err(format!("{USO}: the schema must be a field → spec dict"));
     };
-    let salida = args.get(4).map(to_str).ok_or(format!("{USO}: falta la ruta de salida"))?;
+    let salida = args.get(4).map(to_str).ok_or(format!("{USO}: the output path is missing"))?;
 
     let campos: Vec<extract::Campo> = esquema.iter()
         .map(|(k, v)| extract::parse_campo(k, &to_str(v)))
@@ -1407,8 +1430,231 @@ fn navegar(conn: &Conn, session: &str, url: &str, timeout: Duration) -> Result<(
 }
 
 //    Captura de red
+//    emulate(pestaña, opts) → dispositivo, idioma, zona horaria, ubicación
+
+fn do_emulate(args: &[EvalValue]) -> Result<EvalValue, String> {
+    const USO: &str = "browser.emulate(page, opts): opts is a dict — \
+                       { device: \"iphone\" } · { width, height, scale, mobile, touch, ua } · \
+                       { locale, timezone, dark, geo: { lat, lon } } — or `no` to clear it";
+
+    let p = arg_handle(args, 0, "browser.emulate(page, opts)")?;
+    let (conn, session, timeout, _) = page_ctx(p)?;
+
+    // `emulate(p, no)` deshace: se pide bastante como para no obligar a
+    // recordar un nombre aparte, y leerlo se entiende solo.
+    let quitar = matches!(args.get(1), Some(EvalValue::Bool(false)) | Some(EvalValue::Null) | None);
+    if quitar {
+        for (metodo, params) in emulate::limpiar() {
+            conn.call(metodo, params, Some(&session), timeout)?;
+        }
+        return Ok(EvalValue::Bool(true));
+    }
+
+    let Some(EvalValue::Dict(m)) = args.get(1) else { return Err(USO.to_string()) };
+
+    // El preset es el punto de partida; lo que venga suelto lo sobrescribe,
+    // así que "un iPhone pero más ancho" no obliga a copiar todos los campos.
+    let mut plan = match m.get("device") {
+        Some(d) => emulate::Plan::desde_device(emulate::device(&to_str(d))?),
+        None    => emulate::Plan::default(),
+    };
+
+    if let Some(x) = m.get("width").and_then(|v| to_u64(v).ok())  { plan.width  = Some(x as u32); }
+    if let Some(x) = m.get("height").and_then(|v| to_u64(v).ok()) { plan.height = Some(x as u32); }
+    if let Some(x) = m.get("scale").and_then(to_f64)              { plan.scale  = Some(x); }
+    if let Some(x) = m.get("mobile").map(truthy)                  { plan.movil  = Some(x); }
+    if let Some(x) = m.get("touch").map(truthy)                   { plan.tactil = Some(x); }
+    if let Some(x) = m.get("ua")                                  { plan.ua     = Some(to_str(x)); }
+    if let Some(x) = m.get("locale")                              { plan.locale = Some(to_str(x)); }
+    if let Some(x) = m.get("timezone")                            { plan.timezone = Some(to_str(x)); }
+    if let Some(x) = m.get("dark").map(truthy)                    { plan.dark   = Some(x); }
+    if let Some(EvalValue::Dict(g)) = m.get("geo") {
+        let lat = g.get("lat").and_then(to_f64)
+            .ok_or("browser.emulate: geo needs { lat, lon }")?;
+        let lon = g.get("lon").and_then(to_f64)
+            .ok_or("browser.emulate: geo needs { lat, lon }")?;
+        let acc = g.get("accuracy").and_then(to_f64).unwrap_or(1.0);
+        plan.geo = Some((lat, lon, acc));
+    }
+
+    if plan.vacio() {
+        return Err(format!("browser.emulate: nothing to emulate.\n  {USO}"));
+    }
+
+    // Un ancho sin alto deja la ventana en un estado que el navegador acepta y
+    // el sitio no entiende. Se completa con lo que ya tiene la pestaña.
+    if plan.width.is_some() != plan.height.is_some() {
+        let v = conn.call("Runtime.evaluate", serde_json::json!({
+            "expression": "[innerWidth, innerHeight]",
+            "returnByValue": true,
+        }), Some(&session), timeout)?;
+        let wh = v.get("result").and_then(|r| r.get("value")).cloned().unwrap_or_default();
+        if plan.width.is_none()  { plan.width  = wh.get(0).and_then(|x| x.as_u64()).map(|x| x as u32); }
+        if plan.height.is_none() { plan.height = wh.get(1).and_then(|x| x.as_u64()).map(|x| x as u32); }
+    }
+
+    for (metodo, params) in plan.mensajes() {
+        conn.call(metodo, params, Some(&session), timeout)?;
+    }
+    Ok(EvalValue::Bool(true))
+}
+
+//    cookies(pestaña) / set_cookie / clear_cookies
+
+fn do_cookies(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.cookies(page)")?;
+    let (conn, session, timeout, _) = page_ctx(p)?;
+    let r = conn.call("Network.getCookies", serde_json::json!({}), Some(&session), timeout)?;
+    let filtro = args.get(1).map(to_str);
+
+    let lista = r.get("cookies").and_then(|c| c.as_array()).cloned().unwrap_or_default()
+        .into_iter()
+        .filter(|c| match &filtro {
+            Some(n) => c.get("name").and_then(|x| x.as_str()) == Some(n.as_str()),
+            None    => true,
+        })
+        .map(crate::modules::json_mod::json_to_eval)
+        .collect();
+    Ok(EvalValue::List(lista))
+}
+
+fn do_set_cookie(args: &[EvalValue]) -> Result<EvalValue, String> {
+    const USO: &str = "browser.set_cookie(page, { name, value, domain?, path?, expires?, \
+                       http_only?, secure?, same_site? })";
+    let p = arg_handle(args, 0, USO)?;
+    let (conn, session, timeout, _) = page_ctx(p)?;
+
+    let Some(EvalValue::Dict(m)) = args.get(1) else { return Err(USO.to_string()) };
+    let nombre = m.get("name").map(to_str)
+        .ok_or("browser.set_cookie: `name` is missing")?;
+    let valor = m.get("value").map(to_str).unwrap_or_default();
+
+    let mut c = serde_json::json!({ "name": nombre, "value": valor });
+    // Sin dominio ni url la cookie no se ata a nada y el navegador la
+    // descarta en silencio; se usa la url de la pestaña, que es lo que
+    // cualquiera esperaría al ponerla desde aquí.
+    match m.get("domain") {
+        Some(d) => { c["domain"] = serde_json::Value::String(to_str(d)); }
+        None => {
+            let v = conn.call("Runtime.evaluate", serde_json::json!({
+                "expression": "location.href", "returnByValue": true,
+            }), Some(&session), timeout)?;
+            if let Some(u) = v.get("result").and_then(|r| r.get("value")).and_then(|x| x.as_str()) {
+                c["url"] = serde_json::Value::String(u.to_string());
+            }
+        }
+    }
+    if let Some(x) = m.get("path")      { c["path"]     = serde_json::Value::String(to_str(x)); }
+    if let Some(x) = m.get("same_site") { c["sameSite"] = serde_json::Value::String(to_str(x)); }
+    if let Some(x) = m.get("http_only").map(truthy) { c["httpOnly"] = serde_json::Value::Bool(x); }
+    if let Some(x) = m.get("secure").map(truthy)    { c["secure"]   = serde_json::Value::Bool(x); }
+    if let Some(x) = m.get("expires").and_then(to_f64) { c["expires"] = serde_json::json!(x); }
+
+    conn.call("Network.setCookies", serde_json::json!({ "cookies": [c] }), Some(&session), timeout)?;
+    Ok(EvalValue::Bool(true))
+}
+
+fn do_clear_cookies(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.clear_cookies(page)")?;
+    let (conn, session, timeout, _) = page_ctx(p)?;
+    conn.call("Network.clearBrowserCookies", serde_json::json!({}), Some(&session), timeout)?;
+    Ok(EvalValue::Bool(true))
+}
+
+//    route(pestaña, patrón, acción) → intercepción de peticiones
+
+/// Traduce el diccionario de acción a la decisión que se aplicará.
+///
+/// Una acción por regla y no varias: `{ block: yes, mock: {...} }` no significa
+/// nada, y aceptarlo obligaría a inventar una precedencia que nadie recordaría.
+fn accion_de(v: Option<&EvalValue>) -> Result<route::Accion, String> {
+    const USO: &str = "browser.route(page, pattern, action): the action is a dict — \
+                       { block: yes } · { fail: \"timedout\" } · \
+                       { mock: { status, json|body, headers } } · { headers: {...} }";
+
+    let Some(EvalValue::Dict(m)) = v else { return Err(USO.to_string()) };
+
+    if m.get("block").map(truthy).unwrap_or(false) {
+        return Ok(route::Accion::Bloquear);
+    }
+    if let Some(r) = m.get("fail") {
+        return Ok(route::Accion::Fallar(route::motivo(&to_str(r))?.to_string()));
+    }
+    if let Some(EvalValue::Dict(h)) = m.get("headers") {
+        if h.is_empty() {
+            return Err("browser.route: `headers` is empty; drop the rule instead".into());
+        }
+        return Ok(route::Accion::Cabeceras(
+            h.iter().map(|(k, v)| (k.clone(), to_str(v))).collect(),
+        ));
+    }
+    if let Some(EvalValue::Dict(mk)) = m.get("mock") {
+        let status = mk.get("status").and_then(|x| to_u64(x).ok()).unwrap_or(200) as u32;
+        let mut headers: Vec<(String, String)> = match mk.get("headers") {
+            Some(EvalValue::Dict(h)) => h.iter().map(|(k, v)| (k.clone(), to_str(v))).collect(),
+            _ => Vec::new(),
+        };
+        // `json:` es lo que se quiere el 90% de las veces, así que además de
+        // serializar pone el Content-Type: sin él la página recibe el texto
+        // correcto y su `response.json()` falla, que es un rato perdido.
+        let body = match mk.get("json") {
+            Some(j) => {
+                if !headers.iter().any(|(n, _)| n.eq_ignore_ascii_case("content-type")) {
+                    headers.push(("Content-Type".into(), "application/json; charset=utf-8".into()));
+                }
+                crate::modules::json_mod::eval_to_json(j.clone()).to_string()
+            }
+            None => mk.get("body").map(to_str).unwrap_or_default(),
+        };
+        return Ok(route::Accion::Simular(route::Simulada { status, headers, body }));
+    }
+    Err(USO.to_string())
+}
+
+fn do_route(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.route(page, pattern, action)")?;
+    let patron = args.get(1).map(to_str)
+        .ok_or("browser.route(page, pattern, action): the pattern is missing")?;
+    let accion = accion_de(args.get(2))?;
+    let limite = match args.get(3) {
+        Some(EvalValue::Dict(o)) => o.get("times").and_then(|x| to_u64(x).ok()),
+        _ => None,
+    };
+
+    let (conn, session, timeout, _) = page_ctx(p)?;
+    // Sin Fetch activado el navegador no pausa nada y la regla sería
+    // decorativa. Se activa aquí y no en `page()` porque interceptar cuesta:
+    // quien no usa rutas no lo paga.
+    conn.call("Fetch.enable", serde_json::json!({}), Some(&session), timeout)?;
+    conn.add_route(route::Ruta { patron, accion, limite, veces: 0 });
+    Ok(EvalValue::Bool(true))
+}
+
+fn do_unroute(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.unroute(page, pattern?)")?;
+    let (conn, _, _, _) = page_ctx(p)?;
+    let patron = args.get(1).map(to_str);
+    Ok(EvalValue::Int(conn.del_routes(patron.as_deref()) as i64))
+}
+
+fn do_routes(args: &[EvalValue]) -> Result<EvalValue, String> {
+    let p = arg_handle(args, 0, "browser.routes(page)")?;
+    let (conn, _, _, _) = page_ctx(p)?;
+    let lista = conn.routes().into_iter().map(|(patron, veces, limite)| {
+        let mut d: IndexMap<String, EvalValue> = IndexMap::new();
+        d.insert("pattern".into(), EvalValue::Str(patron));
+        d.insert("hits".into(),    EvalValue::Int(veces as i64));
+        d.insert("times".into(),   match limite {
+            Some(n) => EvalValue::Int(n as i64),
+            None    => EvalValue::Null,
+        });
+        EvalValue::Dict(d)
+    }).collect();
+    Ok(EvalValue::List(lista))
+}
+
 fn do_watch(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.watch(pestaña, patrón)")?;
+    let p = arg_handle(args, 0, "browser.watch(page, pattern)")?;
     let patron = args.get(1).map(to_str).unwrap_or_default();
     let (conn, session, timeout, t) = page_ctx(p)?;
 
@@ -1430,7 +1676,7 @@ fn do_watch(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.capture(pestaña, opts?)")?;
+    let p = arg_handle(args, 0, "browser.capture(page, opts?)")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
     let ms = espera_de(args, 1, &t);
 
@@ -1438,10 +1684,10 @@ fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
         let reg = handles().lock().unwrap();
         match reg.get(&p) {
             Some(Handle::Page(ps)) => ps.watch.clone().ok_or(
-                "browser.capture: no hay ninguna escucha armada.\n  \
-                 Llama antes a browser.watch(pestaña, patrón), y después provoca la petición."
+                "browser.capture: no listener is armed.\n  \
+                 Call browser.watch(page, pattern) first, then trigger the request."
             )?,
-            _ => return Err(format!("browser.capture: la pestaña {p} no existe")),
+            _ => return Err(format!("browser.capture: page {p} does not exist")),
         }
     };
 
@@ -1489,8 +1735,8 @@ fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
             Err(e) => {
                 m.insert("json".into(), EvalValue::Null);
                 m.insert("error".into(), EvalValue::Str(format!(
-                    "el navegador ya no tenía el cuerpo ({e}). Sube el búfer con \
-                     open({{ tuning: {{ body_buffer: bytes }} }}) o captura antes."
+                    "the browser no longer had the body ({e}). Raise the buffer with \
+                     open({{ tuning: {{ body_buffer: bytes }} }}) or capture sooner."
                 )));
             }
         }
@@ -1503,9 +1749,9 @@ fn do_capture(args: &[EvalValue]) -> Result<EvalValue, String> {
 //    Sesión
 
 fn do_save_state(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.save_state(pestaña, ruta)")?;
+    let p = arg_handle(args, 0, "browser.save_state(page, path)")?;
     let ruta = args.get(1).map(to_str)
-        .ok_or("browser.save_state(pestaña, ruta): falta la ruta")?;
+        .ok_or("browser.save_state(page, path): the path is missing")?;
     let (conn, session, timeout, _t) = page_ctx(p)?;
 
     let g = state::save(&conn, &session, &ruta, timeout)?;
@@ -1519,9 +1765,9 @@ fn do_save_state(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_load_state(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.load_state(pestaña, ruta)")?;
+    let p = arg_handle(args, 0, "browser.load_state(page, path)")?;
     let ruta = args.get(1).map(to_str)
-        .ok_or("browser.load_state(pestaña, ruta): falta la ruta")?;
+        .ok_or("browser.load_state(page, path): the path is missing")?;
     let (conn, session, timeout, _t) = page_ctx(p)?;
 
     let c = state::load(&conn, &session, &ruta, timeout)?;
@@ -1536,7 +1782,7 @@ fn do_load_state(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_blocked(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let h = arg_handle(args, 0, "browser.blocked(navegador)")?;
+    let h = arg_handle(args, 0, "browser.blocked(browser)")?;
     let conn = match browser_ctx(h) {
         Ok((c, _, _)) => c,
         Err(_) => page_ctx(h)?.0,
@@ -1555,12 +1801,12 @@ fn rutas_de(v: Option<&EvalValue>) -> Vec<String> {
 }
 
 fn do_upload(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.upload(pestaña, selector, archivos)")?;
+    let p = arg_handle(args, 0, "browser.upload(page, selector, files)")?;
     let sel = args.get(1).map(to_str)
-        .ok_or("browser.upload(pestaña, selector, archivos): falta el selector")?;
+        .ok_or("browser.upload(page, selector, files): the selector is missing")?;
     let rutas = rutas_de(args.get(2));
     if rutas.is_empty() {
-        return Err("browser.upload(pestaña, selector, archivos): falta el archivo".into());
+        return Err("browser.upload(page, selector, files): the file is missing".into());
     }
     let (conn, session, timeout, t) = page_ctx(p)?;
     let puestos = files::upload(&conn, &session, &sel, &rutas,
@@ -1569,9 +1815,9 @@ fn do_upload(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_download(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.download(pestaña, selector, opts?)")?;
+    let p = arg_handle(args, 0, "browser.download(page, selector, opts?)")?;
     let sel = args.get(1).map(to_str)
-        .ok_or("browser.download(pestaña, selector, opts?): falta el selector")?;
+        .ok_or("browser.download(page, selector, opts?): the selector is missing")?;
     let (conn, session, timeout, t) = page_ctx(p)?;
 
     let m = match args.get(2) { Some(EvalValue::Dict(d)) => Some(d), _ => None };
@@ -1592,9 +1838,9 @@ fn do_download(args: &[EvalValue]) -> Result<EvalValue, String> {
 }
 
 fn do_pdf(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.pdf(pestaña, ruta, opts?)")?;
+    let p = arg_handle(args, 0, "browser.pdf(page, path, opts?)")?;
     let ruta = args.get(1).map(to_str)
-        .ok_or("browser.pdf(pestaña, ruta, opts?): falta la ruta")?;
+        .ok_or("browser.pdf(page, path, opts?): the path is missing")?;
     let (conn, session, timeout, _t) = page_ctx(p)?;
 
     // Nada fijado: lo que no se indique lo decide el navegador con su propio
@@ -1625,9 +1871,9 @@ fn do_pdf(args: &[EvalValue]) -> Result<EvalValue, String> {
 //    Captura
 
 fn do_screenshot(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let p = arg_handle(args, 0, "browser.screenshot(pestaña, ruta)")?;
+    let p = arg_handle(args, 0, "browser.screenshot(page, path)")?;
     let ruta = args.get(1).map(to_str)
-        .ok_or("browser.screenshot(pestaña, ruta): falta la ruta")?;
+        .ok_or("browser.screenshot(page, path): the path is missing")?;
     let (conn, session, timeout, _t) = page_ctx(p)?;
 
     let r = conn.call(
@@ -1636,13 +1882,13 @@ fn do_screenshot(args: &[EvalValue]) -> Result<EvalValue, String> {
         Some(&session), timeout,
     )?;
     let b64 = r.get("data").and_then(|d| d.as_str())
-        .ok_or("browser.screenshot: el navegador no devolvió imagen")?;
+        .ok_or("browser.screenshot: the browser returned no image")?;
 
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
     let bytes = B64.decode(b64)
         .map_err(|e| format!("browser.screenshot: imagen ilegible ({e})"))?;
     std::fs::write(&ruta, &bytes)
-        .map_err(|e| format!("browser.screenshot: no se pudo escribir '{ruta}': {e}"))?;
+        .map_err(|e| format!("browser.screenshot: could not write '{ruta}': {e}"))?;
 
     Ok(EvalValue::Str(ruta))
 }
@@ -1650,13 +1896,13 @@ fn do_screenshot(args: &[EvalValue]) -> Result<EvalValue, String> {
 //    pages(browser) → lista de handles
 
 fn pages(args: &[EvalValue]) -> Result<EvalValue, String> {
-    let b = arg_handle(args, 0, "browser.pages(navegador)")?;
+    let b = arg_handle(args, 0, "browser.pages(browser)")?;
     let reg = handles().lock().unwrap();
     match reg.get(&b) {
         Some(Handle::Browser(bs)) => Ok(EvalValue::List(
             bs.pages.iter().map(|p| EvalValue::Int(*p as i64)).collect()
         )),
-        _ => Err(format!("browser.pages: el navegador {b} no existe")),
+        _ => Err(format!("browser.pages: browser {b} does not exist")),
     }
 }
 
@@ -1793,14 +2039,14 @@ fn parse_opts(v: Option<&EvalValue>) -> Result<LaunchOpts, String> {
 }
 
 fn arg_handle(args: &[EvalValue], i: usize, uso: &str) -> Result<u64, String> {
-    let v = args.get(i).ok_or_else(|| format!("{uso}: falta el handle"))?;
-    to_u64(v).map_err(|_| format!("{uso}: esperaba un handle, recibió {}", v.type_name()))
+    let v = args.get(i).ok_or_else(|| format!("{uso}: the handle is missing"))?;
+    to_u64(v).map_err(|_| format!("{uso}: expected a handle, got {}", v.type_name()))
 }
 
 fn to_u64(v: &EvalValue) -> Result<u64, String> {
     match v {
         EvalValue::Int(n) if *n > 0 => Ok(*n as u64),
-        other => Err(format!("esperaba un handle positivo, recibió {}", other.type_name())),
+        other => Err(format!("expected a positive handle, got {}", other.type_name())),
     }
 }
 
@@ -1899,7 +2145,7 @@ mod tests {
     #[test]
     fn un_handle_desconocido_da_un_error_legible() {
         let e = page_ctx(424_242).err().expect("debería fallar");
-        assert!(e.contains("no existe"), "{e}");
+        assert!(e.contains("does not exist"), "{e}");
     }
 
     #[test]

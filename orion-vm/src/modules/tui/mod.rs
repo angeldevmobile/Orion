@@ -211,7 +211,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .map(|_| EvalValue::Null)
         }
 
-        other => Err(format!("tui.{other} no existe")),
+        other => Err(format!("tui.{other} does not exist")),
     }
 }
 
@@ -237,7 +237,7 @@ fn str_arg(args: &[EvalValue], i: usize) -> Option<String> {
 }
 
 fn req_str(args: &[EvalValue], i: usize, name: &str) -> Result<String, String> {
-    str_arg(args, i).ok_or_else(|| format!("tui.{name} requiere un argumento de texto"))
+    str_arg(args, i).ok_or_else(|| format!("tui.{name} requires a text argument"))
 }
 
 fn i64_arg(args: &[EvalValue], i: usize) -> Option<i64> {

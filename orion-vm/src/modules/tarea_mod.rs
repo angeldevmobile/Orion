@@ -13,7 +13,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // sleep(ms) → Null  — pausa la ejecución
         "sleep" | "dormir" => {
-            let ms = to_i64(args.first().ok_or("tarea.dormir requiere (ms)")?)? as u64;
+            let ms = to_i64(args.first().ok_or("tarea.dormir requires (ms)")?)? as u64;
             std::thread::sleep(Duration::from_millis(ms));
             Ok(EvalValue::Null)
         }
@@ -48,7 +48,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // repeat(n, intervalo_ms) → Null  — espera n veces con intervalo (bloqueante)
         "repeat" | "repetir" => {
-            if args.len() < 2 { return Err("tarea.repetir requiere (n, intervalo_ms)".into()); }
+            if args.len() < 2 { return Err("tarea.repetir requires (n, intervalo_ms)".into()); }
             let n        = to_i64(&args[0])? as u64;
             let interval = to_i64(&args[1])? as u64;
             for _ in 0..n {
@@ -56,12 +56,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
             Ok(EvalValue::Null)
         }
-        f => Err(format!("tarea.{}() no existe", f)),
+        f => Err(format!("tarea.{}() does not exist", f)),
     }
 }
 
 fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("{} requiere (nombre)", fn_name)); }
+    if args.is_empty() { return Err(format!("{} requires (nombre)", fn_name)); }
     Ok(to_str(&args[0]))
 }
 
@@ -73,6 +73,6 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("tarea: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("tarea: expected a number, got {}", other.type_name())),
     }
 }

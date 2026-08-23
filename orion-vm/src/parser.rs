@@ -863,7 +863,7 @@ impl Parser {
                     let shape = match &expr {
                         Expr::Ident(n) => n.clone(),
                         _ => return Err(self.err(
-                            "'::' se usa sobre el nombre de un shape: Shape::act(...)".to_string(),
+                            "'::' goes on a shape name: Shape::act(...)".to_string(),
                         )),
                     };
                     expr = Expr::Ident(format!("{shape}::{member}"));

@@ -58,14 +58,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str(content))
         }
         "write" => {
-            if args.len() < 2 { return Err("fs.write requiere (path, content)".into()); }
+            if args.len() < 2 { return Err("fs.write requires (path, content)".into()); }
             let path = eval_to_str(&args[0]);
             let content = eval_to_str(&args[1]);
             std_fs::write(&path, content).map_err(|e| format!("fs.write: {}", e))?;
             Ok(EvalValue::Null)
         }
         "append" => {
-            if args.len() < 2 { return Err("fs.append requiere (path, content)".into()); }
+            if args.len() < 2 { return Err("fs.append requires (path, content)".into()); }
             let path = eval_to_str(&args[0]);
             let content = eval_to_str(&args[1]);
             use std::io::Write;
@@ -76,14 +76,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
         "copy" => {
-            if args.len() < 2 { return Err("fs.copy requiere (src, dst)".into()); }
+            if args.len() < 2 { return Err("fs.copy requires (src, dst)".into()); }
             let src = eval_to_str(&args[0]);
             let dst = eval_to_str(&args[1]);
             std_fs::copy(&src, &dst).map_err(|e| format!("fs.copy: {}", e))?;
             Ok(EvalValue::Bool(true))
         }
         "move" => {
-            if args.len() < 2 { return Err("fs.move requiere (src, dst)".into()); }
+            if args.len() < 2 { return Err("fs.move requires (src, dst)".into()); }
             let src = eval_to_str(&args[0]);
             let dst = eval_to_str(&args[1]);
             std_fs::rename(&src, &dst).map_err(|e| format!("fs.move: {}", e))?;
@@ -99,7 +99,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
         "safe_write" => {
-            if args.len() < 2 { return Err("fs.safe_write requiere (path, content)".into()); }
+            if args.len() < 2 { return Err("fs.safe_write requires (path, content)".into()); }
             let path = eval_to_str(&args[0]);
             let content = eval_to_str(&args[1]);
             let tmp = format!("{}.tmp", path);
@@ -115,7 +115,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str(path))
         }
         "backup" => {
-            if args.is_empty() { return Err("fs.backup requiere (path)".into()); }
+            if args.is_empty() { return Err("fs.backup requires (path)".into()); }
             let path = eval_to_str(&args[0]);
             let suffix = if args.len() > 1 { eval_to_str(&args[1]) } else { ".bak".into() };
             let dst = format!("{}{}", path, suffix);
@@ -171,16 +171,16 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // write_b64(path, base64_str) → guarda binario decodificado de base64
         "write_b64" | "guardar_b64" => {
-            if args.len() < 2 { return Err("fs.guardar_b64 requiere (path, base64_str)".into()); }
+            if args.len() < 2 { return Err("fs.guardar_b64 requires (path, base64_str)".into()); }
             let path   = eval_to_str(&args[0]);
             let b64    = eval_to_str(&args[1]);
             let bytes  = base64_decode(&b64)
-                .map_err(|e| format!("fs.guardar_b64: base64 inválido: {}", e))?;
+                .map_err(|e| format!("fs.guardar_b64: invalid base64: {}", e))?;
             // Crear directorios padre si no existen
             if let Some(parent) = Path::new(&path).parent() {
                 if !parent.as_os_str().is_empty() {
                     std_fs::create_dir_all(parent)
-                        .map_err(|e| format!("fs.guardar_b64: no se pudo crear directorio: {}", e))?;
+                        .map_err(|e| format!("fs.guardar_b64: could not create the directory: {}", e))?;
                 }
             }
             std_fs::write(&path, &bytes)
@@ -196,13 +196,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str(base64_encode(&bytes)))
         }
 
-        f => Err(format!("fs.{}() no existe", f)),
+        f => Err(format!("fs.{}() does not exist", f)),
     }
 }
 
 fn one_str(fn_name: &str, args: Vec<EvalValue>) -> Result<String, String> {
     if args.is_empty() {
-        return Err(format!("fs.{}() requiere al menos 1 argumento", fn_name));
+        return Err(format!("fs.{}() requires at least 1 argument", fn_name));
     }
     Ok(eval_to_str(&args[0]))
 }

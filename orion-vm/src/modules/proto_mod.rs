@@ -6,49 +6,49 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // encode(value) → List de Int (bytes MessagePack)
         "encode" => {
-            if args.is_empty() { return Err("proto.encode requiere (value)".into()); }
+            if args.is_empty() { return Err("proto.encode requires (value)".into()); }
             let bytes = to_msgpack(&args[0])?;
             Ok(EvalValue::List(bytes.into_iter().map(|b| EvalValue::Int(b as i64)).collect()))
         }
 
         // decode(bytes) → EvalValue
         "decode" => {
-            if args.is_empty() { return Err("proto.decode requiere (bytes)".into()); }
+            if args.is_empty() { return Err("proto.decode requires (bytes)".into()); }
             let bytes = list_to_bytes(&args[0])?;
             from_msgpack(&bytes)
         }
 
         // encode_base64(value) → Str base64
         "encode_base64" | "encode_b64" => {
-            if args.is_empty() { return Err("proto.encode_b64 requiere (value)".into()); }
+            if args.is_empty() { return Err("proto.encode_b64 requires (value)".into()); }
             let bytes = to_msgpack(&args[0])?;
             Ok(EvalValue::Str(BASE64.encode(&bytes)))
         }
 
         // decode_base64(s) → EvalValue
         "decode_base64" | "decode_b64" => {
-            if args.is_empty() { return Err("proto.decode_b64 requiere (base64_str)".into()); }
+            if args.is_empty() { return Err("proto.decode_b64 requires (base64_str)".into()); }
             let s     = to_str(&args[0]);
             let bytes = BASE64.decode(s.trim())
-                .map_err(|e| format!("proto.decode_b64: base64 inválido — {}", e))?;
+                .map_err(|e| format!("proto.decode_b64: invalid base64 — {}", e))?;
             from_msgpack(&bytes)
         }
 
         // size(value) → Int (tamaño en bytes del encoding MessagePack)
         "size" => {
-            if args.is_empty() { return Err("proto.size requiere (value)".into()); }
+            if args.is_empty() { return Err("proto.size requires (value)".into()); }
             let bytes = to_msgpack(&args[0])?;
             Ok(EvalValue::Int(bytes.len() as i64))
         }
 
         // json_size(value) → Int (tamaño en bytes como JSON, para comparar)
         "json_size" => {
-            if args.is_empty() { return Err("proto.json_size requiere (value)".into()); }
+            if args.is_empty() { return Err("proto.json_size requires (value)".into()); }
             let json = eval_to_json_str(&args[0]);
             Ok(EvalValue::Int(json.len() as i64))
         }
 
-        f => Err(format!("proto.{}() no existe", f)),
+        f => Err(format!("proto.{}() does not exist", f)),
     }
 }
 
@@ -157,7 +157,7 @@ fn encode_str(s: &str, buf: &mut Vec<u8>) -> Result<(), String> {
 
 fn from_msgpack(bytes: &[u8]) -> Result<EvalValue, String> {
     let (val, _) = decode_value(bytes, 0)
-        .ok_or_else(|| "proto.decode: bytes MessagePack inválidos".to_string())?;
+        .ok_or_else(|| "proto.decode: invalid MessagePack bytes".to_string())?;
     Ok(val)
 }
 
@@ -288,12 +288,12 @@ fn list_to_bytes(v: &EvalValue) -> Result<Vec<u8>, String> {
         EvalValue::List(items) => items.iter().map(|item| {
             match item {
                 EvalValue::Int(n) if *n >= 0 && *n <= 255 => Ok(*n as u8),
-                _ => Err("proto.decode: cada byte debe ser un Int entre 0 y 255".into()),
+                _ => Err("proto.decode: each byte must be an Int between 0 and 255".into()),
             }
         }).collect(),
         EvalValue::Str(s) => BASE64.decode(s.trim())
-            .map_err(|e| format!("proto.decode: string base64 inválido — {}", e)),
-        _ => Err("proto.decode: argumento debe ser List de bytes o String base64".into()),
+            .map_err(|e| format!("proto.decode: invalid base64 string — {}", e)),
+        _ => Err("proto.decode: the argument must be a List of bytes or a base64 String".into()),
     }
 }
 

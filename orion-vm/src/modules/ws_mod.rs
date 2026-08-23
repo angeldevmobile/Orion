@@ -27,22 +27,22 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // send(id, mensaje) → Bool
         "send" | "enviar" => {
-            if args.len() < 2 { return Err("ws.enviar requiere (id, mensaje)".into()); }
+            if args.len() < 2 { return Err("ws.enviar requires (id, mensaje)".into()); }
             let id  = to_u64(&args[0])?;
             let msg = to_str(&args[1]);
             conns().lock().unwrap()
                 .get_mut(&id)
-                .ok_or_else(|| format!("ws: conexión {} no existe", id))?
+                .ok_or_else(|| format!("ws: conexión {} does not exist", id))?
                 .send(Message::Text(msg))
                 .map_err(|e| format!("ws.enviar: {}", e))?;
             Ok(EvalValue::Bool(true))
         }
         // recv(id) → String o Null
         "recv" | "recibir" => {
-            let id = to_u64(args.first().ok_or("ws.recibir requiere (id)")?)?;
+            let id = to_u64(args.first().ok_or("ws.recibir requires (id)")?)?;
             match conns().lock().unwrap()
                 .get_mut(&id)
-                .ok_or_else(|| format!("ws: conexión {} no existe", id))?
+                .ok_or_else(|| format!("ws: conexión {} does not exist", id))?
                 .read()
                 .map_err(|e| format!("ws.recibir: {}", e))?
             {
@@ -53,7 +53,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // close(id) → Bool
         "close" | "cerrar" => {
-            let id = to_u64(args.first().ok_or("ws.cerrar requiere (id)")?)?;
+            let id = to_u64(args.first().ok_or("ws.cerrar requires (id)")?)?;
             if let Some(mut conn) = conns().lock().unwrap().shift_remove(&id) {
                 let _ = conn.close(None);
             }
@@ -65,12 +65,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .keys().map(|k| EvalValue::Int(*k as i64)).collect();
             Ok(EvalValue::List(ids))
         }
-        f => Err(format!("ws.{}() no existe", f)),
+        f => Err(format!("ws.{}() does not exist", f)),
     }
 }
 
 fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("{} requiere argumento", fn_name)); }
+    if args.is_empty() { return Err(format!("{} requires an argument", fn_name)); }
     Ok(to_str(&args[0]))
 }
 
@@ -81,6 +81,6 @@ fn to_str(v: &EvalValue) -> String {
 fn to_u64(v: &EvalValue) -> Result<u64, String> {
     match v {
         EvalValue::Int(n) if *n > 0 => Ok(*n as u64),
-        other => Err(format!("ws: esperaba id positivo, recibió {}", other.type_name())),
+        other => Err(format!("ws: expected a positive id, got {}", other.type_name())),
     }
 }

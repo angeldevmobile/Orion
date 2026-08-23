@@ -44,7 +44,7 @@ fn new_id() -> String {
 fn connect_session(cfg: &ConnConfig) -> Result<Session, String> {
     let addr = format!("{}:{}", cfg.host, cfg.port);
     let tcp = TcpStream::connect(&addr)
-        .map_err(|e| format!("ssh: no se pudo conectar a {}: {}", addr, e))?;
+        .map_err(|e| format!("ssh: could not connect a {}: {}", addr, e))?;
     // Timeout de 30s para operaciones bloqueantes
     tcp.set_read_timeout(Some(std::time::Duration::from_secs(30)))
         .ok();
@@ -54,15 +54,15 @@ fn connect_session(cfg: &ConnConfig) -> Result<Session, String> {
         .map_err(|e| format!("ssh: error creando sesión: {}", e))?;
     sess.set_tcp_stream(tcp);
     sess.handshake()
-        .map_err(|e| format!("ssh: handshake falló: {}", e))?;
+        .map_err(|e| format!("ssh: handshake failed: {}", e))?;
     match &cfg.auth {
         SshAuth::Password(pass) => {
             sess.userauth_password(&cfg.user, pass)
-                .map_err(|e| format!("ssh: autenticación por contraseña falló: {}", e))?;
+                .map_err(|e| format!("ssh: password authentication failed: {}", e))?;
         }
         SshAuth::Key(key_path) => {
             sess.userauth_pubkey_file(&cfg.user, None, Path::new(key_path), None)
-                .map_err(|e| format!("ssh: autenticación por clave falló: {}", e))?;
+                .map_err(|e| format!("ssh: key authentication failed: {}", e))?;
         }
     }
     if !sess.authenticated() {
@@ -78,7 +78,7 @@ where
 {
     let mut lock = sessions().lock().unwrap();
     let live = lock.get_mut(id)
-        .ok_or_else(|| format!("ssh: sesión '{}' no encontrada. Usa ssh.connect() primero.", id))?;
+        .ok_or_else(|| format!("ssh: session '{}' not found. Use ssh.connect() first.", id))?;
 
     // Intentar usar la sesión existente
     match f(&live.session) {
@@ -97,7 +97,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // ssh.connect(host, port, user, password) → session_id
         "connect" => {
             if args.len() < 4 {
-                return Err("ssh.connect requiere (host, port, user, password)".into());
+                return Err("ssh.connect requires (host, port, user, password)".into());
             }
             let host = to_str(&args[0]);
             let port = args[1].to_i64()? as u16;
@@ -113,7 +113,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // ssh.connect_key(host, port, user, key_path) → session_id
         "connect_key" => {
             if args.len() < 4 {
-                return Err("ssh.connect_key requiere (host, port, user, key_path)".into());
+                return Err("ssh.connect_key requires (host, port, user, key_path)".into());
             }
             let host     = to_str(&args[0]);
             let port     = args[1].to_i64()? as u16;
@@ -129,7 +129,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // ssh.exec(session_id, command) → {out, err, code}
         "exec" => {
             if args.len() < 2 {
-                return Err("ssh.exec requiere (session_id, command)".into());
+                return Err("ssh.exec requires (session_id, command)".into());
             }
             let id  = to_str(&args[0]);
             let cmd = to_str(&args[1]);
@@ -162,7 +162,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Ejecuta múltiples comandos reutilizando la misma sesión sin reconectar
         "exec_many" => {
             if args.len() < 2 {
-                return Err("ssh.exec_many requiere (session_id, [commands])".into());
+                return Err("ssh.exec_many requires (session_id, [commands])".into());
             }
             let id = to_str(&args[0]);
             let cmds = match &args[1] {
@@ -197,13 +197,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // ssh.upload(session_id, local_path, remote_path) → {ok, bytes}
         "upload" => {
             if args.len() < 3 {
-                return Err("ssh.upload requiere (session_id, local_path, remote_path)".into());
+                return Err("ssh.upload requires (session_id, local_path, remote_path)".into());
             }
             let id     = to_str(&args[0]);
             let local  = to_str(&args[1]);
             let remote = to_str(&args[2]);
             let data = std::fs::read(&local)
-                .map_err(|e| format!("ssh.upload: no se pudo leer '{}': {}", local, e))?;
+                .map_err(|e| format!("ssh.upload: could not read '{}': {}", local, e))?;
             let bytes = data.len() as i64;
             with_session(&id, |sess| {
                 let mut channel = sess.scp_send(
@@ -228,7 +228,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // ssh.download(session_id, remote_path, local_path) → {ok, bytes}
         "download" => {
             if args.len() < 3 {
-                return Err("ssh.download requiere (session_id, remote_path, local_path)".into());
+                return Err("ssh.download requires (session_id, remote_path, local_path)".into());
             }
             let id     = to_str(&args[0]);
             let remote = to_str(&args[1]);
@@ -251,7 +251,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // ssh.close(session_id) → null  — libera la conexión del pool
         "close" => {
             if args.is_empty() {
-                return Err("ssh.close requiere (session_id)".into());
+                return Err("ssh.close requires (session_id)".into());
             }
             let id = to_str(&args[0]);
             sessions().lock().unwrap().shift_remove(&id);
@@ -261,7 +261,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // ssh.test(session_id) → bool  — verifica que la conexión sigue viva
         "test" => {
             if args.is_empty() {
-                return Err("ssh.test requiere (session_id)".into());
+                return Err("ssh.test requires (session_id)".into());
             }
             let id = to_str(&args[0]);
             let result = with_session(&id, |sess| {
@@ -283,7 +283,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(ids))
         }
 
-        f => Err(format!("ssh.{}() no existe. Funciones: connect, connect_key, exec, exec_many, upload, download, test, sessions, close", f)),
+        f => Err(format!("ssh.{}() does not exist. Funciones: connect, connect_key, exec, exec_many, upload, download, test, sessions, close", f)),
     }
 }
 

@@ -44,14 +44,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // elapsed(clock) → segundos transcurridos
         "elapsed" => {
-            if args.is_empty() { return Err("timewarp.elapsed requiere (clock)".into()); }
+            if args.is_empty() { return Err("timewarp.elapsed requires (clock)".into()); }
             let clock = match &args[0] {
                 EvalValue::Dict(m) => m,
-                _ => return Err("timewarp.elapsed: se esperaba un clock (dict)".into()),
+                _ => return Err("timewarp.elapsed: expected a clock (dict)".into()),
             };
             let start_ns = match clock.get("start_ns") {
                 Some(EvalValue::Int(n)) => *n,
-                _ => return Err("timewarp.elapsed: clock inválido".into()),
+                _ => return Err("timewarp.elapsed: invalid clock".into()),
             };
             let now_ns = SystemTime::now().duration_since(UNIX_EPOCH)
                 .map(|d| d.as_nanos() as i64).unwrap_or(0);
@@ -67,7 +67,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // format(timestamp_secs, fmt?) → string formateado
         "format" => {
-            if args.is_empty() { return Err("timewarp.format requiere (timestamp_secs, fmt?)".into()); }
+            if args.is_empty() { return Err("timewarp.format requires (timestamp_secs, fmt?)".into()); }
             let ts_secs = to_i64(&args[0])? as u64;
             let fmt = if args.len() > 1 { to_str(&args[1]) } else { "%Y-%m-%d %H:%M:%S".into() };
             use chrono::TimeZone;
@@ -78,28 +78,28 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // diff(ts1, ts2) → segundos de diferencia
         "diff" => {
-            if args.len() < 2 { return Err("timewarp.diff requiere (ts1, ts2)".into()); }
+            if args.len() < 2 { return Err("timewarp.diff requires (ts1, ts2)".into()); }
             let t1 = to_i64(&args[0])?;
             let t2 = to_i64(&args[1])?;
             Ok(EvalValue::Int((t2 - t1).abs()))
         }
         // add(timestamp, seconds) → nuevo timestamp
         "add" | "fastforward" => {
-            if args.len() < 2 { return Err("timewarp.add requiere (timestamp, seconds)".into()); }
+            if args.len() < 2 { return Err("timewarp.add requires (timestamp, seconds)".into()); }
             let ts = to_i64(&args[0])?;
             let s  = to_i64(&args[1])?;
             Ok(EvalValue::Int(ts + s))
         }
         // sub(timestamp, seconds) → nuevo timestamp (rewind)
         "sub" | "rewind" => {
-            if args.len() < 2 { return Err("timewarp.sub requiere (timestamp, seconds)".into()); }
+            if args.len() < 2 { return Err("timewarp.sub requires (timestamp, seconds)".into()); }
             let ts = to_i64(&args[0])?;
             let s  = to_i64(&args[1])?;
             Ok(EvalValue::Int(ts - s))
         }
         // since(timestamp_secs) → segundos desde entonces
         "since" => {
-            if args.is_empty() { return Err("timewarp.since requiere (timestamp_secs)".into()); }
+            if args.is_empty() { return Err("timewarp.since requires (timestamp_secs)".into()); }
             let past = to_i64(&args[0])? as u64;
             let now  = SystemTime::now().duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs()).unwrap_or(0);
@@ -107,14 +107,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // until(timestamp_secs) → segundos hasta entonces
         "until" => {
-            if args.is_empty() { return Err("timewarp.until requiere (timestamp_secs)".into()); }
+            if args.is_empty() { return Err("timewarp.until requires (timestamp_secs)".into()); }
             let future = to_i64(&args[0])? as u64;
             let now    = SystemTime::now().duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs()).unwrap_or(0);
             Ok(EvalValue::Int(future.saturating_sub(now) as i64))
         }
 
-        f => Err(format!("timewarp.{}() no existe", f)),
+        f => Err(format!("timewarp.{}() does not exist", f)),
     }
 }
 
@@ -133,7 +133,7 @@ fn parse_duration(v: &EvalValue) -> Result<f64, String> {
                 s.trim().parse::<f64>().map_err(|_| "timewarp.wait: duración inválida".into())
             }
         }
-        _ => Err("timewarp.wait: duración debe ser número o string ('1s', '500ms')".into()),
+        _ => Err("timewarp.wait: the duration must be a number or a string ('1s', '500ms')".into()),
     }
 }
 
@@ -141,7 +141,7 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("timewarp: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("timewarp: expected a number, got {}", other.type_name())),
     }
 }
 

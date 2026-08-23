@@ -302,9 +302,9 @@ with b = web.open() {
 }
 "##);
 
-    assert!(salida.contains("E1=") && salida.contains("es un navegador, no una pestaña"),
+    assert!(salida.contains("E1=") && salida.contains("is a browser, not a page"),
             "usar un navegador como pestaña debería explicarse:\n{salida}");
-    assert!(salida.contains("E2=") && salida.contains("es una pestaña, no un navegador"),
+    assert!(salida.contains("E2=") && salida.contains("is a page, not a browser"),
             "usar una pestaña como navegador debería explicarse:\n{salida}");
 }
 
@@ -320,7 +320,7 @@ attempt {
     show("E=" + e)
 }
 "##);
-    assert!(salida.contains("no existe"), "no se explicó el problema:\n{salida}");
+    assert!(salida.contains("does not exist"), "no se explicó el problema:\n{salida}");
     assert!(salida.contains("browser.open"), "no se dijo cómo arreglarlo:\n{salida}");
 }
 
@@ -464,7 +464,7 @@ with b = web.open() {{
 }}
 "##));
     assert!(salida.contains("E="), "debería haber fallado:\n{salida}");
-    assert!(salida.contains("lo tapa"), "el error no dice qué estorba:\n{salida}");
+    assert!(salida.contains("it is covered by"), "el error no dice qué estorba:\n{salida}");
     assert!(salida.contains("cookie-banner"),
             "el error no identifica al elemento que tapa:\n{salida}");
 }
@@ -507,7 +507,7 @@ with b = web.open() {{
     attempt {{ web.press(p, "teletransporte") }} handle e {{ show("E=" + e) }}
 }}
 "##));
-    assert!(salida.contains("desconocida"), "no se explicó el error:\n{salida}");
+    assert!(salida.contains("unknown key"), "no se explicó el error:\n{salida}");
     assert!(salida.contains("enter"), "no se listaron las teclas válidas:\n{salida}");
 }
 
@@ -695,7 +695,7 @@ with b = web.open() {{
     attempt {{ web.select(p, "#pais", "Narnia") }} handle e {{ show("E=" + e) }}
 }}
 "##));
-    assert!(salida.contains("no hay opción"), "no se explicó el fallo:\n{salida}");
+    assert!(salida.contains("no option"), "no se explicó el fallo:\n{salida}");
     assert!(salida.contains("Peru") && salida.contains("Mexico"),
             "no se listaron las opciones disponibles:\n{salida}");
 }
@@ -746,7 +746,7 @@ with b = web.open() {{
     attempt {{ web.dialogs(p, "quizas") }} handle e {{ show("E=" + e) }}
 }}
 "##));
-    assert!(salida.contains("desconocida"), "no se explicó:\n{salida}");
+    assert!(salida.contains("unknown policy"), "no se explicó:\n{salida}");
     assert!(salida.contains("accept") && salida.contains("answer:"),
             "no se listaron las políticas válidas:\n{salida}");
 }
@@ -1251,9 +1251,9 @@ with b = web.open() {{
     show("V1=" + web.text(p, "#v1"))
 }}
 "##));
-    assert!(salida.contains("E=") && salida.contains("no existe"),
+    assert!(salida.contains("E=") && salida.contains("does not exist"),
             "debería decir que el archivo no existe:\n{salida}");
-    assert!(salida.contains("se buscó en:"),
+    assert!(salida.contains("looked in:"),
             "el error no dice dónde buscó, que es lo único que resuelve el caso:\n{salida}");
     assert!(salida.contains("V1=nada"), "la página no quedó intacta:\n{salida}");
 }
@@ -1349,7 +1349,7 @@ with b = web.open() {{
     handle e {{ show("E=" + e) }}
 }}
 "##));
-    assert!(salida.contains("E=") && salida.contains("no inició ninguna descarga"),
+    assert!(salida.contains("E=") && salida.contains("started no download"),
             "debería explicar que ese elemento no descarga:\n{salida}");
 }
 
@@ -1998,7 +1998,7 @@ with b = web.open() {{
     assert!(salida.contains("B=/uno"), "back no volvió:\n{salida}");
     assert!(salida.contains("C=/dos"), "forward no avanzó:\n{salida}");
     assert!(salida.contains("D=/dos"), "reload cambió de página:\n{salida}");
-    assert!(salida.contains("E=") && salida.contains("historial"),
+    assert!(salida.contains("E=") && salida.contains("history"),
             "un back sin historial debería explicarse:\n{salida}");
 }
 
@@ -2111,7 +2111,7 @@ with b = web.open() {{
     assert!(salida.contains("E="), "{salida}");
     assert!(!salida.contains("clave-secreta-real"),
             "el valor secreto se filtró al error:\n{salida}");
-    assert!(salida.contains("oculto"), "debería decir que lo ocultó:\n{salida}");
+    assert!(salida.contains("hidden by secret"), "debería decir que lo ocultó:\n{salida}");
 }
 
 //    Captura de red
@@ -2361,7 +2361,7 @@ with b = web.open() {{
     attempt {{ web.discover(p, {{ wait: 800 }}) }} handle e {{ show("E=" + e) }}
 }}
 "##));
-    assert!(salida.contains("E=") && salida.contains("estructura repetida"),
+    assert!(salida.contains("E=") && salida.contains("repeating structure"),
             "deberia decir que no hay listado:\n{salida}");
 }
 

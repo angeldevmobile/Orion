@@ -30,7 +30,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 (to_f64v(&args[2])?, to_f64v(&args[3])?),
             ];
             if raw.iter().map(|&a| c_abs2(a)).sum::<f64>() < 1e-15 {
-                return Err("quantum.qubit: amplitudes todas cero (estado inválido)".into());
+                return Err("quantum.qubit: all amplitudes are zero (invalid state)".into());
             }
             Ok(state_to_eval(&normalize(raw)))
         }
@@ -63,7 +63,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // tensor(a, b) → producto tensorial de dos estados
         "tensor" | "entangle" => {
-            if args.len() < 2 { return Err("quantum.tensor requiere (a, b)".into()); }
+            if args.len() < 2 { return Err("quantum.tensor requires (a, b)".into()); }
             let a = eval_to_state(&args[0])?;
             let b = eval_to_state(&args[1])?;
             let result = tensor_product(&a, &b);
@@ -71,7 +71,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // apply(state, gate) → aplica puerta al estado
         "apply" => {
-            if args.len() < 2 { return Err("quantum.apply requiere (state, gate)".into()); }
+            if args.len() < 2 { return Err("quantum.apply requires (state, gate)".into()); }
             let state = eval_to_state(&args[0])?;
             let gate  = eval_to_gate(&args[1])?;
             let result = apply_gate(&state, &gate)?;
@@ -79,7 +79,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // measure(state, shots?) → dict con conteos {"0": n, "1": m, ...}
         "measure" => {
-            if args.is_empty() { return Err("quantum.measure requiere (state, shots?)".into()); }
+            if args.is_empty() { return Err("quantum.measure requires (state, shots?)".into()); }
             let state = eval_to_state(&args[0])?;
             let shots = if args.len() > 1 { to_i64(&args[1])? as usize } else { 1024 };
             let counts = measure(&state, shots);
@@ -90,7 +90,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // measure_probs(state) → dict con probabilidades
         "measure_probs" | "probabilities" => {
-            if args.is_empty() { return Err("quantum.measure_probs requiere (state)".into()); }
+            if args.is_empty() { return Err("quantum.measure_probs requires (state)".into()); }
             let state = eval_to_state(&args[0])?;
             let n_qubits = (state.len() as f64).log2() as usize;
             let m: HashMap<String, EvalValue> = state.iter().enumerate()
@@ -104,7 +104,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // fidelity(s1, s2) → f64 ∈ [0, 1]
         "fidelity" => {
-            if args.len() < 2 { return Err("quantum.fidelity requiere (s1, s2)".into()); }
+            if args.len() < 2 { return Err("quantum.fidelity requires (s1, s2)".into()); }
             let s1 = eval_to_state(&args[0])?;
             let s2 = eval_to_state(&args[1])?;
             let inner = s1.iter().zip(&s2).map(|(a, b)| c_mul(c_conj(*a), *b)).fold((0.0, 0.0), c_add);
@@ -113,7 +113,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // bloch(qubit_state) → [x, y, z]
         "bloch" => {
-            if args.is_empty() { return Err("quantum.bloch requiere (state)".into()); }
+            if args.is_empty() { return Err("quantum.bloch requires (state)".into()); }
             let s  = eval_to_state(&args[0])?;
             if s.len() != 2 { return Err("quantum.bloch solo aplica a un qubit (2 amplitudes)".into()); }
             let a = s[0];
@@ -130,11 +130,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // state_from_bits("01") → estado |01>
         "state_from_bits" => {
-            if args.is_empty() { return Err("quantum.state_from_bits requiere (bitstring)".into()); }
+            if args.is_empty() { return Err("quantum.state_from_bits requires (bitstring)".into()); }
             let bits = to_str(&args[0]);
             let n    = bits.len();
             let size = 1 << n;
-            let idx  = usize::from_str_radix(&bits, 2).map_err(|_| "quantum.state_from_bits: bits inválidos")?;
+            let idx  = usize::from_str_radix(&bits, 2).map_err(|_| "quantum.state_from_bits: invalid bits")?;
             let mut state = vec![(0.0f64, 0.0f64); size];
             state[idx] = (1.0, 0.0);
             Ok(state_to_eval(&state))
@@ -148,7 +148,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "gate_CNOT" => Ok(gate_to_eval(&cnot())),
         // amplitudes(state) → lista de [re, im, prob]
         "amplitudes" => {
-            if args.is_empty() { return Err("quantum.amplitudes requiere (state)".into()); }
+            if args.is_empty() { return Err("quantum.amplitudes requires (state)".into()); }
             let state = eval_to_state(&args[0])?;
             let result: Vec<EvalValue> = state.iter().map(|(re, im)| {
                 let prob = re * re + im * im;
@@ -165,9 +165,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // circuit(n) → id; registro de n qubits inicializado en |0...0> (máx 24)
         "circuit" | "circuito" => {
-            let n = to_i64(args.first().ok_or("quantum.circuit requiere (n_qubits)")?)? as usize;
+            let n = to_i64(args.first().ok_or("quantum.circuit requires (n_qubits)")?)? as usize;
             if n == 0 || n > MAX_QUBITS {
-                return Err(format!("quantum.circuit: n debe estar entre 1 y {} qubits", MAX_QUBITS));
+                return Err(format!("quantum.circuit: n must be between 1 and {} qubits", MAX_QUBITS));
             }
             let mut state = vec![(0.0, 0.0); 1 << n];
             state[0] = (1.0, 0.0);
@@ -205,10 +205,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "swap" => {
             let id = circuit_id(&args)?;
             with_circuits(|cs| {
-                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 let a = qubit_arg(&args, 1, circ.n, "swap")?;
                 let b = qubit_arg(&args, 2, circ.n, "swap")?;
-                if a == b { return Err("quantum.swap: qubits deben ser distintos".into()); }
+                if a == b { return Err("quantum.swap: the qubits must be different".into()); }
                 let x = named_gate("x", 0.0).unwrap();
                 apply_1q(circ, b, &x, &[a]);
                 apply_1q(circ, a, &x, &[b]);
@@ -220,11 +220,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "ccx" | "toffoli" => {
             let id = circuit_id(&args)?;
             with_circuits(|cs| {
-                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 let c1 = qubit_arg(&args, 1, circ.n, "ccx")?;
                 let c2 = qubit_arg(&args, 2, circ.n, "ccx")?;
                 let t  = qubit_arg(&args, 3, circ.n, "ccx")?;
-                if c1 == c2 || c1 == t || c2 == t { return Err("quantum.ccx: los tres qubits deben ser distintos".into()); }
+                if c1 == c2 || c1 == t || c2 == t { return Err("quantum.ccx: the three qubits must be different".into()); }
                 let x = named_gate("x", 0.0).unwrap();
                 apply_1q(circ, t, &x, &[c1, c2]);
                 Ok(EvalValue::Int(id as i64))
@@ -232,11 +232,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // ugate(id, q, matriz2x2) → puerta DEFINIDA POR EL USUARIO (se valida unitariedad)
         "ugate" => {
-            if args.len() < 3 { return Err("quantum.ugate requiere (id, qubit, matriz 2x2)".into()); }
+            if args.len() < 3 { return Err("quantum.ugate requires (id, qubit, matriz 2x2)".into()); }
             let id = circuit_id(&args)?;
             let g  = eval_to_gate2(&args[2])?;
             with_circuits(|cs| {
-                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 let q = qubit_arg(&args, 1, circ.n, "ugate")?;
                 apply_1q(circ, q, &g, &[]);
                 Ok(EvalValue::Int(id as i64))
@@ -244,14 +244,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // cugate(id, control, target, matriz2x2) → puerta custom controlada
         "cugate" => {
-            if args.len() < 4 { return Err("quantum.cugate requiere (id, control, target, matriz 2x2)".into()); }
+            if args.len() < 4 { return Err("quantum.cugate requires (id, control, target, matriz 2x2)".into()); }
             let id = circuit_id(&args)?;
             let g  = eval_to_gate2(&args[3])?;
             with_circuits(|cs| {
-                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 let ctrl = qubit_arg(&args, 1, circ.n, "cugate")?;
                 let tgt  = qubit_arg(&args, 2, circ.n, "cugate")?;
-                if ctrl == tgt { return Err("quantum.cugate: control y target deben ser distintos".into()); }
+                if ctrl == tgt { return Err("quantum.cugate: control and target must be different".into()); }
                 apply_1q(circ, tgt, &g, &[ctrl]);
                 Ok(EvalValue::Int(id as i64))
             })
@@ -260,7 +260,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "state" => {
             let id = circuit_id(&args)?;
             with_circuits(|cs| {
-                let circ = cs.get(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 Ok(state_to_eval(&circ.state))
             })
         }
@@ -268,7 +268,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "probs" => {
             let id = circuit_id(&args)?;
             with_circuits(|cs| {
-                let circ = cs.get(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 let m: HashMap<String, EvalValue> = circ.state.iter().enumerate()
                     .filter_map(|(i, &amp)| {
                         let p = c_abs2(amp);
@@ -285,7 +285,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let id = circuit_id(&args)?;
             let shots = match args.get(1) { Some(v) => to_i64(v)? as usize, None => 1024 };
             with_circuits(|cs| {
-                let circ = cs.get(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 let counts = measure(&circ.state, shots);
                 let m: HashMap<String, EvalValue> = counts.into_iter()
                     .map(|(k, v)| (k, EvalValue::Int(v as i64)))
@@ -297,7 +297,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "collapse" => {
             let id = circuit_id(&args)?;
             with_circuits(|cs| {
-                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 let q = qubit_arg(&args, 1, circ.n, "collapse")?;
                 let bit = 1usize << (circ.n - 1 - q);
                 let p1: f64 = circ.state.iter().enumerate()
@@ -317,7 +317,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "reset" => {
             let id = circuit_id(&args)?;
             with_circuits(|cs| {
-                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get_mut(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 circ.state.iter_mut().for_each(|a| *a = (0.0, 0.0));
                 circ.state[0] = (1.0, 0.0);
                 Ok(EvalValue::Int(id as i64))
@@ -327,7 +327,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "nqubits" => {
             let id = circuit_id(&args)?;
             with_circuits(|cs| {
-                let circ = cs.get(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+                let circ = cs.get(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
                 Ok(EvalValue::Int(circ.n as i64))
             })
         }
@@ -337,7 +337,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Bool(with_circuits(|cs| cs.shift_remove(&id).is_some())))
         }
 
-        f => Err(format!("quantum.{}() no existe", f)),
+        f => Err(format!("quantum.{}() does not exist", f)),
     }
 }
 
@@ -371,15 +371,15 @@ where
 fn circuit_id(args: &[EvalValue]) -> Result<u64, String> {
     match args.first() {
         Some(EvalValue::Int(n)) if *n > 0 => Ok(*n as u64),
-        _ => Err("quantum: se esperaba un id de circuito (int)".into()),
+        _ => Err("quantum: expected a circuit id (int)".into()),
     }
 }
 
 fn qubit_arg(args: &[EvalValue], pos: usize, n: usize, fname: &str) -> Result<usize, String> {
     match args.get(pos) {
         Some(EvalValue::Int(q)) if *q >= 0 && (*q as usize) < n => Ok(*q as usize),
-        Some(EvalValue::Int(q)) => Err(format!("quantum.{}: qubit {} fuera de rango (el circuito tiene {})", fname, q, n)),
-        _ => Err(format!("quantum.{}: se esperaba índice de qubit (int)", fname)),
+        Some(EvalValue::Int(q)) => Err(format!("quantum.{}: qubit {} out of range (the circuit has {})", fname, q, n)),
+        _ => Err(format!("quantum.{}: expected a qubit index (int)", fname)),
     }
 }
 
@@ -387,7 +387,7 @@ fn theta_arg(args: &[EvalValue], pos: usize, fname: &str) -> Result<f64, String>
     match args.get(pos) {
         Some(EvalValue::Float(f)) => Ok(*f),
         Some(EvalValue::Int(n))   => Ok(*n as f64),
-        _ => Err(format!("quantum.{}: se esperaba ángulo theta (número, radianes)", fname)),
+        _ => Err(format!("quantum.{}: expected a theta angle (number, radians)", fname)),
     }
 }
 
@@ -462,7 +462,7 @@ fn named_gate(name: &str, theta: f64) -> Option<[[C; 2]; 2]> {
 fn eval_to_gate2(v: &EvalValue) -> Result<[[C; 2]; 2], String> {
     let g = eval_to_gate(v)?;
     if g.len() != 2 || g[0].len() != 2 || g[1].len() != 2 {
-        return Err("quantum.ugate: la puerta debe ser 2×2 ([[a,b],[c,d]] con [re,im] o números)".into());
+        return Err("quantum.ugate: the gate must be 2×2 ([[a,b],[c,d]] with [re,im] or numbers)".into());
     }
     // Unitariedad: G·G† = I (si no, el estado deja de ser físico)
     let (a, b, c, d) = (g[0][0], g[0][1], g[1][0], g[1][1]);
@@ -470,7 +470,7 @@ fn eval_to_gate2(v: &EvalValue) -> Result<[[C; 2]; 2], String> {
     let row2 = c_abs2(c) + c_abs2(d);
     let cross = c_add(c_mul(a, c_conj(c)), c_mul(b, c_conj(d)));
     if (row1 - 1.0).abs() > 1e-9 || (row2 - 1.0).abs() > 1e-9 || c_abs2(cross) > 1e-18 {
-        return Err("quantum.ugate: la matriz no es unitaria (G·G† ≠ I)".into());
+        return Err("quantum.ugate: the matrix is not unitary (G·G† ≠ I)".into());
     }
     Ok([[g[0][0], g[0][1]], [g[1][0], g[1][1]]])
 }
@@ -479,7 +479,7 @@ fn eval_to_gate2(v: &EvalValue) -> Result<[[C; 2]; 2], String> {
 fn circuit_gate(name: &str, args: Vec<EvalValue>, parametric: bool) -> Result<EvalValue, String> {
     let id = circuit_id(&args)?;
     with_circuits(|cs| {
-        let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+        let circ = cs.get_mut(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
         let q = qubit_arg(&args, 1, circ.n, name)?;
         let theta = if parametric { theta_arg(&args, 2, name)? } else { 0.0 };
         let g = named_gate(name, theta).ok_or(format!("quantum.{}: puerta desconocida", name))?;
@@ -492,10 +492,10 @@ fn circuit_gate(name: &str, args: Vec<EvalValue>, parametric: bool) -> Result<Ev
 fn circuit_cgate(name: &str, args: Vec<EvalValue>, parametric: bool) -> Result<EvalValue, String> {
     let id = circuit_id(&args)?;
     with_circuits(|cs| {
-        let circ = cs.get_mut(&id).ok_or(format!("quantum: circuito {} no existe", id))?;
+        let circ = cs.get_mut(&id).ok_or(format!("quantum: circuit {} does not exist", id))?;
         let ctrl = qubit_arg(&args, 1, circ.n, name)?;
         let tgt  = qubit_arg(&args, 2, circ.n, name)?;
-        if ctrl == tgt { return Err(format!("quantum.{}: control y target deben ser distintos", name)); }
+        if ctrl == tgt { return Err(format!("quantum.{}: control and target must be different", name)); }
         let theta = if parametric { theta_arg(&args, 3, name)? } else { 0.0 };
         let base = match name { "cnot" => "x", "cz" => "z", "cphase" => "phase", other => other };
         let g = named_gate(base, theta).ok_or(format!("quantum.{}: puerta desconocida", name))?;
@@ -589,13 +589,13 @@ fn eval_to_state(v: &EvalValue) -> Result<State, String> {
                     }
                     EvalValue::Float(f) => state.push((*f, 0.0)),
                     EvalValue::Int(n)   => state.push((*n as f64, 0.0)),
-                    _ => return Err("quantum: amplitud debe ser [re, im]".into()),
+                    _ => return Err("quantum: an amplitude must be [re, im]".into()),
                 }
             }
-            if state.is_empty() { return Err("quantum: estado vacío".into()); }
+            if state.is_empty() { return Err("quantum: empty state".into()); }
             Ok(state)
         }
-        _ => Err(format!("quantum: se esperaba lista de amplitudes, recibió {}", v.type_name())),
+        _ => Err(format!("quantum: expected a list of amplitudes, got {}", v.type_name())),
     }
 }
 
@@ -612,15 +612,15 @@ fn eval_to_gate(v: &EvalValue) -> Result<Gate, String> {
                                 }
                                 EvalValue::Float(f) => Ok((*f, 0.0)),
                                 EvalValue::Int(n)   => Ok((*n as f64, 0.0)),
-                                _ => Err("quantum: elemento de gate debe ser [re, im]".into()),
+                                _ => Err("quantum: a gate element must be [re, im]".into()),
                             }
                         }).collect()
                     }
-                    _ => Err("quantum: gate debe ser lista de listas".into()),
+                    _ => Err("quantum: the gate must be a list of lists".into()),
                 }
             }).collect()
         }
-        _ => Err("quantum: gate debe ser una lista de listas".into()),
+        _ => Err("quantum: gate must be a list of lists".into()),
     }
 }
 
@@ -636,7 +636,7 @@ fn to_f64v(v: &EvalValue) -> Result<f64, String> {
     match v {
         EvalValue::Float(f) => Ok(*f),
         EvalValue::Int(n)   => Ok(*n as f64),
-        other => Err(format!("quantum: esperaba f64, recibió {}", other.type_name())),
+        other => Err(format!("quantum: expected an f64, got {}", other.type_name())),
     }
 }
 
@@ -644,7 +644,7 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("quantum: esperaba entero, recibió {}", other.type_name())),
+        other => Err(format!("quantum: expected an integer, got {}", other.type_name())),
     }
 }
 

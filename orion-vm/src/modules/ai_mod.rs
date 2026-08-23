@@ -34,7 +34,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // summarize(text, lang?, length?) → resumen
         "summarize" => {
-            if args.is_empty() { return Err("ai.summarize requiere (text)".into()); }
+            if args.is_empty() { return Err("ai.summarize requires (text)".into()); }
             let text = to_str(&args[0]);
             let lang   = if args.len() > 1 { to_str(&args[1]) } else { "español".into() };
             let length = if args.len() > 2 { to_str(&args[2]) } else { "corto".into() };
@@ -49,7 +49,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // classify(text, [categories]) → categoría
         "classify" => {
-            if args.len() < 2 { return Err("ai.classify requiere (text, categories)".into()); }
+            if args.len() < 2 { return Err("ai.classify requires (text, categories)".into()); }
             let text = to_str(&args[0]);
             let cats = match &args[1] {
                 EvalValue::List(v) => v.iter().map(|x| format!("{}", x)).collect::<Vec<_>>().join(", "),
@@ -57,7 +57,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             };
             let result = ai_call_with_system(
                 &text,
-                &format!("Clasifica el texto en UNA de estas categorías: {}. Responde SOLO con el nombre de la categoría.", cats),
+                &format!("Classify the text into ONE of these categories: {}. Answer with the category name ONLY.", cats),
                 32,
             )?;
             Ok(EvalValue::Str(result.trim().to_string()))
@@ -65,7 +65,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // extract(text, [fields]) → dict
         "extract" => {
-            if args.len() < 2 { return Err("ai.extract requiere (text, fields)".into()); }
+            if args.len() < 2 { return Err("ai.extract requires (text, fields)".into()); }
             let text = to_str(&args[0]);
             let fields = match &args[1] {
                 EvalValue::List(v) => v.iter().map(|x| format!("{}", x)).collect::<Vec<_>>(),
@@ -74,7 +74,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let fields_json = serde_json::to_string(&fields).unwrap_or_default();
             let result = ai_call_with_system(
                 &text,
-                &format!("Extrae los campos {} del texto. Responde SOLO con JSON válido. Si un campo no existe usa null.", fields_json),
+                &format!("Extract the fields {} from the text. Answer with valid JSON ONLY. Use null for a field that is not there.", fields_json),
                 512,
             )?;
             // Intenta parsear como JSON
@@ -91,12 +91,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // code(description, lang?) → código generado
         "code" => {
-            if args.is_empty() { return Err("ai.code requiere (description, lang?)".into()); }
+            if args.is_empty() { return Err("ai.code requires (description, lang?)".into()); }
             let desc = to_str(&args[0]);
             let lang = if args.len() > 1 { to_str(&args[1]) } else { "orion".into() };
             let result = ai_call_with_system(
                 &desc,
-                &format!("Genera código en {}. Responde SOLO con el código, sin explicaciones ni bloques markdown.", lang),
+                &format!("Generate code in {}. Answer with the code ONLY, no explanations and no markdown blocks.", lang),
                 1024,
             )?;
             Ok(EvalValue::Str(result))
@@ -104,7 +104,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // fix(code, error?) → código corregido
         "fix" => {
-            if args.is_empty() { return Err("ai.fix requiere (code, error?)".into()); }
+            if args.is_empty() { return Err("ai.fix requires (code, error?)".into()); }
             let code_text = to_str(&args[0]);
             let error = if args.len() > 1 { to_str(&args[1]) } else { String::new() };
             let content = if error.is_empty() {
@@ -122,12 +122,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // translate(text, to?) → traducción
         "translate" => {
-            if args.is_empty() { return Err("ai.translate requiere (text, to?)".into()); }
+            if args.is_empty() { return Err("ai.translate requires (text, to?)".into()); }
             let text = to_str(&args[0]);
             let to   = if args.len() > 1 { to_str(&args[1]) } else { "english".into() };
             let result = ai_call_with_system(
                 &text,
-                &format!("Traduce al {}. Responde SOLO con la traducción.", to),
+                &format!("Translate into {}. Answer with the translation ONLY.", to),
                 1024,
             )?;
             Ok(EvalValue::Str(result))
@@ -146,7 +146,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // complete(text, max_tokens?) → continuación
         "complete" => {
-            if args.is_empty() { return Err("ai.complete requiere (text)".into()); }
+            if args.is_empty() { return Err("ai.complete requires (text)".into()); }
             let text       = to_str(&args[0]);
             let max_tokens = if args.len() > 1 { to_i64(&args[1])? as u32 } else { 256 };
             let result = ai_call_with_system(
@@ -170,7 +170,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // explain(code, lang?) → explicación
         "explain" => {
-            if args.is_empty() { return Err("ai.explain requiere (code, lang?)".into()); }
+            if args.is_empty() { return Err("ai.explain requires (code, lang?)".into()); }
             let code_text = to_str(&args[0]);
             let lang = if args.len() > 1 { to_str(&args[1]) } else { "español".into() };
             let result = ai_call_with_system(
@@ -183,7 +183,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // qa(context, question) → respuesta
         "qa" => {
-            if args.len() < 2 { return Err("ai.qa requiere (context, question)".into()); }
+            if args.len() < 2 { return Err("ai.qa requires (context, question)".into()); }
             let context  = to_str(&args[0]);
             let question = to_str(&args[1]);
             let result = ai_call_with_system(
@@ -196,7 +196,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // search_in(text, query) → extracto relevante
         "search_in" => {
-            if args.len() < 2 { return Err("ai.search_in requiere (text, query)".into()); }
+            if args.len() < 2 { return Err("ai.search_in requires (text, query)".into()); }
             let text  = to_str(&args[0]);
             let query = to_str(&args[1]);
             let result = ai_call_with_system(
@@ -284,7 +284,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str("[memoria borrada]".into()))
         }
 
-        f => Err(format!("ai.{}() no existe", f)),
+        f => Err(format!("ai.{}() does not exist", f)),
     }
 }
 
@@ -308,7 +308,7 @@ fn clean_json(raw: &str) -> String {
 }
 
 fn one_str(fn_name: &str, args: Vec<EvalValue>) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("ai.{}() requiere 1 argumento", fn_name)); }
+    if args.is_empty() { return Err(format!("ai.{}() requires 1 argument", fn_name)); }
     Ok(to_str(&args[0]))
 }
 
@@ -320,6 +320,6 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("ai: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("ai: expected a number, got {}", other.type_name())),
     }
 }

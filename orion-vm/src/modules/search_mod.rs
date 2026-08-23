@@ -35,7 +35,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "context"  => fn_context(args),
         // columns(ruta: string, columnas: list, patron: string) -> list → filas donde el patrón aparece en alguna de esas columnas
         "columns"  => fn_csv_columns(args),
-        _ => Err(format!("search.{} no existe", function)),
+        _ => Err(format!("search.{} does not exist", function)),
     }
 }
 
@@ -44,7 +44,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn str_arg(args: &[EvalValue], pos: usize, ctx: &str) -> Result<String, String> {
     match args.get(pos) {
         Some(EvalValue::Str(s)) => Ok(s.clone()),
-        _ => Err(format!("search.{}: argumento {} debe ser string", ctx, pos)),
+        _ => Err(format!("search.{}: argument {} must be a string", ctx, pos)),
     }
 }
 
@@ -109,7 +109,7 @@ fn fn_regex(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("search.regex(ruta, patron_regex)".into()); }
     let path    = str_arg(&args, 0, "regex")?;
     let pattern = str_arg(&args, 1, "regex")?;
-    let re      = regex::Regex::new(&pattern).map_err(|e| format!("search.regex: patrón inválido: {}", e))?;
+    let re      = regex::Regex::new(&pattern).map_err(|e| format!("search.regex: invalid pattern: {}", e))?;
 
     let file    = File::open(&path).map_err(|e| format!("search.regex: {}", e))?;
     let reader  = BufReader::new(file);
@@ -137,7 +137,7 @@ fn fn_regex(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 /// Busca en una columna específica: search.csv(ruta, columna, valor)
 fn fn_csv(args: Vec<EvalValue>) -> Result<EvalValue, String> {
-    if args.len() < 3 { return Err("search.csv(ruta, columna, valor)".into()); }
+    if args.len() < 3 { return Err("search.csv(path, column, value)".into()); }
     let path   = str_arg(&args, 0, "csv")?;
     let col    = str_arg(&args, 1, "csv")?;
     let target = &args[2];
@@ -211,7 +211,7 @@ fn fn_csv_columns(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         EvalValue::List(items) => items.iter().filter_map(|v| match v {
             EvalValue::Str(s) => Some(s.clone()), _ => None
         }).collect(),
-        _ => return Err("search.columns: columnas debe ser lista de strings".into()),
+        _ => return Err("search.columns: columns must be a list of strings".into()),
     };
     let pattern = str_arg(&args, 2, "columns")?.to_lowercase();
 

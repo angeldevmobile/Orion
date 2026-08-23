@@ -319,7 +319,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "free"       => fn_free(args),
         // frames() -> int → cuántos frames siguen vivos en memoria; útil para cazar los que no se liberaron
         "frames"     => Ok(EvalValue::Int(with_frames(|fs| fs.len() as i64))),
-        _ => Err(format!("frame.{} no existe", function)),
+        _ => Err(format!("frame.{} does not exist", function)),
     }
 }
 
@@ -345,7 +345,7 @@ fn fn_open(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // texto (CSV) → parseo delimitado column-major (mitad de RAM pico)
         let mut reader = BufReader::new(std::io::Cursor::new(data));
         let (headers, cols_raw) = parse_delim_columnar(&mut reader, ",");
-        if headers.is_empty() { return Err("frame.open: archivo vacío o sin cabecera".into()); }
+        if headers.is_empty() { return Err("frame.open: empty file, or no header row".into()); }
         let n = cols_raw.first().map(|c| c.len()).unwrap_or(0);
         (infer_columns_owned(headers, cols_raw), n)
     };
@@ -370,7 +370,7 @@ fn fn_from_txt(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let file = File::open(&path).map_err(|e| format!("frame.from_txt: {}", e))?;
     let mut reader = BufReader::new(file);
     let (headers, cols_raw) = parse_delim_columnar(&mut reader, &sep);
-    if headers.is_empty() { return Err("frame.from_txt: archivo vacío o sin cabecera".into()); }
+    if headers.is_empty() { return Err("frame.from_txt: empty file, or no header row".into()); }
     let n = cols_raw.first().map(|c| c.len()).unwrap_or(0);
     let cols = infer_columns_owned(headers, cols_raw);
     let id = new_handle();
@@ -399,7 +399,7 @@ fn fn_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     };
 
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let headers: Vec<&str> = f.cols.iter().map(|(n, _)| n.as_str()).collect();
 
         let mut wb = Workbook::new();
@@ -415,7 +415,7 @@ fn fn_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let ws = wb.add_worksheet();
             let sheet_name = if n_sheets == 1 { "Datos".to_string() } else { format!("parte_{}", s + 1) };
             ws.set_name(sheet_name.as_str())
-                .map_err(|e| format!("frame.to_excel: nombre de hoja: {}", e))?;
+                .map_err(|e| format!("frame.to_excel: sheet name: {}", e))?;
 
             // cabecera
             for (c, h) in headers.iter().enumerate() {
@@ -556,7 +556,7 @@ fn fn_txt_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     // cabecera
     let mut header_line = String::new();
     if reader.read_line(&mut header_line).map_err(|e| e.to_string())? == 0 {
-        return Err("frame.txt_to_excel: archivo vacío".into());
+        return Err("frame.txt_to_excel: empty file".into());
     }
     let headers: Vec<String> = header_line
         .trim_end_matches(['\r', '\n'])
@@ -589,7 +589,7 @@ fn fn_from_list(args: Vec<EvalValue>) -> Result<EvalValue, String> {
         Some(EvalValue::List(rows)) if !rows.is_empty() => {
             let headers: Vec<String> = match &rows[0] {
                 EvalValue::Dict(d) => d.keys().cloned().collect(),
-                _ => return Err("frame.from_list: se esperaba lista de dicts".into()),
+                _ => return Err("frame.from_list: expected a list of dicts".into()),
             };
             let str_rows: Vec<Vec<String>> = rows.iter().map(|r| {
                 match r {
@@ -621,7 +621,7 @@ fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     let n  = match args.get(1) { Some(EvalValue::Int(n)) => *n as usize, _ => 5 };
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let show = n.min(f.rows);
         // ancho de columnas
         let widths: Vec<usize> = f.cols.iter().map(|(name, _)| name.len().max(8)).collect();
@@ -643,7 +643,7 @@ fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             println!("│{}│", row.join("│"));
         }
         println!("└{}┘", widths.iter().map(|w| " ".repeat(w + 2)).collect::<Vec<_>>().join("┴"));
-        if f.rows > show { println!("  ... {} filas en total", f.rows); }
+        if f.rows > show { println!("  ... {} rows in total", f.rows); }
         Ok(EvalValue::Null)
     })
 }
@@ -651,7 +651,7 @@ fn fn_peek(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_schema(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let mut map = HashMap::new();
         for (name, col) in &f.cols {
             let t = match col { Col::Float(_) => "float", Col::Int(_) => "int",
@@ -665,7 +665,7 @@ fn fn_schema(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_size(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let mut map = HashMap::new();
         map.insert("rows".to_string(), EvalValue::Int(f.rows as i64));
         map.insert("cols".to_string(), EvalValue::Int(f.cols.len() as i64));
@@ -678,8 +678,8 @@ fn fn_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id   = arg_handle(&args, 0)?;
     let name = arg_str(&args, 1, "frame.col")?;
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
-        let col = f.col(&name).ok_or(format!("columna '{}' no existe", name))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
+        let col = f.col(&name).ok_or(format!("column '{}' does not exist", name))?;
         let vals: Vec<EvalValue> = (0..col.len()).map(|i| col.to_eval(i)).collect();
         Ok(EvalValue::List(vals))
     })
@@ -688,9 +688,9 @@ fn fn_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_row(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.row(handle, indice)".into()); }
     let id  = arg_handle(&args, 0)?;
-    let idx = match &args[1] { EvalValue::Int(n) => *n as usize, _ => return Err("frame.row: índice debe ser int".into()) };
+    let idx = match &args[1] { EvalValue::Int(n) => *n as usize, _ => return Err("frame.row: the index must be an int".into()) };
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         if idx >= f.rows { return Err(format!("frame.row: índice {} fuera de rango", idx)); }
         Ok(f.row_to_dict(idx))
     })
@@ -699,7 +699,7 @@ fn fn_row(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn fn_to_list(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let rows: Vec<EvalValue> = (0..f.rows).map(|i| f.row_to_dict(i)).collect();
         Ok(EvalValue::List(rows))
     })
@@ -712,7 +712,7 @@ fn fn_keep(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id   = arg_handle(&args, 0)?;
     let keep = arg_str_list(&args, 1)?;
     with_frames(|fs| {
-        let f    = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f    = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let cols = f.cols.iter().filter(|(n, _)| keep.contains(n)).cloned().collect::<Vec<_>>();
         let rows = cols.first().map(|(_, c)| c.len()).unwrap_or(0);
         let new_id = new_handle();
@@ -726,7 +726,7 @@ fn fn_drop(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id   = arg_handle(&args, 0)?;
     let drop = arg_str_list(&args, 1)?;
     with_frames(|fs| {
-        let f    = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f    = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let cols = f.cols.iter().filter(|(n, _)| !drop.contains(n)).cloned().collect::<Vec<_>>();
         let rows = cols.first().map(|(_, c)| c.len()).unwrap_or(0);
         let new_id = new_handle();
@@ -741,7 +741,7 @@ fn fn_rename(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let viejo = arg_str(&args, 1, "frame.rename")?;
     let nuevo = arg_str(&args, 2, "frame.rename")?;
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let cols = f.cols.iter().map(|(n, c)| {
             (if n == &viejo { nuevo.clone() } else { n.clone() }, c.clone())
         }).collect();
@@ -755,13 +755,13 @@ fn fn_rename(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 //   filtrado                                  
 
 fn fn_where(args: Vec<EvalValue>) -> Result<EvalValue, String> {
-    if args.len() < 3 { return Err("frame.where_(handle, columna, valor)".into()); }
+    if args.len() < 3 { return Err("frame.where_(handle, column, value)".into()); }
     let id   = arg_handle(&args, 0)?;
     let col  = arg_str(&args, 1, "frame.where_")?;
     let val  = args[2].clone();
     with_frames(|fs| {
-        let f   = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
-        let idx = f.col_index(&col).ok_or(format!("columna '{}' no existe", col))?;
+        let f   = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
+        let idx = f.col_index(&col).ok_or(format!("column '{}' does not exist", col))?;
         let mask: Vec<usize> = (0..f.rows).filter(|&i| {
             match (&f.cols[idx].1, &val) {
                 (Col::Float(v), EvalValue::Float(target)) => (v[i] - target).abs() < 1e-12,
@@ -799,9 +799,9 @@ fn fn_tail(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn slice_frame(args: Vec<EvalValue>, from_start: bool) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.head/tail(handle, n)".into()); }
     let id = arg_handle(&args, 0)?;
-    let n  = match &args[1] { EvalValue::Int(n) => *n as usize, _ => return Err("n debe ser int".into()) };
+    let n  = match &args[1] { EvalValue::Int(n) => *n as usize, _ => return Err("n must be an int".into()) };
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let (start, end) = if from_start {
             (0, n.min(f.rows))
         } else {
@@ -830,8 +830,8 @@ fn fn_sort(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let col  = arg_str(&args, 1, "frame.sort")?;
     let desc = matches!(args.get(2), Some(EvalValue::Str(s)) if s == "desc");
     with_frames(|fs| {
-        let f   = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
-        let idx = f.col_index(&col).ok_or(format!("columna '{}' no existe", col))?;
+        let f   = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
+        let idx = f.col_index(&col).ok_or(format!("column '{}' does not exist", col))?;
         let mut order: Vec<usize> = (0..f.rows).collect();
         match &f.cols[idx].1 {
             Col::Float(v) => order.sort_by(|&a, &b| {
@@ -909,8 +909,8 @@ fn fn_col_stat(args: Vec<EvalValue>, stat: &str) -> Result<EvalValue, String> {
     let id   = arg_handle(&args, 0)?;
     let name = arg_str(&args, 1, "frame.stat")?;
     with_frames(|fs| {
-        let f    = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
-        let col  = f.col(&name).ok_or(format!("columna '{}' no existe", name))?;
+        let f    = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
+        let col  = f.col(&name).ok_or(format!("column '{}' does not exist", name))?;
         // Float opera prestado (sin el clon de 8 bytes/fila que hacía
         // as_floats); Int convierte una vez, que es inevitable.
         let result = match col {
@@ -919,7 +919,7 @@ fn fn_col_stat(args: Vec<EvalValue>, stat: &str) -> Result<EvalValue, String> {
                 let fl: Vec<f64> = v.iter().map(|&x| x as f64).collect();
                 stat_slice(&fl, stat)
             }
-            _ => return Err(format!("columna '{}' no es numérica", name)),
+            _ => return Err(format!("columna '{}' is not numeric", name)),
         };
         Ok(EvalValue::Float(result))
     })
@@ -930,9 +930,9 @@ fn fn_stats(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id   = arg_handle(&args, 0)?;
     let name = arg_str(&args, 1, "frame.stats")?;
     with_frames(|fs| {
-        let f    = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
-        let col  = f.col(&name).ok_or(format!("columna '{}' no existe", name))?;
-        let mut v = col.as_floats().ok_or(format!("columna '{}' no es numérica", name))?;
+        let f    = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
+        let col  = f.col(&name).ok_or(format!("column '{}' does not exist", name))?;
+        let mut v = col.as_floats().ok_or(format!("columna '{}' is not numeric", name))?;
         v.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let n  = v.len() as f64;
         let m  = v.iter().sum::<f64>() / n;
@@ -955,23 +955,23 @@ fn fn_count(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id = arg_handle(&args, 0)?;
     with_frames(|fs| match fs.get(&id) {
         Some(f) => Ok(EvalValue::Int(f.rows as i64)),
-        None    => Err(format!("frame '{}' no existe", id)),
+        None    => Err(format!("frame '{}' does not exist", id)),
     })
 }
 
 //   agregación                                 
 
 fn fn_group(args: Vec<EvalValue>) -> Result<EvalValue, String> {
-    if args.len() < 4 { return Err("frame.group(handle, by, valor_col, op)".into()); }
+    if args.len() < 4 { return Err("frame.group(handle, by, value_col, op)".into()); }
     let id  = arg_handle(&args, 0)?;
     let by  = arg_str(&args, 1, "frame.group")?;
     let val = arg_str(&args, 2, "frame.group")?;
     let op  = arg_str(&args, 3, "frame.group")?;
     with_frames(|fs| {
-        let f        = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
-        let by_col   = f.col(&by).ok_or(format!("columna '{}' no existe", by))?;
-        let val_col  = f.col(&val).ok_or(format!("columna '{}' no existe", val))?;
-        let vals     = val_col.as_floats().ok_or(format!("columna '{}' no es numérica", val))?;
+        let f        = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
+        let by_col   = f.col(&by).ok_or(format!("column '{}' does not exist", by))?;
+        let val_col  = f.col(&val).ok_or(format!("column '{}' does not exist", val))?;
+        let vals     = val_col.as_floats().ok_or(format!("columna '{}' is not numeric", val))?;
         // agrupar: key → vec de valores
         let mut groups: HashMap<String, Vec<f64>> = HashMap::new();
         for i in 0..f.rows {
@@ -1006,7 +1006,7 @@ fn fn_group(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 //   columna calculada                              
 
 fn fn_add_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
-    if args.len() < 3 { return Err("frame.add_col(handle, nombre, lista_valores)".into()); }
+    if args.len() < 3 { return Err("frame.add_col(handle, name, values_list)".into()); }
     let id   = arg_handle(&args, 0)?;
     let name = arg_str(&args, 1, "frame.add_col")?;
     let new_col = match &args[2] {
@@ -1022,12 +1022,12 @@ fn fn_add_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 Col::Str(strs)
             }
         }
-        _ => return Err("frame.add_col: valores debe ser una lista".into()),
+        _ => return Err("frame.add_col: the values must be a list".into()),
     };
     with_frames(|fs| {
-        let f = fs.get_mut(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get_mut(&id).ok_or(format!("frame '{}' does not exist", id))?;
         if new_col.len() != f.rows {
-            return Err(format!("frame.add_col: lista tiene {} valores pero el frame tiene {}", new_col.len(), f.rows));
+            return Err(format!("frame.add_col: the list has {} values but the frame has {}", new_col.len(), f.rows));
         }
         f.cols.retain(|(n, _)| n != &name);
         f.cols.push((name, new_col));
@@ -1111,7 +1111,7 @@ fn fn_scan_stats(args: Vec<EvalValue>) -> Result<EvalValue, String> {
             }
         }
     }
-    if count == 0 { return Err(format!("frame.scan_stats: no hay valores numéricos en '{}'", col)); }
+    if count == 0 { return Err(format!("frame.scan_stats: there are no numeric values in '{}'", col)); }
     let mean     = sum / count as f64;
     let variance = sum_sq / count as f64 - mean * mean;
     let std      = variance.max(0.0).sqrt();
@@ -1140,7 +1140,7 @@ fn fn_save(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id   = arg_handle(&args, 0)?;
     let path = arg_str(&args, 1, "frame.save")?;
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let mut lines = Vec::new();
         let headers: Vec<String> = f.cols.iter().map(|(n, _)| n.clone()).collect();
         lines.push(headers.join(","));
@@ -1218,7 +1218,7 @@ pub(crate) fn escribir_odf_filas(
     let cols = infer_columns(headers, filas);
     let buf = serialize_odf(&cols, filas.len());
     std::fs::write(ruta, &buf)
-        .map_err(|e| format!("no se pudo escribir '{ruta}': {e}"))?;
+        .map_err(|e| format!("could not write '{ruta}': {e}"))?;
     Ok(buf.len())
 }
 
@@ -1227,7 +1227,7 @@ fn fn_save_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let id   = arg_handle(&args, 0)?;
     let path = arg_str(&args, 1, "frame.save_odf")?;
     with_frames(|fs| {
-        let f = fs.get(&id).ok_or(format!("frame '{}' no existe", id))?;
+        let f = fs.get(&id).ok_or(format!("frame '{}' does not exist", id))?;
         let buf = serialize_odf(&f.cols, f.rows);
         std::fs::write(&path, &buf)
             .map_err(|e| format!("frame.save_odf: {}", e))?;
@@ -1266,7 +1266,7 @@ fn fn_txt_to_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     // cabecera
     let mut header_line = String::new();
     if reader.read_line(&mut header_line).map_err(|e| e.to_string())? == 0 {
-        return Err("frame.txt_to_odf: archivo vacío".into());
+        return Err("frame.txt_to_odf: empty file".into());
     }
     let headers: Vec<String> = header_line
         .trim_end_matches(['\r', '\n'])
@@ -1329,14 +1329,14 @@ fn deserialize_odf(data: &[u8]) -> Result<(Vec<(String, Col)>, usize), String> {
     macro_rules! need {
         ($n:expr) => {
             if p + $n > data.len() {
-                return Err("frame: archivo .odf truncado o corrupto".into());
+                return Err("frame: .odf file truncated or corrupt".into());
             }
         };
     }
 
     need!(4);
     if &data[0..4] != ODF_MAGIC {
-        return Err("frame: no es un .odf válido (magic incorrecto)".into());
+        return Err("frame: not a valid .odf (wrong magic)".into());
     }
     p = 4;
     need!(8); let n_rows = u64::from_le_bytes(data[p..p+8].try_into().unwrap()) as usize; p += 8;
@@ -1368,7 +1368,7 @@ fn deserialize_odf(data: &[u8]) -> Result<(Vec<(String, Col)>, usize), String> {
                        need!(sl); v.push(String::from_utf8_lossy(&data[p..p+sl]).into_owned()); p += sl;
                    }
                    Col::Str(v) }
-            _ => return Err(format!("frame: tag de columna desconocido ({})", tag)),
+            _ => return Err(format!("frame: unknown column tag ({})", tag)),
         };
         cols.push((name, col));
     }
@@ -1389,14 +1389,14 @@ fn fn_load_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn arg_handle(args: &[EvalValue], pos: usize) -> Result<String, String> {
     match args.get(pos) {
         Some(EvalValue::Str(s)) => Ok(s.clone()),
-        _ => Err("frame: se esperaba un handle (string)".into()),
+        _ => Err("frame: expected a handle (string)".into()),
     }
 }
 
 fn arg_str(args: &[EvalValue], pos: usize, ctx: &str) -> Result<String, String> {
     match args.get(pos) {
         Some(EvalValue::Str(s)) => Ok(s.clone()),
-        _ => Err(format!("{}: argumento {} debe ser string", ctx, pos)),
+        _ => Err(format!("{}: argument {} must be a string", ctx, pos)),
     }
 }
 
@@ -1404,9 +1404,9 @@ fn arg_str_list(args: &[EvalValue], pos: usize) -> Result<Vec<String>, String> {
     match args.get(pos) {
         Some(EvalValue::List(items)) => items.iter().map(|v| match v {
             EvalValue::Str(s) => Ok(s.clone()),
-            _ => Err("frame: se esperaba lista de strings".into()),
+            _ => Err("frame: expected a list of strings".into()),
         }).collect(),
-        _ => Err("frame: se esperaba lista de strings".into()),
+        _ => Err("frame: expected a list of strings".into()),
     }
 }
 

@@ -44,26 +44,26 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
     //    _orion_bc  — los bytes del bytecode serializado (JSON)
     let bc_id = module
         .declare_data("_orion_bc", Linkage::Export, false, false)
-        .map_err(|e| format!("Error declarando _orion_bc: {e}"))?;
+        .map_err(|e| format!("Error declaring _orion_bc: {e}"))?;
 
     let mut bc_desc = DataDescription::new();
     bc_desc.define(bytecode_bytes.to_vec().into_boxed_slice());
     module
         .define_data(bc_id, &bc_desc)
-        .map_err(|e| format!("Error definiendo _orion_bc: {e}"))?;
+        .map_err(|e| format!("Error defining _orion_bc: {e}"))?;
 
     //    Sección DATA: longitud del bytecode                               
     //    _orion_bc_len  — u64 con el número de bytes
     let len_id = module
         .declare_data("_orion_bc_len", Linkage::Export, false, false)
-        .map_err(|e| format!("Error declarando _orion_bc_len: {e}"))?;
+        .map_err(|e| format!("Error declaring _orion_bc_len: {e}"))?;
 
     let mut len_desc = DataDescription::new();
     let len_bytes = (bytecode_bytes.len() as u64).to_le_bytes();
     len_desc.define(Box::new(len_bytes));
     module
         .define_data(len_id, &len_desc)
-        .map_err(|e| format!("Error definiendo _orion_bc_len: {e}"))?;
+        .map_err(|e| format!("Error defining _orion_bc_len: {e}"))?;
 
     //    Declarar orion_rt_exec (símbolo externo, lo provee la staticlib)   
     let mut rt_sig = module.make_signature();
@@ -73,7 +73,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     let rt_exec_id = module
         .declare_function("orion_rt_exec", Linkage::Import, &rt_sig)
-        .map_err(|e| format!("Error declarando orion_rt_exec: {e}"))?;
+        .map_err(|e| format!("Error declaring orion_rt_exec: {e}"))?;
 
     //    Función main()                                                     
     //    Signature: fn() -> i32  (C ABI)
@@ -82,7 +82,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     let main_id = module
         .declare_function("main", Linkage::Export, &main_sig)
-        .map_err(|e| format!("Error declarando main: {e}"))?;
+        .map_err(|e| format!("Error declaring main: {e}"))?;
 
     // Obtener referencias globales para usar dentro de la función
     let bc_gv   = module.declare_data_in_func(bc_id,  &mut cranelift_codegen::ir::Function::new());
@@ -128,7 +128,7 @@ pub fn compile_to_object(bytecode_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     module
         .define_function(main_id, &mut ctx)
-        .map_err(|e| format!("Error compilando main(): {e}"))?;
+        .map_err(|e| format!("Error compiling main(): {e}"))?;
 
     //    Emitir el objeto                                                  
     let product = module.finish();

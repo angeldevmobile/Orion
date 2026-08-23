@@ -76,7 +76,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // set(clave, valor) → valor guardado
         "set" | "put" | "guardar" => {
-            if args.len() < 2 { return Err("state.set requiere (clave, valor)".into()); }
+            if args.len() < 2 { return Err("state.set requires (key, value)".into()); }
             let key = to_str(&args[0]);
             let val = args[1].clone();
             s.data.insert(key, val.clone());
@@ -85,21 +85,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // get(clave [, default]) → valor o default/Null
         "get" | "obtener" => {
-            if args.is_empty() { return Err("state.get requiere (clave)".into()); }
+            if args.is_empty() { return Err("state.get requires (key)".into()); }
             let key = to_str(&args[0]);
             Ok(s.data.get(&key).cloned()
                 .unwrap_or_else(|| args.get(1).cloned().unwrap_or(EvalValue::Null)))
         }
         // has(clave) → Bool
         "has" | "exists" | "existe" => {
-            if args.is_empty() { return Err("state.has requiere (clave)".into()); }
+            if args.is_empty() { return Err("state.has requires (key)".into()); }
             Ok(EvalValue::Bool(s.data.contains_key(&to_str(&args[0]))))
         }
         // incr(clave [, delta=1]) → nuevo valor (ATÓMICO: get+set bajo un lock)
         // Clave inexistente arranca en 0; clave con valor NO numérico → error
         // claro (antes se pisaba en silencio).
         "incr" | "increment" => {
-            if args.is_empty() { return Err("state.incr requiere (clave)".into()); }
+            if args.is_empty() { return Err("state.incr requires (key)".into()); }
             let key = to_str(&args[0]);
             let delta = args.get(1).and_then(as_number).unwrap_or(1.0);
             let current = numeric_current("incr", &s, &key)?;
@@ -113,7 +113,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // decr(clave [, delta=1]) → nuevo valor (atómico)
         "decr" | "decrement" => {
-            if args.is_empty() { return Err("state.decr requiere (clave)".into()); }
+            if args.is_empty() { return Err("state.decr requires (key)".into()); }
             let key = to_str(&args[0]);
             let delta = args.get(1).and_then(as_number).unwrap_or(1.0);
             let current = numeric_current("decr", &s, &key)?;
@@ -127,7 +127,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // setnx(clave, valor) → Bool: guarda SOLO si la clave no existe.
         // Atómico bajo el mismo lock — sirve como candado simple entre requests.
         "setnx" | "set_if_absent" => {
-            if args.len() < 2 { return Err("state.setnx requiere (clave, valor)".into()); }
+            if args.len() < 2 { return Err("state.setnx requires (key, value)".into()); }
             let key = to_str(&args[0]);
             if s.data.contains_key(&key) { return Ok(EvalValue::Bool(false)); }
             s.data.insert(key, args[1].clone());
@@ -136,7 +136,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // delete(clave) → Bool (true si existía)
         "delete" | "remove" | "del" | "eliminar" => {
-            if args.is_empty() { return Err("state.delete requiere (clave)".into()); }
+            if args.is_empty() { return Err("state.delete requires (key)".into()); }
             let existed = s.data.shift_remove(&to_str(&args[0])).is_some();
             flush(&s);
             Ok(EvalValue::Bool(existed))
@@ -160,7 +160,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // persist(ruta) → Bool. Activa el respaldo a disco y carga lo existente.
         "persist" | "persistir" => {
-            if args.is_empty() { return Err("state.persist requiere (ruta)".into()); }
+            if args.is_empty() { return Err("state.persist requires (ruta)".into()); }
             let path = PathBuf::from(to_str(&args[0]));
             // Si el archivo ya existe, sembrar el store con su contenido.
             if let Ok(content) = std::fs::read_to_string(&path) {
@@ -173,6 +173,6 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             s.persist_path = Some(path);
             Ok(EvalValue::Bool(true))
         }
-        f => Err(format!("state.{}() no existe", f)),
+        f => Err(format!("state.{}() does not exist", f)),
     }
 }

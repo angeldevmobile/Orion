@@ -18,21 +18,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // verify(password, hash) → Bool
         "verify" | "verificar" => {
-            if args.len() < 2 { return Err("auth.verificar requiere (password, hash)".into()); }
+            if args.len() < 2 { return Err("auth.verificar requires (password, hash)".into()); }
             let pass   = to_str(&args[0]);
             let hash   = to_str(&args[1]);
             let parsed = PasswordHash::new(&hash)
-                .map_err(|e| format!("auth.verificar: hash inválido: {}", e))?;
+                .map_err(|e| format!("auth.verificar: invalid hash: {}", e))?;
             Ok(EvalValue::Bool(
                 Argon2::default().verify_password(pass.as_bytes(), &parsed).is_ok()
             ))
         }
         // token(payload_dict, secret, exp_secs?) → String JWT (HS256)
         "token" => {
-            if args.len() < 2 { return Err("auth.token requiere (payload, secret, exp_secs?)".into()); }
+            if args.len() < 2 { return Err("auth.token requires (payload, secret, exp_secs?)".into()); }
             let mut claims = match crate::modules::json_mod::eval_to_json(args[0].clone()) {
                 serde_json::Value::Object(m) => m,
-                _ => return Err("auth.token: payload debe ser un Dict".into()),
+                _ => return Err("auth.token: the payload must be a Dict".into()),
             };
             let secret = to_str(&args[1]);
             if let Some(exp_arg) = args.get(2) {
@@ -52,7 +52,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // decode_token(token, secret) → Dict con payload o {error, valido:false}
         "decode_token" | "verificar_token" => {
-            if args.len() < 2 { return Err("auth.verificar_token requiere (token, secret)".into()); }
+            if args.len() < 2 { return Err("auth.verificar_token requires (token, secret)".into()); }
             let token  = to_str(&args[0]);
             let secret = to_str(&args[1]);
             let mut validation = Validation::new(Algorithm::HS256);
@@ -72,12 +72,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 }
             }
         }
-        f => Err(format!("auth.{}() no existe", f)),
+        f => Err(format!("auth.{}() does not exist", f)),
     }
 }
 
 fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("{} requiere argumento", fn_name)); }
+    if args.is_empty() { return Err(format!("{} requires an argument", fn_name)); }
     Ok(to_str(&args[0]))
 }
 
@@ -89,6 +89,6 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("auth: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("auth: expected a number, got {}", other.type_name())),
     }
 }

@@ -5,14 +5,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // reach(url, headers?) → {status, body, ok}
         "reach" | "get" => {
-            if args.is_empty() { return Err("net.reach requiere (url)".into()); }
+            if args.is_empty() { return Err("net.reach requires (url)".into()); }
             let url     = to_str(&args[0]);
             let headers = extract_headers(args.get(1));
             http_get(&url, headers)
         }
         // transmit(url, body, headers?) → {status, body, ok}
         "transmit" | "post" => {
-            if args.is_empty() { return Err("net.transmit requiere (url, body?)".into()); }
+            if args.is_empty() { return Err("net.transmit requires (url, body?)".into()); }
             let url     = to_str(&args[0]);
             let body    = args.get(1).cloned();
             let headers = extract_headers(args.get(2));
@@ -20,7 +20,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // put(url, body, headers?) → {status, body, ok}
         "put" => {
-            if args.is_empty() { return Err("net.put requiere (url, body?)".into()); }
+            if args.is_empty() { return Err("net.put requires (url, body?)".into()); }
             let url     = to_str(&args[0]);
             let body    = args.get(1).cloned();
             let headers = extract_headers(args.get(2));
@@ -28,14 +28,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // delete(url, headers?) → {status, body, ok}
         "delete" => {
-            if args.is_empty() { return Err("net.delete requiere (url)".into()); }
+            if args.is_empty() { return Err("net.delete requires (url)".into()); }
             let url     = to_str(&args[0]);
             let headers = extract_headers(args.get(1));
             http_method("DELETE", &url, None, headers)
         }
         // status(url) → int código HTTP
         "status" => {
-            if args.is_empty() { return Err("net.status requiere (url)".into()); }
+            if args.is_empty() { return Err("net.status requires (url)".into()); }
             let url = to_str(&args[0]);
             let resp = ureq::get(&url).call();
             match resp {
@@ -46,7 +46,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // download(url, path) → guarda archivo
         "download" => {
-            if args.len() < 2 { return Err("net.download requiere (url, path)".into()); }
+            if args.len() < 2 { return Err("net.download requires (url, path)".into()); }
             let url  = to_str(&args[0]);
             let path = to_str(&args[1]);
             let resp = ureq::get(&url).call()
@@ -60,7 +60,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // resolve(host) → IP string
         "resolve" => {
-            if args.is_empty() { return Err("net.resolve requiere (host)".into()); }
+            if args.is_empty() { return Err("net.resolve requires (host)".into()); }
             let host = to_str(&args[0]);
             use std::net::ToSocketAddrs;
             let addr = format!("{}:80", host).to_socket_addrs()
@@ -71,7 +71,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // pulse(host, port?) → {alive, latency_ms}
         "pulse" => {
-            if args.is_empty() { return Err("net.pulse requiere (host, port?)".into()); }
+            if args.is_empty() { return Err("net.pulse requires (host, port?)".into()); }
             let host = to_str(&args[0]);
             let port = if args.len() > 1 { to_i64(&args[1])? as u16 } else { 80 };
             let start = std::time::Instant::now();
@@ -83,7 +83,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Dict(m))
         }
 
-        f => Err(format!("net.{}() no existe", f)),
+        f => Err(format!("net.{}() does not exist", f)),
     }
 }
 
@@ -186,6 +186,6 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("net: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("net: expected a number, got {}", other.type_name())),
     }
 }

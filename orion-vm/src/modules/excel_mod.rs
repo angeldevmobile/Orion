@@ -39,7 +39,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let path = str_arg("sheets", &args, 0)?;
             let wb: calamine::Sheets<std::io::BufReader<std::fs::File>> =
                 open_workbook_auto(&path)
-                    .map_err(|e| format!("excel.sheets: no se pudo abrir '{}': {}", path, e))?;
+                    .map_err(|e| format!("excel.sheets: could not open '{}': {}", path, e))?;
             let names: Vec<EvalValue> = wb.sheet_names()
                 .iter()
                 .map(|n| EvalValue::Str(n.clone()))
@@ -56,13 +56,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
             let mut wb: calamine::Sheets<std::io::BufReader<std::fs::File>> =
                 open_workbook_auto(&path)
-                    .map_err(|e| format!("excel.read: no se pudo abrir '{}': {}", path, e))?;
+                    .map_err(|e| format!("excel.read: could not open '{}': {}", path, e))?;
 
             let target_sheet = match sheet_name {
                 Some(n) => n,
                 None => wb.sheet_names().first()
                     .cloned()
-                    .ok_or_else(|| "excel.read: el archivo no tiene hojas".to_string())?,
+                    .ok_or_else(|| "excel.read: the file has no sheets".to_string())?,
             };
 
             let range = wb.worksheet_range(&target_sheet)
@@ -122,7 +122,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // write(path, list_of_dicts, sheet_name) → con nombre de hoja
         "write" => {
             if args.len() < 2 {
-                return Err("excel.write requiere (path, datos) o (path, datos, nombre_hoja)".into());
+                return Err("excel.write requires (path, datos) o (path, datos, nombre_hoja)".into());
             }
             let path = str_arg("write", &args, 0)?;
             let rows = list_arg("write", &args, 1)?;
@@ -137,7 +137,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             } else {
                 match rows.first() {
                     Some(EvalValue::List(_)) | None => vec![],
-                    _ => return Err("excel.write: los datos deben ser lista de dicts o listas".into()),
+                    _ => return Err("excel.write: the data must be a list of dicts or lists".into()),
                 }
             };
 
@@ -146,7 +146,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             {
                 let ws = wb.add_worksheet();
                 ws.set_name(sheet_name.as_str())
-                    .map_err(|e| format!("excel.write: nombre de hoja inválido: {}", e))?;
+                    .map_err(|e| format!("excel.write: invalid sheet name: {}", e))?;
 
                 let header_fmt = Format::new()
                     .set_bold()
@@ -193,12 +193,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // write_multi(path, dict { sheet_name → list_of_dicts }) → xlsx con múltiples hojas
         "write_multi" => {
             if args.len() < 2 {
-                return Err("excel.write_multi requiere (path, dict_de_hojas)".into());
+                return Err("excel.write_multi requires (path, dict_de_hojas)".into());
             }
             let path = str_arg("write_multi", &args, 0)?;
             let sheets_map = match &args[1] {
                 EvalValue::Dict(m) => m.clone(),
-                other => return Err(format!("excel.write_multi: se esperaba dict, se recibió {}", other.type_name())),
+                other => return Err(format!("excel.write_multi: expected a dict, got {}", other.type_name())),
             };
 
             let mut wb = Workbook::new();
@@ -292,7 +292,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // }
         "write_styled" => {
             if args.len() < 2 {
-                return Err("excel.write_styled requiere (path, datos, config?)".into());
+                return Err("excel.write_styled requires (path, datos, config?)".into());
             }
             let path = str_arg("write_styled", &args, 0)?;
             let rows = list_arg("write_styled", &args, 1)?;
@@ -309,7 +309,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // op: ">" | "<" | ">=" | "<=" | "==" | "!=" | "contiene" | "empieza" | "termina"
         "filter" | "filtrar" => {
             if args.len() < 4 {
-                return Err("excel.filtrar requiere (datos, campo, op, valor)".into());
+                return Err("excel.filtrar requires (data, field, op, value)".into());
             }
             let rows  = list_arg("filtrar", &args, 0)?;
             let campo = str_arg("filtrar", &args, 1)?;
@@ -331,7 +331,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //         "count": yes }
         "group" | "agrupar" => {
             if args.len() < 2 {
-                return Err("excel.group requiere (datos, campo, spec?)".into());
+                return Err("excel.group requires (datos, campo, spec?)".into());
             }
             let rows  = list_arg("group", &args, 0)?;
             let campo = str_arg("group", &args, 1)?;
@@ -352,7 +352,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //   excel.sort(data, "col", "asc"|"desc") → compat. 1-col anterior
         "sort" | "ordenar" | "sort_by" => {
             if args.len() < 2 {
-                return Err("excel.sort requiere (datos, criterio...)".into());
+                return Err("excel.sort requires (datos, criterio...)".into());
             }
             let mut rows = list_arg("sort", &args, 0)?;
             // Construir lista de (campo, desc)
@@ -407,7 +407,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // column(datos, campo) → lista de valores de esa columna
         "column" | "columna" => {
             if args.len() < 2 {
-                return Err("excel.columna requiere (datos, campo)".into());
+                return Err("excel.columna requires (datos, campo)".into());
             }
             let rows  = list_arg("columna", &args, 0)?;
             let campo = str_arg("columna", &args, 1)?;
@@ -417,7 +417,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // sum_col(datos, campo) → Float — suma de columna numérica
         "sum_col" | "sumar" => {
             if args.len() < 2 {
-                return Err("excel.sumar requiere (datos, campo)".into());
+                return Err("excel.sumar requires (datos, campo)".into());
             }
             let rows  = list_arg("sumar", &args, 0)?;
             let campo = str_arg("sumar", &args, 1)?;
@@ -430,7 +430,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // avg_col(datos, campo) → Float — promedio de columna numérica
         "avg_col" | "promedio" => {
             if args.len() < 2 {
-                return Err("excel.promedio requiere (datos, campo)".into());
+                return Err("excel.promedio requires (datos, campo)".into());
             }
             let rows  = list_arg("promedio", &args, 0)?;
             let campo = str_arg("promedio", &args, 1)?;
@@ -444,7 +444,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // pivot(datos, campo_fila, campo_col, campo_valor) → lista formato ancho
         "pivot" => {
             if args.len() < 4 {
-                return Err("excel.pivot requiere (datos, campo_fila, campo_col, campo_valor)".into());
+                return Err("excel.pivot requires (data, row_field, col_field, value_field)".into());
             }
             let rows        = list_arg("pivot", &args, 0)?;
             let campo_fila  = str_arg("pivot", &args, 1)?;
@@ -458,13 +458,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Las columnas no listadas en `keep` se convierten en filas.
         "long" | "melt" | "unpivot" => {
             if args.len() < 4 {
-                return Err("excel.long requiere (datos, keep:[cols], var:\"nombre\", val:\"nombre\")".into());
+                return Err("excel.long requires (datos, keep:[cols], var:\"nombre\", val:\"nombre\")".into());
             }
             let rows = list_arg("long", &args, 0)?;
             let keep_cols: Vec<String> = match &args[1] {
                 EvalValue::List(l) => l.iter().map(|v| to_str_val(v)).collect(),
                 EvalValue::Str(s)  => vec![s.clone()],
-                _ => return Err("excel.long: `keep` debe ser lista de columnas o string".into()),
+                _ => return Err("excel.long: `keep` must be a list of columns or a string".into()),
             };
             let var_col = str_arg("long", &args, 2)?;
             let val_col = str_arg("long", &args, 3)?;
@@ -492,7 +492,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                         result.push(EvalValue::Dict(new_row));
                     }
                 } else {
-                    return Err("excel.long: cada fila debe ser un dict".into());
+                    return Err("excel.long: each row must be a dict".into());
                 }
             }
             Ok(EvalValue::List(result))
@@ -501,12 +501,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // select_cols(datos, [campos]) → lista con solo esas columnas
         "select_cols" | "seleccionar" => {
             if args.len() < 2 {
-                return Err("excel.seleccionar requiere (datos, [campos])".into());
+                return Err("excel.seleccionar requires (datos, [campos])".into());
             }
             let rows   = list_arg("seleccionar", &args, 0)?;
             let campos: Vec<String> = match &args[1] {
                 EvalValue::List(l) => l.iter().map(|v| to_str_val(v)).collect(),
-                _ => return Err("excel.seleccionar: segundo arg debe ser lista de campos".into()),
+                _ => return Err("excel.seleccionar: the second argument must be a list of fields".into()),
             };
             let result: Vec<EvalValue> = rows.into_iter().map(|row| {
                 if let EvalValue::Dict(m) = row {
@@ -526,7 +526,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             for arg in &args {
                 match arg {
                     EvalValue::List(l) => result.extend_from_slice(l),
-                    _ => return Err("excel.unir: todos los argumentos deben ser listas".into()),
+                    _ => return Err("excel.unir: all arguments must be lists".into()),
                 }
             }
             Ok(EvalValue::List(result))
@@ -536,7 +536,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // clave puede ser "col" o ["col1","col2"]; tipo: "inner" (default) | "left" | "right" | "full"
         "join" | "cruzar" => {
             if args.len() < 3 {
-                return Err("excel.join requiere (data1, data2, clave|[claves], tipo?)".into());
+                return Err("excel.join requires (data1, data2, key|[keys], type?)".into());
             }
             let left  = list_arg("join", &args, 0)?;
             let right = list_arg("join", &args, 1)?;
@@ -557,7 +557,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // campos: lista de campos clave — si se omite, usa todos los campos
         "dedupe" | "deduplicar" => {
             if args.is_empty() {
-                return Err("excel.deduplicar requiere (data, [campos]?)".into());
+                return Err("excel.deduplicar requires (data, [campos]?)".into());
             }
             let rows = list_arg("deduplicar", &args, 0)?;
             let campos: Option<Vec<String>> = match args.get(1) {
@@ -570,7 +570,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // stats(data, campo) → dict { min, max, sum, avg, count, std, mediana }
         "stats" | "estadisticas" => {
             if args.len() < 2 {
-                return Err("excel.estadisticas requiere (data, campo)".into());
+                return Err("excel.estadisticas requires (data, campo)".into());
             }
             let rows  = list_arg("estadisticas", &args, 0)?;
             let campo = str_arg("estadisticas", &args, 1)?;
@@ -580,7 +580,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // rename_col(data, viejo, nuevo) → lista con columna renombrada
         "rename_col" | "renombrar_col" => {
             if args.len() < 3 {
-                return Err("excel.renombrar_col requiere (data, viejo, nuevo)".into());
+                return Err("excel.renombrar_col requires (data, viejo, nuevo)".into());
             }
             let rows  = list_arg("renombrar_col", &args, 0)?;
             let viejo = str_arg("renombrar_col", &args, 1)?;
@@ -599,7 +599,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // fill_null(data, campo, valor) → reemplaza nulos/vacíos en campo con valor
         "fill_null" | "rellenar" => {
             if args.len() < 3 {
-                return Err("excel.rellenar requiere (data, campo, valor)".into());
+                return Err("excel.rellenar requires (data, field, value)".into());
             }
             let rows  = list_arg("rellenar", &args, 0)?;
             let campo = str_arg("rellenar", &args, 1)?;
@@ -622,7 +622,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Formatos: "DD/MM/YYYY" | "MM/DD/YYYY" | "YYYY-MM-DD" | "auto"
         "dates" => {
             if args.len() < 2 {
-                return Err("excel.dates requiere (data, col, formato?)".into());
+                return Err("excel.dates requires (data, col, formato?)".into());
             }
             let rows = list_arg("dates", &args, 0)?;
             let col  = str_arg("dates", &args, 1)?;
@@ -649,7 +649,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Partes: "year" | "month" | "day" | "quarter" | "weekday" | "week" | "hour"
         "date_parts" => {
             if args.len() < 3 {
-                return Err("excel.date_parts requiere (data, col, [partes])".into());
+                return Err("excel.date_parts requires (data, col, [partes])".into());
             }
             let rows  = list_arg("date_parts", &args, 0)?;
             let col   = str_arg("date_parts", &args, 1)?;
@@ -697,12 +697,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
             let mut wb: calamine::Sheets<std::io::BufReader<std::fs::File>> =
                 open_workbook_auto(&path)
-                    .map_err(|e| format!("excel.sheet: no se pudo abrir '{}': {}", path, e))?;
+                    .map_err(|e| format!("excel.sheet: could not open '{}': {}", path, e))?;
 
             let target = match sheet_name {
                 Some(n) => n,
                 None => wb.sheet_names().first().cloned()
-                    .ok_or_else(|| "excel.sheet: el archivo no tiene hojas".to_string())?,
+                    .ok_or_else(|| "excel.sheet: the file has no sheets".to_string())?,
             };
 
             let range = wb.worksheet_range(&target)
@@ -759,7 +759,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //           width, height }
         "chart" => {
             if args.len() < 2 {
-                return Err("excel.chart requiere (path, datos, config?)".into());
+                return Err("excel.chart requires (path, datos, config?)".into());
             }
             let path   = str_arg("chart", &args, 0)?;
             let rows   = list_arg("chart", &args, 1)?;
@@ -823,7 +823,7 @@ fn str_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<String, Stri
 fn list_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<Vec<EvalValue>, String> {
     match args.get(idx) {
         Some(EvalValue::List(v)) => Ok(v.clone()),
-        Some(other) => Err(format!("excel.{}: se esperaba lista, se recibió {}", fn_name, other.type_name())),
+        Some(other) => Err(format!("excel.{}: expected a list, got {}", fn_name, other.type_name())),
         None => Err(format!("excel.{}: argumento {} requerido", fn_name, idx + 1)),
     }
 }
@@ -868,10 +868,10 @@ fn write_styled_impl(
             h.sort();
             h
         }
-        _ => return Err("excel.write_styled: los datos deben ser lista de dicts".into()),
+        _ => return Err("excel.write_styled: the data must be a list of dicts".into()),
     };
     if headers.is_empty() {
-        return Err("excel.write_styled: el primer dict está vacío".into());
+        return Err("excel.write_styled: the first dict is empty".into());
     }
 
     // Columnas de fórmulas vivas: { "col_name": descriptor_dict, ... }
@@ -1586,7 +1586,7 @@ fn excel_chart_impl(
     config: HashMap<String, EvalValue>,
 ) -> Result<EvalValue, String> {
     if rows.is_empty() {
-        return Err("excel.chart: datos vacíos".into());
+        return Err("excel.chart: empty data".into());
     }
 
     let data_sht  = cfg_str(&config, "data_sheet").unwrap_or_else(|| "Datos".to_string());
@@ -1596,7 +1596,7 @@ fn excel_chart_impl(
 
     let headers: Vec<String> = match rows.first() {
         Some(EvalValue::Dict(m)) => m.keys().cloned().collect(),
-        _ => return Err("excel.chart: cada elemento debe ser un dict".into()),
+        _ => return Err("excel.chart: each element must be a dict".into()),
     };
 
     let goal_col_idx = headers.len() as u16;
@@ -1626,7 +1626,7 @@ fn excel_chart_impl(
                 }
                 if let Some((gv, _)) = goal {
                     ws.write(cur, goal_col_idx, gv)
-                        .map_err(|e| format!("excel.chart valor meta: {}", e))?;
+                        .map_err(|e| format!("excel.chart meta value: {}", e))?;
                 }
             }
         }
@@ -1641,7 +1641,7 @@ fn excel_chart_impl(
         ws_c.insert_chart(0, 0, &mut chart).map_err(|e| format!("excel.chart insertar: {}", e))?;
     }
 
-    wb.save(path).map_err(|e| format!("excel.chart guardar '{}': {}", path, e))?;
+    wb.save(path).map_err(|e| format!("excel.chart save '{}': {}", path, e))?;
     Ok(EvalValue::Str(path.to_string()))
 }
 
@@ -1668,10 +1668,10 @@ fn build_chart_from_cfg(
     let y_cols: Vec<String> = match cfg.get("y") {
         Some(EvalValue::List(l)) => l.iter().map(|v| to_str_val(v)).collect(),
         Some(EvalValue::Str(s))  => vec![s.clone()],
-        _ => return Err("excel.chart: falta campo 'y'".into()),
+        _ => return Err("excel.chart: field 'y' is missing".into()),
     };
     if y_cols.is_empty() {
-        return Err("excel.chart: 'y' no puede estar vacío".into());
+        return Err("excel.chart: 'y' cannot be empty".into());
     }
 
     let title     = cfg_str(cfg, "title").unwrap_or_default();
@@ -1830,7 +1830,7 @@ fn generate_formula_str(
 ) -> Result<String, String> {
     let f_type = match desc.get("_f") {
         Some(EvalValue::Str(s)) => s.as_str(),
-        _ => return Err("Descriptor de fórmula inválido: falta '_f'".into()),
+        _ => return Err("Invalid formula descriptor: '_f' is missing".into()),
     };
 
     // Resuelve nombre de columna → letra Excel

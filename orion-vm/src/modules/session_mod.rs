@@ -31,7 +31,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // set(sid, clave, valor) → Bool  — crea la sesión si no existía
         "set" | "guardar" => {
-            if args.len() < 3 { return Err("session.set requiere (sid, clave, valor)".into()); }
+            if args.len() < 3 { return Err("session.set requires (sid, key, value)".into()); }
             let sid = to_str(&args[0]);
             let key = to_str(&args[1]);
             let val = crate::modules::json_mod::eval_to_json(args[2].clone());
@@ -46,7 +46,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // get(sid, clave, default?) → valor | default | Null
         "get" | "obtener" => {
-            if args.len() < 2 { return Err("session.get requiere (sid, clave [, default])".into()); }
+            if args.len() < 2 { return Err("session.get requires (sid, key [, default])".into()); }
             let sid = to_str(&args[0]);
             let key = to_str(&args[1]);
             let default = args.get(2).cloned().unwrap_or(EvalValue::Null);
@@ -64,7 +64,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // all(sid) → Dict con todos los datos de la sesión
         "all" | "todo" => {
-            if args.is_empty() { return Err("session.all requiere (sid)".into()); }
+            if args.is_empty() { return Err("session.all requires (sid)".into()); }
             let sid = to_str(&args[0]);
             let s = store().lock().unwrap();
             Ok(match s.get(&sid) {
@@ -81,7 +81,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // has(sid, clave) → Bool
         "has" | "existe" => {
-            if args.len() < 2 { return Err("session.has requiere (sid, clave)".into()); }
+            if args.len() < 2 { return Err("session.has requires (sid, key)".into()); }
             let s = store().lock().unwrap();
             Ok(EvalValue::Bool(
                 s.get(&to_str(&args[0])).map(|se| se.data.contains_key(&to_str(&args[1]))).unwrap_or(false)
@@ -90,7 +90,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // delete(sid, clave) → Bool  — borra una clave de la sesión
         "delete" | "del" | "eliminar" => {
-            if args.len() < 2 { return Err("session.delete requiere (sid, clave)".into()); }
+            if args.len() < 2 { return Err("session.delete requires (sid, key)".into()); }
             let mut s = store().lock().unwrap();
             let removed = s.get_mut(&to_str(&args[0]))
                 .map(|se| se.data.shift_remove(&to_str(&args[1])).is_some())
@@ -100,7 +100,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // destroy(sid) → Bool  — elimina la sesión entera (logout)
         "destroy" | "destruir" => {
-            if args.is_empty() { return Err("session.destroy requiere (sid)".into()); }
+            if args.is_empty() { return Err("session.destroy requires (sid)".into()); }
             let removed = store().lock().unwrap().remove(&to_str(&args[0])).is_some();
             Ok(EvalValue::Bool(removed))
         }
@@ -118,7 +118,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Int((before - s.len()) as i64))
         }
 
-        f => Err(format!("session.{}() no existe", f)),
+        f => Err(format!("session.{}() does not exist", f)),
     }
 }
 

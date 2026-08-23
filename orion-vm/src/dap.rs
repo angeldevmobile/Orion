@@ -97,7 +97,7 @@ pub fn run_dap(path: &str) {
     let src = match std::fs::read_to_string(path) {
         Ok(s) => s.strip_prefix('\u{FEFF}').unwrap_or(&s).to_string(),
         Err(e) => {
-            eprintln!("[dap] no se puede leer '{}': {}", path, e);
+            eprintln!("[dap] cannot read '{}': {}", path, e);
             return;
         }
     };
@@ -425,7 +425,7 @@ fn send_stopped_or_terminated(seq: &mut u64, session: &DebugSession, _source: &s
         };
         let description = match &session.pause_reason {
             Some(PauseReason::Breakpoint { id, line }) =>
-                format!("Breakpoint #{} en línea {}", id, line),
+                format!("Breakpoint #{} at line {}", id, line),
             Some(PauseReason::Error(e)) => e.clone(),
             _ => String::new(),
         };
@@ -471,6 +471,6 @@ fn compile_src(src: &str, path: &str) -> Result<crate::bytecode::OrionBytecode, 
         .map_err(|e| OrionError::from(e).with_file(path))?;
     let stmts = crate::parser::parse(tokens)
         .map_err(|e| OrionError::from(e).with_file(path))?;
-    crate::codegen::compile(stmts)
+    crate::codegen::compile_entry(stmts)
         .map_err(|e| OrionError::from(e).with_file(path))
 }

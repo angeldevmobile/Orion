@@ -12,7 +12,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // named(name, data) → "event: name\ndata: ...\n\n"
         "named" => {
-            if args.len() < 2 { return Err("sse.named requiere (name, data)".into()); }
+            if args.len() < 2 { return Err("sse.named requires (name, data)".into()); }
             let name  = to_str(&args[0]);
             let data  = to_str(&args[1]);
             let lines = fmt_data(&data);
@@ -21,7 +21,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // id(id, name, data) → "id: id\nevent: name\ndata: ...\n\n"
         "id" => {
-            if args.len() < 3 { return Err("sse.id requiere (id, name, data)".into()); }
+            if args.len() < 3 { return Err("sse.id requires (id, name, data)".into()); }
             let id    = to_str(&args[0]);
             let name  = to_str(&args[1]);
             let data  = to_str(&args[2]);
@@ -31,7 +31,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // json_event(name, dict_or_list) → SSE con data JSON
         "json_event" => {
-            if args.len() < 2 { return Err("sse.json_event requiere (name, value)".into()); }
+            if args.len() < 2 { return Err("sse.json_event requires (name, value)".into()); }
             let name = to_str(&args[0]);
             let json = eval_to_json_str(&args[1]);
             let lines = fmt_data(&json);
@@ -46,9 +46,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // retry(ms) → "retry: ms\n\n"
         "retry" => {
-            if args.is_empty() { return Err("sse.retry requiere (ms)".into()); }
+            if args.is_empty() { return Err("sse.retry requires (ms)".into()); }
             let ms = args[0].to_i64()?;
-            if ms < 0 { return Err("sse.retry: ms debe ser >= 0".into()); }
+            if ms < 0 { return Err("sse.retry: ms must be >= 0".into()); }
             Ok(EvalValue::Str(format!("retry: {}\n\n", ms)))
         }
 
@@ -74,7 +74,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(parse_event(&raw))
         }
 
-        f => Err(format!("sse.{}() no existe", f)),
+        f => Err(format!("sse.{}() does not exist", f)),
     }
 }
 
@@ -139,7 +139,7 @@ fn eval_to_json_str(v: &EvalValue) -> String {
 }
 
 fn one_str(ctx: &str, args: &[EvalValue]) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("{} requiere (data)", ctx)); }
+    if args.is_empty() { return Err(format!("{} requires (data)", ctx)); }
     Ok(to_str(&args[0]))
 }
 

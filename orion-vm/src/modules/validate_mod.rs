@@ -15,12 +15,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // required(valor) → Bool
         "required" | "requerido" => {
-            let v = args.first().ok_or("validate.requerido requiere (valor)")?;
+            let v = args.first().ok_or("validate.requerido requires (valor)")?;
             Ok(EvalValue::Bool(!matches!(v, EvalValue::Null) && !to_str(v).is_empty()))
         }
         // length(s, min, max) → Bool
         "length" | "longitud" => {
-            if args.len() < 3 { return Err("validate.longitud requiere (s, min, max)".into()); }
+            if args.len() < 3 { return Err("validate.longitud requires (s, min, max)".into()); }
             let s   = to_str(&args[0]);
             let min = to_i64(&args[1])? as usize;
             let max = to_i64(&args[2])? as usize;
@@ -45,18 +45,18 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // all(datos_dict, reglas_dict) → {valido, errores}
         // Reglas: "requerido|email|min:5|max:100|numero|alfa"
         "all" | "todo" => {
-            if args.len() < 2 { return Err("validate.todo requiere (datos, reglas)".into()); }
+            if args.len() < 2 { return Err("validate.todo requires (datos, reglas)".into()); }
             let datos = match &args[0] {
                 EvalValue::Dict(m) => m.clone(),
-                _ => return Err("validate.todo: datos debe ser un Dict".into()),
+                _ => return Err("validate.todo: the data must be a Dict".into()),
             };
             let reglas = match &args[1] {
                 EvalValue::Dict(m) => m.clone(),
-                _ => return Err("validate.todo: reglas debe ser un Dict".into()),
+                _ => return Err("validate.todo: the rules must be a Dict".into()),
             };
             validate_all(datos, reglas)
         }
-        f => Err(format!("validate.{}() no existe", f)),
+        f => Err(format!("validate.{}() does not exist", f)),
     }
 }
 
@@ -109,7 +109,7 @@ fn is_email(s: &str) -> bool {
 }
 
 fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
-    if args.is_empty() { return Err(format!("{} requiere argumento", fn_name)); }
+    if args.is_empty() { return Err(format!("{} requires an argument", fn_name)); }
     Ok(to_str(&args[0]))
 }
 
@@ -121,6 +121,6 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("validate: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("validate: expected a number, got {}", other.type_name())),
     }
 }

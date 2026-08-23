@@ -92,6 +92,7 @@ pub struct Conn {
     state:   Mutex<State>,
     dialogs: Mutex<HashMap<String, String>>,
     allow:   Mutex<Vec<String>>,
+    routes:  Mutex<Vec<super::route::Ruta>>,
     blocked: Mutex<Vec<String>>,
     limits:  Limits,
     cv:      Condvar,
@@ -104,11 +105,11 @@ impl Conn {
     /// Conecta al endpoint CDP y arranca el hilo lector.
     pub fn connect(url: &str, limits: Limits) -> Result<Arc<Conn>, String> {
         let (mut socket, _) = tungstenite::connect(url)
-            .map_err(|e| format!("no se pudo conectar a CDP en {url}: {e}"))?;
+            .map_err(|e| format!("could not connect to CDP at {url}: {e}"))?;
 
         match socket.get_mut() {
             MaybeTlsStream::Plain(s) => s.set_nonblocking(true)
-                .map_err(|e| format!("no se pudo poner el socket CDP en no bloqueante: {e}"))?,
+                .map_err(|e| format!("could not set the CDP socket to non-blocking: {e}"))?,
             _ => {}
         }
 
@@ -117,6 +118,7 @@ impl Conn {
             state:   Mutex::new(State::default()),
             dialogs: Mutex::new(HashMap::new()),
             allow:   Mutex::new(Vec::new()),
+            routes:  Mutex::new(Vec::new()),
             blocked: Mutex::new(Vec::new()),
             limits,
             cv:      Condvar::new(),
@@ -129,7 +131,7 @@ impl Conn {
         thread::Builder::new()
             .name("orion-cdp".into())
             .spawn(move || lector.read_loop())
-            .map_err(|e| format!("no se pudo arrancar el lector CDP: {e}"))?;
+            .map_err(|e| format!("could not start the CDP reader: {e}"))?;
 
         Ok(conn)
     }
@@ -147,7 +149,7 @@ impl Conn {
                     self.dispatch(&txt);
                 }
                 Ok(Message::Close(_)) => {
-                    self.die("el navegador cerró la conexión CDP");
+                    self.die("the browser closed the CDP connection");
                     return;
                 }
                 // Ping/Pong/Binary: irrelevantes para CDP.
@@ -165,7 +167,7 @@ impl Conn {
                     }
                 }
                 Err(e) => {
-                    self.die(&format!("conexión CDP perdida: {e}"));
+                    self.die(&format!("CDP connection lost: {e}"));
                     return;
                 }
             }
@@ -194,7 +196,39 @@ impl Conn {
     pub fn bloqueadas(&self) -> Vec<String> {
         self.blocked.lock().unwrap().clone()
     }
+
+    /// Añade una regla de intercepción al final de la lista.
+    pub fn add_route(&self, r: super::route::Ruta) {
+        self.routes.lock().unwrap().push(r);
+    }
+
+    /// Quita las reglas cuyo patrón sea exactamente `patron`, o todas si es
+    /// `None`. Devuelve cuántas quitó.
+    pub fn del_routes(&self, patron: Option<&str>) -> usize {
+        let mut rs = self.routes.lock().unwrap();
+        let antes = rs.len();
+        match patron {
+            Some(p) => rs.retain(|r| r.patron != p),
+            None    => rs.clear(),
+        }
+        antes - rs.len()
+    }
+
+    /// Las reglas puestas y cuántas veces ha disparado cada una.
+    pub fn routes(&self) -> Vec<(String, u64, Option<u64>)> {
+        self.routes.lock().unwrap().iter()
+            .map(|r| (r.patron.clone(), r.veces, r.limite))
+            .collect()
+    }
+
+    pub fn hay_routes(&self) -> bool {
+        !self.routes.lock().unwrap().is_empty()
+    }
+
     fn answer_fetch(&self, session: Option<&str>, request_id: &str, url: &str) {
+        // La lista blanca manda sobre las reglas: es una medida de seguridad, y
+        // una regla de conveniencia no puede reabrir un dominio cerrado a
+        // propósito. Por eso se comprueba primero y corta.
         let lista = self.allow.lock().unwrap().clone();
         let ok = super::state::permitida(url, &lista);
         if !ok {
@@ -203,16 +237,33 @@ impl Conn {
                 b.push(url.to_string());
             }
         }
+
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let mut msg = serde_json::json!({
-            "id": id,
-            "method": if ok { "Fetch.continueRequest" } else { "Fetch.failRequest" },
-            "params": if ok {
-                serde_json::json!({ "requestId": request_id })
-            } else {
-                serde_json::json!({ "requestId": request_id, "errorReason": "BlockedByClient" })
-            },
-        });
+
+        // Con la url permitida, decide la primera regla que case.
+        let de_ruta = if ok {
+            let mut rs = self.routes.lock().unwrap();
+            super::route::elegir(&mut rs, url).map(|r| {
+                r.veces += 1;
+                super::route::respuesta_cdp(&r.accion, request_id)
+            })
+        } else {
+            None
+        };
+
+        let mut msg = if let Some((metodo, params)) = de_ruta {
+            serde_json::json!({ "id": id, "method": metodo, "params": params })
+        } else {
+            serde_json::json!({
+                "id": id,
+                "method": if ok { "Fetch.continueRequest" } else { "Fetch.failRequest" },
+                "params": if ok {
+                    serde_json::json!({ "requestId": request_id })
+                } else {
+                    serde_json::json!({ "requestId": request_id, "errorReason": "BlockedByClient" })
+                },
+            })
+        };
         if let Some(s) = session {
             msg["sessionId"] = serde_json::Value::String(s.to_string());
         }
@@ -312,9 +363,9 @@ impl Conn {
                 Err(e) if reintentable(method, &e) => {
                     if Instant::now() >= limite {
                         return Err(format!(
-                            "la página siguió cambiando de documento durante {} ms y no se pudo leer.\n  \
-                             Suele ser una redirección en cadena; sube el plazo con \
-                             open({{ nav_settle: ms }}) si el sitio es así de lento.",
+                            "the page kept swapping documents for {} ms and could not be read.\n  \
+                             Usually a redirect chain; raise the deadline with \
+                             open({{ nav_settle: ms }}) if the site really is that slow.",
                             self.limits.nav_settle.as_millis()
                         ));
                     }
@@ -362,11 +413,11 @@ impl Conn {
                     if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
                 {
                     if Instant::now() > limite {
-                        return Err(format!("CDP: el envío no progresó en {:?}", self.limits.send));
+                        return Err(format!("CDP: the send made no progress in {:?}", self.limits.send));
                     }
                     thread::sleep(Duration::from_millis(1));
                 }
-                Err(e) => return Err(format!("CDP: no se pudo enviar '{}': {e}", texto.len())),
+                Err(e) => return Err(format!("CDP: could not send '{}': {e}", texto.len())),
             }
         }
     }
@@ -398,7 +449,7 @@ impl Conn {
             }
             let restante = limite.saturating_duration_since(Instant::now());
             if restante.is_zero() {
-                return Err(format!("{method}: sin respuesta en {} ms", timeout.as_millis()));
+                return Err(format!("{method}: no response within {} ms", timeout.as_millis()));
             }
             let (guard, _) = self.cv.wait_timeout(st, restante).unwrap();
             st = guard;
@@ -474,7 +525,7 @@ impl Conn {
 
     fn death_reason(&self) -> String {
         self.state.lock().unwrap().dead.clone()
-            .unwrap_or_else(|| "la conexión CDP está cerrada".into())
+            .unwrap_or_else(|| "the CDP connection is closed".into())
     }
 
     pub fn close(&self) {
@@ -504,6 +555,7 @@ mod tests {
             state:   Mutex::new(State::default()),
             dialogs: Mutex::new(HashMap::new()),
             allow:   Mutex::new(Vec::new()),
+            routes:  Mutex::new(Vec::new()),
             blocked: Mutex::new(Vec::new()),
             limits:  Limits::default(),
             cv:      Condvar::new(),
@@ -541,7 +593,7 @@ mod tests {
         let c = conn_de_prueba();
         let inicio = Instant::now();
         let e = c.await_response(99, "Page.navigate", Duration::from_millis(60)).unwrap_err();
-        assert!(e.contains("sin respuesta"), "{e}");
+        assert!(e.contains("no response"), "{e}");
         assert!(inicio.elapsed() < Duration::from_secs(2), "tardó demasiado en rendirse");
     }
 

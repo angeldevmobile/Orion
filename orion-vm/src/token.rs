@@ -193,6 +193,6 @@ pub struct LexError {
 
 impl fmt::Display for LexError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SyntaxError [línea {}, col {}]: {}", self.line, self.col, self.message)
+        write!(f, "SyntaxError [line {}, col {}]: {}", self.line, self.col, self.message)
     }
 }

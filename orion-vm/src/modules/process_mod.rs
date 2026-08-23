@@ -56,7 +56,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let idx = match args.first() {
                 Some(EvalValue::Int(n))   => *n as usize,
                 Some(EvalValue::Float(f)) => *f as usize,
-                _ => return Err("process.arg requiere (indice, default?)".into()),
+                _ => return Err("process.arg requires (indice, default?)".into()),
             };
             let lista = match call("args", vec![])? {
                 EvalValue::List(l) => l,
@@ -94,7 +94,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str(path.to_string_lossy().into_owned()))
         }
 
-        f => Err(format!("process.{}() no existe", f)),
+        f => Err(format!("process.{}() does not exist", f)),
     }
 }
 
@@ -138,7 +138,7 @@ fn which_exists(cmd: &str) -> bool {
 
 fn one_str(fn_name: &str, args: Vec<EvalValue>) -> Result<String, String> {
     if args.is_empty() {
-        return Err(format!("process.{}() requiere 1 argumento", fn_name));
+        return Err(format!("process.{}() requires 1 argument", fn_name));
     }
     Ok(match args.into_iter().next().unwrap() {
         EvalValue::Str(s) => s,
@@ -150,6 +150,6 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("process: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("process: expected a number, got {}", other.type_name())),
     }
 }

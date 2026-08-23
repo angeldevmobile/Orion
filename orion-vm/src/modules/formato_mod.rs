@@ -6,11 +6,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // table(encabezados, filas) → String  — tabla ASCII formateada
         // filas puede ser List<List> o List<Dict>
         "table" | "tabla" => {
-            if args.len() < 2 { return Err("formato.tabla requiere (encabezados, filas)".into()); }
+            if args.len() < 2 { return Err("formato.tabla requires (encabezados, filas)".into()); }
             let headers = to_str_list(&args[0])?;
             let rows    = match &args[1] {
                 EvalValue::List(l) => l.clone(),
-                _ => return Err("formato.tabla: filas debe ser una lista".into()),
+                _ => return Err("formato.tabla: rows must be a list".into()),
             };
             let mut table = Table::new();
             table.set_content_arrangement(ContentArrangement::Dynamic)
@@ -33,7 +33,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // divider(ancho, caracter?) → String  — línea horizontal
         "divider" | "separador" => {
-            let ancho = to_i64(args.first().ok_or("formato.separador requiere (ancho)")?)?.max(0);
+            let ancho = to_i64(args.first().ok_or("formato.separador requires (ancho)")?)?.max(0);
             let ch    = args.get(1).map(to_str_val).unwrap_or_else(|| "─".to_string());
             let ch    = ch.chars().next().unwrap_or('─');
             Ok(EvalValue::Str(std::iter::repeat(ch).take(ancho as usize).collect()))
@@ -41,7 +41,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // number(n, decimales=0, miles=",", decimal=".") → "1,487,000.50"
         // Estilo español: numero(n, 2, ".", ",") → "1.487.000,50"
         "number" | "numero" => {
-            let n = to_f64(args.first().ok_or("formato.numero requiere (n)")?)?;
+            let n = to_f64(args.first().ok_or("formato.numero requires (n)")?)?;
             let dec  = args.get(1).and_then(|v| to_i64(v).ok()).unwrap_or(0).max(0) as usize;
             let thou = args.get(2).map(to_str_val).unwrap_or_else(|| ",".to_string());
             let dsep = args.get(3).map(to_str_val).unwrap_or_else(|| ".".to_string());
@@ -50,7 +50,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // currency(n, simbolo="$", decimales=2) → "$1,487,000.00"
         // Símbolo alfabético va con espacio: moneda(n, "USD") → "USD 1,487,000.00"
         "currency" | "moneda" => {
-            let n = to_f64(args.first().ok_or("formato.moneda requiere (n)")?)?;
+            let n = to_f64(args.first().ok_or("formato.moneda requires (n)")?)?;
             let sym = args.get(1).map(to_str_val).unwrap_or_else(|| "$".to_string());
             let dec = args.get(2).and_then(|v| to_i64(v).ok()).unwrap_or(2).max(0) as usize;
             let num = format_number(n, dec, ",", ".");
@@ -59,13 +59,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // percent(x, decimales=1) → 0.156 → "15.6%"
         "percent" | "porcentaje" => {
-            let x = to_f64(args.first().ok_or("formato.porcentaje requiere (x)")?)?;
+            let x = to_f64(args.first().ok_or("formato.porcentaje requires (x)")?)?;
             let dec = args.get(1).and_then(|v| to_i64(v).ok()).unwrap_or(1).max(0) as usize;
             Ok(EvalValue::Str(format!("{:.*}%", dec, x * 100.0)))
         }
         // bytes(n) → tamaño humano en base 1024: "512 B", "1.5 KB", "2 MB"
         "bytes" => {
-            let mut n = to_f64(args.first().ok_or("formato.bytes requiere (n)")?)?.max(0.0);
+            let mut n = to_f64(args.first().ok_or("formato.bytes requires (n)")?)?.max(0.0);
             let units = ["B", "KB", "MB", "GB", "TB", "PB"];
             let mut i = 0;
             while n >= 1024.0 && i < units.len() - 1 { n /= 1024.0; i += 1; }
@@ -78,7 +78,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // duration(segundos) → "1d 2h 3m 4s"; menos de 1s → "500ms"
         "duration" | "duracion" => {
-            let secs = to_f64(args.first().ok_or("formato.duracion requiere (segundos)")?)?;
+            let secs = to_f64(args.first().ok_or("formato.duracion requires (segundos)")?)?;
             if secs <= 0.0 { return Ok(EvalValue::Str("0s".into())); }
             if secs < 1.0 {
                 return Ok(EvalValue::Str(format!("{}ms", (secs * 1000.0).round() as i64)));
@@ -96,7 +96,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // truncate(s, max) → corta a max caracteres agregando "…" si hizo falta
         "truncate" | "truncar" => {
-            if args.len() < 2 { return Err("formato.truncar requiere (s, max)".into()); }
+            if args.len() < 2 { return Err("formato.truncar requires (s, max)".into()); }
             let s   = to_str_val(&args[0]);
             let max = to_i64(&args[1])?.max(0) as usize;
             let out = if s.chars().count() <= max {
@@ -110,7 +110,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // center(s, ancho) → String  — texto centrado con espacios
         "center" | "centrar" => {
-            if args.len() < 2 { return Err("formato.centrar requiere (s, ancho)".into()); }
+            if args.len() < 2 { return Err("formato.centrar requires (s, ancho)".into()); }
             let s     = to_str_val(&args[0]);
             let ancho = to_i64(&args[1])? as usize;
             let len   = s.chars().count();
@@ -123,14 +123,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 Ok(EvalValue::Str(format!("{}{}{}", " ".repeat(left), s, " ".repeat(right))))
             }
         }
-        f => Err(format!("formato.{}() no existe", f)),
+        f => Err(format!("formato.{}() does not exist", f)),
     }
 }
 
 fn to_str_list(v: &EvalValue) -> Result<Vec<String>, String> {
     match v {
         EvalValue::List(l) => Ok(l.iter().map(to_str_val).collect()),
-        _ => Err("formato: encabezados debe ser una lista".into()),
+        _ => Err("formato: encabezados must be a list".into()),
     }
 }
 
@@ -142,7 +142,7 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("formato: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("formato: expected a number, got {}", other.type_name())),
     }
 }
 

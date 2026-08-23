@@ -25,7 +25,7 @@ pub fn run_bench(path: &str, runs: u32) {
         Ok(s) => s,
         Err(e) => { banner::fail(&format!("Parse: {}", e.message)); std::process::exit(1); }
     };
-    let bc = match codegen::compile(stmts) {
+    let bc = match codegen::compile_entry(stmts) {
         Ok(b) => b,
         Err(e) => { banner::fail(&format!("Codegen: {}", e.message)); std::process::exit(1); }
     };

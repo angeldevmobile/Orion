@@ -26,12 +26,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // set(clave, valor) o set(clave, valor, ttl_segundos) → Bool
         // Con ttl la entrada expira sola; acepta segundos con decimales.
         "set" | "guardar" => {
-            if args.len() < 2 { return Err("cache.guardar requiere (clave, valor [, ttl_segundos])".into()); }
+            if args.len() < 2 { return Err("cache.guardar requires (key, value [, ttl_seconds])".into()); }
             let key = to_str(&args[0]);
             let val = crate::modules::json_mod::eval_to_json(args[1].clone());
             let expires = match args.get(2) {
                 Some(v) => {
-                    let secs = v.to_f64().map_err(|e| format!("cache.guardar: ttl inválido: {}", e))?;
+                    let secs = v.to_f64().map_err(|e| format!("cache.guardar: invalid ttl: {}", e))?;
                     Some(Instant::now() + Duration::from_secs_f64(secs.max(0.0)))
                 }
                 None => None,
@@ -41,7 +41,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // get(clave) o get(clave, default) → valor, default o Null
         "get" | "obtener" => {
-            if args.is_empty() { return Err("cache.obtener requiere (clave [, default])".into()); }
+            if args.is_empty() { return Err("cache.obtener requires (key [, default])".into()); }
             let key = to_str(&args[0]);
             let default = args.get(1).cloned().unwrap_or(EvalValue::Null);
             let mut m = cache().lock().unwrap();
@@ -53,13 +53,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // del(clave) → Bool (true si la clave existía y estaba viva)
         "del" | "eliminar" => {
-            if args.is_empty() { return Err("cache.eliminar requiere (clave)".into()); }
+            if args.is_empty() { return Err("cache.eliminar requires (key)".into()); }
             let removed = cache().lock().unwrap().shift_remove(&to_str(&args[0]));
             Ok(EvalValue::Bool(removed.map(|e| !expired(&e)).unwrap_or(false)))
         }
         // has(clave) → Bool (una entrada expirada ya no existe)
         "has" | "existe" => {
-            if args.is_empty() { return Err("cache.existe requiere (clave)".into()); }
+            if args.is_empty() { return Err("cache.existe requires (key)".into()); }
             let key = to_str(&args[0]);
             let mut m = cache().lock().unwrap();
             let is_expired = m.get(&key).map(expired).unwrap_or(false);
@@ -68,7 +68,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // ttl(clave) → segundos restantes (Float), o Null si no existe o no tiene ttl
         "ttl" => {
-            if args.is_empty() { return Err("cache.ttl requiere (clave)".into()); }
+            if args.is_empty() { return Err("cache.ttl requires (key)".into()); }
             let key = to_str(&args[0]);
             let mut m = cache().lock().unwrap();
             let is_expired = m.get(&key).map(expired).unwrap_or(false);
@@ -96,7 +96,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             purge(&mut m);
             Ok(EvalValue::Int(m.len() as i64))
         }
-        f => Err(format!("cache.{}() no existe", f)),
+        f => Err(format!("cache.{}() does not exist", f)),
     }
 }
 

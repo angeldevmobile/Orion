@@ -73,11 +73,11 @@ fn http_post(
                 .unwrap_or_else(|| raw.chars().take(300).collect());
             format!("API error ({}): {}", code, detail)
         }
-        other => format!("Error de red: {}", other),
+        other => format!("Network error: {}", other),
     })?;
 
     resp.into_json::<serde_json::Value>()
-        .map_err(|e| format!("Error al parsear respuesta JSON: {}", e))
+        .map_err(|e| format!("Could not parse the JSON response: {}", e))
 }
 
 //     Llamadas por proveedor                                                    
@@ -131,7 +131,7 @@ fn call_anthropic(
     result["content"][0]["text"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| format!("Respuesta inesperada de Anthropic: {}", result))
+        .ok_or_else(|| format!("Unexpected response from Anthropic: {}", result))
 }
 
 fn call_openai(
@@ -167,7 +167,7 @@ fn call_openai(
     result["choices"][0]["message"]["content"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| format!("Respuesta inesperada de OpenAI: {}", result))
+        .ok_or_else(|| format!("Unexpected response from OpenAI: {}", result))
 }
 
 /// Proveedor efectivo según keys presentes y preferencia AI_MODEL:
@@ -249,7 +249,7 @@ pub fn sense(query: &str) -> Result<String, String> {
     let context = {
         let mem = SESSION_MEMORY.lock().unwrap();
         if mem.is_empty() {
-            return Ok("[sense: memoria vacía — usa 'learn' primero]".into());
+            return Ok("[sense: memory is empty — use 'learn' first]".into());
         }
         mem.join("\n---\n")
     };

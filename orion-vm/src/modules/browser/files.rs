@@ -57,7 +57,7 @@ pub fn upload(
     espera_ms: u64, t: &Tuning, timeout: Duration,
 ) -> Result<Vec<String>, String> {
     if rutas.is_empty() {
-        return Err("browser.upload: no se indicó ningún archivo".into());
+        return Err("browser.upload: no file was given".into());
     }
 
     let mut abs = Vec::with_capacity(rutas.len());
@@ -65,19 +65,19 @@ pub fn upload(
         let a = absoluta(r);
         if !a.exists() {
             return Err(format!(
-                "browser.upload: el archivo '{r}' no existe\n  se buscó en: {}",
+                "browser.upload: the file '{r}' does not exist\n  looked in: {}",
                 a.display()
             ));
         }
         if a.is_dir() {
-            return Err(format!("browser.upload: '{r}' es una carpeta, no un archivo"));
+            return Err(format!("browser.upload: '{r}' is a folder, not a file"));
         }
         abs.push(a.display().to_string());
     }
 
     if !dom::wait_for(conn, session, sel, espera_ms, t)? {
         return Err(format!(
-            "browser.upload: no apareció '{sel}' en {espera_ms} ms"
+            "browser.upload: '{sel}' did not appear within {espera_ms} ms"
         ));
     }
 
@@ -117,21 +117,21 @@ fn upload_interceptando(
         let ev = conn
             .wait_event("Page.fileChooserOpened", Some(session), marca, timeout)?
             .ok_or_else(|| format!(
-                "browser.upload: '{sel}' no abrió ningún selector de archivos.\n  \
-                 Si es el propio campo, comprueba que sea un <input type=\"file\">; \
-                 si es un botón, que al pulsarlo abra el diálogo."
+                "browser.upload: '{sel}' opened no file chooser.\n  \
+                 If it is the input itself, check that it is an <input type=\"file\">; \
+                 if it is a button, that clicking it opens the dialog."
             ))?;
 
         let modo = ev.params.get("mode").and_then(|m| m.as_str()).unwrap_or("");
         if modo == "selectSingle" && abs.len() > 1 {
             return Err(format!(
-                "browser.upload: '{sel}' admite un solo archivo y se le pasaron {}",
+                "browser.upload: '{sel}' accepts a single file and {} were given",
                 abs.len()
             ));
         }
 
         let backend = ev.params.get("backendNodeId").and_then(|b| b.as_u64())
-            .ok_or("browser.upload: el navegador no dijo a qué campo iban los archivos")?;
+            .ok_or("browser.upload: the browser did not say which input the files were for")?;
 
         conn.call(
             "DOM.setFileInputFiles",
@@ -175,7 +175,7 @@ fn object_id_de(
     )?;
     r.get("result").and_then(|x| x.get("objectId")).and_then(|v| v.as_str())
         .map(str::to_string)
-        .ok_or_else(|| format!("browser: no se pudo referenciar '{sel}'"))
+        .ok_or_else(|| format!("browser: could not get a reference to '{sel}'"))
 }
 
 //    Descargas
@@ -202,11 +202,11 @@ pub fn download(
         Some(d) => {
             let p = absoluta(d);
             std::fs::create_dir_all(&p)
-                .map_err(|e| format!("browser.download: no se pudo crear '{}': {e}", p.display()))?;
+                .map_err(|e| format!("browser.download: could not create '{}': {e}", p.display()))?;
             absoluta(&p.display().to_string())
         }
         None => std::env::current_dir()
-            .map_err(|e| format!("browser.download: no se pudo leer el directorio actual: {e}"))?,
+            .map_err(|e| format!("browser.download: could not read the current directory: {e}"))?,
     };
     let dir_txt = dir.display().to_string();
 
@@ -237,9 +237,9 @@ pub fn download(
     let inicio = conn
         .wait_event("Browser.downloadWillBegin", None, marca, plazo)?
         .ok_or_else(|| format!(
-            "browser.download: pulsar '{sel}' no inició ninguna descarga en {} ms.\n  \
-             Comprueba que el elemento sea el que descarga, y no un enlace que \
-             abre el archivo en una pestaña.",
+            "browser.download: clicking '{sel}' started no download within {} ms.\n  \
+             Check that the element is the one that downloads, and not a link that \
+             opens the file in a page.",
             o.wait_ms
         ))?;
 
@@ -258,13 +258,13 @@ pub fn download(
                 )
         })?
         .ok_or_else(|| format!(
-            "browser.download: '{sugerido}' no terminó de descargarse en {} ms.\n  \
-             Si el archivo es grande, sube el plazo con {{ wait: ms }}.",
+            "browser.download: '{sugerido}' did not finish downloading within {} ms.\n  \
+             If the file is large, raise the deadline with {{ wait: ms }}.",
             o.wait_ms
         ))?;
 
     if fin.params.get("state").and_then(|s| s.as_str()) == Some("canceled") {
-        return Err(format!("browser.download: el navegador canceló la descarga de '{sugerido}'"));
+        return Err(format!("browser.download: the browser cancelled the download of '{sugerido}'"));
     }
 
     let escrito = if nombrado { dir.join(&guid) } else { dir.join(&sugerido) };
@@ -273,7 +273,7 @@ pub fn download(
 
     if escrito != destino {
         std::fs::rename(&escrito, &destino).map_err(|e| format!(
-            "browser.download: la descarga terminó pero no se pudo dejar en '{}': {e}",
+            "browser.download: the download finished but could not be placed in '{}': {e}",
             destino.display()
         ))?;
     }
@@ -310,12 +310,12 @@ pub fn pdf(
         .map_err(|e| format!("browser.pdf: {e}"))?;
 
     let b64 = r.get("data").and_then(|d| d.as_str())
-        .ok_or("browser.pdf: el navegador no devolvió el documento")?;
+        .ok_or("browser.pdf: the browser returned no document")?;
 
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
     let bytes = B64.decode(b64).map_err(|e| format!("browser.pdf: documento ilegible ({e})"))?;
     std::fs::write(ruta, &bytes)
-        .map_err(|e| format!("browser.pdf: no se pudo escribir '{ruta}': {e}"))?;
+        .map_err(|e| format!("browser.pdf: could not write '{ruta}': {e}"))?;
     Ok(ruta.to_string())
 }
 

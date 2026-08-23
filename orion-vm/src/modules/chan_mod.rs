@@ -65,14 +65,14 @@ fn get_chan(id: i64) -> Result<Arc<Chan>, String> {
         .unwrap()
         .get(&id)
         .cloned()
-        .ok_or_else(|| format!("chan: canal {} no existe (¿cerrado y eliminado?)", id))
+        .ok_or_else(|| format!("chan: channel {} does not exist (closed and removed?)", id))
 }
 
 fn as_int(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("chan: se esperaba un handle de canal (int), no {}", other)),
+        other => Err(format!("chan: expected a channel handle (int), not {}", other)),
     }
 }
 
@@ -99,7 +99,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // send(id, valor) → Bool. Bloquea si el canal tiene capacidad y está
         // lleno. Error si el canal está cerrado.
         "send" | "enviar" | "push" => {
-            if args.len() < 2 { return Err("chan.enviar requiere (canal, valor)".into()); }
+            if args.len() < 2 { return Err("chan.enviar requires (channel, value)".into()); }
             let id  = as_int(&args[0])?;
             let val = eval_to_json(args[1].clone());
             let ch  = get_chan(id)?;
@@ -122,7 +122,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // recv(id) → valor | Null. Bloquea (parking) hasta que haya un valor.
         // Devuelve Null si el canal se cierra y ya no quedan valores.
         "recv" | "recibir" | "pop" => {
-            let id = as_int(args.get(0).ok_or("chan.recibir requiere (canal)")?)?;
+            let id = as_int(args.get(0).ok_or("chan.recibir requires (canal)")?)?;
             let ch = get_chan(id)?;
             let mut st = ch.inner.lock().unwrap();
             loop {
@@ -139,7 +139,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // try_recv(id) → valor | Null (no bloquea; Null si vacío).
         "try_recv" | "try_recibir" | "intentar_recibir" => {
-            let id = as_int(args.get(0).ok_or("chan.try_recibir requiere (canal)")?)?;
+            let id = as_int(args.get(0).ok_or("chan.try_recibir requires (canal)")?)?;
             let ch = get_chan(id)?;
             let mut st = ch.inner.lock().unwrap();
             match st.queue.pop_front() {
@@ -150,7 +150,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // close(id) → Bool. Despierta a todos los bloqueados.
         "close" | "cerrar" => {
-            let id = as_int(args.get(0).ok_or("chan.cerrar requiere (canal)")?)?;
+            let id = as_int(args.get(0).ok_or("chan.cerrar requires (canal)")?)?;
             let ch = get_chan(id)?;
             {
                 let mut st = ch.inner.lock().unwrap();
@@ -164,7 +164,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // is_closed(id) → Bool
         "is_closed" | "cerrada" | "closed" => {
-            let id = as_int(args.get(0).ok_or("chan.cerrada requiere (canal)")?)?;
+            let id = as_int(args.get(0).ok_or("chan.cerrada requires (canal)")?)?;
             let ch = get_chan(id)?;
             let st = ch.inner.lock().unwrap();
             Ok(EvalValue::Bool(st.closed))
@@ -172,7 +172,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // len(id) / tamaño(id) → Int (valores en cola ahora mismo)
         "len" | "tamaño" | "size" => {
-            let id = as_int(args.get(0).ok_or("chan.len requiere (canal)")?)?;
+            let id = as_int(args.get(0).ok_or("chan.len requires (canal)")?)?;
             let ch = get_chan(id)?;
             let st = ch.inner.lock().unwrap();
             Ok(EvalValue::Int(st.queue.len() as i64))
@@ -180,7 +180,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // delete(id) → Bool. Libera el canal del registro.
         "delete" | "eliminar" | "free" => {
-            let id = as_int(args.get(0).ok_or("chan.eliminar requiere (canal)")?)?;
+            let id = as_int(args.get(0).ok_or("chan.eliminar requires (canal)")?)?;
             let existed = registry().lock().unwrap().shift_remove(&id).is_some();
             Ok(EvalValue::Bool(existed))
         }
@@ -193,7 +193,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let ids: Vec<i64> = match args.get(0) {
                 Some(EvalValue::List(items)) => items.iter()
                     .map(as_int).collect::<Result<Vec<_>, _>>()?,
-                _ => return Err("chan.select requiere una lista de canales".into()),
+                _ => return Err("chan.select requires a list of channels".into()),
             };
             if ids.is_empty() { return Ok(EvalValue::Null); }
 
@@ -233,6 +233,6 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(ids))
         }
 
-        f => Err(format!("chan.{}() no existe", f)),
+        f => Err(format!("chan.{}() does not exist", f)),
     }
 }

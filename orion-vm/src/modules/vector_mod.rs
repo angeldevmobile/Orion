@@ -40,7 +40,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // vector.add(handle, id, embedding, metadata?) → int (total de entradas)
         "add" => {
-            if args.len() < 3 { return Err("vector.add requiere (handle, id, embedding, metadata?)".into()); }
+            if args.len() < 3 { return Err("vector.add requires (handle, id, embedding, metadata?)".into()); }
             let handle = to_str(&args[0]);
             let id     = to_str(&args[1]);
             let emb    = to_float_vec(&args[2])?;
@@ -56,7 +56,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // search(handle, embedding, top?) → List<{id, score, metadata?}>
         "search" | "buscar" => {
-            if args.len() < 2 { return Err("vector.buscar requiere (handle, embedding, top?)".into()); }
+            if args.len() < 2 { return Err("vector.buscar requires (handle, embedding, top?)".into()); }
             let handle = to_str(&args[0]);
             let query  = to_float_vec(&args[1])?;
             let top    = if args.len() > 2 { to_usize(&args[2]).unwrap_or(5) } else { 5 };
@@ -83,7 +83,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // vector.remove(handle, id) → bool
         "remove" | "eliminar" => {
-            if args.len() < 2 { return Err("vector.remove requiere (handle, id)".into()); }
+            if args.len() < 2 { return Err("vector.remove requires (handle, id)".into()); }
             let handle = to_str(&args[0]);
             let id     = to_str(&args[1]);
             let removed = with_dbs(|dbs| {
@@ -97,7 +97,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // vector.size(handle) → int
         "size" | "tamaño" => {
-            if args.is_empty() { return Err("vector.size requiere (handle)".into()); }
+            if args.is_empty() { return Err("vector.size requires (handle)".into()); }
             let handle = to_str(&args[0]);
             let n = with_dbs(|dbs| dbs.get(&handle).map(|db| db.entries.len()).unwrap_or(0));
             Ok(EvalValue::Int(n as i64))
@@ -105,7 +105,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // vector.clear(handle) → int (entradas eliminadas)
         "clear" | "limpiar" => {
-            if args.is_empty() { return Err("vector.clear requiere (handle)".into()); }
+            if args.is_empty() { return Err("vector.clear requires (handle)".into()); }
             let handle = to_str(&args[0]);
             let n = with_dbs(|dbs| {
                 let Some(db) = dbs.get_mut(&handle) else { return 0; };
@@ -118,7 +118,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // vector.ids(handle) → List<string>
         "ids" => {
-            if args.is_empty() { return Err("vector.ids requiere (handle)".into()); }
+            if args.is_empty() { return Err("vector.ids requires (handle)".into()); }
             let handle = to_str(&args[0]);
             let ids = with_dbs(|dbs| {
                 dbs.get(&handle)
@@ -130,7 +130,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // vector.save(handle, path) → string
         "save" | "guardar" => {
-            if args.len() < 2 { return Err("vector.save requiere (handle, path)".into()); }
+            if args.len() < 2 { return Err("vector.save requires (handle, path)".into()); }
             let handle = to_str(&args[0]);
             let path   = to_str(&args[1]);
             let json   = with_dbs(|dbs| {
@@ -146,11 +146,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // vector.load(path) → handle
         "load" | "cargar" => {
-            if args.is_empty() { return Err("vector.load requiere (path)".into()); }
+            if args.is_empty() { return Err("vector.load requires (path)".into()); }
             let path    = to_str(&args[0]);
             let content = std::fs::read_to_string(&path).map_err(|e| format!("vector.load: {}", e))?;
             let json: serde_json::Value = serde_json::from_str(&content)
-                .map_err(|e| format!("vector.load: JSON inválido: {}", e))?;
+                .map_err(|e| format!("vector.load: invalid JSON: {}", e))?;
             let arr = json.as_array().ok_or("vector.load: se esperaba un array JSON")?;
             let handle  = new_handle();
             let mut entries = Vec::new();
@@ -166,7 +166,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Str(handle))
         }
 
-        f => Err(format!("vector.{}() no existe", f)),
+        f => Err(format!("vector.{}() does not exist", f)),
     }
 }
 
@@ -188,9 +188,9 @@ fn to_float_vec(v: &EvalValue) -> Result<Vec<f64>, String> {
         EvalValue::List(items) => items.iter().map(|x| match x {
             EvalValue::Float(f) => Ok(*f),
             EvalValue::Int(i)   => Ok(*i as f64),
-            other => Err(format!("vector: embedding debe contener números, encontró {}", other.type_name())),
+            other => Err(format!("vector: embedding must contain numbers, found {}", other.type_name())),
         }).collect(),
-        _ => Err("vector: se esperaba un embedding (lista de números)".into()),
+        _ => Err("vector: expected an embedding (list of numbers)".into()),
     }
 }
 
@@ -198,7 +198,7 @@ fn to_usize(v: &EvalValue) -> Result<usize, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n as usize),
         EvalValue::Float(f) => Ok(*f as usize),
-        _ => Err("vector: se esperaba un número entero".into()),
+        _ => Err("vector: expected an integer".into()),
     }
 }
 

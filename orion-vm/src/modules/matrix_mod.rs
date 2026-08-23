@@ -18,28 +18,28 @@ fn from_dmatrix(d: &DMatrix<f64>) -> Mat {
 }
 
 fn arg0<'a>(args: &'a [EvalValue], f: &str) -> Result<&'a EvalValue, String> {
-    args.first().ok_or_else(|| format!("matrix.{f} requiere (A)"))
+    args.first().ok_or_else(|| format!("matrix.{f} requires (A)"))
 }
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
         // add(A, B) → A + B
         "add" => {
-            if args.len() < 2 { return Err("matrix.add requiere (A, B)".into()); }
+            if args.len() < 2 { return Err("matrix.add requires (A, B)".into()); }
             let a = parse_mat(&args[0])?;
             let b = parse_mat(&args[1])?;
             Ok(mat_to_eval(mat_add(&a, &b)?))
         }
         // sub(A, B) → A - B
         "sub" => {
-            if args.len() < 2 { return Err("matrix.sub requiere (A, B)".into()); }
+            if args.len() < 2 { return Err("matrix.sub requires (A, B)".into()); }
             let a = parse_mat(&args[0])?;
             let b = parse_mat(&args[1])?;
             Ok(mat_to_eval(mat_sub(&a, &b)?))
         }
         // mul(A, B) → A @ B  (soporta escalar × matriz)
         "mul" => {
-            if args.len() < 2 { return Err("matrix.mul requiere (A, B)".into()); }
+            if args.len() < 2 { return Err("matrix.mul requires (A, B)".into()); }
             match (&args[0], &args[1]) {
                 (EvalValue::Float(s), _) => {
                     let b = parse_mat(&args[1])?;
@@ -87,19 +87,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // identity(n) → matriz identidad n×n
         "identity" => {
-            let n = to_i64(args.first().ok_or("matrix.identity requiere (n)")?)? as usize;
+            let n = to_i64(args.first().ok_or("matrix.identity requires (n)")?)? as usize;
             Ok(mat_to_eval(identity(n)))
         }
         // zeros(rows, cols) → matriz de ceros
         "zeros" => {
-            if args.len() < 2 { return Err("matrix.zeros requiere (rows, cols)".into()); }
+            if args.len() < 2 { return Err("matrix.zeros requires (rows, cols)".into()); }
             let r = to_i64(&args[0])? as usize;
             let c = to_i64(&args[1])? as usize;
             Ok(mat_to_eval(vec![vec![0.0; c]; r]))
         }
         // ones(rows, cols) → matriz de unos
         "ones" => {
-            if args.len() < 2 { return Err("matrix.ones requiere (rows, cols)".into()); }
+            if args.len() < 2 { return Err("matrix.ones requires (rows, cols)".into()); }
             let r = to_i64(&args[0])? as usize;
             let c = to_i64(&args[1])? as usize;
             Ok(mat_to_eval(vec![vec![1.0; c]; r]))
@@ -113,14 +113,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // dot(A, B) → producto punto (misma que mul)
         "dot" => {
-            if args.len() < 2 { return Err("matrix.dot requiere (A, B)".into()); }
+            if args.len() < 2 { return Err("matrix.dot requires (A, B)".into()); }
             let a = parse_mat(&args[0])?;
             let b = parse_mat(&args[1])?;
             Ok(mat_to_eval(mat_mul(&a, &b)?))
         }
         // rot_2d(angle_deg) → matriz de rotación 2D
         "rot_2d" | "rot2D" => {
-            let deg = to_f64(args.first().ok_or("matrix.rot2D requiere (angle_deg)")?)?;
+            let deg = to_f64(args.first().ok_or("matrix.rot2D requires (angle_deg)")?)?;
             let a = deg.to_radians();
             Ok(mat_to_eval(vec![
                 vec![a.cos(), -a.sin()],
@@ -129,7 +129,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // neuralify(A, activation?) → aplica función de activación
         "neuralify" => {
-            if args.is_empty() { return Err("matrix.neuralify requiere (A, activation?)".into()); }
+            if args.is_empty() { return Err("matrix.neuralify requires (A, activation?)".into()); }
             let a   = parse_mat(&args[0])?;
             let act = if args.len() > 1 { to_str(&args[1]) } else { "relu".into() };
             let result = a.into_iter().map(|row| {
@@ -150,7 +150,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // scale(A, factor) → multiplica todos los elementos
         "scale" | "amplify" => {
-            if args.len() < 2 { return Err("matrix.scale requiere (A, factor)".into()); }
+            if args.len() < 2 { return Err("matrix.scale requires (A, factor)".into()); }
             let a      = parse_mat(&args[0])?;
             let factor = to_f64(&args[1])?;
             Ok(mat_to_eval(scalar_mul(factor, &a)))
@@ -166,10 +166,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // solve(A, b) → x tal que A·x = b (b vector o matriz; LU con pivoteo)
         "solve" => {
-            if args.len() < 2 { return Err("matrix.solve requiere (A, b)".into()); }
+            if args.len() < 2 { return Err("matrix.solve requires (A, b)".into()); }
             let a = parse_mat(&args[0])?;
             let (r, c) = shape(&a);
-            if r != c { return Err("matrix.solve: A debe ser cuadrada".into()); }
+            if r != c { return Err("matrix.solve: A must be square".into()); }
             // b puede ser vector plano [..] o matriz [[..], ..]
             let (b_mat, b_is_vec) = match &args[1] {
                 EvalValue::List(items) if items.iter().all(|x| matches!(x, EvalValue::Int(_) | EvalValue::Float(_))) => {
@@ -179,7 +179,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 other => (parse_mat(other)?, false),
             };
             if b_mat.len() != r {
-                return Err(format!("matrix.solve: b tiene {} filas, A es {}x{}", b_mat.len(), r, c));
+                return Err(format!("matrix.solve: b has {} rows, A is {}x{}", b_mat.len(), r, c));
             }
             let lu = to_dmatrix(&a).lu();
             let x = lu.solve(&to_dmatrix(&b_mat))
@@ -194,7 +194,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "eig" | "eigenvalues" => {
             let a = parse_mat(arg0(&args, "eig")?)?;
             let (r, c) = shape(&a);
-            if r != c { return Err("matrix.eig: la matriz debe ser cuadrada".into()); }
+            if r != c { return Err("matrix.eig: the matrix must be square".into()); }
             let eig = to_dmatrix(&a).complex_eigenvalues();
             let all_real = eig.iter().all(|z| z.im.abs() < 1e-10);
             let mut vals: Vec<(f64, f64)> = eig.iter().map(|z| (z.re, z.im)).collect();
@@ -232,7 +232,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Float(to_dmatrix(&a).norm()))
         }
 
-        f => Err(format!("matrix.{}() no existe", f)),
+        f => Err(format!("matrix.{}() does not exist", f)),
     }
 }
 
@@ -278,7 +278,7 @@ fn transpose(a: &Mat) -> Mat {
 
 fn det(a: &Mat) -> Result<f64, String> {
     let (r, c) = shape(a);
-    if r != c { return Err("matrix.det: la matriz debe ser cuadrada".into()); }
+    if r != c { return Err("matrix.det: the matrix must be square".into()); }
     if r == 1 { return Ok(a[0][0]); }
     if r == 2 { return Ok(a[0][0]*a[1][1] - a[0][1]*a[1][0]); }
     if r == 3 {
@@ -311,7 +311,7 @@ fn det(a: &Mat) -> Result<f64, String> {
 
 fn inverse(a: &Mat) -> Result<Mat, String> {
     let n = a.len();
-    if shape(a).0 != shape(a).1 { return Err("matrix.inverse: debe ser cuadrada".into()); }
+    if shape(a).0 != shape(a).1 { return Err("matrix.inverse: must be square".into()); }
     // Grandes → nalgebra
     if n >= FAST_N {
         return to_dmatrix(a).try_inverse()
@@ -372,7 +372,7 @@ fn parse_mat(v: &EvalValue) -> Result<Mat, String> {
                     }
                     EvalValue::Float(f) => mat.push(vec![*f]),
                     EvalValue::Int(n)   => mat.push(vec![*n as f64]),
-                    _ => return Err("matrix: fila debe ser una lista de números".into()),
+                    _ => return Err("matrix: a row must be a list of numbers".into()),
                 }
             }
             if mat.is_empty() { return Err("matrix: lista vacía".into()); }
@@ -380,7 +380,7 @@ fn parse_mat(v: &EvalValue) -> Result<Mat, String> {
         }
         EvalValue::Float(f) => Ok(vec![vec![*f]]),
         EvalValue::Int(n)   => Ok(vec![vec![*n as f64]]),
-        _ => Err(format!("matrix: se esperaba lista, recibió {}", v.type_name())),
+        _ => Err(format!("matrix: expected a list, got {}", v.type_name())),
     }
 }
 
@@ -396,7 +396,7 @@ fn to_f64(v: &EvalValue) -> Result<f64, String> {
     match v {
         EvalValue::Float(f) => Ok(*f),
         EvalValue::Int(n)   => Ok(*n as f64),
-        other => Err(format!("matrix: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("matrix: expected a number, got {}", other.type_name())),
     }
 }
 
@@ -404,7 +404,7 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("matrix: esperaba entero, recibió {}", other.type_name())),
+        other => Err(format!("matrix: expected an integer, got {}", other.type_name())),
     }
 }
 

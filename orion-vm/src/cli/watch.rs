@@ -106,7 +106,7 @@ fn compile_and_run(path: &str) {
 
     let src = match fs::read_to_string(path) {
         Ok(s) => s,
-        Err(e) => { banner::fail(&format!("No se puede leer: {e}")); return; }
+        Err(e) => { banner::fail(&format!("Cannot read: {e}")); return; }
     };
 
     let tokens = match lexer::lex(&src) {
@@ -117,7 +117,7 @@ fn compile_and_run(path: &str) {
         Ok(s) => s,
         Err(e) => { banner::fail(&format!("Parse  line {} — {}", e.line, e.message)); return; }
     };
-    let bc = match codegen::compile(stmts) {
+    let bc = match codegen::compile_entry(stmts) {
         Ok(b) => b,
         Err(e) => { banner::fail(&format!("Codegen  line {} — {}", e.line, e.message)); return; }
     };

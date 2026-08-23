@@ -76,7 +76,7 @@ fn spawn_worker(p: Arc<PoolInner>) {
     std::thread::Builder::new()
         .name("orion-task".into())
         .spawn(move || worker_loop(p))
-        .expect("no se pudo crear hilo de tarea");
+        .expect("could not create the task thread");
 }
 
 fn worker_loop(p: Arc<PoolInner>) {

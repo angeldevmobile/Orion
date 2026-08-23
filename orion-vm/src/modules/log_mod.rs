@@ -15,7 +15,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //   Niveles estándar                           
         "info" | "warn" | "err" | "debug" | "ok" => {
             if args.is_empty() {
-                return Err(format!("log.{} requiere (msg, tag?)", function));
+                return Err(format!("log.{} requires (msg, tag?)", function));
             }
             let msg = to_str(&args[0]);
             let tag = if args.len() > 1 { Some(to_str(&args[1])) } else { None };
@@ -27,7 +27,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //   Configuración                             
         "level" => {
             if args.is_empty() {
-                return Err("log.level requiere (\"debug\"|\"info\"|\"warn\"|\"error\")".into());
+                return Err("log.level requires (\"debug\"|\"info\"|\"warn\"|\"error\")".into());
             }
             LOG_LEVEL.store(level_num(&to_str(&args[0])), Ordering::Relaxed);
             Ok(EvalValue::Null)
@@ -49,7 +49,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //   Timers                                
         // timer(name) → inicia un temporizador nombrado
         "timer" | "start" => {
-            if args.is_empty() { return Err("log.timer requiere (name)".into()); }
+            if args.is_empty() { return Err("log.timer requires (name)".into()); }
             let name = to_str(&args[0]);
             let mut guard = TIMERS.lock().unwrap();
             guard.get_or_insert_with(HashMap::new).insert(name.clone(), Instant::now());
@@ -58,7 +58,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // elapsed(name, msg?) → muestra el tiempo transcurrido desde timer(name)
         "elapsed" | "stop" => {
-            if args.is_empty() { return Err("log.elapsed requiere (name, msg?)".into()); }
+            if args.is_empty() { return Err("log.elapsed requires (name, msg?)".into()); }
             let name  = to_str(&args[0]);
             let label = if args.len() > 1 { to_str(&args[1]) } else { format!("'{}'", name) };
             let guard = TIMERS.lock().unwrap();
@@ -70,13 +70,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                     write_log("ok", &msg, Some(&name));
                     Ok(EvalValue::Int(ms as i64))
                 }
-                None => Err(format!("log.elapsed: timer '{}' no existe — usa log.timer(name) primero", name)),
+                None => Err(format!("log.elapsed: timer '{}' does not exist — use log.timer(name) first", name)),
             }
         }
 
         //   Impresión explícita                          
         "print" => {
-            if args.len() < 2 { return Err("log.print requiere (level, msg, tag?)".into()); }
+            if args.len() < 2 { return Err("log.print requires (level, msg, tag?)".into()); }
             let level = to_str(&args[0]);
             let msg   = to_str(&args[1]);
             let tag   = if args.len() > 2 { Some(to_str(&args[2])) } else { None };
@@ -84,7 +84,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        f => Err(format!("log.{}() no existe", f)),
+        f => Err(format!("log.{}() does not exist", f)),
     }
 }
 

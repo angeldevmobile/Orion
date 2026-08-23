@@ -67,11 +67,11 @@ fn abrir_pestaña(conn: &Conn, timeout: Duration) -> Result<(String, String), St
     let creado = conn.call("Target.createTarget",
         serde_json::json!({ "url": "about:blank" }), None, timeout)?;
     let target = creado["targetId"].as_str()
-        .ok_or("crawl: el navegador no devolvió targetId")?.to_string();
+        .ok_or("crawl: the browser returned no targetId")?.to_string();
     let adj = conn.call("Target.attachToTarget",
         serde_json::json!({ "targetId": target, "flatten": true }), None, timeout)?;
     let session = adj["sessionId"].as_str()
-        .ok_or("crawl: el navegador no devolvió sessionId")?.to_string();
+        .ok_or("crawl: the browser returned no sessionId")?.to_string();
     conn.call("Page.enable", serde_json::json!({}), Some(&session), timeout)?;
     Ok((target, session))
 }
@@ -119,7 +119,7 @@ pub fn crawl(
 
     let progreso = std::fs::OpenOptions::new()
         .create(true).append(true).open(&progreso_ruta)
-        .map_err(|e| format!("browser.crawl: no se pudo abrir el progreso: {e}"))?;
+        .map_err(|e| format!("browser.crawl: could not open the progress file: {e}"))?;
 
     // Cuántas pestañas de verdad: ni más que URLs pendientes, ni cero.
     let n = o.workers.clamp(1, pendientes.len().max(1));
@@ -149,7 +149,7 @@ pub fn crawl(
             // resto del recorrido sigue con menos manos, que es mejor que abortar.
             let (target, session) = match abrir_pestaña(&conn, timeout) {
                 Ok(x) => x,
-                Err(e) => { par.errores.push(format!("(pestaña) {e}")); return par; }
+                Err(e) => { par.errores.push(format!("(page) {e}")); return par; }
             };
 
             loop {
@@ -207,12 +207,12 @@ pub fn crawl(
     for h in hilos {
         match h.join() {
             Ok(par) => { ok += par.ok; vacias.extend(par.vacias); errores.extend(par.errores); }
-            Err(_)  => errores.push("un hilo del recorrido se cayó".into()),
+            Err(_)  => errores.push("a crawl worker thread died".into()),
         }
     }
 
     let volcador = Arc::try_unwrap(escritor)
-        .map_err(|_| "browser.crawl: el volcador seguía compartido".to_string())?
+        .map_err(|_| "browser.crawl: the writer was still shared".to_string())?
         .into_inner().unwrap();
     let (filas, archivos) = volcador.cerrar().map_err(|e| format!("browser.crawl: {e}"))?;
 

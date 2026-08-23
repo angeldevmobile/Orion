@@ -152,11 +152,11 @@ fn rerun_script(
     };
     let stmts = match parser::parse(tokens) {
         Ok(s) => s,
-        Err(e) => { eprintln!("  [!] Parse   línea {} — {}", e.line, e.message); return None; }
+        Err(e) => { eprintln!("  [!] Parse   line {} — {}", e.line, e.message); return None; }
     };
-    let bc = match codegen::compile(stmts) {
+    let bc = match codegen::compile_entry(stmts) {
         Ok(b) => b,
-        Err(e) => { eprintln!("  [!] Codegen línea {} — {}", e.line, e.message); return None; }
+        Err(e) => { eprintln!("  [!] Codegen line {} — {}", e.line, e.message); return None; }
     };
 
     // Preparar estado: preservar state_store, inyectar event, restaurar field_vals
@@ -200,11 +200,11 @@ fn reload_script(path: &str) -> Option<Vec<Component>> {
     };
     let stmts = match parser::parse(tokens) {
         Ok(s) => s,
-        Err(e) => { eprintln!("  [!] Parse   línea {} — {}", e.line, e.message); return None; }
+        Err(e) => { eprintln!("  [!] Parse   line {} — {}", e.line, e.message); return None; }
     };
-    let bc = match codegen::compile(stmts) {
+    let bc = match codegen::compile_entry(stmts) {
         Ok(b) => b,
-        Err(e) => { eprintln!("  [!] Codegen línea {} — {}", e.line, e.message); return None; }
+        Err(e) => { eprintln!("  [!] Codegen line {} — {}", e.line, e.message); return None; }
     };
 
     with_state(|s| {

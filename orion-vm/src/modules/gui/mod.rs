@@ -652,7 +652,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "table" => {
             let rows_data = match args.get(0) {
                 Some(EvalValue::List(l)) => l.clone(),
-                _ => return Err("gui.table requiere una lista de dicts".into()),
+                _ => return Err("gui.table requires a list of dicts".into()),
             };
             let cfg = dict_opt(&args, 1);
             let height = cfg_f32(&cfg, "height", 300.0);
@@ -667,7 +667,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "chart" => {
             let rows_data = match args.get(0) {
                 Some(EvalValue::List(l)) => l.clone(),
-                _ => return Err("gui.chart requiere (datos, tipo, config?)".into()),
+                _ => return Err("gui.chart requires (datos, tipo, config?)".into()),
             };
             let kind_str = str_arg(&args, 1).unwrap_or_else(|| "bar".into());
             let kind = match kind_str.to_lowercase().as_str() {
@@ -731,7 +731,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             push(Component::Chart(Box::new(chart)))
         }
 
-        other => Err(format!("gui.{other} no existe")),
+        other => Err(format!("gui.{other} does not exist")),
     }
 }
 
@@ -766,7 +766,7 @@ fn str_arg(args: &[EvalValue], i: usize) -> Option<String> {
 }
 
 fn req_str(args: &[EvalValue], i: usize, fn_name: &str) -> Result<String, String> {
-    str_arg(args, i).ok_or_else(|| format!("gui.{fn_name} requiere un argumento de texto"))
+    str_arg(args, i).ok_or_else(|| format!("gui.{fn_name} requires a text argument"))
 }
 
 fn f32_arg(args: &[EvalValue], i: usize) -> Option<f32> {
@@ -898,7 +898,7 @@ fn boton_de(accion: &EvalValue) -> Result<EvalValue, String> {
 fn list_arg(args: &[EvalValue], i: usize, fn_name: &str) -> Result<Vec<EvalValue>, String> {
     match args.get(i) {
         Some(EvalValue::List(l)) => Ok(l.clone()),
-        _ => Err(format!("gui.{fn_name} requiere una lista como primer argumento")),
+        _ => Err(format!("gui.{fn_name} requires a list as its first argument")),
     }
 }
 
@@ -964,7 +964,7 @@ fn file_dialog(cfg: &CfgMap) -> rfd::FileDialog {
     if !exts.is_empty() {
         let label = cfg_str(cfg, "filter")
             .or_else(|| cfg_str(cfg, "filtro"))
-            .unwrap_or_else(|| "Archivos".into());
+            .unwrap_or_else(|| "Files".into());
         let refs: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
         d = d.add_filter(label, &refs);
     }

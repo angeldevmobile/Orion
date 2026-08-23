@@ -66,7 +66,7 @@ const __rellenar = (el, v) => {
     if (i < 0) i = ops.findIndex(o => (o.textContent || '').trim() === q);
     if (i < 0 && /^[0-9]+$/.test(q)) i = parseInt(q, 10);
     if (i < 0 || i >= ops.length) {
-      return { ok: false, why: 'no hay opción ' + JSON.stringify(q),
+      return { ok: false, why: 'no option ' + JSON.stringify(q),
                opciones: ops.map(o => (o.textContent || '').trim()) };
     }
     el.selectedIndex = i;
@@ -78,7 +78,7 @@ const __rellenar = (el, v) => {
   if (tipo === 'checkbox' || tipo === 'radio') {
     const querer = __esVerdad(v);
     if (tipo === 'radio' && !querer) {
-      return { ok: false, why: 'un radio no se puede desmarcar; marca otro del grupo' };
+      return { ok: false, why: 'a radio cannot be unchecked; check another one in the group' };
     }
     // Un clic y no `checked = x`: muchos formularios escuchan el clic, y
     // además así se respetan los `disabled` y los `<label>` asociados.
@@ -192,13 +192,13 @@ pub fn queja(r: &Relleno) -> Option<String> {
     }
     let mut m = String::from("browser.fill: ");
     if !r.ausentes.is_empty() {
-        m.push_str(&format!("{} campo(s) no existen en la página:\n", r.ausentes.len()));
+        m.push_str(&format!("{} field(s) do not exist on the page:\n", r.ausentes.len()));
         for s in &r.ausentes { m.push_str(&format!("    {s}\n")); }
     }
     for (s, why) in &r.fallidos {
         m.push_str(&format!("    {s}  ->  {why}\n"));
     }
-    m.push_str("  Revisa esos selectores, o usa { strict: no } si de verdad pueden faltar.");
+    m.push_str("  Check those selectors, or use { strict: no } if they really may be absent.");
     Some(m)
 }
 
@@ -225,7 +225,7 @@ pub fn estado_casilla(
     )?;
     let v = r.get("result").and_then(|x| x.get("value")).cloned().unwrap_or(serde_json::Value::Null);
     if v.is_null() {
-        return Err(format!("no apareció '{sel}' en {ms} ms"));
+        return Err(format!("'{sel}' did not appear within {ms} ms"));
     }
     let tipo = v.get("tipo").and_then(|x| x.as_str()).unwrap_or("").to_string();
     if tipo != "checkbox" && tipo != "radio" {
@@ -352,7 +352,7 @@ pub fn table(
 
     let v = r.get("result").and_then(|x| x.get("value")).cloned().unwrap_or(serde_json::Value::Null);
     if v.is_null() {
-        return Err(format!("browser.table: no apareció '{sel}' en {ms} ms"));
+        return Err(format!("browser.table: '{sel}' did not appear within {ms} ms"));
     }
     if let Some(e) = v.get("error").and_then(|x| x.as_str()) {
         return Err(format!("browser.table '{sel}': {e}"));

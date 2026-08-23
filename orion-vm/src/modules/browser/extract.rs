@@ -68,7 +68,7 @@ pub fn parse_campo(nombre: &str, spec: &str) -> Result<Campo, String> {
         Some(i) => {
             let c = spec[i + 1..].trim().to_lowercase();
             if c.is_empty() {
-                return Err(format!("campo '{nombre}': falta la conversión después de '|'"));
+                return Err(format!("field '{nombre}': missing the conversion after '|'"));
             }
             const VALIDAS: [&str; 6] = ["num", "int", "bool", "html", "text", "trim"];
             let sub = match c.strip_prefix("list") {
@@ -82,7 +82,7 @@ pub fn parse_campo(nombre: &str, spec: &str) -> Result<Campo, String> {
             };
             if !valida {
                 return Err(format!(
-                    "campo '{nombre}': conversión '{c}' desconocida.\n  Admitidas: {}, list, list:<conversión>",
+                    "field '{nombre}': unknown conversion '{c}'.\n  Accepted: {}, list, list:<conversion>",
                     VALIDAS.join(", ")
                 ));
             }
@@ -95,7 +95,7 @@ pub fn parse_campo(nombre: &str, spec: &str) -> Result<Campo, String> {
         Some(i) => {
             let a = resto[i + 1..].trim();
             if a.is_empty() {
-                return Err(format!("campo '{nombre}': falta el nombre del atributo después de '@'"));
+                return Err(format!("field '{nombre}': missing the attribute name after '@'"));
             }
             (resto[..i].trim(), Some(a.to_string()))
         }
@@ -131,8 +131,19 @@ const __enFila = (fila, sel) => {
     }
     return null;
   }
-  return fila.querySelector(sel);
+  const uno = fila.querySelector(sel);
+  if (uno || !__SHADOW) return uno;
+  // El campo puede estar dentro de un componente web de la propia fila. Se
+  // busca ahí solo si el DOM normal no lo tenía: el listado corriente —que es
+  // el 99% de los casos— no paga por esto.
+  for (const sr of __sombrasDe(fila)) {
+    const e = sr.querySelector(sel);
+    if (e) return e;
+  }
+  return null;
 };
+
+const __sombrasDe = (el) => { const out = []; __sombras(el, out, 0); return out; };
 
 const __aNumero = (s) => {
   let t = String(s).replace(/[^0-9,.\-]/g, '');
@@ -172,7 +183,12 @@ const __todosEnFila = (fila, sel) => {
     return Array.from(fila.querySelectorAll('*'))
       .filter(e => !e.children.length && (e.textContent || '').trim().includes(want));
   }
-  return Array.from(fila.querySelectorAll(sel));
+  const todos = Array.from(fila.querySelectorAll(sel));
+  if (todos.length || !__SHADOW) return todos;
+  for (const sr of __sombrasDe(fila)) {
+    todos.push(...sr.querySelectorAll(sel));
+  }
+  return todos;
 };
 
 /// Texto o atributo de un elemento, sin convertir todavía.
@@ -384,14 +400,14 @@ mod tests {
     #[test]
     fn una_conversion_inventada_lista_las_validas() {
         let e = parse_campo("precio", ".p|dinero").unwrap_err();
-        assert!(e.contains("desconocida"), "{e}");
+        assert!(e.contains("unknown conversion"), "{e}");
         assert!(e.contains("num"), "no listó las válidas: {e}");
     }
 
     #[test]
     fn los_separadores_sueltos_se_explican() {
-        assert!(parse_campo("x", ".a|").unwrap_err().contains("conversión"));
-        assert!(parse_campo("x", ".a@").unwrap_err().contains("atributo"));
+        assert!(parse_campo("x", ".a|").unwrap_err().contains("conversion"));
+        assert!(parse_campo("x", ".a@").unwrap_err().contains("attribute"));
     }
 
     #[test]
@@ -449,7 +465,7 @@ impl Volcador {
         let csv = match formato {
             Formato::Csv => {
                 let f = std::fs::File::create(ruta)
-                    .map_err(|e| format!("no se pudo crear '{ruta}': {e}"))?;
+                    .map_err(|e| format!("could not create '{ruta}': {e}"))?;
                 let mut w = csv::Writer::from_writer(f);
                 w.write_record(&headers).map_err(|e| format!("csv: {e}"))?;
                 Some(w)
@@ -475,7 +491,7 @@ impl Volcador {
             return Self::nuevo(ruta, headers, chunk);
         }
         let f = std::fs::OpenOptions::new().append(true).open(ruta)
-            .map_err(|e| format!("no se pudo abrir '{ruta}' para continuar: {e}"))?;
+            .map_err(|e| format!("could not open '{ruta}' para continuar: {e}"))?;
         // Sin `write_record` de cabecera: ya está en el archivo.
         let w = csv::WriterBuilder::new().has_headers(false).from_writer(f);
         Ok(Volcador {

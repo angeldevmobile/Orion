@@ -92,7 +92,7 @@ pub(crate) fn val_to_display(v: &OrionVal) -> String {
         },
         TAG_CLOSURE => "<closure>".to_string(),
         TAG_TASK    => "<task>".to_string(),
-        _           => "<valor>".to_string(),
+        _           => "<value>".to_string(),
     }
 }
 
@@ -191,7 +191,7 @@ pub extern "C" fn rt_sub(a: i64, b: i64) -> i64 {
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => match av.data_i.checked_sub(bv.data_i) {
                 Some(r) => alloc_val(TAG_INT, r, 0.0),
-                None => { eprintln!("[JIT] Error: Desbordamiento aritmético en resta de enteros"); std::process::exit(1) }
+                None => { eprintln!("[JIT] Error: integer subtraction overflow"); std::process::exit(1) }
             },
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f - bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 - bv.data_f),
@@ -269,7 +269,7 @@ pub extern "C" fn rt_pow(a: i64, b: i64) -> i64 {
         let bv = val_ref(b);
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => {
-                if bv.data_i < 0 { eprintln!("[JIT] Error: Exponente negativo en potencia de enteros (usa flotantes)"); std::process::exit(1); }
+                if bv.data_i < 0 { eprintln!("[JIT] Error: negative exponent in an integer power (use floats)"); std::process::exit(1); }
                 match u32::try_from(bv.data_i).ok().and_then(|e| av.data_i.checked_pow(e)) {
                     Some(r) => alloc_val(TAG_INT, r, 0.0),
                     None => { eprintln!("[JIT] Error: Desbordamiento aritmético en potencia"); std::process::exit(1) }
@@ -293,7 +293,7 @@ pub extern "C" fn rt_neg(a: i64) -> i64 {
                 None => { eprintln!("[JIT] Error: Desbordamiento aritmético en negación"); std::process::exit(1) }
             },
             TAG_FLOAT => alloc_val(TAG_FLOAT, 0, -av.data_f),
-            _ => { eprintln!("[JIT] Error: - requiere número"); std::process::exit(1) }
+            _ => { eprintln!("[JIT] Error: - requires a number"); std::process::exit(1) }
         }
     }
 }
@@ -480,7 +480,7 @@ pub extern "C" fn rt_get_index(obj: i64, idx: i64) -> i64 {
                 for (k, p) in entries {
                     if k == &key_str { return *p; }
                 }
-                eprintln!("[JIT] Clave '{}' no encontrada", key_str);
+                eprintln!("[JIT] Key '{}' not found", key_str);
                 std::process::exit(1)
             }
             TAG_STR => {
@@ -621,7 +621,7 @@ pub extern "C" fn rt_read_file(path: i64, fmt_ptr: i64) -> i64 {
         let content = match std::fs::read_to_string(&path_str) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[JIT] read: no se pudo leer '{}': {}", path_str, e);
+                eprintln!("[JIT] read: could not read '{}': {}", path_str, e);
                 std::process::exit(1);
             }
         };

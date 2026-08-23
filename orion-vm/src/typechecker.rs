@@ -869,9 +869,9 @@ impl TypeChecker {
                                         let col  = self.current_col;
                                         self.report(
                                             format!(
-                                                "Llamada a '{fn_name}': argumento #{} \
-                                                 ('{pname}: {declared}') — se esperaba \
-                                                 '{resolved}', se recibió '{actual}'",
+                                                "Call to '{fn_name}': argument #{} \
+                                                 ('{pname}: {declared}') expects \
+                                                 '{resolved}', got '{actual}'",
                                                 idx + 1
                                             ),
                                             line, col,

@@ -38,7 +38,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             // valida que todos sean dicts
             for (i, row) in list.iter().enumerate() {
                 if !matches!(row, EvalValue::Dict(_)) {
-                    return Err(format!("table.from: elemento [{}] no es un dict", i));
+                    return Err(format!("table.from: element [{}] is not a dict", i));
                 }
             }
             Ok(EvalValue::List(list))
@@ -201,7 +201,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // rename(table, "viejo", "nuevo") → table con columna renombrada
         "rename" => {
-            if args.len() < 3 { return Err("table.rename requiere (tabla, viejo, nuevo)".into()); }
+            if args.len() < 3 { return Err("table.rename requires (tabla, viejo, nuevo)".into()); }
             let rows  = list_arg("rename", &args, 0)?;
             let old   = str_arg("rename", &args, 1)?;
             let new   = str_arg("rename", &args, 2)?;
@@ -218,7 +218,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // "date" normaliza a ISO "YYYY-MM-DD" (ordena/filtra cronológicamente);
         // acepta 4º arg con formato chrono explícito: cast(t, "f", "date", "%m/%d/%Y")
         "cast" => {
-            if args.len() < 3 { return Err("table.cast requiere (tabla, columna, tipo)".into()); }
+            if args.len() < 3 { return Err("table.cast requires (tabla, columna, tipo)".into()); }
             let rows  = list_arg("cast", &args, 0)?;
             let col   = str_arg("cast", &args, 1)?;
             let to    = str_arg("cast", &args, 2)?;
@@ -241,7 +241,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // lógica (&& || !), paréntesis, aritmética, columna vs columna y funciones.
         // Ej: "(region == 'Norte' || region == 'Sur') && venta * 1.19 > meta"
         "where" => {
-            if args.len() < 2 { return Err("table.where requiere (tabla, condicion)".into()); }
+            if args.len() < 2 { return Err("table.where requires (tabla, condicion)".into()); }
             let rows = list_arg("where", &args, 0)?;
             let cond = str_arg("where", &args, 1)?;
             let ast = parse_table_expr(&cond).map_err(|e| format!("table.where: {}", e))?;
@@ -257,7 +257,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // sort(table, "col") o sort(table, "col", "desc") → table ordenada
         "sort" => {
-            if args.len() < 2 { return Err("table.sort requiere (tabla, columna)".into()); }
+            if args.len() < 2 { return Err("table.sort requires (tabla, columna)".into()); }
             let mut rows = list_arg("sort", &args, 0)?;
             let col = str_arg("sort", &args, 1)?;
             let desc = args.get(2)
@@ -274,7 +274,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // top(table, "col", n) → las n filas con mayor valor en col
         "top" => {
-            if args.len() < 3 { return Err("table.top requiere (tabla, columna, n)".into()); }
+            if args.len() < 3 { return Err("table.top requires (tabla, columna, n)".into()); }
             let mut rows = list_arg("top", &args, 0)?;
             let col = str_arg("top", &args, 1)?;
             let n   = int_arg("top", &args, 2)?.max(0) as usize;
@@ -284,7 +284,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // bottom(table, "col", n) → las n filas con menor valor en col
         "bottom" => {
-            if args.len() < 3 { return Err("table.bottom requiere (tabla, columna, n)".into()); }
+            if args.len() < 3 { return Err("table.bottom requires (tabla, columna, n)".into()); }
             let mut rows = list_arg("bottom", &args, 0)?;
             let col = str_arg("bottom", &args, 1)?;
             let n   = int_arg("bottom", &args, 2)?.max(0) as usize;
@@ -294,7 +294,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // sample(table, n) → n filas aleatorias sin reemplazo
         "sample" => {
-            if args.len() < 2 { return Err("table.sample requiere (tabla, n)".into()); }
+            if args.len() < 2 { return Err("table.sample requires (tabla, n)".into()); }
             let mut rows = list_arg("sample", &args, 0)?;
             let n = (int_arg("sample", &args, 1)?.max(0) as usize).min(rows.len());
             // Fisher-Yates parcial
@@ -309,7 +309,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // dedupe(table, "col") → sin duplicados por columna
         "dedupe" => {
-            if args.len() < 2 { return Err("table.dedupe requiere (tabla, columna)".into()); }
+            if args.len() < 2 { return Err("table.dedupe requires (tabla, columna)".into()); }
             let rows = list_arg("dedupe", &args, 0)?;
             let col  = str_arg("dedupe", &args, 1)?;
             let mut seen = std::collections::HashSet::new();
@@ -330,7 +330,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // y funciones: upper lower trim len abs round floor ceil sqrt min max pow.
         // Ej: "round((venta - costo) / venta * 100, 2)", "upper(nombre) + ' (' + region + ')'"
         "add" => {
-            if args.len() < 3 { return Err("table.add requiere (tabla, nombre_col, expresion)".into()); }
+            if args.len() < 3 { return Err("table.add requires (tabla, nombre_col, expresion)".into()); }
             let rows = list_arg("add", &args, 0)?;
             let col  = str_arg("add", &args, 1)?;
             let expr = str_arg("add", &args, 2)?;
@@ -350,7 +350,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // group(table, "por" | ["c1","c2"], "valor", "sum"|"avg"|"count"|"min"|"max")
         // → tabla con las columnas clave (conservan su tipo original) + el agregado
         "group" => {
-            if args.len() < 4 { return Err("table.group requiere (tabla, por, valor, operacion)".into()); }
+            if args.len() < 4 { return Err("table.group requires (table, by, value, operation)".into()); }
             let rows  = list_arg("group", &args, 0)?;
             let by_cols: Vec<String> = match &args[1] {
                 EvalValue::List(v) => v.iter().map(|x| x.to_string()).collect(),
@@ -359,7 +359,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             let val   = str_arg("group", &args, 2)?;
             let op    = str_arg("group", &args, 3)?;
             if !matches!(op.as_str(), "sum" | "avg" | "count" | "min" | "max") {
-                return Err(format!("table.group: operación '{}' desconocida (usa sum|avg|count|min|max)", op));
+                return Err(format!("table.group: unknown operation '{}' (use sum|avg|count|min|max)", op));
             }
 
             let mut buckets: HashMap<String, Vec<f64>> = HashMap::new();
@@ -404,7 +404,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // agg(table, "col", "sum"|"avg"|"count"|"min"|"max") → número
         // count cuenta valores no nulos de cualquier tipo; el resto opera sobre números.
         "agg" => {
-            if args.len() < 3 { return Err("table.agg requiere (tabla, columna, operacion)".into()); }
+            if args.len() < 3 { return Err("table.agg requires (tabla, columna, operacion)".into()); }
             let rows = list_arg("agg", &args, 0)?;
             let col  = str_arg("agg", &args, 1)?;
             let op   = str_arg("agg", &args, 2)?;
@@ -425,21 +425,21 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 "avg"   => nums.iter().sum::<f64>() / nums.len() as f64,
                 "min"   => nums.iter().cloned().fold(f64::INFINITY, f64::min),
                 "max"   => nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
-                _ => return Err(format!("table.agg: operación '{}' desconocida (usa sum|avg|count|min|max)", op)),
+                _ => return Err(format!("table.agg: unknown operation '{}' (use sum|avg|count|min|max)", op)),
             };
             Ok(smart_num(result))
         }
 
         // stats(table, "col") → dict completo: min/max/avg/std/p25/median/p75/count/nulls
         "stats" => {
-            if args.len() < 2 { return Err("table.stats requiere (tabla, columna)".into()); }
+            if args.len() < 2 { return Err("table.stats requires (tabla, columna)".into()); }
             let rows = list_arg("stats", &args, 0)?;
             let col  = str_arg("stats", &args, 1)?;
             let all_vals = column_values(&rows, &col);
             let nulls = all_vals.iter().filter(|v| matches!(v, EvalValue::Null)).count();
             let nums: Vec<f64> = all_vals.iter().filter_map(|v| v.to_f64().ok()).collect();
             if nums.is_empty() {
-                return Err(format!("table.stats: columna '{}' no tiene valores numéricos", col));
+                return Err(format!("table.stats: columna '{}' has no numeric values", col));
             }
             let s = compute_stats(&nums);
             let mut result = HashMap::new();
@@ -457,7 +457,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // column(table, "col") → list de valores de esa columna
         "column" => {
-            if args.len() < 2 { return Err("table.column requiere (tabla, columna)".into()); }
+            if args.len() < 2 { return Err("table.column requires (tabla, columna)".into()); }
             let rows = list_arg("column", &args, 0)?;
             let col  = str_arg("column", &args, 1)?;
             Ok(EvalValue::List(column_values(&rows, &col)))
@@ -485,7 +485,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Colisión de nombre (columna no-clave en ambos lados): la derecha entra
         // como col_2, col_3… — nada se pisa en silencio.
         "join" => {
-            if args.len() < 3 { return Err("table.join requiere (tabla1, tabla2, clave)".into()); }
+            if args.len() < 3 { return Err("table.join requires (table1, table2, key)".into()); }
             let left  = list_arg("join", &args, 0)?;
             let right = list_arg("join", &args, 1)?;
             let key_cols: Vec<String> = match &args[2] {
@@ -494,7 +494,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             };
             let mode = args.get(3).map(|v| v.to_string()).unwrap_or_else(|| "inner".to_string());
             if mode != "inner" && mode != "left" {
-                return Err(format!("table.join: modo '{}' desconocido (usa inner|left)", mode));
+                return Err(format!("table.join: unknown mode '{}' (use inner|left)", mode));
             }
             let right_cols: Vec<String> = infer_headers(&right)
                 .into_iter().filter(|c| !key_cols.contains(c)).collect();
@@ -553,7 +553,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // concat(table1, table2) → apila las filas
         "concat" => {
-            if args.len() < 2 { return Err("table.concat requiere (tabla1, tabla2)".into()); }
+            if args.len() < 2 { return Err("table.concat requires (tabla1, tabla2)".into()); }
             let mut t1 = list_arg("concat", &args, 0)?;
             let t2     = list_arg("concat", &args, 1)?;
             t1.extend(t2);
@@ -564,14 +564,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // forecast(table, "col", n) → list de n valores futuros (regresión lineal)
         "forecast" => {
-            if args.len() < 3 { return Err("table.forecast requiere (tabla, columna, n)".into()); }
+            if args.len() < 3 { return Err("table.forecast requires (tabla, columna, n)".into()); }
             let rows = list_arg("forecast", &args, 0)?;
             let col  = str_arg("forecast", &args, 1)?;
             let n    = int_arg("forecast", &args, 2)? as usize;
             let nums: Vec<f64> = column_values(&rows, &col)
                 .iter().filter_map(|v| v.to_f64().ok()).collect();
             if nums.len() < 2 {
-                return Err("table.forecast: se necesitan al menos 2 valores para proyectar".into());
+                return Err("table.forecast: at least 2 values are needed to project".into());
             }
             let predictions = linear_forecast(&nums, n);
             Ok(EvalValue::List(predictions.into_iter().map(EvalValue::Float).collect()))
@@ -579,7 +579,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // anomalies(table, "col") → list de dicts de las filas anómalas (IQR)
         "anomalies" => {
-            if args.len() < 2 { return Err("table.anomalies requiere (tabla, columna)".into()); }
+            if args.len() < 2 { return Err("table.anomalies requires (tabla, columna)".into()); }
             let rows = list_arg("anomalies", &args, 0)?;
             let col  = str_arg("anomalies", &args, 1)?;
             let nums: Vec<f64> = column_values(&rows, &col)
@@ -602,7 +602,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // anomalies_mark(table, "col") → table con columna "_anomaly" yes/no
         "anomalies_mark" => {
-            if args.len() < 2 { return Err("table.anomalies_mark requiere (tabla, columna)".into()); }
+            if args.len() < 2 { return Err("table.anomalies_mark requires (tabla, columna)".into()); }
             let rows = list_arg("anomalies_mark", &args, 0)?;
             let col  = str_arg("anomalies_mark", &args, 1)?;
             let nums: Vec<f64> = column_values(&rows, &col)
@@ -625,7 +625,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // correlate(table, "col1", "col2") → float coeficiente de Pearson (-1 a 1)
         "correlate" => {
-            if args.len() < 3 { return Err("table.correlate requiere (tabla, col1, col2)".into()); }
+            if args.len() < 3 { return Err("table.correlate requires (tabla, col1, col2)".into()); }
             let rows = list_arg("correlate", &args, 0)?;
             let c1   = str_arg("correlate", &args, 1)?;
             let c2   = str_arg("correlate", &args, 2)?;
@@ -637,7 +637,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 } else { None }
             }).collect();
             if pairs.len() < 2 {
-                return Err("table.correlate: se necesitan al menos 2 pares de valores".into());
+                return Err("table.correlate: at least 2 value pairs are needed".into());
             }
             let xs: Vec<f64> = pairs.iter().map(|p| p.0).collect();
             let ys: Vec<f64> = pairs.iter().map(|p| p.1).collect();
@@ -646,7 +646,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // rank(table, "col") → table con columna "_rank" (1=mayor) y "_pct" (percentil 0-1)
         "rank" => {
-            if args.len() < 2 { return Err("table.rank requiere (tabla, columna)".into()); }
+            if args.len() < 2 { return Err("table.rank requires (tabla, columna)".into()); }
             let rows = list_arg("rank", &args, 0)?;
             let col  = str_arg("rank", &args, 1)?;
 
@@ -680,7 +680,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // moving_avg(table, "col", window) → table con columna "_mavg"
         "moving_avg" => {
-            if args.len() < 3 { return Err("table.moving_avg requiere (tabla, columna, ventana)".into()); }
+            if args.len() < 3 { return Err("table.moving_avg requires (tabla, columna, ventana)".into()); }
             let rows   = list_arg("moving_avg", &args, 0)?;
             let col    = str_arg("moving_avg", &args, 1)?;
             let window = int_arg("moving_avg", &args, 2)? as usize;
@@ -706,7 +706,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // normalize(table, "col") → table con columna "_norm" (0-1, min-max)
         "normalize" => {
-            if args.len() < 2 { return Err("table.normalize requiere (tabla, columna)".into()); }
+            if args.len() < 2 { return Err("table.normalize requires (tabla, columna)".into()); }
             let rows = list_arg("normalize", &args, 0)?;
             let col  = str_arg("normalize", &args, 1)?;
             let nums: Vec<f64> = column_values(&rows, &col)
@@ -735,7 +735,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // → filas que cumplen la condición, sin cargar todo en RAM.
         // Auto-detecta el delimitador (coma, punto y coma o tab) igual que load.
         "stream" => {
-            if args.len() < 2 { return Err("table.stream requiere (path, condicion)".into()); }
+            if args.len() < 2 { return Err("table.stream requires (path, condicion)".into()); }
             let path = str_arg("stream", &args, 0)?;
             let cond = str_arg("stream", &args, 1)?;
             let limit = args.get(2).and_then(|v| v.to_i64().ok()).unwrap_or(i64::MAX) as usize;
@@ -747,7 +747,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .has_headers(true)
                 .flexible(true)
                 .from_path(&path)
-                .map_err(|e| format!("table.stream: no se pudo abrir '{}': {}", path, e))?;
+                .map_err(|e| format!("table.stream: could not open '{}': {}", path, e))?;
 
             let headers: Vec<String> = rdr.headers()
                 .map_err(|e| format!("table.stream: {}", e))?
@@ -785,7 +785,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // ask(table, "pregunta") → string respuesta IA sobre los datos
         "ask" => {
-            if args.len() < 2 { return Err("table.ask requiere (tabla, pregunta)".into()); }
+            if args.len() < 2 { return Err("table.ask requires (tabla, pregunta)".into()); }
             let rows      = list_arg("ask", &args, 0)?;
             let question  = str_arg("ask", &args, 1)?;
             let summary   = build_table_summary(&rows);
@@ -826,7 +826,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // las columnas conservan su orden original (CSV/Excel/literal)
         // save(table, path, ["col1", "col2"]) → guarda SOLO esas columnas y EN ESE ORDEN
         "save" => {
-            if args.len() < 2 { return Err("table.save requiere (tabla, path)".into()); }
+            if args.len() < 2 { return Err("table.save requires (tabla, path)".into()); }
             let rows = list_arg("save", &args, 0)?;
             let path = str_arg("save", &args, 1)?;
             let headers = resolve_columns("save", &rows, args.get(2))?;
@@ -853,10 +853,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 fn detect_delimiter(path: &str) -> Result<u8, String> {
     use std::io::BufRead;
     let f = std::fs::File::open(path)
-        .map_err(|e| format!("no se pudo abrir '{}': {}", path, e))?;
+        .map_err(|e| format!("could not open '{}': {}", path, e))?;
     let mut first = String::new();
     std::io::BufReader::new(f).read_line(&mut first)
-        .map_err(|e| format!("no se pudo leer '{}': {}", path, e))?;
+        .map_err(|e| format!("could not read '{}': {}", path, e))?;
     Ok(if first.contains('\t') { b'\t' }
        else if first.contains(';') { b';' }
        else { b',' })
@@ -896,7 +896,7 @@ fn load_excel(path: &str, sheet: Option<&str>) -> Result<EvalValue, String> {
     let target = match sheet {
         Some(s) => s.to_string(),
         None => wb.sheet_names().first().cloned()
-            .ok_or("table.load: el archivo no tiene hojas")?,
+            .ok_or("table.load: the file has no sheets")?,
     };
 
     let range = wb.worksheet_range(&target)
@@ -924,13 +924,13 @@ fn load_json(path: &str) -> Result<EvalValue, String> {
     let raw = std::fs::read_to_string(path)
         .map_err(|e| format!("table.load: {}", e))?;
     let json: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("table.load: JSON inválido: {}", e))?;
+        .map_err(|e| format!("table.load: invalid JSON: {}", e))?;
     match json {
         serde_json::Value::Array(arr) => {
             let rows = arr.into_iter().map(json_to_eval).collect();
             Ok(EvalValue::List(rows))
         }
-        _ => Err("table.load: el JSON debe ser una lista de objetos".into()),
+        _ => Err("table.load: the JSON must be a list of objects".into()),
     }
 }
 
@@ -945,13 +945,13 @@ fn resolve_columns(fn_name: &str, rows: &[EvalValue], arg: Option<&EvalValue>) -
             let known = infer_headers(rows);
             for c in &cols {
                 if !known.contains(c) {
-                    return Err(format!("table.{}: la columna '{}' no existe (hay: {})",
+                    return Err(format!("table.{}: column '{}' does not exist (available: {})",
                         fn_name, c, known.join(", ")));
                 }
             }
             Ok(cols)
         }
-        Some(other) => Err(format!("table.{}: se esperaba lista de columnas, se recibió {}",
+        Some(other) => Err(format!("table.{}: expected a list of columns, got {}",
             fn_name, other.type_name())),
         None => Ok(infer_headers(rows)),
     }
@@ -1049,7 +1049,7 @@ fn pretty_print(rows: &[EvalValue], n: usize, headers: &[String]) {
     println!();
     println!("  ┌{: <width$}┐", "", width = total_w - 2);
     println!("  │ {:width$} │",
-        format!("tabla  ·  {} filas  ×  {} columnas", rows.len(), headers.len()),
+        format!("table  ·  {} rows  ×  {} columns", rows.len(), headers.len()),
         width = total_w - 4);
     println!("  ├{}┤", headers.iter().enumerate()
         .map(|(i, _)| format!("{: <w$}", "", w = col_widths[i] + 2))
@@ -1080,7 +1080,7 @@ fn pretty_print(rows: &[EvalValue], n: usize, headers: &[String]) {
 
     if rows.len() > n {
         println!("  │ {:width$} │",
-            format!("... {} filas más", rows.len() - n),
+            format!("... {} more rows", rows.len() - n),
             width = total_w - 4);
     }
     println!("  └{}┘", headers.iter().enumerate()
@@ -1189,7 +1189,7 @@ fn tokenize_expr(src: &str) -> Result<Vec<Tok>, String> {
                 s.push(chars[i]);
                 i += 1;
             }
-            if i >= chars.len() { return Err(format!("literal de texto sin cerrar: {}{}", quote, s)); }
+            if i >= chars.len() { return Err(format!("unterminated text literal: {}{}", quote, s)); }
             i += 1;
             toks.push(Tok::Str(s));
             continue;
@@ -1199,7 +1199,7 @@ fn tokenize_expr(src: &str) -> Result<Vec<Tok>, String> {
             let mut s = String::new();
             i += 1;
             while i < chars.len() && chars[i] != '`' { s.push(chars[i]); i += 1; }
-            if i >= chars.len() { return Err(format!("referencia de columna sin cerrar: `{}", s)); }
+            if i >= chars.len() { return Err(format!("unterminated column reference: `{}", s)); }
             i += 1;
             toks.push(Tok::ColName(s));
             continue;
@@ -1226,10 +1226,10 @@ fn tokenize_expr(src: &str) -> Result<Vec<Tok>, String> {
             }
             let text: String = chars[start..i].iter().collect();
             if is_float {
-                let f = text.parse::<f64>().map_err(|_| format!("número inválido '{}'", text))?;
+                let f = text.parse::<f64>().map_err(|_| format!("invalid number '{}'", text))?;
                 toks.push(Tok::Float(f));
             } else {
-                let n = text.parse::<i64>().map_err(|_| format!("número inválido '{}'", text))?;
+                let n = text.parse::<i64>().map_err(|_| format!("invalid number '{}'", text))?;
                 toks.push(Tok::Int(n));
             }
             continue;
@@ -1252,7 +1252,7 @@ fn tokenize_expr(src: &str) -> Result<Vec<Tok>, String> {
         let sym1 = match c {
             '>' => ">", '<' => "<", '!' => "!", '+' => "+", '-' => "-",
             '*' => "*", '/' => "/", '%' => "%", '(' => "(", ')' => ")", ',' => ",",
-            _ => return Err(format!("carácter inesperado '{}'", c)),
+            _ => return Err(format!("unexpected character '{}'", c)),
         };
         toks.push(Tok::Sym(sym1));
         i += 1;
@@ -1362,7 +1362,7 @@ impl ExprParser {
             Some(Tok::Sym("(")) => {
                 self.pos += 1;
                 let e = self.parse_or()?;
-                if !self.eat_sym(")") { return Err("falta ')' de cierre".into()); }
+                if !self.eat_sym(")") { return Err("missing closing ')'".into()); }
                 Ok(e)
             }
             Some(Tok::Ident(w)) => {
@@ -1388,17 +1388,17 @@ impl ExprParser {
                             fn_args.push(self.parse_or()?);
                             if self.eat_sym(",") { continue; }
                             if self.eat_sym(")") { break; }
-                            return Err(format!("falta ')' en la llamada a {}", name));
+                            return Err(format!("missing ')' in the call to {}", name));
                         }
                     }
                     if fn_args.len() < min_a || fn_args.len() > max_a {
-                        return Err(format!("{}: número de argumentos inválido ({})", name, fn_args.len()));
+                        return Err(format!("{}: wrong number of arguments ({})", name, fn_args.len()));
                     }
                     return Ok(TExpr::Call(name, fn_args));
                 }
                 Ok(TExpr::Col(w))
             }
-            Some(other) => Err(format!("token inesperado: {:?}", other)),
+            Some(other) => Err(format!("unexpected token: {:?}", other)),
             None => Err("expresión incompleta".into()),
         }
     }
@@ -1746,7 +1746,7 @@ fn build_table_summary(rows: &[EvalValue]) -> String {
 fn ai_call(prompt: &str) -> Result<EvalValue, String> {
     let api_key = std::env::var("ANTHROPIC_API_KEY")
         .or_else(|_| std::env::var("OPENAI_API_KEY"))
-        .map_err(|_| "table (IA): falta ANTHROPIC_API_KEY o OPENAI_API_KEY en el entorno".to_string())?;
+        .map_err(|_| "table (IA): ANTHROPIC_API_KEY or OPENAI_API_KEY is missing from the environment".to_string())?;
 
     let is_anthropic = std::env::var("ANTHROPIC_API_KEY").is_ok();
 
@@ -1763,9 +1763,9 @@ fn ai_call(prompt: &str) -> Result<EvalValue, String> {
             .set("anthropic-version", "2023-06-01")
             .set("content-type", "application/json")
             .send_json(body)
-            .map_err(|e| format!("table (IA): error de red: {}", e))?;
+            .map_err(|e| format!("table (IA): network error: {}", e))?;
         let json: serde_json::Value = resp.into_json()
-            .map_err(|e| format!("table (IA): respuesta inválida: {}", e))?;
+            .map_err(|e| format!("table (IA): invalid response: {}", e))?;
         let text = json["content"][0]["text"].as_str().unwrap_or("").to_string();
         Ok(EvalValue::Str(text))
     } else {
@@ -1778,9 +1778,9 @@ fn ai_call(prompt: &str) -> Result<EvalValue, String> {
             .set("Authorization", &format!("Bearer {}", api_key))
             .set("content-type", "application/json")
             .send_json(body)
-            .map_err(|e| format!("table (IA): error de red: {}", e))?;
+            .map_err(|e| format!("table (IA): network error: {}", e))?;
         let json: serde_json::Value = resp.into_json()
-            .map_err(|e| format!("table (IA): respuesta inválida: {}", e))?;
+            .map_err(|e| format!("table (IA): invalid response: {}", e))?;
         let text = json["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
         Ok(EvalValue::Str(text))
     }
@@ -1969,7 +1969,7 @@ fn int_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<i64, String>
 fn list_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<Vec<EvalValue>, String> {
     match args.get(idx) {
         Some(EvalValue::List(v)) => Ok(v.clone()),
-        Some(other) => Err(format!("table.{}: se esperaba tabla (lista), se recibió {}", fn_name, other.type_name())),
+        Some(other) => Err(format!("table.{}: expected a table (list), got {}", fn_name, other.type_name())),
         None => Err(format!("table.{}: argumento {} requerido", fn_name, idx + 1)),
     }
 }
@@ -1978,6 +1978,6 @@ fn str_list_arg(fn_name: &str, args: &[EvalValue], idx: usize) -> Result<Vec<Str
     match args.get(idx) {
         Some(EvalValue::List(v)) => Ok(v.iter().map(|x| x.to_string()).collect()),
         Some(EvalValue::Str(s)) => Ok(vec![s.clone()]),
-        _ => Err(format!("table.{}: argumento {} debe ser lista de strings", fn_name, idx + 1)),
+        _ => Err(format!("table.{}: argument {} must be a list of strings", fn_name, idx + 1)),
     }
 }

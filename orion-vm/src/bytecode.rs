@@ -76,7 +76,7 @@ pub struct OrionBytecode {
 /// Detecta automáticamente el formato: binario (ORBC magic) o JSON legacy.
 pub fn load(path: &str) -> Result<OrionBytecode, String> {
     let bytes = fs::read(path)
-        .map_err(|e| format!("No se pudo leer '{}': {}", path, e))?;
+        .map_err(|e| format!("Could not read '{}': {}", path, e))?;
 
     if bytes.starts_with(MAGIC) {
         // Formato binario: saltar los 4 bytes del magic
@@ -85,7 +85,7 @@ pub fn load(path: &str) -> Result<OrionBytecode, String> {
     } else {
         // Formato JSON legado
         let text = String::from_utf8(bytes)
-            .map_err(|e| format!("Bytecode no es UTF-8 válido: {}", e))?;
+            .map_err(|e| format!("Bytecode is not valid UTF-8: {}", e))?;
         serde_json::from_str(&text)
             .map_err(|e| format!("Error leyendo bytecode JSON: {}", e))
     }
@@ -100,7 +100,7 @@ pub fn save(bc: &OrionBytecode, path: &str) -> Result<(), String> {
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&payload);
     fs::write(path, out)
-        .map_err(|e| format!("No se pudo escribir '{}': {}", path, e))
+        .map_err(|e| format!("Could not write '{}': {}", path, e))
 }
 
 /// Guarda bytecode en formato JSON (útil para depuración / inspección humana).
@@ -108,5 +108,5 @@ pub fn save_json(bc: &OrionBytecode, path: &str) -> Result<(), String> {
     let text = serde_json::to_string_pretty(bc)
         .map_err(|e| format!("Error serializando bytecode JSON: {}", e))?;
     fs::write(path, text)
-        .map_err(|e| format!("No se pudo escribir '{}': {}", path, e))
+        .map_err(|e| format!("Could not write '{}': {}", path, e))
 }

@@ -29,7 +29,27 @@ use super::launch::Tuning;
 /// que sobreviva a una navegación ni ensucia el espacio global del sitio, que
 /// es una forma barata de que un scraper se delate.
 pub const FIND_JS: &str = r#"
-// Documentos donde buscar: el principal y el de cada iframe accesible.
+// Shadow roots ABIERTAS que cuelgan de una raíz.
+//
+// Un componente web guarda su contenido en una shadow root, y `querySelector`
+// del documento no entra ahí: el selector correcto "no existe" y no hay pista
+// de por qué. Media web moderna —de un reproductor de vídeo a los formularios
+// de Salesforce— es esto, así que la búsqueda entra sola.
+//
+// Una shadow root CERRADA (`mode: 'closed'`) no es accesible ni para el
+// navegador desde fuera. No hay truco: se dice en el error en vez de fingir.
+const __sombras = (raiz, out, prof) => {
+  if (prof > __SPROF) return;
+  let els;
+  try { els = raiz.querySelectorAll('*'); } catch (e) { return; }
+  for (const e of els) {
+    const sr = e.shadowRoot;
+    if (sr) { out.push(sr); __sombras(sr, out, prof + 1); }
+  }
+};
+
+// Raíces donde buscar: el documento principal, el de cada iframe accesible, y
+// las shadow roots abiertas de todos ellos.
 //
 // Muchos modales —los de consentimiento de cookies sobre todo— viven dentro de
 // un iframe. Sin esto, el selector correcto "no existe" y el usuario acaba
@@ -47,6 +67,14 @@ const __docs = () => {
     }
   };
   scan(document);
+  // Las shadow roots van DESPUÉS de los documentos: el caso normal —el
+  // elemento está en el DOM de siempre— sigue resolviéndose en el primer
+  // intento, y solo se paga el recorrido cuando hace falta.
+  if (__SHADOW) {
+    const sombras = [];
+    for (const d of out) __sombras(d, sombras, 0);
+    out.push(...sombras);
+  }
   return out;
 };
 
@@ -68,6 +96,10 @@ const __offset = (el) => {
 
 const __unoEn = (doc, sel) => {
   if (sel.startsWith('//') || sel.startsWith('(//')) {
+    // XPath no cruza la frontera de una shadow root, y una ShadowRoot no
+    // tiene `evaluate`. Se salta en vez de lanzar: dentro del shadow hay que
+    // usar CSS o `text=`, y eso lo dice el error de arriba si no aparece.
+    if (!doc.evaluate) return null;
     return doc.evaluate(sel, doc, null, 9, null).singleNodeValue;
   }
   if (sel.startsWith('text=')) {
@@ -86,6 +118,7 @@ const __unoEn = (doc, sel) => {
 
 const __todosEn = (doc, sel) => {
   if (sel.startsWith('//') || sel.startsWith('(//')) {
+    if (!doc.evaluate) return [];
     const r = doc.evaluate(sel, doc, null, 7, null);
     const out = [];
     for (let i = 0; i < r.snapshotLength; i++) out.push(r.snapshotItem(i));
@@ -117,15 +150,25 @@ const __findAll = (sel) => {
 };
 "#;
 
+/// Constantes que el JS inyectado necesita. Salen del afinado, no del código:
+/// quien tenga un sitio raro sube la profundidad o apaga el shadow sin
+/// recompilar nada.
+pub fn consts(t: &Tuning) -> String {
+    format!(
+        "const __PROF = {}; const __SHADOW = {}; const __SPROF = {};",
+        t.iframe_depth, t.shadow, t.shadow_depth,
+    )
+}
+
 pub fn expr(sel: &str, cuerpo: &str, t: &Tuning) -> String {
     let s = serde_json::Value::String(sel.to_string()).to_string();
-    let prof = t.iframe_depth;
-    format!("(() => {{ const __PROF = {prof};\n {FIND_JS}\n const sel = {s};\n {cuerpo} }})()")
+    let c = consts(t);
+    format!("(() => {{ {c}\n {FIND_JS}\n const sel = {s};\n {cuerpo} }})()")
 }
 
 pub fn expr_multi(cuerpo: &str, t: &Tuning) -> String {
-    let prof = t.iframe_depth;
-    format!("(() => {{ const __PROF = {prof};\n {FIND_JS}\n {cuerpo} }})()")
+    let c = consts(t);
+    format!("(() => {{ {c}\n {FIND_JS}\n {cuerpo} }})()")
 }
 
 /// Como `expr`, pero reintentando hasta obtener algo o agotar el plazo.
@@ -241,7 +284,21 @@ pub fn box_for_click(
     // El hit-test tiene que ocurrir en el documento del elemento: dentro de un
     // iframe, `document.elementFromPoint` de la página de arriba devolvería el
     // propio iframe y todo parecería tapado.
-    const __enPunto = (el, x, y) => el.ownerDocument.elementFromPoint(x, y);
+    //
+    // Con shadow DOM pasa lo mismo un nivel más abajo: `elementFromPoint`
+    // devuelve el HOST, no el botón de dentro, y `host.contains(boton)` es
+    // false porque `contains` no cruza la frontera. Sin bajar por las shadow
+    // roots, todo componente web parecería tapado por sí mismo y `click`
+    // fallaría con un motivo que no hay forma de entender.
+    const __enPunto = (el, x, y) => {{
+      let enc = el.ownerDocument.elementFromPoint(x, y);
+      for (let i = 0; __SHADOW && enc && enc.shadowRoot && i < __SPROF; i++) {{
+        const dentro = enc.shadowRoot.elementFromPoint(x, y);
+        if (!dentro || dentro === enc) break;
+        enc = dentro;
+      }}
+      return enc;
+    }};
     const __nombre = (e) => {{
       const cls = String(e.className || '').split(' ').filter(Boolean)[0];
       return '<' + e.tagName.toLowerCase() + (cls ? '.' + cls : '') + '>';
@@ -271,7 +328,7 @@ pub fn box_for_click(
               }}
             }}
             const enc = __enPunto(el, cands[0][0], cands[0][1]);
-            why = enc ? ('lo tapa ' + __nombre(enc)) : 'no responde al puntero';
+            why = enc ? ('it is covered by ' + __nombre(enc)) : 'it does not respond to the pointer';
           }}
         }}
 
@@ -322,11 +379,11 @@ pub fn box_for_click(
     let v = r.get("result").and_then(|x| x.get("value")).cloned().unwrap_or(serde_json::Value::Null);
 
     if v.get("ok").and_then(|b| b.as_bool()) != Some(true) {
-        let why = v.get("why").and_then(|w| w.as_str()).unwrap_or("no se pudo localizar");
+        let why = v.get("why").and_then(|w| w.as_str()).unwrap_or("could not be located");
         let pista = if force == Force::No {
-            "\n  Si el elemento que estorba no se va a quitar, usa: { force: yes }"
+            "\n  If whatever is in the way will not go away, use: { force: yes }"
         } else { "" };
-        return Err(format!("'{sel}': {why} (tras esperar {ms} ms){pista}"));
+        return Err(format!("'{sel}': {why} (after waiting {ms} ms){pista}"));
     }
     Ok(Box {
         x: v.get("x").and_then(|n| n.as_f64()).unwrap_or(0.0),

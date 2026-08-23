@@ -438,7 +438,7 @@ fn main() {
         //    Generar documentación Markdown
         "--docs" => {
             if args.len() < 3 {
-                cli::banner::fail("Usage: orion --docs <archivo.orx|carpeta> [--output=<dir>]");
+                cli::banner::fail("Usage: orion --docs <file.orx|folder> [--output=<dir>]");
                 std::process::exit(1);
             }
             let output = args.iter()
@@ -485,7 +485,7 @@ fn main() {
             let src_path = &args[2];
             let out_path = src_path.replace(".orx", ".orbc");
             let src = read_src(src_path);
-            let bc = match compile_source(&src, src_path) {
+            let bc = match compile_entry_source(&src, src_path) {
                 Ok(bc) => bc,
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
@@ -500,7 +500,7 @@ fn main() {
                     cli::banner::fail(&e); std::process::exit(1);
                 });
             }
-            cli::banner::ok(&format!("Compilado → {out_path}{}",
+            cli::banner::ok(&format!("Compiled → {out_path}{}",
                 if use_json { " (JSON)" } else { " (binario)" }));
         }
 
@@ -514,7 +514,7 @@ fn main() {
             let t0 = Instant::now();
             let src = read_src(src_path);
             typecheck_gate(&src, src_path, &args);
-            let bc = match compile_source(&src, src_path) {
+            let bc = match compile_entry_source(&src, src_path) {
                 Ok(bc) => bc,
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
@@ -552,7 +552,7 @@ fn main() {
             let t_total = Instant::now();
             let src = read_src(src_path);
             typecheck_gate(&src, src_path, &args);
-            let bc = match compile_source(&src, src_path) {
+            let bc = match compile_entry_source(&src, src_path) {
                 Ok(bc) => bc,
                 Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
             };
@@ -576,7 +576,7 @@ fn main() {
             if !path.ends_with(".orx") && !path.ends_with(".orbc")
                 && !std::path::Path::new(path).exists()
             {
-                cli::banner::fail(&format!("Comando o archivo desconocido: '{path}'"));
+                cli::banner::fail(&format!("Unknown command or file: '{path}'"));
                 eprintln!("  Try {BOLD}orion help{RESET} to see the commands.",
                     BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
                 std::process::exit(1);
@@ -588,7 +588,7 @@ fn main() {
             let (bc, src) = if path.ends_with(".orx") {
                 let src = read_src(path);
                 typecheck_gate(&src, path, &args);
-                let bc = match compile_source(&src, path) {
+                let bc = match compile_entry_source(&src, path) {
                     Ok(bc) => bc,
                     Err(e) => { eprint!("{}", e.render(&src)); std::process::exit(1); }
                 };
@@ -781,14 +781,26 @@ fn typecheck_gate(src: &str, path: &str, args: &[String]) {
 
 /// Lex + parse + codegen → OrionBytecode, o un error estructurado con span.
 pub fn compile_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, error::OrionError> {
+    compile_with(src, path, false)
+}
+
+/// Compila el archivo que el usuario manda ejecutar (`run`, `--build`, `.orbc`).
+/// Añade la llamada a `main` si el programa la define y no la llama — ver
+/// [`codegen::compile_entry`]. El REPL y los diagnósticos del LSP usan
+/// [`compile_source`]: allí definir `main` no debe ejecutarla.
+pub fn compile_entry_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, error::OrionError> {
+    compile_with(src, path, true)
+}
+
+fn compile_with(src: &str, path: &str, entry: bool) -> Result<bytecode::OrionBytecode, error::OrionError> {
     let tokens = lexer::lex(src)
         .map_err(|e| error::OrionError::from(e).with_file(path))?;
 
     let stmts = parser::parse(tokens)
         .map_err(|e| error::OrionError::from(e).with_file(path))?;
 
-    codegen::compile(stmts)
-        .map_err(|e| error::OrionError::from(e).with_file(path))
+    let bc = if entry { codegen::compile_entry(stmts) } else { codegen::compile(stmts) };
+    bc.map_err(|e| error::OrionError::from(e).with_file(path))
 }
 
 //    REPL

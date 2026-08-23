@@ -68,7 +68,7 @@ pub const DISCOVER_JS: &str = r#"
       if (!best || score > best.score) best = { rows: g, score, parent };
     }
   }
-  if (!best) return { error: 'no se encontro ninguna estructura repetida de al menos ' + MIN + ' elementos' };
+  if (!best) return { error: 'no repeating structure of at least ' + MIN + ' elements was found' };
 
   const rows = best.rows;
 

@@ -52,25 +52,25 @@ pub fn compile_to_native_object(bc: &OrionBytecode) -> Result<Option<Vec<u8>>, S
     main_sig.returns.push(AbiParam::new(types::I32));
     let main_id = module
         .declare_function("main", Linkage::Export, &main_sig)
-        .map_err(|e| format!("Error declarando main: {e}"))?;
+        .map_err(|e| format!("Error declaring main: {e}"))?;
 
     let mut reg_shape_sig = module.make_signature();
     for _ in 0..3 { reg_shape_sig.params.push(AbiParam::new(types::I64)); }
     let reg_shape_id = module
         .declare_function("rt_register_shape", Linkage::Import, &reg_shape_sig)
-        .map_err(|e| format!("Error declarando rt_register_shape: {e}"))?;
+        .map_err(|e| format!("Error declaring rt_register_shape: {e}"))?;
 
     let mut reg_fn_sig = module.make_signature();
     for _ in 0..2 { reg_fn_sig.params.push(AbiParam::new(types::I64)); }
     let reg_fn_id = module
         .declare_function("rt_register_fn", Linkage::Import, &reg_fn_sig)
-        .map_err(|e| format!("Error declarando rt_register_fn: {e}"))?;
+        .map_err(|e| format!("Error declaring rt_register_fn: {e}"))?;
 
     let mut reg_method_sig = module.make_signature();
     for _ in 0..3 { reg_method_sig.params.push(AbiParam::new(types::I64)); }
     let reg_method_id = module
         .declare_function("rt_register_method", Linkage::Import, &reg_method_sig)
-        .map_err(|e| format!("Error declarando rt_register_method: {e}"))?;
+        .map_err(|e| format!("Error declaring rt_register_method: {e}"))?;
 
     let mut lits: HashMap<String, String> = HashMap::new();
     for (name, fields, parents) in &prog.shapes {
@@ -145,7 +145,7 @@ pub fn compile_to_native_object(bc: &OrionBytecode) -> Result<Option<Vec<u8>>, S
 
     cg.module_mut()
         .define_function(main_id, &mut ctx)
-        .map_err(|e| format!("Error compilando main(): {e}"))?;
+        .map_err(|e| format!("Error compiling main(): {e}"))?;
 
     let product = cg.into_module().finish();
     product

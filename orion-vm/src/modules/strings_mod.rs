@@ -39,7 +39,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // --- División y unión ---
         // split(s: string, sep?: string) -> list → trozos; sin `sep` parte por espacios y descarta los vacíos
         "split" => {
-            if args.is_empty() { return Err("strings.split requiere (s, sep?)".into()); }
+            if args.is_empty() { return Err("strings.split requires (s, sep?)".into()); }
             let s = to_str(&args[0]);
             let parts: Vec<EvalValue> = if args.len() > 1 {
                 let sep = to_str(&args[1]);
@@ -51,10 +51,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // join(lista: list, sep: string) -> string → une los elementos; la LISTA va primera
         "join" => {
-            if args.len() < 2 { return Err("strings.join requiere (list, sep)".into()); }
+            if args.len() < 2 { return Err("strings.join requires (list, sep)".into()); }
             let list = match &args[0] {
                 EvalValue::List(v) => v.iter().map(|x| format!("{}", x)).collect::<Vec<_>>(),
-                _ => return Err("strings.join: el primer argumento debe ser una lista".into()),
+                _ => return Err("strings.join: el the first argument must be a lista".into()),
             };
             let sep = to_str(&args[1]);
             Ok(EvalValue::Str(list.join(&sep)))
@@ -63,7 +63,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // --- Reemplazos y búsquedas ---
         // replace(s: string, viejo: string, nuevo: string) -> string → cambia TODAS las apariciones, no solo la primera
         "replace" => {
-            if args.len() < 3 { return Err("strings.replace requiere (s, old, new)".into()); }
+            if args.len() < 3 { return Err("strings.replace requires (s, old, new)".into()); }
             let s   = to_str(&args[0]);
             let old = to_str(&args[1]);
             let new = to_str(&args[2]);
@@ -71,28 +71,28 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // contains(s: string, sub: string) -> bool → si `sub` aparece en algún sitio
         "contains" => {
-            if args.len() < 2 { return Err("strings.contains requiere (s, sub)".into()); }
+            if args.len() < 2 { return Err("strings.contains requires (s, sub)".into()); }
             let s   = to_str(&args[0]);
             let sub = to_str(&args[1]);
             Ok(EvalValue::Bool(s.contains(sub.as_str())))
         }
         // starts_with(s: string, sub: string) -> bool → si empieza por `sub`
         "starts_with" => {
-            if args.len() < 2 { return Err("strings.starts_with requiere (s, sub)".into()); }
+            if args.len() < 2 { return Err("strings.starts_with requires (s, sub)".into()); }
             let s   = to_str(&args[0]);
             let sub = to_str(&args[1]);
             Ok(EvalValue::Bool(s.starts_with(sub.as_str())))
         }
         // ends_with(s: string, sub: string) -> bool → si termina en `sub`
         "ends_with" => {
-            if args.len() < 2 { return Err("strings.ends_with requiere (s, sub)".into()); }
+            if args.len() < 2 { return Err("strings.ends_with requires (s, sub)".into()); }
             let s   = to_str(&args[0]);
             let sub = to_str(&args[1]);
             Ok(EvalValue::Bool(s.ends_with(sub.as_str())))
         }
         // index_of(s: string, sub: string) -> int → posición de la 1ª aparición, o -1. OJO: cuenta BYTES, no caracteres, así que con acentos no coincide con length()
         "index_of" | "find_index" => {
-            if args.len() < 2 { return Err("strings.index_of requiere (s, sub)".into()); }
+            if args.len() < 2 { return Err("strings.index_of requires (s, sub)".into()); }
             let s   = to_str(&args[0]);
             let sub = to_str(&args[1]);
             match s.find(sub.as_str()) {
@@ -105,7 +105,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Las tres de aquí toman el PATRÓN primero, al revés que el resto del módulo.
         // match(patron: string, s: string) -> bool → si el patrón casa en algún sitio
         "match" => {
-            if args.len() < 2 { return Err("strings.match requiere (pattern, s)".into()); }
+            if args.len() < 2 { return Err("strings.match requires (pattern, s)".into()); }
             let pattern = to_str(&args[0]);
             let s       = to_str(&args[1]);
             let re = Regex::new(&pattern).map_err(|e| format!("strings.match regex: {}", e))?;
@@ -113,7 +113,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // find(patron: string, s: string) -> list → los TROZOS que casan, no sus posiciones. Para una posición usa index_of
         "find" => {
-            if args.len() < 2 { return Err("strings.find requiere (pattern, s)".into()); }
+            if args.len() < 2 { return Err("strings.find requires (pattern, s)".into()); }
             let pattern = to_str(&args[0]);
             let s       = to_str(&args[1]);
             let re = Regex::new(&pattern).map_err(|e| format!("strings.find regex: {}", e))?;
@@ -124,7 +124,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // replace_regex(patron: string, reemplazo: string, s: string) -> string → cambia todo lo que case; el texto va el ÚLTIMO
         "replace_regex" => {
-            if args.len() < 3 { return Err("strings.replace_regex requiere (pattern, repl, s)".into()); }
+            if args.len() < 3 { return Err("strings.replace_regex requires (pattern, repl, s)".into()); }
             let pattern = to_str(&args[0]);
             let repl    = to_str(&args[1]);
             let s       = to_str(&args[2]);
@@ -135,7 +135,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // --- Padding y formato ---
         // pad(s: string, ancho: int, relleno?: string) -> string → rellena solo por la DERECHA hasta `ancho`; si ya es más largo, se queda igual
         "pad" => {
-            if args.is_empty() { return Err("strings.pad requiere (s, width, char?)".into()); }
+            if args.is_empty() { return Err("strings.pad requires (s, width, char?)".into()); }
             let s     = to_str(&args[0]);
             let width = if args.len() > 1 { to_i64(&args[1])? as usize } else { 0 };
             let ch    = if args.len() > 2 { to_str(&args[2]).chars().next().unwrap_or(' ') } else { ' ' };
@@ -144,7 +144,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // center(s: string, ancho: int, relleno?: string) -> string → centra rellenando a los dos lados; si sobra un hueco, va a la derecha
         "center" => {
-            if args.len() < 2 { return Err("strings.center requiere (s, width)".into()); }
+            if args.len() < 2 { return Err("strings.center requires (s, width)".into()); }
             let s     = to_str(&args[0]);
             let width = to_i64(&args[1])? as usize;
             let ch    = if args.len() > 2 { to_str(&args[2]).chars().next().unwrap_or(' ') } else { ' ' };
@@ -164,7 +164,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // --- Futuristas Orion ---
         // orbit(s: string, veces?: int) -> string → rota los caracteres hacia la izquierda; por defecto 2
         "orbit" => {
-            if args.is_empty() { return Err("strings.orbit requiere (s, times?)".into()); }
+            if args.is_empty() { return Err("strings.orbit requires (s, times?)".into()); }
             let s     = to_str(&args[0]);
             let times = if args.len() > 1 { to_i64(&args[1])? as usize } else { 2 };
             let chars: Vec<char> = s.chars().collect();
@@ -203,14 +203,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // --- Utilidades extra ---
         // repeat(s: string, n: int) -> string → el texto repetido n veces, sin separador
         "repeat" => {
-            if args.len() < 2 { return Err("strings.repeat requiere (s, n)".into()); }
+            if args.len() < 2 { return Err("strings.repeat requires (s, n)".into()); }
             let s = to_str(&args[0]);
             let n = to_i64(&args[1])? as usize;
             Ok(EvalValue::Str(s.repeat(n)))
         }
         // count(s: string, sub: string) -> int → cuántas veces aparece `sub` sin solaparse: en "aaa", contar "aa" da 1
         "count" => {
-            if args.len() < 2 { return Err("strings.count requiere (s, sub)".into()); }
+            if args.len() < 2 { return Err("strings.count requires (s, sub)".into()); }
             let s   = to_str(&args[0]);
             let sub = to_str(&args[1]);
             Ok(EvalValue::Int(s.matches(sub.as_str()).count() as i64))
@@ -226,13 +226,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Bool(s.parse::<f64>().is_ok()))
         }
 
-        f => Err(format!("strings.{}() no existe", f)),
+        f => Err(format!("strings.{}() does not exist", f)),
     }
 }
 
 fn one_str(fn_name: &str, args: &[EvalValue]) -> Result<String, String> {
     if args.is_empty() {
-        return Err(format!("strings.{}() requiere al menos 1 argumento", fn_name));
+        return Err(format!("strings.{}() requires at least 1 argument", fn_name));
     }
     Ok(to_str(&args[0]))
 }
@@ -248,7 +248,7 @@ fn to_i64(v: &EvalValue) -> Result<i64, String> {
     match v {
         EvalValue::Int(n)   => Ok(*n),
         EvalValue::Float(f) => Ok(*f as i64),
-        other => Err(format!("strings: esperaba número, recibió {}", other.type_name())),
+        other => Err(format!("strings: expected a number, got {}", other.type_name())),
     }
 }
 
@@ -281,7 +281,7 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
         .filter(|c| !c.is_whitespace())
         .map(|c| {
             let v = table[c as usize];
-            if v == 255 { Err(format!("carácter inválido en base64: {}", c)) }
+            if v == 255 { Err(format!("invalid character in base64: {}", c)) }
             else { Ok(v) }
         })
         .collect::<Result<_, _>>()?;

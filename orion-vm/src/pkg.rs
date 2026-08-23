@@ -86,9 +86,9 @@ fn resumen(instalados: usize, fallos: usize, inicio: std::time::Instant) {
     let plural = |n: usize, s: &str, p: &str| if n == 1 { s.to_string() } else { p.to_string() };
     let cuenta = match (instalados, fallos) {
         (n, 0) => format!("{n} {}", plural(n, "paquete instalado", "paquetes instalados")),
-        (0, f) => format!("{f} {}", plural(f, "fallo", "fallos")),
+        (0, f) => format!("{f} {}", plural(f, "failure", "failures")),
         (n, f) => format!("{n} {}, {f} {}",
-                          plural(n, "instalado", "instalados"), plural(f, "fallo", "fallos")),
+                          plural(n, "instalado", "instalados"), plural(f, "failure", "failures")),
     };
     let glifo = if fallos == 0 { format!("{BOLD}{GREEN}✓{RESET}") } else { format!("{BOLD}{ORANGE}!{RESET}") };
     println!();
@@ -226,13 +226,13 @@ fn verify_signature(pkg: &str, bytes: &[u8], sig_b64: &str) -> Result<bool, Stri
         return Ok(false); // nada que verificar contra
     }
     let sig = B64.decode(sig_b64.trim())
-        .map_err(|e| format!("firma de '{pkg}' no es base64 válido: {e}"))?;
+        .map_err(|e| format!("the signature of '{pkg}' is not valid base64: {e}"))?;
     let digest = Sha256::digest(bytes);
 
     for (name, pem) in &keys {
         let Ok(key) = RsaPublicKey::from_public_key_pem(pem) else { continue };
         if key.verify(Pkcs1v15Sign::new::<Sha256>(), &digest, &sig).is_ok() {
-            println!("  firma verificada con {name}");
+            println!("  signature verified with {name}");
             return Ok(true);
         }
     }
@@ -251,7 +251,7 @@ fn http_get_bytes(what: &str, url: &str) -> Result<Vec<u8>, String> {
     let resp = ureq::get(url)
         .set("User-Agent", "orion-lang/pkg")
         .call()
-        .map_err(|e| format!("no se pudo descargar '{what}' desde {url}: {e}"))?;
+        .map_err(|e| format!("could not download '{what}' from {url}: {e}"))?;
 
     let total = resp.header("Content-Length").and_then(|v| v.trim().parse::<u64>().ok());
     let mut progreso = banner::Download::start(what, total);
@@ -275,7 +275,7 @@ fn http_get_bytes(what: &str, url: &str) -> Result<Vec<u8>, String> {
 
 fn http_get_string(what: &str, url: &str) -> Result<String, String> {
     let bytes = http_get_bytes(what, url)?;
-    String::from_utf8(bytes).map_err(|_| format!("'{what}' no es texto UTF-8 válido"))
+    String::from_utf8(bytes).map_err(|_| format!("'{what}' is not valid UTF-8 text"))
 }
 
 //    Registry
@@ -398,7 +398,7 @@ pub fn installed_everywhere() -> Vec<(PathBuf, HashMap<String, serde_json::Value
 
 fn save_installed_at(dir: &Path, installed: &HashMap<String, serde_json::Value>) -> Result<(), String> {
     fs::create_dir_all(dir)
-        .map_err(|e| format!("No se pudo crear {}: {e}", dir.display()))?;
+        .map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
     let path = installed_path_in(dir);
     let json = serde_json::to_string_pretty(installed)
         .map_err(|e| format!("Error serializando installed.json: {e}"))?;
@@ -529,7 +529,7 @@ fn fetch_source(name: &str, src: &Source, entry: Option<&PkgEntry>) -> Result<(V
         Source::Url(u) => Ok((http_get_bytes(name, u)?, u.clone())),
         Source::Local(p) => {
             let bytes = fs::read(p)
-                .map_err(|e| format!("no se pudo leer '{}': {e}", p.display()))?;
+                .map_err(|e| format!("could not read '{}': {e}", p.display()))?;
             Ok((bytes, p.to_string_lossy().to_string()))
         }
         Source::GitHub { owner, repo, git_ref, path } => {
@@ -576,7 +576,7 @@ fn install_native_asset(name: &str, entry: &PkgEntry, dir: &Path) -> Result<Opti
         ));
     };
     if asset.url.is_empty() {
-        return Err(format!("'{name}': el asset de {plat} no tiene 'url'"));
+        return Err(format!("'{name}': the {plat} asset has no 'url'"));
     }
     // Un binario remoto sin checksum declarado no se instala: es el único
     // punto del flujo donde ejecutamos código que no compiló el usuario.
@@ -593,8 +593,8 @@ fn install_native_asset(name: &str, entry: &PkgEntry, dir: &Path) -> Result<Opti
     match &asset.signature {
         Some(sig) => {
             if !verify_signature(name, &bytes, sig)? {
-                println!("  aviso: '{name}' viene firmado pero no hay claves de confianza instaladas");
-                println!("         (el checksum sí se verificó; añade claves en {})",
+                println!("  warning: '{name}' is signed but no trusted keys are installed");
+                println!("         (the checksum was verified; add keys in {})",
                          trusted_key_dirs()[0].display());
             }
         }
@@ -606,10 +606,10 @@ fn install_native_asset(name: &str, entry: &PkgEntry, dir: &Path) -> Result<Opti
     );
     let target_dir = paths::native_dir(dir, name);
     fs::create_dir_all(&target_dir)
-        .map_err(|e| format!("no se pudo crear {}: {e}", target_dir.display()))?;
+        .map_err(|e| format!("could not create {}: {e}", target_dir.display()))?;
     let target = target_dir.join(&file_name);
     fs::write(&target, &bytes)
-        .map_err(|e| format!("no se pudo escribir {}: {e}", target.display()))?;
+        .map_err(|e| format!("could not write {}: {e}", target.display()))?;
 
     // En Unix la librería necesita permiso de ejecución.
     #[cfg(unix)]
@@ -668,9 +668,9 @@ fn install_one(
     let digest = sha256_hex(&bytes);
 
     fs::create_dir_all(&dir)
-        .map_err(|e| format!("no se pudo crear {}: {e}", dir.display()))?;
+        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     fs::write(&dest, &bytes)
-        .map_err(|e| format!("no se pudo escribir {}: {e}", dest.display()))?;
+        .map_err(|e| format!("could not write {}: {e}", dest.display()))?;
 
     let native = match entry {
         Some(e) => install_native_asset(name, e, &dir)?,
@@ -725,7 +725,7 @@ pub fn add_package(spec: &str, force: bool, sha: Option<&str>) {
             Some(v) => format!("v{v}"),
         };
         encabezado("Añadir paquete", &dir);
-        linea_aviso(&name, &format!("ya instalado ({v}) — usa --force para reinstalar"));
+        linea_aviso(&name, &format!("already installed ({v}) — use --force to reinstall"));
         println!();
         return;
     }
@@ -827,16 +827,16 @@ pub fn install_project() {
     let manifest = paths::manifest_path();
     if !manifest.is_file() {
         println!();
-        banner::fail(&format!("No hay {} en este proyecto.", paths::MANIFEST));
+        banner::fail(&format!("There is no {} in this project.", paths::MANIFEST));
         println!("     {DIM}Raíz detectada: {}{RESET}", paths::project_root().display());
-        println!("     {DIM}Crea el manifiesto con los campos name, version y dependencies.{RESET}");
+        println!("     {DIM}Create the manifest with the fields name, version and dependencies.{RESET}");
         println!();
         std::process::exit(1);
     }
 
     let raw = match fs::read_to_string(&manifest) {
         Ok(s) => s,
-        Err(e) => { banner::fail(&format!("No se pudo leer {}: {e}", manifest.display())); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("Could not read {}: {e}", manifest.display())); std::process::exit(1); }
     };
     let json: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(j) => j,
@@ -925,7 +925,7 @@ pub fn install_project() {
     match save_lock(&new_lock) {
         Err(e) => banner::fail(&e),
         Ok(()) if fallos == 0 => println!("  {DIM}{} actualizado{RESET}\n", paths::LOCKFILE),
-        Ok(()) => println!("  {DIM}{} conservado (hubo fallos){RESET}\n", paths::LOCKFILE),
+        Ok(()) => println!("  {DIM}{} kept (there were failures){RESET}\n", paths::LOCKFILE),
     }
 
     if fallos > 0 { std::process::exit(1); }
@@ -990,7 +990,7 @@ pub fn remove_package(name: &str) {
 
     // Los .orx builtin vienen con Orion y se conservan.
     if source == "builtin" {
-        linea_ok(name, &format!("{DIM}desregistrado (archivo builtin conservado){RESET}"));
+        linea_ok(name, &format!("{DIM}unregistered (builtin file kept){RESET}"));
         println!();
         return;
     }
@@ -1003,7 +1003,7 @@ pub fn remove_package(name: &str) {
                     println!();
                     return;
                 }
-                Err(e) => linea_aviso(name, &format!("no se pudo eliminar {}: {e}", path.display())),
+                Err(e) => linea_aviso(name, &format!("could not delete {}: {e}", path.display())),
             }
         }
     }
@@ -1053,7 +1053,7 @@ pub fn list_packages() {
         .collect();
     if !extras.is_empty() {
         println!();
-        println!("  {BOLD}{BCYAN}Instalados fuera del registry{RESET}");
+        println!("  {BOLD}{BCYAN}Installed outside the registry{RESET}");
         println!();
         for (name, (ver, dir)) in extras {
             println!("  {BOLD}{GREEN}✓{RESET}  {BWHITE}{name:<18}{RESET}{DIM}{ver:<10}{}{RESET}", dir.display());
@@ -1116,7 +1116,7 @@ pub fn update_packages(pkg_name: Option<&str>) {
     let installed = load_installed_at(&dir);
     if installed.is_empty() {
         println!();
-        banner::info(&format!("No hay paquetes instalados en {}.", dir.display()));
+        banner::info(&format!("No packages installed in {}.", dir.display()));
         println!();
         return;
     }
@@ -1204,7 +1204,7 @@ fn read_manifest() -> Result<PackageManifest, String> {
 
     let req = |field: &str| -> Result<String, String> {
         json[field].as_str().map(str::to_string)
-            .ok_or_else(|| format!("{}: campo requerido '{field}' faltante", paths::MANIFEST))
+            .ok_or_else(|| format!("{}: required field '{field}' is missing", paths::MANIFEST))
     };
 
     let name    = req("name")?;
@@ -1233,7 +1233,7 @@ fn gh_get(url: &str, token: &str) -> Result<serde_json::Value, String> {
         .call()
         .map_err(|e| format!("GitHub GET {url}: {e}"))?
         .into_json::<serde_json::Value>()
-        .map_err(|e| format!("Respuesta inválida de GitHub: {e}"))
+        .map_err(|e| format!("Invalid response from GitHub: {e}"))
 }
 
 fn gh_put(url: &str, token: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -1244,7 +1244,7 @@ fn gh_put(url: &str, token: &str, body: &serde_json::Value) -> Result<serde_json
         .send_json(body.clone())
         .map_err(|e| format!("GitHub PUT {url}: {e}"))?
         .into_json::<serde_json::Value>()
-        .map_err(|e| format!("Respuesta inválida de GitHub: {e}"))
+        .map_err(|e| format!("Invalid response from GitHub: {e}"))
 }
 
 fn gh_post(url: &str, token: &str, body: &serde_json::Value) -> Result<serde_json::Value, String> {
@@ -1255,7 +1255,7 @@ fn gh_post(url: &str, token: &str, body: &serde_json::Value) -> Result<serde_jso
         .send_json(body.clone())
         .map_err(|e| format!("GitHub POST {url}: {e}"))?
         .into_json::<serde_json::Value>()
-        .map_err(|e| format!("Respuesta inválida de GitHub: {e}"))
+        .map_err(|e| format!("Invalid response from GitHub: {e}"))
 }
 
 /// Crea una rama; si ya existe (422) la reutiliza sin error.
@@ -1282,13 +1282,13 @@ pub fn publish_package() {
     };
 
     if !m.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-        banner::fail(&format!("Nombre inválido '{}'. Usa solo letras minúsculas, números y guiones.", m.name));
+        banner::fail(&format!("Invalid name '{}'. Use lowercase letters, digits and hyphens only.", m.name));
         std::process::exit(1);
     }
 
     let orx_src = match fs::read(&m.file) {
         Ok(s) => s,
-        Err(e) => { banner::fail(&format!("No se pudo leer '{}': {e}", m.file)); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("Could not read '{}': {e}", m.file)); std::process::exit(1); }
     };
     // El registry publica el checksum: quien instale puede comprobar que recibe
     // exactamente lo que se publicó, aunque el CDN o el espejo mientan.
@@ -1297,7 +1297,7 @@ pub fn publish_package() {
     let token = match std::env::var("ORION_GITHUB_TOKEN") {
         Ok(t) if !t.trim().is_empty() => t,
         _ => {
-            banner::fail("Falta el token de GitHub.");
+            banner::fail("The GitHub token is missing.");
             println!("     {DIM}1. Créalo en https://github.com/settings/tokens{RESET}");
             println!("     {DIM}   Permisos: repo (Contents read/write, Pull requests write){RESET}");
             println!("     {DIM}2. Configúralo: $env:ORION_GITHUB_TOKEN = \"<token>\"{RESET}");
@@ -1323,7 +1323,7 @@ pub fn publish_package() {
 
     let reg_bytes = match B64.decode(&reg_b64_clean) {
         Ok(b) => b,
-        Err(e) => { banner::fail(&format!("Error decodificando registry.json: {e}")); std::process::exit(1); }
+        Err(e) => { banner::fail(&format!("Error decoding registry.json: {e}")); std::process::exit(1); }
     };
     let mut reg_json: serde_json::Value = match serde_json::from_slice(&reg_bytes) {
         Ok(j) => j,
@@ -1360,7 +1360,7 @@ pub fn publish_package() {
     };
     let master_sha = match refs_resp["object"]["sha"].as_str() {
         Some(s) => s.to_string(),
-        None => { banner::fail("No se pudo leer el SHA de master."); std::process::exit(1); }
+        None => { banner::fail("Could not read the SHA of master."); std::process::exit(1); }
     };
 
     let branch = format!("publish/{}-{}", m.name, m.version.replace('.', "-"));
@@ -1424,7 +1424,7 @@ pub fn publish_package() {
     banner::ok(&format!("{BWHITE}{} v{} enviado{RESET}", m.name, m.version));
     println!("     {BCYAN}{pr_url}{RESET}");
     println!();
-    println!("  {DIM}Estará disponible tras la revisión y el merge del PR.{RESET}");
+    println!("  {DIM}It becomes available once the PR is reviewed and merged.{RESET}");
     println!("  {DIM}Después:{RESET}  {BCYAN}orion update {}{RESET}", m.name);
     println!();
 }

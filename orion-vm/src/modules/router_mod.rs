@@ -47,7 +47,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // bajo el prefijo, con MIME automático e index.html en directorios.
         // Los paths se validan contra path traversal (../ no escapa la carpeta).
         "static" | "static_dir" => {
-            if args.len() < 3 { return Err("router.static requiere (id, prefijo_url, carpeta)".into()); }
+            if args.len() < 3 { return Err("router.static requires (id, prefijo_url, carpeta)".into()); }
             let id     = to_u64(&args[0])?;
             let mut prefix = to_str(&args[1]);
             let dir    = to_str(&args[2]);
@@ -63,7 +63,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // prefijo con JWT Bearer: sin token válido serve responde 401 solo;
         // con token válido el handler recibe los claims en req["user"].
         "guard" => {
-            if args.len() < 3 { return Err("router.guard requiere (id, prefijo_url, secret)".into()); }
+            if args.len() < 3 { return Err("router.guard requires (id, prefijo_url, secret)".into()); }
             let id     = to_u64(&args[0])?;
             let mut prefix = to_str(&args[1]);
             let secret = to_str(&args[2]);
@@ -77,7 +77,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // add(id, method, path, handler) → Bool
         "add" => {
-            if args.len() < 4 { return Err("router.add requiere (id, method, path, handler)".into()); }
+            if args.len() < 4 { return Err("router.add requires (id, method, path, handler)".into()); }
             let id      = to_u64(&args[0])?;
             let method  = to_str(&args[1]).to_uppercase();
             let pattern = to_str(&args[2]);
@@ -91,7 +91,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // get/post/put/delete/patch(id, path, handler) → Bool
         "get" | "post" | "put" | "delete" | "patch" => {
-            if args.len() < 3 { return Err(format!("router.{} requiere (id, path, handler)", function)); }
+            if args.len() < 3 { return Err(format!("router.{} requires (id, path, handler)", function)); }
             let id      = to_u64(&args[0])?;
             let method  = function.to_uppercase();
             let pattern = to_str(&args[1]);
@@ -105,7 +105,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // use_middleware(id, fn) → Bool
         "use_middleware" => {
-            if args.len() < 2 { return Err("router.use_middleware requiere (id, handler_fn)".into()); }
+            if args.len() < 2 { return Err("router.use_middleware requires (id, handler_fn)".into()); }
             let id = to_u64(&args[0])?;
             let mw = args[1].clone();
             check_handler("use_middleware", "el middleware", &mw)?;
@@ -114,10 +114,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // attach(id) → Bool  — activa el router para el próximo serve
         "attach" => {
-            if args.is_empty() { return Err("router.attach requiere (id)".into()); }
+            if args.is_empty() { return Err("router.attach requires (id)".into()); }
             let id = to_u64(&args[0])?;
             if !store().lock().unwrap().contains_key(&id) {
-                return Err(format!("router: ID {} no existe", id));
+                return Err(format!("router: ID {} does not exist", id));
             }
             *active_id().lock().unwrap() = Some(id);
             Ok(EvalValue::Bool(true))
@@ -132,12 +132,12 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // match(id, method, path) → Dict {handler_name, params, method, path} | Null
         // (mantiene la versión anterior para uso manual)
         "match" => {
-            if args.len() < 3 { return Err("router.match requiere (id, method, path)".into()); }
+            if args.len() < 3 { return Err("router.match requires (id, method, path)".into()); }
             let id     = to_u64(&args[0])?;
             let method = to_str(&args[1]).to_uppercase();
             let path   = to_str(&args[2]);
             let store  = store().lock().unwrap();
-            let data   = store.get(&id).ok_or_else(|| format!("router: ID {} no existe", id))?;
+            let data   = store.get(&id).ok_or_else(|| format!("router: ID {} does not exist", id))?;
             for route in &data.routes {
                 if route.method == method || route.method == "*" {
                     if let Some(params) = match_path(&route.pattern, &path) {
@@ -164,10 +164,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // routes(id) → List de Dicts
         "routes" => {
-            if args.is_empty() { return Err("router.routes requiere (id)".into()); }
+            if args.is_empty() { return Err("router.routes requires (id)".into()); }
             let id    = to_u64(&args[0])?;
             let store = store().lock().unwrap();
-            let data  = store.get(&id).ok_or_else(|| format!("router: ID {} no existe", id))?;
+            let data  = store.get(&id).ok_or_else(|| format!("router: ID {} does not exist", id))?;
             let list  = data.routes.iter().map(|r| {
                 let mut d = HashMap::new();
                 d.insert("method".into(),  EvalValue::Str(r.method.clone()));
@@ -185,13 +185,13 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         // clear(id) → Bool
         "clear" => {
-            if args.is_empty() { return Err("router.clear requiere (id)".into()); }
+            if args.is_empty() { return Err("router.clear requires (id)".into()); }
             with_router_mut(to_u64(&args[0])?, |r| { r.routes.clear(); Ok(EvalValue::Bool(true)) })
         }
 
         // drop(id) → Bool
         "drop" => {
-            if args.is_empty() { return Err("router.drop requiere (id)".into()); }
+            if args.is_empty() { return Err("router.drop requires (id)".into()); }
             let id = to_u64(&args[0])?;
             store().lock().unwrap().shift_remove(&id);
             // Desactivar si era el activo
@@ -200,7 +200,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Bool(true))
         }
 
-        f => Err(format!("router.{}() no existe", f)),
+        f => Err(format!("router.{}() does not exist", f)),
     }
 }
 
@@ -317,7 +317,7 @@ fn check_handler(fn_name: &str, arg_desc: &str, h: &EvalValue) -> Result<(), Str
 
 fn type_label(v: &EvalValue) -> &'static str {
     match v {
-        EvalValue::Str(_)   => "un string vacío",
+        EvalValue::Str(_)   => "un empty string",
         EvalValue::Int(_)   => "un entero",
         EvalValue::Float(_) => "un float",
         EvalValue::Bool(_)  => "un booleano",
@@ -332,7 +332,7 @@ where F: FnOnce(&mut RouterData) -> Result<EvalValue, String>
 {
     f(store().lock().unwrap()
         .get_mut(&id)
-        .ok_or_else(|| format!("router: ID {} no existe", id))?)
+        .ok_or_else(|| format!("router: ID {} does not exist", id))?)
 }
 
 /// Coincide `pattern` con `path`, extrayendo parámetros `:param` y `*wildcard`.
@@ -370,7 +370,7 @@ fn match_path(pattern: &str, path: &str) -> Option<HashMap<String, String>> {
 fn to_u64(v: &EvalValue) -> Result<u64, String> {
     match v {
         EvalValue::Int(n) if *n > 0 => Ok(*n as u64),
-        _ => Err("router: ID debe ser un Int positivo".into()),
+        _ => Err("router: the ID must be a positive Int".into()),
     }
 }
 

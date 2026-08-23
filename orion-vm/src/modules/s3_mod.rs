@@ -115,7 +115,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // s3.config(endpoint, access_key, secret_key, region)
         "config" => {
             if args.len() < 4 {
-                return Err("s3.config requiere (endpoint, access_key, secret_key, region)".into());
+                return Err("s3.config requires (endpoint, access_key, secret_key, region)".into());
             }
             let endpoint   = to_str(&args[0]);
             let access_key = to_str(&args[1]);
@@ -128,14 +128,14 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // s3.upload(bucket, key, local_path) → {ok, url}
         "upload" => {
             if args.len() < 3 {
-                return Err("s3.upload requiere (bucket, key, local_path)".into());
+                return Err("s3.upload requires (bucket, key, local_path)".into());
             }
             let bucket = to_str(&args[0]);
             let key    = to_str(&args[1]);
             let path   = to_str(&args[2]);
             let cfg    = get_config()?;
             let body = std::fs::read(&path)
-                .map_err(|e| format!("s3.upload: no se pudo leer '{}': {}", path, e))?;
+                .map_err(|e| format!("s3.upload: could not read '{}': {}", path, e))?;
             let headers = build_auth_headers("PUT", &cfg.endpoint, &bucket, &key, "", &body, &cfg);
             let url = obj_url(&cfg, &bucket, &key);
             let mut req = ureq::put(&url);
@@ -151,7 +151,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // s3.download(bucket, key, local_path) → {ok, bytes}
         "download" => {
             if args.len() < 3 {
-                return Err("s3.download requiere (bucket, key, local_path)".into());
+                return Err("s3.download requires (bucket, key, local_path)".into());
             }
             let bucket = to_str(&args[0]);
             let key    = to_str(&args[1]);
@@ -177,7 +177,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // s3.list(bucket, prefix?) → [{key, size, modified}]
         "list" => {
             if args.is_empty() {
-                return Err("s3.list requiere (bucket, prefix?)".into());
+                return Err("s3.list requires (bucket, prefix?)".into());
             }
             let bucket = to_str(&args[0]);
             let prefix = if args.len() > 1 { to_str(&args[1]) } else { String::new() };
@@ -217,7 +217,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // s3.delete(bucket, key) → {ok}
         "delete" => {
             if args.len() < 2 {
-                return Err("s3.delete requiere (bucket, key)".into());
+                return Err("s3.delete requires (bucket, key)".into());
             }
             let bucket = to_str(&args[0]);
             let key    = to_str(&args[1]);
@@ -235,7 +235,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // s3.exists(bucket, key) → bool
         "exists" => {
             if args.len() < 2 {
-                return Err("s3.exists requiere (bucket, key)".into());
+                return Err("s3.exists requires (bucket, key)".into());
             }
             let bucket = to_str(&args[0]);
             let key    = to_str(&args[1]);
@@ -253,7 +253,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // s3.url(bucket, key) → string  — URL pública del objeto
         "url" => {
             if args.len() < 2 {
-                return Err("s3.url requiere (bucket, key)".into());
+                return Err("s3.url requires (bucket, key)".into());
             }
             let bucket = to_str(&args[0]);
             let key    = to_str(&args[1]);
@@ -265,7 +265,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Copia server-side: no descarga el archivo, S3 lo copia en su infraestructura.
         "copy" => {
             if args.len() < 4 {
-                return Err("s3.copy requiere (src_bucket, src_key, dst_bucket, dst_key)".into());
+                return Err("s3.copy requires (src_bucket, src_key, dst_bucket, dst_key)".into());
             }
             let src_bucket = to_str(&args[0]);
             let src_key    = to_str(&args[1]);
@@ -290,7 +290,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // Copia server-side y luego elimina el origen (equivale a renombrar/mover).
         "move" => {
             if args.len() < 4 {
-                return Err("s3.move requiere (src_bucket, src_key, dst_bucket, dst_key)".into());
+                return Err("s3.move requires (src_bucket, src_key, dst_bucket, dst_key)".into());
             }
             let src_bucket = to_str(&args[0]);
             let src_key    = to_str(&args[1]);
@@ -320,7 +320,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // s3.size(bucket, key) → int (bytes)  — tamaño sin descargar
         "size" => {
             if args.len() < 2 {
-                return Err("s3.size requiere (bucket, key)".into());
+                return Err("s3.size requires (bucket, key)".into());
             }
             let bucket = to_str(&args[0]);
             let key    = to_str(&args[1]);
@@ -337,7 +337,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
 
         f => Err(format!(
-            "s3.{}() no existe. Funciones: config, upload, download, list, delete, exists, \
+            "s3.{}() does not exist. Funciones: config, upload, download, list, delete, exists, \
              url, copy, move, size",
             f
         )),

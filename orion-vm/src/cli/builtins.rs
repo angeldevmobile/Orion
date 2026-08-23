@@ -286,8 +286,8 @@ fn string_methods(v: &mut Vec<BuiltinDoc>) {
 fn dict_methods(v: &mut Vec<BuiltinDoc>) {
     v.push(m("dict", "keys", "dict.keys() → list", "Lista de claves.", "d.keys()"));
     v.push(m("dict", "values", "dict.values() → list", "Lista de valores.", "d.values()"));
-    v.push(m("dict", "get", "dict.get(clave) → any", "Valor de la clave (o null).", "d.get(\"nombre\")"));
-    v.push(m("dict", "has_key", "dict.has_key(clave) → bool", "¿Existe la clave? (alias: contains).", "d.has_key(\"id\")"));
+    v.push(m("dict", "get", "dict.get(key) → any", "Valor de la clave (o null).", "d.get(\"nombre\")"));
+    v.push(m("dict", "has_key", "dict.has_key(key) → bool", "¿Existe la clave? (alias: contains).", "d.has_key(\"id\")"));
     v.push(m("dict", "len", "dict.len() → int", "Cantidad de pares.", "d.len()"));
     v.push(m("dict", "is_empty", "dict.is_empty() → bool", "¿El dict está vacío?", "d.is_empty()"));
 }
@@ -316,7 +316,7 @@ fn mod_gui(v: &mut Vec<BuiltinDoc>) {
     v.push(f("gui", "pressed", "gui.pressed(nombre) → bool", "¿Fue ese botón el último evento?", "if gui.pressed(\"agregar\") { ... }"));
     v.push(f("gui", "ev", "gui.ev() → string", "Nombre del último evento disparado.", "ev = gui.ev()"));
     v.push(f("gui", "val", "gui.val(clave, default) → any", "Lee estado de UI efímero (vive entre re-ejecuciones).", "n = gui.val(\"contador\", 0)"));
-    v.push(f("gui", "set", "gui.set(clave, valor)", "Escribe estado de UI efímero.", "gui.set(\"contador\", n + 1)"));
+    v.push(f("gui", "set", "gui.set(key, value)", "Escribe estado de UI efímero.", "gui.set(\"contador\", n + 1)"));
     v.push(f("gui", "badge", "gui.badge(texto, estilo?)", "Etiqueta de estado.", "gui.badge(\"completado\", \"success\")"));
     v.push(f("gui", "progress", "gui.progress(valor, color?)", "Barra de progreso (0..1 o 0..100).", "gui.progress(50, \"success\")"));
     v.push(f("gui", "tabs", "gui.tabs([labels], activa?)", "Pestañas; al click dispara el label.", "gui.tabs([\"Todas\",\"Activas\"], \"Todas\")"));
@@ -338,12 +338,12 @@ fn mod_gui(v: &mut Vec<BuiltinDoc>) {
 
 fn mod_state(v: &mut Vec<BuiltinDoc>) {
     v.push(f("state", "persist", "state.persist(ruta) → bool", "Activa respaldo a disco y carga lo existente (sobrevive reinicios).", "state.persist(\"app.db\")"));
-    v.push(f("state", "set", "state.set(clave, valor) → valor", "Guarda un valor en el store compartido.", "state.set(\"tareas\", [])"));
+    v.push(f("state", "set", "state.set(key, value) → valor", "Guarda un valor en el store compartido.", "state.set(\"tareas\", [])"));
     v.push(f("state", "get", "state.get(clave, default?) → any", "Lee un valor (o el default).", "tareas = state.get(\"tareas\", [])"));
-    v.push(f("state", "has", "state.has(clave) → bool", "¿Existe la clave?", "if state.has(\"seeded\") { ... }"));
+    v.push(f("state", "has", "state.has(key) → bool", "¿Existe la clave?", "if state.has(\"seeded\") { ... }"));
     v.push(f("state", "incr", "state.incr(clave, delta?) → number", "Incremento ATÓMICO (seguro bajo el pool de hilos).", "n = state.incr(\"visitas\")"));
     v.push(f("state", "decr", "state.decr(clave, delta?) → number", "Decremento atómico.", "state.decr(\"stock\")"));
-    v.push(f("state", "delete", "state.delete(clave) → bool", "Elimina una clave.", "state.delete(\"tmp\")"));
+    v.push(f("state", "delete", "state.delete(key) → bool", "Elimina una clave.", "state.delete(\"tmp\")"));
     v.push(f("state", "keys", "state.keys() → list", "Todas las claves.", "state.keys()"));
     v.push(f("state", "all", "state.all() → dict", "Snapshot completo del estado.", "state.all()"));
     v.push(f("state", "len", "state.len() → int", "Cantidad de claves.", "state.len()"));
