@@ -125,9 +125,6 @@ pub enum TokenKind {
     Question,    // ?
     At,          // @
 
-    // Bit a bit. `&` ya existía en el lexer sin que nadie lo parseara; el resto
-    // de la familia se añade con él, porque un lenguaje con AND de bits pero
-    // sin OR, XOR ni desplazamientos deja el trabajo a medias.
     Ampersand,   // &   AND
     Pipe,        // |   OR   (a dos pasos de |> y ||, que se reconocen antes)
     Caret,       // ^   XOR

@@ -1,17 +1,9 @@
 -- demo_grover.orx — Búsqueda de Grover en Orion puro.
---
--- Busca el estado "101" entre 8 posibilidades usando un circuito de 3 qubits.
--- Clásicamente se necesitan ~4 consultas en promedio; Grover lo encuentra con
--- 2 iteraciones y ~94.5% de probabilidad. Todo el circuito lo diseña el
--- developer con puertas primitivas: no hay nada precocinado.
---
---   orion run demo/demo_grover.orx
 
 use "quantum" as q
 
 BUSCADO = "101"
 
--- Oráculo: invierte la fase SOLO del estado buscado.
 -- Los qubits en 0 del objetivo se envuelven en X para que el CCZ
 -- (= H·CCX·H sobre el último qubit) dispare exactamente en |101>.
 fn oraculo(c) {
@@ -22,7 +14,6 @@ fn oraculo(c) {
     q.x(c, 1)
 }
 
--- Difusor de Grover: reflexión sobre la media (amplifica lo marcado).
 fn difusor(c) {
     for i in 0..3 { q.h(c, i) }
     for i in 0..3 { q.x(c, i) }

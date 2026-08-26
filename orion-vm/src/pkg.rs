@@ -59,11 +59,6 @@ fn linea_error(nombre: &str, msg: &str)  { linea("✗", RED,    nombre, &format!
 fn linea_aviso(nombre: &str, msg: &str)  { linea("!", ORANGE, nombre, &format!("{DIM}{msg}{RESET}")); }
 
 /// Columnas de detalle de un paquete instalado: versión, origen, tamaño y
-/// cualquier nota extra (por ejemplo el binario nativo que vino con él).
-///
-/// Un origen sin registry no declara versión, y el `0.0.0` de relleno que se
-/// guarda en `installed.json` como marcador se muestra aquí como `—`: fingir una
-/// versión que nadie ha declarado es peor que admitir que no se conoce.
 fn detalle(version: &str, origen: &str, bytes: u64, extra: &str) -> String {
     let ver = if version == "0.0.0" { "—" } else { version };
     let tam = banner::human_size(bytes);
@@ -98,9 +93,6 @@ fn resumen(instalados: usize, fallos: usize, inicio: std::time::Instant) {
 const DEFAULT_REGISTRY_BASE: &str =
     "https://raw.githubusercontent.com/angeldevmobile/Orion/master/packages";
 
-/// Tope de descarga. Un `.orx` son kilobytes y una librería nativa decenas de
-/// megabytes; más allá de esto casi seguro es un error de configuración o una
-/// respuesta HTML de error, y conviene fallar en vez de llenar el disco.
 const MAX_DOWNLOAD: u64 = 512 * 1024 * 1024;
 
 //    Configuración del registry
@@ -124,8 +116,6 @@ fn install_dir() -> PathBuf { paths::install_dir() }
 /// Directorios donde se busca lo ya instalado, del más específico al más general.
 fn search_dirs() -> Vec<PathBuf> { paths::packages_dirs() }
 
-/// Caché local del registry. Si el proyecto trae uno propio manda ese (permite
-/// fijar un registro vendorizado); si no, se usa el de la caché global.
 fn registry_path() -> PathBuf {
     let project = paths::project_packages_dir().join("registry.json");
     if project.is_file() { return project; }
@@ -170,8 +160,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Compara un digest esperado con el real. La comparación es sobre hex en
-/// minúsculas para que dé igual cómo lo haya escrito quien publicó.
 fn verify_sha256(what: &str, bytes: &[u8], expected: &str) -> Result<(), String> {
     let actual = sha256_hex(bytes);
     if actual.eq_ignore_ascii_case(expected.trim()) {
@@ -186,8 +174,6 @@ fn verify_sha256(what: &str, bytes: &[u8], expected: &str) -> Result<(), String>
 
 //    Firma de assets nativos
 
-/// Directorios donde se buscan claves públicas de confianza (`*.pem`).
-/// `ORION_TRUSTED_KEYS` gana; si no, `<global>/trusted_keys`.
 fn trusted_key_dirs() -> Vec<PathBuf> {
     if let Ok(d) = std::env::var("ORION_TRUSTED_KEYS") {
         if !d.trim().is_empty() { return vec![PathBuf::from(d)]; }
@@ -285,9 +271,6 @@ fn http_get_string(what: &str, url: &str) -> Result<String, String> {
 fn load_registry(refresh: bool) -> Result<(String, HashMap<String, PkgEntry>), String> {
     let local = registry_path();
 
-    // La caché guarda de qué registro salió. Sin esa marca, apuntar a otro
-    // registro (ORION_REGISTRY) seguía sirviendo el contenido del anterior:
-    // la caché existía, así que nunca se refrescaba.
     let cache_ajena = fs::read_to_string(&local).ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .map(|j| j["_meta"]["source"].as_str().unwrap_or("").to_string())

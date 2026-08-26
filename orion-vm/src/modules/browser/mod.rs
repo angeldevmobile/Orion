@@ -586,6 +586,7 @@ fn parse_tuning(v: Option<&EvalValue>) -> Tuning {
         if let Some(x) = u64_de(g, "cleanup_tries") { t.cleanup_tries = x as u32; }
         if let Some(x) = u64_de(g, "body_buffer")   { t.body_buffer   = x; }
         if let Some(x) = u64_de(g, "total_buffer")  { t.total_buffer  = x; }
+        if let Some(x) = u64_de(g, "stale_profile_mins") { t.stale_profile_mins = x; }
     }
     t
 }
@@ -703,7 +704,7 @@ fn do_select(args: &[EvalValue]) -> Result<EvalValue, String> {
             let why = m.get("why").map(to_str).unwrap_or_default();
             let ops = match m.get("opciones") {
                 Some(EvalValue::List(l)) if !l.is_empty() => format!(
-                    "\n  Opciones: {}",
+                    "\n  Options: {}",
                     l.iter().map(to_str).collect::<Vec<_>>().join(", ")
                 ),
                 _ => String::new(),
@@ -2062,6 +2063,9 @@ fn parse_opts(v: Option<&EvalValue>) -> Result<LaunchOpts, String> {
     }
     if let Some(EvalValue::List(xs)) = m.get("args") {
         o.extra = xs.iter().map(to_str).collect();
+    }
+    if let Some(EvalValue::List(xs)) = m.get("without").or_else(|| m.get("sin")) {
+        o.sin = xs.iter().map(to_str).collect();
     }
     Ok(o)
 }

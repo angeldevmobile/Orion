@@ -36,8 +36,6 @@ impl TaskHandle {
         self.done.notify_all();
     }
 
-    /// Bloquea (aparcando el hilo) hasta que la tarea termine y devuelve su
-    /// resultado. Sin espera activa: el SO nos despierta al `notify_all`.
     pub fn wait(&self) -> Result<SendValue, String> {
         let mut guard = self.result.lock().unwrap();
         while guard.is_none() {
@@ -77,10 +75,6 @@ thread_local! {
     static DROP_DRAINING: Cell<bool> = Cell::new(false);
 }
 
-/// Drena la cola de drops si nadie la está drenando ya. Los drops anidados
-/// que se disparan dentro del bucle solo encolan y retornan (guardado por
-/// `DROP_DRAINING`), así la profundidad de llamadas queda acotada sea cual
-/// sea la profundidad de la estructura que se destruye.
 fn drain_drop_queue() {
     DROP_DRAINING.with(|draining| {
         if draining.get() {
@@ -88,8 +82,6 @@ fn drain_drop_queue() {
         }
         draining.set(true);
         loop {
-            // Sacar con el borrow cerrado ANTES de soltar el valor: ese
-            // drop puede re-entrar aquí y volver a encolar.
             let next = DROP_QUEUE.with(|q| q.borrow_mut().pop());
             match next {
                 Some(v) => drop(v),
@@ -100,11 +92,6 @@ fn drain_drop_queue() {
     });
 }
 
-/// Drop iterativo: sin esto, soltar una cadena de instancias enlazadas
-/// (nodo.next → nodo.next → …) destruye recursivamente y desborda el call
-/// stack nativo con ~100k nodos. En vez de descender, cada instancia mueve
-/// sus fields a la cola thread-local y deja que el drenador del nivel
-/// superior los suelte en un bucle.
 impl Drop for InstanceData {
     fn drop(&mut self) {
         if self.fields.is_empty() {
@@ -120,12 +107,6 @@ impl Drop for InstanceData {
     }
 }
 
-/// Backing de una lista por referencia. Newtype sobre `Vec<Value>` con
-/// `Deref`/`DerefMut` para que el resto del código use la API de Vec como
-/// siempre; existe SOLO para poder colgarle el mismo Drop iterativo que a
-/// `InstanceData` — sin él, soltar listas anidadas a mucha profundidad
-/// ([[[[…]]]]) recorría la cadena Rc→RefCell→Vec→Value con el drop glue
-/// recursivo de Rust y desbordaba el stack.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListData(pub Vec<Value>);
 
@@ -182,15 +163,9 @@ pub enum Value {
     Float(f64),
     Str(String),
     Bool(bool),
-    /// Lista por referencia: el contenido es compartido (Rc<RefCell>) para que
-    /// `xs.push(x)` y demás mutaciones se vean en todos los alias (`ys = xs`).
-    /// La igualdad (`==`) sigue siendo estructural; `Clone` comparte el backing.
     List(Rc<RefCell<ListData>>),
     Dict(IndexMap<String, Value>),
     Instance(Rc<RefCell<InstanceData>>),
-    /// Closure: función + variables capturadas del scope donde fue creada.
-    /// El entorno es compartido (Rc<RefCell>) para que las mutaciones de las
-    /// variables capturadas persistan entre invocaciones del mismo closure.
     Closure { fn_name: String, env: Rc<RefCell<IndexMap<String, Value>>> },
     /// Handle a una tarea asíncrona en curso (parking + cancelación).
     Task(Arc<TaskHandle>),
@@ -377,10 +352,6 @@ impl Value {
 
     pub fn compare_eq(&self, other: &Value) -> bool {
         match (self, other) {
-            // Igualdad numérica con promoción int↔float, consistente con
-            // `compare_lt` y con el runtime JIT (`rt_eq`): el operador `==` es
-            // numérico, no estructural. (El `PartialEq` de abajo sigue siendo
-            // estructural para igualdad de listas/dicts/instancias.)
             (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
             (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
             _ => self == other,

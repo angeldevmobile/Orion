@@ -1,8 +1,11 @@
-# Orion `browser` — referencia
+# Orion `browser` — reference
 
-Automatización web sobre CDP (Chrome DevTools Protocol). Sin driver externo, sin
-`chromedriver`, sin dependencias nuevas: el módulo usa el `tungstenite`
-síncrono y el `serde_json` que Orion ya lleva dentro.
+> Spanish version: [BROWSER.es.md](BROWSER.es.md) — kept for reference, but
+> this English page is the canonical one and the Spanish one lags behind it.
+
+Web automation over CDP (Chrome DevTools Protocol). No external driver, no
+`chromedriver`, no new dependencies: the module uses the synchronous
+`tungstenite` and the `serde_json` that Orion already carries inside.
 
 ```orion
 use "browser" as web
@@ -14,103 +17,104 @@ with b = web.open() {
 }
 ```
 
-`with` desugara a `web.free(b)` incluso si el cuerpo lanza un error, y `free`
-cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
+`with` desugars to `web.free(b)` even if the body raises an error, and `free`
+closes the browser's tabs in cascade. No orphan processes are left behind.
 
-> **Estado**: transporte, arranque, navegación, interacción (iframes y shadow
-> DOM incluidos), formularios, tablas, modales, ventanas, extracción (con
-> descubrimiento de esquema), archivos, sesión, cookies, estabilidad, captura de
-> red, intercepción de peticiones, emulación de dispositivo y recorrido paralelo
-> (`crawl`) verificados de punta a punta (94 tests e2e en
-> [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
-> servidor local). **Cero constantes fijadas**: todo lo que decide el
-> comportamiento se puede cambiar desde `open()` — ver 1.2. Medido contra
-> Selenium y Playwright en 19.3, con la metodología en
+> **Status**: transport, launch, navigation, interaction (iframes and shadow DOM
+> included), forms, tables, dialogs, windows, extraction (with schema
+> discovery), files, session, cookies, stability, network capture, request
+> interception, device emulation and parallel crawling (`crawl`) are verified
+> end to end (94 e2e tests in
+> [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), against a
+> local server). **Zero hardcoded constants**: everything that decides behaviour
+> can be changed from `open()` — see 1.2. Measured against Selenium and
+> Playwright in 19.3, with the methodology in
 > [`bench/web/README.md`](bench/web/README.md).
 
-## 1. Arranque
+## 1. Launch
 
-### 1.1 `web.open(opts?)` → navegador
+### 1.1 `web.open(opts?)` → browser
 
-Localiza el navegador en cascada, **sin nada fijado en el código**:
+It locates the browser in a cascade, **with nothing hardcoded**:
 
-1. `opts.chrome` — ruta explícita
-2. `ORION_CHROME` — variable de entorno
-3. Detección automática: Chrome, Chromium, Brave o Edge
+1. `opts.chrome` — an explicit path
+2. `ORION_CHROME` — environment variable
+3. Auto-detection: Chrome, Chromium, Brave or Edge
 
-En Windows importa que acepte Edge: viene instalado de fábrica, así que no hay
-nada que descargar.
+On Windows it matters that Edge is accepted: it ships with the system, so there
+is nothing to download.
 
-**Orion no descarga ningún navegador.** Usa el que ya tienes. Si no hay ninguno
-basado en Chromium, `open()` falla diciendo cuáles sirven y cómo indicar la ruta.
+**Orion does not download any browser.** It uses the one you already have. If
+there is no Chromium-based browser at all, `open()` fails saying which ones work
+and how to point at the path.
 
-Lo que sí desaparece por completo es `chromedriver`: CDP habla directamente con
-el navegador, así que no hay un segundo binario cuya versión haya que mantener
-sincronizada. Que Chrome se actualice solo deja de ser un problema.
+What does disappear entirely is `chromedriver`: CDP talks to the browser
+directly, so there is no second binary whose version has to be kept in sync.
+Chrome updating itself stops being a problem.
 
-El endpoint se descubre por dos vías, porque no todos los navegadores dan las
-dos: Chrome lo anuncia por su salida de error y además escribe
-`DevToolsActivePort` en el perfil; **Edge solo escribe el archivo**.
+The endpoint is discovered two ways, because not every browser offers both:
+Chrome announces it on its error output *and* writes `DevToolsActivePort` into
+the profile; **Edge only writes the file**.
 
 ```orion
 b = web.open({
-    chrome:   "C:/ruta/chrome.exe",  -- opcional
-    headless: yes,                   -- por defecto yes
-    images:   no,                    -- por defecto NO se descargan
+    chrome:   "C:/path/chrome.exe",  -- optional
+    headless: yes,                   -- yes by default
+    images:   no,                    -- NOT downloaded by default
     gpu:      no,
     width:    1280,
     height:   800,
-    timeout:  30000,                 -- ms, arranque del navegador
-    user_data: "C:/perfil",          -- perfil propio (persiste sesiones)
-    args:     ["--proxy-server=x:1"],   -- banderas extra, van al final
-    sin:      ["--disable-extensions"], -- banderas por defecto a quitar
-    allow:    ["*.empresa.com"]       -- lista blanca de dominios, ver 9.2
+    timeout:  30000,                 -- ms, browser launch
+    user_data: "C:/profile",         -- your own profile (sessions persist)
+    args:     ["--proxy-server=x:1"],   -- extra flags, appended last
+    without:  ["--disable-extensions"], -- default flags to remove
+    allow:    ["*.company.com"]       -- domain allowlist, see 9.2
 })
 ```
 
-`args` **añade** y `sin` **quita**. Hacen falta las dos: en Chrome una bandera
-posterior no siempre revierte a la anterior, así que sin `sin` un sitio que
-necesitara extensiones no tenía forma de deshacer `--disable-extensions`.
-Se quita por nombre, sin repetir el valor: `sin: ["--blink-settings"]`.
+`args` **adds** and `without` **removes**. Both are needed: in Chrome a later
+flag does not always revert an earlier one, so without `without` a site that
+needed extensions had no way to undo `--disable-extensions`. Flags are removed by
+name, without repeating the value: `without: ["--blink-settings"]`.
 
-**Las imágenes vienen desactivadas por defecto.** Son el grueso del consumo de
-memoria y de red de una página, y casi ningún scraper las necesita. Se
-reactivan con `images: yes`, obligatorio para capturas fieles.
+**Images are off by default.** They are the bulk of a page's memory and network
+use, and almost no scraper needs them. Turn them back on with `images: yes`,
+which is mandatory for faithful screenshots.
 
-Sin `user_data` se crea un perfil temporal que se borra al cerrar. Con
-`user_data` el perfil es tuyo y no se toca: es la forma de conservar sesiones
-entre ejecuciones.
+Without `user_data` a temporary profile is created and deleted on close. With
+`user_data` the profile is yours and is left alone: that is how you keep sessions
+between runs.
 
-### 1.2 Afinado
+### 1.2 Tuning
 
-Nada del motor está fijado en el código. Los parámetros se agrupan en dos
-niveles según lo que sean:
+Nothing in the engine is hardcoded. The parameters are grouped into two levels
+according to what they are:
 
-**Política** — decisiones sobre *tu* problema, en la raíz de las opciones:
+**Policy** — decisions about *your* problem, at the root of the options:
 
-| Opción | Default | Qué controla |
+| Option | Default | What it controls |
 |---|---|---|
-| `wait` | 10000 | espera de acciones y lecturas, en ms |
-| `retry` | 50 | cada cuánto se reintenta dentro de la página |
-| `cdp_margin` | 5000 | margen del plazo de transporte sobre el de espera |
-| `drag_steps` | 10 | pasos intermedios de un arrastre |
-| `force_layers` | 12 | capas superpuestas que `force` atraviesa |
-| `iframe_depth` | 8 | profundidad de iframes anidados que se recorre |
-| `shadow` | `yes` | si los selectores entran en las shadow roots abiertas |
-| `shadow_depth` | 8 | profundidad de shadow roots anidadas que se recorre |
-| `hit_inset` | 24 | margen en píxeles al probar puntos de un elemento |
-| `nav_settle` | 5000 | cuánto se tolera que la página esté cambiando de documento |
+| `wait` | 10000 | wait for actions and reads, in ms |
+| `retry` | 50 | how often it retries inside the page |
+| `cdp_margin` | 5000 | margin of the transport deadline over the wait |
+| `drag_steps` | 10 | intermediate steps of a drag |
+| `force_layers` | 12 | stacked layers that `force` goes through |
+| `iframe_depth` | 8 | depth of nested iframes that is traversed |
+| `shadow` | `yes` | whether selectors enter open shadow roots |
+| `shadow_depth` | 8 | depth of nested shadow roots that is traversed |
+| `hit_inset` | 24 | margin in pixels when probing points of an element |
+| `nav_settle` | 5000 | how long the page is tolerated changing documents |
 
-**Mecanismo** — uso de recursos, bajo `tuning` para no ensuciar la API diaria:
+**Mechanism** — resource usage, under `tuning` so the day-to-day API stays clean:
 
-| Opción | Default | Qué controla |
+| Option | Default | What it controls |
 |---|---|---|
-| `max_events` | 512 | eventos CDP retenidos (más historial es más RAM) |
-| `idle_poll` | 5 | techo del sondeo en reposo (subirlo baja la CPU) |
-| `close_timeout` | 2000 | plazo de las operaciones de cierre |
-| `send_timeout` | 5000 | plazo para que un envío progrese |
-| `cleanup_tries` | 12 | intentos de borrar el perfil temporal |
-| `stale_profile_mins` | 60 | edad a partir de la cual se barre un perfil abandonado |
+| `max_events` | 512 | retained CDP events (more history is more RAM) |
+| `idle_poll` | 5 | ceiling of the idle poll (raising it lowers CPU) |
+| `close_timeout` | 2000 | deadline for close operations |
+| `send_timeout` | 5000 | deadline for a send to make progress |
+| `cleanup_tries` | 12 | attempts to delete the temporary profile |
+| `stale_profile_mins` | 60 | age at which an abandoned profile is swept |
 
 ```orion
 b = web.open({
@@ -120,932 +124,936 @@ b = web.open({
 })
 ```
 
-El `wait` tiene **tres niveles**, del más concreto al más general: lo que diga
-la llamada, lo que se fijó al abrir, y el default.
+`wait` has **three levels**, from the most specific to the most general: what the
+call says, what was set when opening, and the default.
 
 ```orion
-web.text(p, "#tarde", 6000)   -- manda sobre el wait del navegador
+web.text(p, "#slow", 6000)   -- overrides the browser's wait
 ```
 
-### 1.3 `web.page(navegador)` → pestaña
+### 1.3 `web.page(browser)` → tab
 
 ### 1.4 `web.free(handle)` / `web.close(handle)`
 
-Vale para navegador o pestaña; es el nombre que invoca `with`.
+Works for a browser or a tab; it is the name `with` invokes.
 
-### 1.5 `web.pages(navegador)` → lista de handles
+### 1.5 `web.pages(browser)` → list of handles
 
-### 1.6 `web.info()` → diccionario de diagnóstico
+### 1.6 `web.info()` → diagnostic dictionary
 
-Qué navegador se usaría, de dónde sale y cuántos hay abiertos. Sin esto, un
-"no me funciona" es indepurable.
+Which browser would be used, where it comes from, and how many are open. Without
+this, an "it doesn't work for me" is impossible to debug.
 
 ```orion
 show(web.info())
 -- {found: yes, path: C:\...\chrome.exe, env: , open_browsers: 0, in_use: [], open_pages: 0}
 ```
 
-## 2. Navegación
+## 2. Navigation
 
-| Función | Devuelve |
+| Function | Returns |
 |---|---|
-| `web.goto(pestaña, url)` | la URL final |
-| `web.title(pestaña)` | título |
-| `web.url(pestaña)` | URL actual |
-| `web.content(pestaña)` | HTML completo |
-| `web.reload(pestaña, opts?)` | recarga, ver 10.1 |
-| `web.back(pestaña)` / `web.forward(pestaña)` | historial, ver 10.1 |
+| `web.goto(tab, url)` | the final URL |
+| `web.title(tab)` | title |
+| `web.url(tab)` | current URL |
+| `web.content(tab)` | full HTML |
+| `web.reload(tab, opts?)` | reload, see 10.1 |
+| `web.back(tab)` / `web.forward(tab)` | history, see 10.1 |
 
-`goto` espera a que la página cargue. Si no carga porque un `alert` la dejó
-congelada, lo dice con el texto del diálogo en vez de un timeout genérico.
+`goto` waits for the page to load. If it does not load because an `alert` froze
+it, it says so with the dialog's text instead of a generic timeout.
 
-## 3. Selectores
+## 3. Selectors
 
-**Uno solo**, deducido del propio texto. No hay `find_by_xpath` y `find_by_css`.
+**One kind only**, deduced from the text itself. There is no `find_by_xpath` and
+`find_by_css`.
 
-| Forma | Significa |
+| Form | Means |
 |---|---|
 | `.card > button` | CSS |
-| `//li[data-n='2']` | XPath (empieza por `//` o `(//`) |
-| `text=Comprar` | por texto visible |
+| `//li[@data-n='2']` | XPath (starts with `//` or `(//`) |
+| `text=Buy` | by visible text |
 
-La variante por texto existe porque la mayoría de los XPath que escribe la gente
-son para buscar por contenido, y salen frágiles e ilegibles.
+The by-text variant exists because most XPath people write is there to search by
+content, and it comes out fragile and unreadable.
 
-**Los selectores atraviesan los iframes accesibles**, que es donde viven casi
-todos los modales de consentimiento de cookies. Los iframes de otro origen se
-saltan sin romper la búsqueda.
+**Selectors cross accessible iframes**, which is where nearly every cookie
+consent dialog lives. Cross-origin iframes are skipped without breaking the
+search.
 
 ### 3.1 Shadow DOM
 
-**Los selectores también entran en las shadow roots abiertas**, a cualquier
-profundidad. Un componente web guarda su contenido en una shadow root y el
-`querySelector` del documento no entra ahí: el selector correcto "no existe" y
-no hay pista de por qué. Media web moderna —de un reproductor de vídeo a los
-formularios de Salesforce— es exactamente esto.
+**Selectors also enter open shadow roots**, at any depth. A web component keeps
+its content in a shadow root and the document's `querySelector` does not go in
+there: the correct selector "does not exist" and there is no hint as to why. Half
+the modern web — from a video player to Salesforce forms — is exactly this.
 
 ```orion
--- <mi-ficha> guarda su botón en una shadow root: no hace falta decir nada.
+-- <my-card> keeps its button in a shadow root: nothing needs to be said.
 web.click(p, "#btn")
-web.extract(p, ".fila", { nombre: ".nom" })
+web.extract(p, ".row", { name: ".nm" })
 ```
 
-Entra la búsqueda **y el clic**: el hit-test baja por las shadow roots, porque
-si no `elementFromPoint` devuelve el host, `host.contains(boton)` es false —
-`contains` no cruza la frontera— y todo componente parecería tapado por sí
-mismo.
+Both the search **and the click** go in: the hit test descends through shadow
+roots, because otherwise `elementFromPoint` returns the host, `host.contains(button)`
+is false — `contains` does not cross the boundary — and every component would
+look covered by itself.
 
-Tres cosas que conviene saber:
+Three things worth knowing:
 
-- **Las shadow roots cerradas** (`mode: 'closed'`) no son accesibles ni para el
-  navegador desde fuera. No hay truco que valga: `exists` dice `no`, que es la
-  respuesta honesta.
-- **XPath no cruza** la frontera del shadow, por definición del estándar.
-  Dentro de un componente hay que usar CSS o `text=`.
-- **El caso normal no paga.** Las shadow roots se recorren después de los
-  documentos, así que un elemento del DOM de siempre se resuelve en el primer
-  intento. Medido en una página de 500 filas sin componentes: 3 ms de
-  diferencia. Se apaga con `open({ shadow: no })`.
+- **Closed shadow roots** (`mode: 'closed'`) are not reachable, not even for the
+  browser from outside. There is no trick: `exists` says `no`, which is the
+  honest answer.
+- **XPath does not cross** the shadow boundary, by definition of the standard.
+  Inside a component you have to use CSS or `text=`.
+- **The normal case does not pay for it.** Shadow roots are traversed after the
+  documents, so an element in the ordinary DOM resolves on the first attempt.
+  Measured on a 500-row page with no components: 3 ms of difference. It is turned
+  off with `open({ shadow: no })`.
 
-## 4. Interacción
+## 4. Interaction
 
-| Función | Nota |
+| Function | Note |
 |---|---|
-| `web.click(pestaña, sel, opts?)` | |
-| `web.dblclick(pestaña, sel, opts?)` | |
-| `web.rightclick(pestaña, sel, opts?)` | |
-| `web.hover(pestaña, sel, ms?)` | |
-| `web.drag(pestaña, origen, destino, ms?)` | con pasos intermedios, para `dragover` |
-| `web.scroll(pestaña, dx, dy)` | rueda del ratón |
-| `web.type(pestaña, sel, texto, opts?)` | limpia el campo salvo `{ clear: no }` |
-| `web.press(pestaña, tecla)` | ver 4.3 |
-| `web.select(pestaña, sel, opción, ms?)` | `<select>` nativo, ver 4.4 |
-| `web.fill(pestaña, campos, opts?)` | un formulario entero en una llamada, ver 4.5 |
-| `web.check(pestaña, sel)` / `web.uncheck(...)` | casillas, ver 4.6 |
+| `web.click(tab, sel, opts?)` | |
+| `web.dblclick(tab, sel, opts?)` | |
+| `web.rightclick(tab, sel, opts?)` | |
+| `web.hover(tab, sel, ms?)` | |
+| `web.drag(tab, source, target, ms?)` | with intermediate steps, for `dragover` |
+| `web.scroll(tab, dx, dy)` | mouse wheel |
+| `web.type(tab, sel, text, opts?)` | clears the field unless `{ clear: no }` |
+| `web.press(tab, key)` | see 4.3 |
+| `web.select(tab, sel, option, ms?)` | native `<select>`, see 4.4 |
+| `web.fill(tab, fields, opts?)` | a whole form in one call, see 4.5 |
+| `web.check(tab, sel)` / `web.uncheck(...)` | checkboxes, see 4.6 |
 
-El tercer argumento admite un número (milisegundos de espera) o un diccionario:
+The third argument accepts a number (milliseconds to wait) or a dictionary:
 
 ```orion
-web.click(p, "#ir", 3000)                    -- espera hasta 3 s
-web.click(p, "#ir", { wait: 3000, force: yes })
+web.click(p, "#go", 3000)                    -- waits up to 3 s
+web.click(p, "#go", { wait: 3000, force: yes })
 ```
 
-### 4.1 Espera implícita, siempre
+### 4.1 Implicit waiting, always
 
-Ninguna acción exige acordarse de poner un `wait`. `click` y compañía esperan a
-que el elemento sea **accionable**: existe, ocupa espacio, no está oculto por
-estilo, y nadie lo tapa. Un scraper que depende de que el programador recuerde
-esperar es un scraper que falla de forma intermitente.
+No action requires remembering to add a `wait`. `click` and friends wait for the
+element to be **actionable**: it exists, it takes up space, it is not hidden by
+style, and nothing covers it. A scraper that depends on the programmer
+remembering to wait is a scraper that fails intermittently.
 
-El bucle de reintento vive **dentro de la página**, así que todo esto sigue
-siendo una única llamada CDP.
+The retry loop lives **inside the page**, so all of this is still a single CDP
+call.
 
-### 4.2 Elementos tapados
+### 4.2 Covered elements
 
-Hay tres situaciones y cada una tiene su respuesta:
+There are three situations and each has its own answer:
 
-| Situación | Comportamiento |
+| Situation | Behaviour |
 |---|---|
-| Tapado temporal (spinner, banner que se va) | espera y clica |
-| Tapado parcial (cabecera fija sobre media mitad) | clica por la zona libre |
-| Tapado permanente (banner de cookies) | falla nombrando al culpable |
+| Temporarily covered (a spinner, a banner on its way out) | waits and clicks |
+| Partially covered (a sticky header over half of it) | clicks on the free area |
+| Permanently covered (a cookie banner) | fails, naming the culprit |
 
-El tapado parcial se resuelve probando **nueve puntos** dentro del rectángulo
-del elemento (centro, cuatro desplazamientos, cuatro esquinas) en vez de solo el
-centro, que es lo que hacen las demás herramientas. Es lo que haría una persona:
-pinchar donde se ve.
+Partial covering is solved by probing **nine points** inside the element's
+rectangle (centre, four offsets, four corners) instead of just the centre, which
+is what the other tools do. It is what a person would do: click where you can see
+it.
 
-Cuando de verdad no se puede, el error identifica lo que estorba:
+When it really cannot be done, the error identifies what is in the way:
 
 ```
-browser.click '#total': lo tapa <div.cookie-banner> (tras esperar 1200 ms)
-  Si el elemento que estorba no se va a quitar, usa: { force: yes }
+browser.click '#total': it is covered by <div.cookie-banner> (after waiting 1200 ms)
+  If whatever is in the way will not go away, use: { force: yes }
 ```
 
-Con `{ force: yes }` se atraviesa. **No se clica a ciegas en las coordenadas**
-—eso es como Selenium acaba pulsando el banner en lugar del botón—: se vuelve
-transparente al puntero lo que estorba, el clic sigue siendo un evento real del
-navegador, y después se restaura todo (incluso si el clic falla).
+`{ force: yes }` goes through. **It does not blind-click the coordinates** — that
+is how Selenium ends up pressing the banner instead of the button: whatever is in
+the way is made transparent to the pointer, the click is still a real browser
+event, and everything is restored afterwards (even if the click fails).
 
-No es el comportamiento por defecto a propósito: atravesar un modal suele
-significar saltarse algo que el sitio te está pidiendo, y eso produce sesiones
-raras que fallan tres pasos después.
+It is deliberately not the default: going through a modal usually means skipping
+something the site is asking you for, and that produces strange sessions that
+fail three steps later.
 
-### 4.3 Teclas
+### 4.3 Keys
 
 `enter`, `tab`, `escape`, `backspace`, `delete`, `space`, `up`, `down`, `left`,
 `right`, `home`, `end`, `pageup`, `pagedown`.
 
-`web.type` manda **tecla a tecla**, no asigna `value` desde JavaScript: React,
-Vue y compañía solo se enteran del cambio si llegan los eventos de teclado, y un
-`value` puesto a mano queda ignorado al enviar el formulario.
+`web.type` sends **key by key**, it does not assign `value` from JavaScript:
+React, Vue and company only find out about the change if the keyboard events
+arrive, and a `value` set by hand is ignored when the form is submitted.
 
-### 4.4 `<select>` nativo
+### 4.4 Native `<select>`
 
-Un `<select>` abre un desplegable **del sistema operativo**, fuera del DOM:
-ningún clic puede navegarlo. `web.select` asigna la opción y emite `input` y
-`change` como haría el navegador.
+A `<select>` opens a dropdown **belonging to the operating system**, outside the
+DOM: no click can navigate it. `web.select` assigns the option and emits `input`
+and `change` the way the browser would.
 
-Acepta el `value`, **el texto visible** o el índice, porque quien escribe el
-scraper ve el texto en pantalla:
+It accepts the `value`, **the visible text** or the index, because whoever writes
+the scraper sees the text on screen:
 
 ```orion
-web.select(p, "#pais", "México")   -- por texto
-web.select(p, "#pais", "mx")       -- por value
-web.select(p, "#pais", "1")        -- por índice
+web.select(p, "#country", "Mexico")   -- by text
+web.select(p, "#country", "mx")       -- by value
+web.select(p, "#country", "1")        -- by index
 ```
 
-Si la opción no existe, el error lista las que hay.
+If the option does not exist, the error lists the ones that do.
 
-### 4.5 `web.fill(pestaña, campos, opts?)` → cuántos rellenó
+### 4.5 `web.fill(tab, fields, opts?)` → how many it filled
 
-Un formulario entero en **una sola llamada**, y el tipo de cada control lo
-decide la página:
+A whole form in **a single call**, with the type of each control decided by the
+page:
 
 ```orion
 web.fill(p, {
-    "#nombre":  "Ana Torres",
-    "#notas":   "texto largo",
-    "#pais":    "España",     -- <select>: vale el texto visible, el value o el índice
-    "#acepto":  yes,          -- casilla
+    "#name":    "Ana Torres",
+    "#notes":   "long text",
+    "#country": "Spain",      -- <select>: visible text, value or index all work
+    "#accept":  yes,          -- checkbox
     "#plan_b":  yes,          -- radio
     "#bio":     "..."         -- contenteditable
 })
 ```
 
-Obligar a elegir la función según de qué está hecho el campo —`type` para el
-texto, `select` para el desplegable, `check` para la casilla— significa mirar el
-HTML antes de poder escribir una línea.
+Forcing you to choose the function based on what the field is made of — `type`
+for text, `select` for the dropdown, `check` for the checkbox — means reading the
+HTML before you can write a single line.
 
-**El orden se respeta**, y hace falta: un desplegable de provincia que solo se
-llena al elegir el país tiene que ir después del país.
+**Order is respected**, and it is needed: a province dropdown that only fills in
+once you pick a country has to come after the country.
 
-**Por qué es rápido.** `type` manda dos eventos CDP por carácter. Medido contra
-un sitio real, 51 caracteres tecla a tecla cuestan **221 ms** y la misma
-asignación en una llamada cuesta **1 ms**.
+**Why it is fast.** `type` sends two CDP events per character. Measured against a
+real site, 51 characters key by key cost **221 ms** and the same assignment in one
+call costs **1 ms**.
 
-**Por qué `type` sigue existiendo.** Las teclas de verdad hacen falta cuando el
-sitio reacciona a ellas: autocompletados, máscaras de teléfono, buscadores que
-filtran mientras escribes. Para esos, `{ keys: yes }` pasa `fill` al modo lento
-y fiel, campo a campo.
+**Why `type` still exists.** Real keys are needed when the site reacts to them:
+autocompletes, phone masks, search boxes that filter as you type. For those,
+`{ keys: yes }` puts `fill` into the slow, faithful mode, field by field.
 
 ```orion
-web.fill(p, { "#buscador": "madr" }, { keys: yes })   -- dispara el autocompletado
+web.fill(p, { "#search": "madr" }, { keys: yes })   -- triggers the autocomplete
 ```
 
-#### La trampa del `value`
+#### The `value` trap
 
-Asignar `el.value = x` y lanzar un evento **no llega a la aplicación** si el
-sitio usa React. React instala un rastreador sobre el descriptor `value` del
-elemento y, cuando llega el evento, compara con lo último que él anotó: si
-coincide, da el cambio por visto y no avisa a nadie.
+Assigning `el.value = x` and firing an event **does not reach the application**
+if the site uses React. React installs a tracker on the element's `value`
+descriptor and, when the event arrives, compares it with the last thing it
+recorded: if they match, it considers the change already seen and tells nobody.
 
-El resultado es el peor fallo posible: **el campo se ve relleno en pantalla y el
-formulario se envía vacío.** Comprobado sobre el mismo mecanismo que usa React:
+The result is the worst possible failure: **the field looks filled on screen and
+the form is submitted empty.** Verified against the same mechanism React uses:
 
-| Cómo se rellena | ¿Se entera la aplicación? |
+| How it is filled | Does the application find out? |
 |---|---|
-| `el.value = x` + evento | **No** |
-| setter nativo del prototipo + evento | Sí |
-| teclas reales | Sí |
+| `el.value = x` + event | **No** |
+| native prototype setter + event | Yes |
+| real keys | Yes |
 
-`fill` escribe por el setter nativo del prototipo, que el rastreador no
-intercepta. Y usa el prototipo correcto: el de `HTMLInputElement` no sirve para
-un `<textarea>` y la asignación se perdería sin decir nada.
+`fill` writes through the native prototype setter, which the tracker does not
+intercept. And it uses the correct prototype: the `HTMLInputElement` one is no
+good for a `<textarea>` and the assignment would be lost without a word.
 
-Además hace `blur` al terminar cada campo, porque muchos formularios validan al
-perder el foco y si no el campo queda relleno pero marcado en rojo, con el botón
-de enviar deshabilitado.
+It also `blur`s after finishing each field, because many forms validate on focus
+loss and otherwise the field ends up filled but marked in red, with the submit
+button disabled.
 
-#### Lo que no encuentra, lo dice
+#### What it cannot find, it says
 
-Un campo que no se rellena casi nunca es un dato que faltaba: es el selector
-equivocado, o el formulario que cambió. Callarlo deja el envío incompleto y el
-fallo aparece en el servidor de otro.
+A field that does not get filled is almost never missing data: it is the wrong
+selector, or the form changed. Keeping quiet leaves the submission incomplete and
+the failure shows up on somebody else's server.
 
 ```
-browser.fill: 1 campo(s) no existen en la página:
-    #telefono_viejo
-    #pais  ->  no hay opción "Marte"
-  Opciones: España, Portugal
-  Revisa esos selectores, o usa { strict: no } si de verdad pueden faltar.
+browser.fill: 1 field(s) do not exist on the page:
+    #old_phone
+    #country  ->  no option "Mars"
+  Options: Spain, Portugal
+  Check those selectors, or use { strict: no } if they really may be absent.
 ```
 
-Se espera a que estén **todos** antes de tocar ninguno: parar a medio rellenar
-deja el formulario en un estado que nadie escribió.
+It waits for **all** of them before touching any: stopping halfway through leaves
+the form in a state nobody wrote.
 
-### 4.6 `web.check(pestaña, sel)` / `web.uncheck(pestaña, sel)`
+### 4.6 `web.check(tab, sel)` / `web.uncheck(tab, sel)`
 
-Marca o desmarca con un **clic real**, y solo si hace falta:
+Checks or unchecks with a **real click**, and only if needed:
 
 ```orion
-web.check(p, "#acepto")
-web.check(p, "#acepto")   -- ya estaba: no hace nada
+web.check(p, "#accept")
+web.check(p, "#accept")   -- already was: does nothing
 ```
 
-La idempotencia no es un detalle. Si se limitara a pulsar, un reintento inocente
-—o un bucle que revisa la casilla— la dejaría en el contrario de lo que se pedía.
+Idempotence is not a detail. If it just pressed, an innocent retry — or a loop
+that reviews the checkbox — would leave it in the opposite state to the one
+requested.
 
-Un `<input type="radio">` no se puede desmarcar pulsándolo, y `uncheck` lo dice
-en vez de fallar en silencio: hay que marcar otro del grupo.
+An `<input type="radio">` cannot be unchecked by pressing it, and `uncheck` says
+so instead of failing silently: you have to check another one in the group.
 
-## 5. Lectura del DOM
+## 5. Reading the DOM
 
-| Función | ¿Espera? |
+| Function | Waits? |
 |---|---|
-| `web.text(pestaña, sel, ms?)` | sí |
-| `web.texts(pestaña, sel, ms?)` | sí |
-| `web.html(pestaña, sel, ms?)` | sí |
-| `web.attr(pestaña, sel, atributo, ms?)` | sí |
-| `web.value(pestaña, sel)` | sí — lo que el campo contiene AHORA, ver 5.1 |
-| `web.table(pestaña, sel, opts?)` | sí — una `<table>` entera, ver 5.2 |
-| `web.watch` + `web.capture` | el JSON que la página pide a su API, ver 12 |
-| `web.discover(pestaña, opts?)` | deduce el esquema de extracción solo, ver 7.5 |
-| `web.crawl(navegador, opts)` | recorre urls en paralelo, vuelca y reanuda, ver 7.6 |
-| `web.exists(pestaña, sel)` | **no** |
-| `web.count(pestaña, sel)` | **no** |
-| `web.visible(pestaña, sel)` | **no** |
-| `web.wait(pestaña, sel, ms?)` | espera explícita |
-| `web.wait(pestaña, { idle: ms })` | espera a que la red se calme, ver 10.2 |
+| `web.text(tab, sel, ms?)` | yes |
+| `web.texts(tab, sel, ms?)` | yes |
+| `web.html(tab, sel, ms?)` | yes |
+| `web.attr(tab, sel, attribute, ms?)` | yes |
+| `web.value(tab, sel)` | yes — what the field holds RIGHT NOW, see 5.1 |
+| `web.table(tab, sel, opts?)` | yes — a whole `<table>`, see 5.2 |
+| `web.watch` + `web.capture` | the JSON the page asks its own API for, see 12 |
+| `web.discover(tab, opts?)` | works out the extraction schema by itself, see 7.5 |
+| `web.crawl(browser, opts)` | walks urls in parallel, dumps and resumes, see 7.6 |
+| `web.exists(tab, sel)` | **no** |
+| `web.count(tab, sel)` | **no** |
+| `web.visible(tab, sel)` | **no** |
+| `web.wait(tab, sel, ms?)` | explicit wait |
+| `web.wait(tab, { idle: ms })` | waits for the network to go quiet, see 10.2 |
 
-La regla: **lo que devuelve contenido espera; lo que informa del estado no.**
+The rule: **what returns content waits; what reports state does not.**
 
-Devolver `null` porque el contenido aún no había llegado convierte un problema
-de tiempo en un dato perdido en silencio — el fallo que hace que un scraper
-funcione en el portátil y no en el servidor. Al revés, hacer esperar a `exists`
-convertiría un "no está" legítimo en diez segundos de bloqueo.
+Returning `null` because the content had not arrived yet turns a timing problem
+into silently lost data — the failure that makes a scraper work on the laptop and
+not on the server. The other way round, making `exists` wait would turn a
+legitimate "it's not there" into ten seconds of blocking.
 
-### 5.1 `web.value(pestaña, sel)` → lo que el campo contiene ahora
+### 5.1 `web.value(tab, sel)` → what the field holds right now
 
 ```orion
-web.fill(p, { "#nombre": "Ana" })
-show(web.value(p, "#nombre"))          -- Ana
-show(web.attr(p, "#nombre", "value"))  -- null
+web.fill(p, { "#name": "Ana" })
+show(web.value(p, "#name"))          -- Ana
+show(web.attr(p, "#name", "value"))  -- null
 ```
 
-Las dos líneas de arriba no se contradicen, y confundirlas es un clásico:
-`attr` lee el **atributo del HTML** —el que venía escrito en la página— y ese no
-cambia cuando alguien escribe en el campo. Un `<input>` sin `value=` en el HTML
-devuelve `null` por ahí aunque tenga texto dentro, que es justo el momento en el
-que uno cree que su `fill` no funcionó.
+The two lines above do not contradict each other, and confusing them is a
+classic: `attr` reads the **HTML attribute** — the one written in the page — and
+that does not change when somebody types into the field. An `<input>` with no
+`value=` in the HTML returns `null` that way even when it has text inside, which
+is exactly the moment you believe your `fill` did not work.
 
-`value` devuelve además lo que corresponde a cada control: el valor de la opción
-elegida en un `<select>`, `yes`/`no` en una casilla, y el texto en un
+`value` also returns what corresponds to each control: the value of the chosen
+option in a `<select>`, `yes`/`no` in a checkbox, and the text in a
 `contenteditable`.
 
-### 5.2 `web.table(pestaña, sel, opts?)` → lista de registros
+### 5.2 `web.table(tab, sel, opts?)` → list of records
 
 ```orion
-filas = web.table(p, "table.wikitable")
-show(len(filas))       -- 222
-show(filas[1])
+rows = web.table(p, "table.wikitable")
+show(len(rows))       -- 222
+show(rows[1])
 -- {Country/Territory: United States, IMF (2026)[1]: 32,383,920, ...}
 ```
 
-Una tabla entera en una llamada, con la cabecera deducida y las columnas ya
-nombradas. Se puede encadenar directamente con el motor de datos.
+A whole table in one call, with the header deduced and the columns already named.
+It chains directly into the data engine.
 
-**Las reglas de aquí salen de mirar tablas reales, no de imaginarlas.** De 13
-tablas en tres páginas de Wikipedia:
+**The rules here come from looking at real tables, not from imagining them.** Out
+of 13 tables across three Wikipedia pages:
 
-| | Cuántas |
+| | How many |
 |---|---|
-| Sin `<thead>` | **13 de 13** |
-| Con `<th>` dentro del cuerpo (encabezados de fila) | 10 |
-| Con `colspan` o `rowspan` | 4 |
-| Con otra tabla dentro | 1 |
+| Without `<thead>` | **13 of 13** |
+| With `<th>` inside the body (row headers) | 10 |
+| With `colspan` or `rowspan` | 4 |
+| With another table inside | 1 |
 
-Un lector que dé por hecho el `<thead>` —que es como sale la primera versión—
-funciona perfecto en el sitio de demostración y falla en el 100% de las tablas
-de verdad. De ahí las cuatro decisiones:
+A reader that assumes `<thead>` — which is how the first version comes out —
+works perfectly on the demo site and fails on 100% of real tables. Hence the four
+decisions:
 
-1. **La cabecera se busca en cascada**: `<thead>`, o la primera fila si
-   **todas** sus celdas son `<th>`, o nombres generados `col_1`, `col_2`…
-2. **Exigir que sean *todas* `<th>`** es lo que evita confundir una fila de
-   datos que empieza con un encabezado de fila con la cabecera de la tabla.
-   Es el caso de 10 de las 13.
-3. **`colspan` y `rowspan` se expanden.** Sin eso, las columnas se desalinean a
-   partir de la primera celda combinada y todo lo que sigue queda corrido un
-   puesto, con pinta de dato bueno.
-4. **Las filas de una tabla anidada pertenecen a la de dentro**, no a esta.
+1. **The header is looked for in a cascade**: `<thead>`, or the first row if
+   **all** its cells are `<th>`, or generated names `col_1`, `col_2`…
+2. **Requiring that they all be `<th>`** is what avoids mistaking a data row that
+   starts with a row header for the table's header. That is the case in 10 of the
+   13.
+3. **`colspan` and `rowspan` are expanded.** Without that, the columns fall out of
+   alignment from the first merged cell onwards and everything after it is shifted
+   one place, looking like good data.
+4. **The rows of a nested table belong to the inner one**, not to this one.
 
-Con cabeceras a varios pisos manda la de abajo, que es la que nombra columnas.
+With multi-level headers the bottom one wins, since it is the one that names
+columns.
 
-**Los nombres de columna se limpian** porque son claves: se colapsan los
-espacios (una cabecera con un `<br>` daría una clave con un salto de línea, y esa
-no hay quien la escriba), los vacíos pasan a `col_N` y los repetidos se numeran
-(`n`, `n_2`). Los **valores no se tocan**: ahí un salto de línea puede ser parte
-del dato.
+**Column names are cleaned** because they are keys: whitespace is collapsed (a
+header with a `<br>` would give a key with a line break in it, and nobody can type
+that), empty ones become `col_N` and repeated ones are numbered (`n`, `n_2`).
+**Values are left untouched**: there a line break can be part of the data.
 
-`{ header: no }` no interpreta ninguna fila como cabecera y devuelve todo como
-datos con nombres generados. Hace falta para las tablas que se usan como
-maquetación, donde la primera fila ya es un dato.
+`{ header: no }` interprets no row as a header and returns everything as data with
+generated names. It is needed for tables used as layout, where the first row is
+already data.
 
-## 6. Modales y ventanas
+## 6. Dialogs and windows
 
-### 6.1 `web.dialogs(pestaña, política)`
+### 6.1 `web.dialogs(tab, policy)`
 
-Para `alert`, `confirm` y `prompt`:
+For `alert`, `confirm` and `prompt`:
 
 ```orion
-web.dialogs(p, "accept")          -- acepta
-web.dialogs(p, "dismiss")         -- rechaza
-web.dialogs(p, "answer:Orion")    -- responde un prompt
-web.dialogs(p, "off")             -- deja de atenderlos
+web.dialogs(p, "accept")          -- accepts
+web.dialogs(p, "dismiss")         -- dismisses
+web.dialogs(p, "answer:Orion")    -- answers a prompt
+web.dialogs(p, "off")             -- stops handling them
 ```
 
-Se declara **una vez** y vale para la sesión. Playwright obliga a registrar el
-handler *antes* de cada acción que pudiera abrir uno, y eso falla cuando el
-diálogo lo lanza un temporizador de la página: no hay ninguna llamada tuya a la
-que engancharlo.
+It is declared **once** and holds for the session. Playwright forces you to
+register the handler *before* each action that might open one, and that fails when
+the dialog is fired by a timer on the page: there is no call of yours to hook it
+to.
 
-Un diálogo sin atender **congela la página** sin dar ningún error, que es el
-peor fallo posible. Por eso lo atiende el propio hilo lector de CDP.
+An unhandled dialog **freezes the page** without producing any error, which is the
+worst possible failure. That is why the CDP reader thread itself handles them.
 
-### 6.2 `web.click_opens(pestaña, sel, opts?)` → pestaña nueva
+### 6.2 `web.click_opens(tab, sel, opts?)` → new tab
 
-Un clic que abre una pestaña te devuelve su handle, ya cargada:
+A click that opens a tab gives you back its handle, already loaded:
 
 ```orion
-factura = web.click_opens(p, "#ver-factura")
-show(web.title(factura))
+invoice = web.click_opens(p, "#view-invoice")
+show(web.title(invoice))
 ```
 
-Playwright necesita envolver el clic en `expect_popup`; Selenium te hace listar
-handles de ventana y adivinar cuál es la nueva.
+Playwright needs the click wrapped in `expect_popup`; Selenium makes you list
+window handles and guess which one is new.
 
-### 6.3 Modales HTML
+### 6.3 HTML modals
 
-No necesitan nada especial: son HTML. Además el fondo bloqueante se comporta
-bien — con el modal abierto, un clic fuera falla nombrando al culpable en vez de
-colarse por debajo.
+They need nothing special: they are HTML. The blocking backdrop also behaves
+properly — with the modal open, a click outside fails naming the culprit instead
+of slipping underneath.
 
-## 7. Extracción
+## 7. Extraction
 
-### 7.1 `web.extract(pestaña, selector_de_fila, esquema, opts?)` → lista
+### 7.1 `web.extract(tab, row_selector, schema, opts?)` → list
 
-El esquema es un diccionario de campo a especificación, y **todo él se compila a
-una sola llamada** que corre dentro de la página.
+The schema is a dictionary of field to specification, and **all of it compiles
+into a single call** that runs inside the page.
 
 ```orion
-esquema = {
-    id:     "data-id",
-    nombre: ".title",
-    precio: ".price|num",
-    stock:  "[data-qty]data-qty|int",
-    url:    "ahref",
-    hay:    ".disp|bool"
+schema = {
+    id:    "@data-id",
+    name:  ".title",
+    price: ".price|num",
+    stock: "[data-qty]@data-qty|int",
+    url:   "a@href",
+    avail: ".disp|bool"
 }
-items = web.extract(p, ".card", esquema)
+items = web.extract(p, ".card", schema)
 ```
 
 ```
-{id: 1, nombre: Laptop Pro, precio: 1299,  stock: 7,  url: /p/1, hay: yes}
-{id: 2, nombre: Mouse,      precio: 24.99, stock: 0,  url: /p/2, hay: no}
+{id: 1, name: Laptop Pro, price: 1299,  stock: 7,  url: /p/1, avail: yes}
+{id: 2, name: Mouse,      price: 24.99, stock: 0,  url: /p/2, avail: no}
 ```
 
-Ahí está la diferencia de fondo con Selenium: allí **cada lectura de un atributo
-es una petición HTTP al driver**, así que 500 productos por 3 campos son unas
-1.500 idas y vueltas más las 500 de localizar las filas. Esto es una. Y como se
-usa `returnByValue`, lo que cruza el socket son los datos pedidos, no el HTML.
+There is the fundamental difference with Selenium: there **every attribute read
+is an HTTP request to the driver**, so 500 products by 3 fields is about 1,500
+round trips plus the 500 to locate the rows. This is one. And since
+`returnByValue` is used, what crosses the socket is the data you asked for, not
+the HTML.
 
-`extract` espera a que haya filas antes de rendirse: el listado suele llegar
-después de la acción que lo pidió, y devolver una lista vacía convertiría un
-problema de tiempo en un resultado vacío silencioso.
+`extract` waits for rows to exist before giving up: the listing usually arrives
+after the action that requested it, and returning an empty list would turn a
+timing problem into a silent empty result.
 
-### 7.2 Gramática de una especificación
+### 7.2 Grammar of a specification
 
-Las tres partes son opcionales: `<selector> <atributo> |<conversión>`
+All three parts are optional: `<selector> @<attribute> |<conversion>`
 
-| Ejemplo | Significa |
+| Example | Means |
 |---|---|
-| `.price` | texto del elemento |
-| `ahref` | atributo de un descendiente |
-| `data-id` | atributo de la propia fila |
-| `.price\|num` | texto convertido a número |
-| `//td[2]\|num` | XPath **relativo a la fila** |
-| `\|num` | el texto de la fila entera, como número |
-| `.tag\|list` | **todas** las coincidencias, no la primera |
-| `.p\|list:num` | todas, convertidas a número |
-| `ahref\|list` | todos los enlaces de la fila |
+| `.price` | text of the element |
+| `a@href` | attribute of a descendant |
+| `@data-id` | attribute of the row itself |
+| `.price\|num` | text converted to a number |
+| `//td[2]\|num` | XPath **relative to the row** |
+| `\|num` | the text of the whole row, as a number |
+| `.tag\|list` | **all** the matches, not the first |
+| `.p\|list:num` | all of them, converted to number |
+| `a@href\|list` | every link in the row |
 
-Conversiones: `num`, `int`, `bool`, `html`, `text`, `trim`, `list`,
-`list:<conversión>`.
+Conversions: `num`, `int`, `bool`, `html`, `text`, `trim`, `list`,
+`list:<conversion>`.
 
-Tres detalles que evitan errores silenciosos:
+Three details that prevent silent errors:
 
-**`list` recoge todas.** Sin él, un campo con varios valores —las etiquetas de un
-producto, las imágenes de una galería— devolvía la primera coincidencia y las
-demás se perdían sin decir nada. Una lista vacía en **todas** las filas cuenta
-como selector muerto igual que un `null`, así que el aviso de 7.3 sigue
-funcionando ahí, que es donde más falta hace.
+**`list` collects them all.** Without it, a field with several values — a
+product's tags, a gallery's images — returned the first match and the rest were
+lost without a word. An empty list in **every** row counts as a dead selector
+just like a `null`, so the warning in 7.3 still works there, which is where it is
+needed most.
 
-Dentro de una lista se conserva el `null` que venga de la conversión (`"Agotado"`
-con `list:num`), porque ahí sí había algo y hace falta verlo para entender por
-qué no salió el número. Lo que se salta son los elementos sin nada dentro.
+Inside a list the `null` coming from a conversion is preserved (`"Sold out"` with
+`list:num`), because there really was something there and you need to see it to
+understand why no number came out. What gets skipped are the elements with
+nothing inside.
 
-**Los XPath se relativizan.** `//td[1]` es absoluto y buscaría desde la raíz del
-documento, devolviendo **la misma fila repetida** con datos que parecen buenos.
-Como una especificación de campo describe por definición algo dentro de la fila,
-se convierte en relativo.
+**XPath is made relative.** `//td[1]` is absolute and would search from the root
+of the document, returning **the same row repeated** with data that looks fine.
+Since a field specification describes, by definition, something inside the row, it
+is converted to a relative one.
 
-**Los números entienden los dos formatos.** `1.299,00 €` y `$1,234.56` conviven
-en la misma página. Manda el separador que aparece más a la derecha; con una
-coma sola, es decimal si separa uno o dos dígitos finales y miles si no. Un
-valor no numérico como `Agotado` da `null`, no un número inventado.
+**Numbers understand both formats.** `1.299,00 €` and `$1,234.56` coexist on the
+same page. The separator that appears furthest to the right wins; with a lone
+comma, it is decimal if it separates one or two trailing digits and thousands if
+not. A non-numeric value such as `Sold out` gives `null`, not an invented number.
 
-### 7.3 Selectores muertos
+### 7.3 Dead selectors
 
-Un campo vacío en **todas** las filas casi nunca es un dato ausente: es un
-selector equivocado, o el sitio que cambió de estructura. Callarlo devuelve una
-lista que parece buena y revienta cien líneas después — el fallo clásico de
-BeautifulSoup.
+A field that is empty in **every** row is almost never missing data: it is the
+wrong selector, or the site that changed structure. Keeping quiet returns a list
+that looks fine and blows up a hundred lines later — the classic BeautifulSoup
+failure.
 
 ```
-browser.extract: 2 campo(s) no encontraron nada en ninguna de las 3 filas:
-    precio  ←  .precio-viejo
-    sku  ←  data-sku
-  Revisa esos selectores, o usa { strict: no } si de verdad pueden faltar.
+browser.extract: 2 field(s) matched nothing in any of the 3 rows:
+    price  ←  .old-price
+    sku  ←  @data-sku
+  Check those selectors, or use { strict: no } if they really may be absent.
 ```
 
-Con `{ strict: no }` se acepta y esos campos vienen como `null`.
+With `{ strict: no }` it is accepted and those fields come back as `null`.
 
-### 7.4 `web.extract_to(pestaña, urls, selector, esquema, salida, opts?)` → resumen
+### 7.4 `web.extract_to(tab, urls, selector, schema, out, opts?)` → summary
 
-Recorre varias URLs y **vuelca a disco según extrae**.
+Walks several URLs and **dumps to disk as it extracts**.
 
 ```orion
-r = web.extract_to(p, urls, ".card", esquema, "productos.csv")
+r = web.extract_to(p, urls, ".card", schema, "products.csv")
 show(r)
--- {rows: 8000, urls: 40, ok: 40, failed: 0, empty: [], files: [productos.csv], errors: []}
+-- {rows: 8000, urls: 40, ok: 40, failed: 0, empty: [], files: [products.csv], errors: []}
 ```
 
-Dos decisiones deliberadas: se **reutiliza una sola pestaña** para todas las URLs
-(abrir una por página multiplica la memoria del navegador) y **no se acumula el
-listado** antes de guardar, que es lo que hace que un scraper de Python se coma
-la RAM en cuanto el volumen crece.
+Two deliberate decisions: **a single tab is reused** for all the URLs (opening one
+per page multiplies the browser's memory) and **the listing is not accumulated**
+before saving, which is what makes a Python scraper eat RAM as soon as the volume
+grows.
 
-Medido con 200 filas por página:
+Measured with 200 rows per page:
 
-| Páginas | Filas | Pico de RAM de Orion |
+| Pages | Rows | Orion peak RAM |
 |---|---|---|
-| 5 | 1.000 | 18,4 MB |
-| 40 | 8.000 | 18,9 MB |
+| 5 | 1,000 | 18.4 MB |
+| 40 | 8,000 | 18.9 MB |
 
-Ocho veces más datos, medio megabyte más. La medida es del proceso de Orion; la
-memoria del navegador va aparte y es la grande, por eso las imágenes vienen
-desactivadas.
+Eight times the data, half a megabyte more. The measurement is of the Orion
+process; the browser's memory is separate and it is the large one, which is why
+images are off by default.
 
-El límite honesto: la memoria queda acotada por **la página más grande**, no por
-el total del recorrido, porque cada página se extrae de una vez.
+The honest limit: memory is bounded by **the largest page**, not by the total of
+the walk, because each page is extracted in one go.
 
-**Formatos**, según la extensión:
+**Formats**, according to the extension:
 
-- `.csv` — se escribe fila a fila, un solo archivo, memoria constante de verdad.
-- `.odf` — el formato binario lleva el número de filas en la cabecera y no admite
-  añadir al final, así que se vuelca por bloques (`chunk`, 50.000 por defecto)
-  liberando cada uno. El primero conserva el nombre pedido y los siguientes se
-  numeran. Lo lee `frame` directamente, con los tipos ya inferidos:
+- `.csv` — written row by row, a single file, genuinely constant memory.
+- `.odf` — the binary format carries the row count in its header and does not
+  allow appending, so it is dumped in blocks (`chunk`, 50,000 by default),
+  freeing each one. The first keeps the requested name and the rest are numbered.
+  `frame` reads it directly, with the types already inferred:
 
 ```orion
-h = fr.open("productos.odf")
-show(fr.schema(h))    -- {id: int, nombre: string, precio: float, stock: int}
+h = fr.open("products.odf")
+show(fr.schema(h))    -- {id: int, name: string, price: float, stock: int}
 ```
 
-**Una URL que falla no aborta el recorrido.** En una tanda de veinte, morir por
-un 404 tira el trabajo de las diecinueve buenas: se anota en `errors` y se sigue.
+**A URL that fails does not abort the walk.** In a batch of twenty, dying on a 404
+throws away the work of the nineteen good ones: it is recorded in `errors` and the
+walk continues.
 
-**Una página que carga pero no da filas se reporta en `empty`.** Un 404 con
-plantilla, un redirect al login o un selector que dejó de valer en esa sección
-cargan bien y no producen nada. Sin esto, un recorrido pierde páginas en
-silencio y nadie lo nota hasta que faltan datos en el informe.
+**A page that loads but yields no rows is reported in `empty`.** A 404 with a
+template, a redirect to the login page, or a selector that stopped working in that
+section all load fine and produce nothing. Without this, a walk loses pages
+silently and nobody notices until data is missing from the report.
 
-### 7.5 `web.discover(pestaña, opts?)` → esquema propuesto
+### 7.5 `web.discover(tab, opts?)` → proposed schema
 
-El problema de un scraper no es leer datos, es **averiguar qué selector usar**.
-Uno abre las herramientas del navegador, baja por el árbol, prueba una clase, ve
-que también casa con el menú, prueba otra… y veinte minutos después tiene un
-esquema que se rompe en la página siguiente.
+A scraper's problem is not reading data, it is **working out which selector to
+use**. You open the browser's tools, walk down the tree, try a class, see that it
+also matches the menu, try another one… and twenty minutes later you have a schema
+that breaks on the next page.
 
-`discover` mira la página y lo propone:
+`discover` looks at the page and proposes one:
 
 ```orion
 e = web.discover(p)
-show(e["row"])       -- ".quote"     (el selector de la fila que se repite)
-show(e["fields"])    -- {text: ".text", author: ".author", url: "ahref"}
-show(e["sample"])    -- las primeras filas ya extraídas con esa propuesta
+show(e["row"])       -- ".quote"     (the selector of the repeating row)
+show(e["fields"])    -- {text: ".text", author: ".author", url: "a@href"}
+show(e["sample"])    -- the first rows already extracted with that proposal
 
--- y se usa tal cual:
-filas = web.extract(p, e["row"], { frase: ".text", autor: ".author" })
+-- and it is used as is:
+rows = web.extract(p, e["row"], { quote: ".text", author: ".author" })
 ```
 
-Devuelve `{ row, count, fields, sample, fragil }`. La **muestra** es lo que lo
-hace fiable: no te pide que confíes en la propuesta, te enseña qué extraería.
+It returns `{ row, count, fields, sample, fragil }`. The **sample** is what makes
+it trustworthy: it does not ask you to believe the proposal, it shows you what it
+would extract.
 
-Cómo lo deduce, para que no sea magia:
+How it works it out, so it is not magic:
 
-- **La fila** es el grupo de elementos hermanos que más se repite con la misma
-  estructura interna, puntuado por cantidad **y riqueza** —texto y número de
-  campos—. Así no confunde un listado de productos con el menú de navegación,
-  que también se repite pero está vacío.
-- La repetición se detecta por **estructura, no por clases**: los sitios
-  modernos generan clases como `x1i10hfl` que no significan nada, así que se
-  mira el tag y los tags de los hijos.
-- **El selector de fila** es la clase común a todas las filas que además
-  selecciona exactamente esas. Si ninguna clase sirve, se cae a un selector
-  estructural (`article > h3 > a`) y `fragil` viene en `yes` para avisarlo.
-- **Los campos** solo se conservan si aparecen en la mayoría de las filas: uno
-  que esté en una sola no es un campo, es una casualidad.
+- **The row** is the group of sibling elements that repeats most with the same
+  internal structure, scored by count **and richness** — text and number of
+  fields. That way it does not mistake a product listing for the navigation menu,
+  which also repeats but is empty.
+- Repetition is detected by **structure, not by classes**: modern sites generate
+  classes like `x1i10hfl` that mean nothing, so the tag and the children's tags
+  are what get looked at.
+- **The row selector** is the class common to every row that also selects exactly
+  those. If no class works, it falls back to a structural selector
+  (`article > h3 > a`) and `fragil` comes back `yes` to warn about it.
+- **Fields** are only kept if they appear in most of the rows: one that is in a
+  single row is not a field, it is a coincidence.
 
-No adivina la intención —no sabe que eso es un "precio", así que un campo sin
-clase legible se llama `campo_1`—. No sustituye a `extract`: te deja a un paso
-de él en vez de a veinte minutos. Nadie lo tiene de serie; en Python te pones a
-leer el HTML a mano.
+It does not guess intent — it does not know that something is a "price", so a
+field with no readable class is called `campo_1`. It does not replace `extract`:
+it leaves you one step away from it instead of twenty minutes. Nobody ships this;
+in Python you sit down and read the HTML by hand.
 
-Medido en tres sitios distintos sin decirle nada de ninguno: en Hacker News saca
-la URL del artículo y su título; en una tienda de libros, el enlace, la miniatura
-y el precio; en un listado de citas, el texto y el autor.
+Measured on three different sites without being told anything about any of them:
+on Hacker News it pulls out the article URL and its title; on a bookshop, the
+link, the thumbnail and the price; on a quotes listing, the text and the author.
 
-### 7.6 `web.crawl(navegador, opts)` → resumen
+### 7.6 `web.crawl(browser, opts)` → summary
 
-`extract_to` recorre una lista de URLs con **una sola pestaña, en serie**. Sirve,
-pero deja la máquina a un octavo de gas: mientras una página carga —que es
-esperar a la red, no calcular— el resto del navegador está parado.
+`extract_to` walks a list of URLs with **a single tab, serially**. It works, but
+it leaves the machine at an eighth throttle: while one page loads — which is
+waiting on the network, not computing — the rest of the browser sits idle.
 
-`web.crawl` abre **N pestañas y las conduce en paralelo desde N hilos de
-sistema**:
+`web.crawl` opens **N tabs and drives them in parallel from N system threads**:
 
 ```orion
 r = web.crawl(b, {
-    urls:    paginas,                    -- la lista de páginas
+    urls:    pages,                      -- the list of pages
     row:     ".card",
-    schema:  { nombre: ".title", precio: ".price|num" },
-    out:     "catalogo.csv",
-    workers: 8,                          -- 8 pestañas a la vez
-    resume:  yes                         -- retoma si se cortó
+    schema:  { name: ".title", price: ".price|num" },
+    out:     "catalog.csv",
+    workers: 8,                          -- 8 tabs at a time
+    resume:  yes                         -- picks up if it was cut off
 })
 show(r)
--- {rows: 4000, ok: 40, failed: 0, skipped: 0, workers: 8, empty: [], files: [catalogo.csv], errors: []}
+-- {rows: 4000, ok: 40, failed: 0, skipped: 0, workers: 8, empty: [], files: [catalog.csv], errors: []}
 ```
 
-Se le pasa el **navegador**, no una pestaña: las abre él. Toma el `row` y el
-`schema` de `extract`, y escribe a disco con el mismo volcador en streaming de
-`extract_to` (RAM plana, `.csv` o `.odf`).
+You pass it the **browser**, not a tab: it opens them itself. It takes `row` and
+`schema` from `extract`, and writes to disk with the same streaming dumper as
+`extract_to` (flat RAM, `.csv` or `.odf`).
 
-**El paralelismo es real, y es el músculo que Orion tiene y un scraper de Python
-no**: hilos de sistema de verdad sobre el mismo socket CDP, que el transporte
-multiplexa. No es `asyncio` cooperativo. Medido contra un servidor local de 12
-páginas lentas: `extract_to` en serie **7,9 s**, `crawl` con 8 workers **1,8 s**
-— las mismas 120 filas. El factor depende de cuántas páginas y de la red; la
-forma es la que cambia.
+**The parallelism is real, and it is the muscle Orion has and a Python scraper
+does not**: genuine system threads over the same CDP socket, which the transport
+multiplexes. It is not cooperative `asyncio`. Measured against a local server of
+12 slow pages: `extract_to` serially **7.9 s**, `crawl` with 8 workers **1.8 s** —
+the same 120 rows. The factor depends on how many pages and on the network; what
+changes is the shape.
 
-**Reanuda.** Un recorrido de diez mil páginas que se corta en la siete mil no
-puede empezar de cero. Cada URL terminada se anota en `<salida>.progress`, y al
-volver a arrancar con `resume: yes` las hechas se saltan (`skipped` las cuenta).
-Se anota **después** de escribir sus filas: si el proceso muere entre medias, esa
-página se repite al reanudar en vez de perderse. La reanudación es para `.csv`
-—que admite añadir al final—; el `.odf` obliga a empezar de cero y se avisa.
+**It resumes.** A ten-thousand-page walk that is cut off at seven thousand cannot
+start from scratch. Every finished URL is recorded in `<out>.progress`, and on
+starting again with `resume: yes` the completed ones are skipped (`skipped` counts
+them). It is recorded **after** its rows are written: if the process dies in
+between, that page is repeated on resume instead of being lost. Resuming is for
+`.csv` — which allows appending; `.odf` forces starting over and says so.
 
-Como `extract`, un campo que no trae valor en **ninguna** página se delata en vez
-de dejar una columna vacía que parece buena; con `{ strict: no }` se acepta.
+Like `extract`, a field that brings no value on **any** page gives itself away
+instead of leaving an empty column that looks fine; with `{ strict: no }` it is
+accepted.
 
-En Python esto es **Scrapy**: un framework entero, otro fichero de settings, otra
-mentalidad. Aquí es una llamada, apoyada en piezas que ya existían.
+In Python this is **Scrapy**: a whole framework, another settings file, another
+mindset. Here it is one call, resting on pieces that already existed.
 
-## 8. Archivos
+## 8. Files
 
-Las tres cosas que el navegador **delega en el sistema operativo**: elegir un
-archivo para subir, guardar uno que se descarga, e imprimir. Las tres abren una
-ventana nativa que está fuera del DOM, así que ningún clic ni ninguna tecla la
-alcanza. Es donde se atasca la automatización web de verdad.
+The three things the browser **delegates to the operating system**: choosing a
+file to upload, saving a downloaded one, and printing. All three open a native
+window that is outside the DOM, so no click and no key can reach it. It is where
+real web automation gets stuck.
 
-Aquí no se maneja ninguna de esas ventanas: **se impide que existan**. CDP
-permite interceptar las tres antes de que el navegador se las pida al sistema,
-así que nada de esto depende del idioma del Windows, de la resolución, ni de
-que haya escritorio. Funciona igual en headless y en un servidor sin pantalla.
+None of those windows is handled here: **they are prevented from existing**. CDP
+allows all three to be intercepted before the browser asks the system for them, so
+none of this depends on the language of the Windows install, on the resolution, or
+on there being a desktop at all. It works the same headless and on a server with
+no screen.
 
-### 8.1 `web.upload(pestaña, selector, archivos)` → rutas absolutas
+### 8.1 `web.upload(tab, selector, files)` → absolute paths
 
 ```orion
-web.upload(p, "#adjunto", "contrato.pdf")            -- uno
-web.upload(p, "#adjunto", ["a.pdf", "b.pdf"])        -- varios
+web.upload(p, "#attachment", "contract.pdf")            -- one
+web.upload(p, "#attachment", ["a.pdf", "b.pdf"])        -- several
 ```
 
-El selector puede apuntar a dos cosas distintas, y las dos funcionan:
+The selector can point at two different things, and both work:
 
-1. **El propio `<input type="file">`.** Se le asignan los archivos y ya está.
-2. **Cualquier cosa que abra el selector al pulsarla** — el botón "Examinar",
-   una zona de arrastrar y soltar, un `<label>`. El `<input>` real suele estar
-   oculto tras el diseño del sitio y a veces ni siquiera es alcanzable con un
-   selector.
+1. **The `<input type="file">` itself.** The files are assigned to it and that is
+   that.
+2. **Anything that opens the picker when pressed** — the "Browse" button, a
+   drag-and-drop zone, a `<label>`. The real `<input>` is usually hidden behind
+   the site's design and sometimes is not even reachable with a selector.
 
-El caso 2 es el que no cubre Selenium: su receta es `send_keys` sobre el input,
-que exige que el input exista y sea alcanzable. Aquí se activa la interceptación,
-se pulsa, y cuando el navegador anuncia que iba a abrir la ventana se le contesta
-con los archivos. La ventana no llega a aparecer.
+Case 2 is the one Selenium does not cover: its recipe is `send_keys` on the input,
+which requires the input to exist and be reachable. Here interception is turned
+on, the element is pressed, and when the browser announces it was about to open
+the window it is answered with the files. The window never appears.
 
-Las rutas relativas se resuelven contra el directorio del programa, no contra el
-del navegador, que es otro proceso y está en otro sitio. Se devuelven las
-absolutas ya resueltas porque sin verlas es imposible entender por qué el
-navegador dice que un archivo que existe no existe.
+Relative paths are resolved against the program's directory, not the browser's,
+which is another process and is somewhere else. The resolved absolute paths are
+returned because without seeing them it is impossible to understand why the
+browser says a file that exists does not exist.
 
-**Un archivo que no existe se dice antes de tocar la página.** El navegador
-acepta en silencio una ruta inventada: el formulario se envía sin adjunto y el
-fallo aparece mucho después, en el servidor de otro.
+**A file that does not exist is reported before touching the page.** The browser
+silently accepts an invented path: the form is submitted with no attachment and
+the failure shows up much later, on somebody else's server.
 
 ```
-browser.upload: el archivo 'contrato.pdf' no existe
-  se buscó en: C:\trabajo\facturas\contrato.pdf
+browser.upload: the file 'contract.pdf' does not exist
+  looked in: C:\work\invoices\contract.pdf
 ```
 
-### 8.2 `web.download(pestaña, selector, opts?)` → dict
+### 8.2 `web.download(tab, selector, opts?)` → dict
 
 ```orion
-d = web.download(p, "#descargar", { dir: "facturas" })
+d = web.download(p, "#download", { dir: "invoices" })
 show(d)
--- {path: C:\trabajo\facturas\factura-042.pdf, name: factura-042.pdf, bytes: 51234, url: https://...}
+-- {path: C:\work\invoices\invoice-042.pdf, name: invoice-042.pdf, bytes: 51234, url: https://...}
 ```
 
-Descargar con un navegador automatizado tiene dos problemas, no uno:
+Downloading with an automated browser has two problems, not one:
 
-**El diálogo "Guardar como"**, que se evita fijando el comportamiento de descarga
-antes de pulsar.
+**The "Save as" dialog**, which is avoided by fixing the download behaviour before
+pressing.
 
-**Saber cuándo ha terminado.** El navegador escribe primero un archivo temporal
-`.crdownload` y lo renombra al acabar. Sin un aviso, la receta habitual es dormir
-unos segundos y cruzar los dedos: si la red va lenta se lee un archivo a medias,
-y si va rápida se pierde el tiempo. Aquí se espera el evento de finalización, así
-que la llamada vuelve exactamente cuando el archivo está entero — y `bytes` lo
-confirma.
+**Knowing when it has finished.** The browser first writes a temporary
+`.crdownload` file and renames it when done. Without a notification, the usual
+recipe is to sleep a few seconds and cross your fingers: if the network is slow
+you read a half-written file, and if it is fast you waste the time. Here the
+completion event is awaited, so the call returns exactly when the file is whole —
+and `bytes` confirms it.
 
-| Opción | Qué hace |
+| Option | What it does |
 |---|---|
-| `dir` | Carpeta destino. Se crea si no está. Por defecto, la del programa. |
-| `name` | Renombra al terminar. Por defecto, el que proponga el servidor. |
-| `overwrite` | Permite pisar un archivo existente. Por defecto **no**. |
-| `wait` | Plazo, en ms, para archivos grandes. |
+| `dir` | Destination folder. Created if absent. By default, the program's. |
+| `name` | Renames on finish. By default, whatever the server proposes. |
+| `overwrite` | Allows overwriting an existing file. **No** by default. |
+| `wait` | Deadline, in ms, for large files. |
 
-**Dos descargas con el mismo nombre no se pisan.** La segunda queda como
-`informe (2).txt` y la ruta real viene en `path`. Sobrescribir en silencio es lo
-que hace perder una tanda entera de facturas sin que nadie se entere hasta el
-cierre del mes; se pide explícitamente con `{ overwrite: yes }`.
+**Two downloads with the same name do not overwrite each other.** The second ends
+up as `report (2).txt` and the real path comes back in `path`. Overwriting
+silently is what loses a whole batch of invoices without anyone noticing until
+month end; it is requested explicitly with `{ overwrite: yes }`.
 
-**Un elemento que no descarga lo dice**, en vez de quedarse esperando:
+**An element that does not download says so**, instead of waiting around:
 
 ```
-browser.download: pulsar '#ver' no inició ninguna descarga en 10000 ms.
-  Comprueba que el elemento sea el que descarga, y no un enlace que abre el
-  archivo en una pestaña.
+browser.download: pressing '#view' did not start any download in 10000 ms.
+  Check that the element is the one that downloads, and not a link that opens the
+  file in a tab.
 ```
 
-### 8.3 `web.pdf(pestaña, ruta, opts?)` → ruta
+### 8.3 `web.pdf(tab, path, opts?)` → path
 
 ```orion
-web.pdf(p, "justificante.pdf", { margin: 0.4, landscape: no })
+web.pdf(p, "receipt.pdf", { margin: 0.4, landscape: no })
 ```
 
-No es una captura: es el documento entero paginado y con el texto seleccionable.
-Para guardar un justificante o una factura de un portal web es lo que hace falta,
-y es justo lo que obliga a pelearse con el diálogo de impresión si se hace a mano.
+It is not a screenshot: it is the whole document, paginated and with selectable
+text. To save a receipt or an invoice from a web portal it is what you need, and
+it is exactly what forces you to fight the print dialog if done by hand.
 
-Opciones: `landscape`, `background`, `headers`, `scale`, `width`, `height`,
-`margin`, `pages`. Las medidas van en pulgadas, que es la unidad del navegador —
-un A4 son 8,27 × 11,69. Lo que no se indique lo decide el navegador con el mismo
-default que aplicaría el diálogo.
+Options: `landscape`, `background`, `headers`, `scale`, `width`, `height`,
+`margin`, `pages`. Measurements are in inches, which is the browser's unit — an A4
+is 8.27 × 11.69. Anything not specified is decided by the browser with the same
+default the dialog would apply.
 
-El fondo se imprime por defecto, al revés que en el diálogo: el navegador lo
-quita para ahorrar tinta, y en un PDF que nadie va a imprimir eso solo hace que
-las tablas con filas alternas salgan en blanco.
+The background is printed by default, unlike in the dialog: the browser removes it
+to save ink, and in a PDF nobody is going to print that only makes tables with
+alternating rows come out blank.
 
-## 9. Sesión y seguridad
+## 9. Session and security
 
-### 9.1 `web.save_state(pestaña, ruta)` / `web.load_state(pestaña, ruta)`
+### 9.1 `web.save_state(tab, path)` / `web.load_state(tab, path)`
 
-Lo más caro de una automatización que corre a diario no es navegar: es **volver
-a iniciar sesión en cada ejecución**. Es lento, y sobre todo es frágil — cada
-login es un formulario que puede cambiar, un captcha que puede aparecer y un
-doble factor que puede saltar. Un proceso que se loguea cien veces al día
-también es un proceso que parece un ataque.
+The most expensive part of an automation that runs daily is not navigating: it is
+**logging in again on every run**. It is slow, and above all it is fragile — every
+login is a form that can change, a captcha that can appear and a second factor
+that can fire. A process that logs in a hundred times a day is also a process that
+looks like an attack.
 
 ```orion
--- una vez
-web.save_state(p, "sesion.json")
+-- once
+web.save_state(p, "session.json")
 
--- todos los días
-web.goto(p, "https://portal.empresa.com")
-web.load_state(p, "sesion.json")
-web.reload(p)                        -- ya dentro
+-- every day
+web.goto(p, "https://portal.company.com")
+web.load_state(p, "session.json")
+web.reload(p)                        -- already inside
 ```
 
-`save_state` devuelve qué guardó y `load_state` qué aplicó:
+`save_state` returns what it saved and `load_state` what it applied:
 
 ```
-{path: sesion.json, cookies: 5, local: 3, session: 0, origin: https://portal.empresa.com}
+{path: session.json, cookies: 5, local: 3, session: 0, origin: https://portal.company.com}
 {cookies: 5, local: 3, session: 0, skipped: []}
 ```
 
-**Hay que estar en el origen antes de restaurar.** Las cookies van al navegador
-entero, pero el almacenamiento local solo se puede escribir estando en su
-dominio — el navegador no deja tocar el de otro. Los orígenes que no coinciden
-salen en `skipped` en vez de perderse en silencio, porque una sesión restaurada
-a medias no da ningún error y es indepurable.
+**You have to be on the origin before restoring.** Cookies go to the whole
+browser, but local storage can only be written while on its domain — the browser
+does not allow touching another's. Origins that do not match come back in
+`skipped` instead of being lost silently, because a half-restored session gives no
+error at all and is impossible to debug.
 
-`user_data` en `open()` resuelve algo parecido guardando el perfil entero, pero
-es una carpeta de cientos de megas atada a una máquina. Esto es un JSON que se
-puede mover, versionar aparte o guardar en un gestor de secretos.
+`user_data` in `open()` solves something similar by saving the whole profile, but
+that is a folder of hundreds of megabytes tied to one machine. This is a JSON you
+can move, version separately or keep in a secrets manager.
 
-> **Este archivo es una credencial.** Dentro van las cookies de sesión: quien lo
-> tenga entra como tú, sin contraseña y sin segundo factor. No va al
-> repositorio. Vale exactamente lo mismo que la contraseña, con el agravante de
-> que no caduca cuando la cambias.
+> **This file is a credential.** The session cookies are inside it: whoever has it
+> gets in as you, with no password and no second factor. It does not go in the
+> repository. It is worth exactly as much as the password, with the aggravating
+> factor that it does not expire when you change it.
 
-### 9.2 `open({ allow: [...] })` — lista blanca de dominios
-
-```orion
-b = web.open({ allow: ["*.empresa.com", "cdn.proveedor.net"] })
-```
-
-Un proceso automático lleva encima la sesión de la empresa. Si la página que
-visita está comprometida —o si un anuncio inyectado en ella redirige— el bot se
-va a otro sitio **con esa sesión puesta**. La lista blanca acota a dónde puede
-ir: lo que no esté, no se carga.
-
-`*.empresa.com` cubre los subdominios y el dominio pelado; sin comodín es solo
-ese host exacto. El puerto no cuenta, y lo que va antes de una arroba tampoco:
-`http://empresa.commalo.net/` es una petición a **malo.net**, y ese truco de
-suplantación no pasa la lista.
-
-`web.blocked(navegador)` devuelve lo que se ha cortado, que es lo primero que
-hace falta cuando un sitio deja de funcionar con la lista puesta.
-
-La interceptación solo se activa si hay lista: con ella, el navegador para en
-cada petición y espera respuesta, y eso no se paga si no se pide.
-
-### 9.3 Credenciales fuera de los registros
+### 9.2 `open({ allow: [...] })` — domain allowlist
 
 ```orion
-web.fill(p, { "#usuario": u, "#clave": c }, { secret: ["#clave"] })
+b = web.open({ allow: ["*.company.com", "cdn.provider.net"] })
 ```
 
-Un error de `fill` puede repetir el valor que no se admitió, y ese error acaba
-en un log o en una consola compartida. Los campos marcados no cuentan el suyo.
-`{ secret: yes }` tapa todos los de la llamada.
+An automated process carries the company's session with it. If the page it visits
+is compromised — or if an ad injected into it redirects — the bot goes elsewhere
+**wearing that session**. The allowlist bounds where it can go: what is not on it
+is not loaded.
 
-## 10. Estabilidad
+`*.company.com` covers the subdomains and the bare domain; without a wildcard it
+is only that exact host. The port does not count, and neither does what comes
+before an at sign: `http://company.com@evil.net/` is a request to **evil.net**,
+and that impersonation trick does not pass the list.
 
-### 10.1 `web.reload(pestaña, opts?)` / `web.back` / `web.forward`
+`web.blocked(browser)` returns what has been cut off, which is the first thing you
+need when a site stops working with the list in place.
 
-Devuelven la URL en la que quedan. `{ cache: no }` en `reload` fuerza traerlo
-todo del servidor.
+Interception is only activated if there is a list: with it, the browser stops on
+every request and waits for an answer, and that is not paid for unless asked.
 
-Ninguna espera el evento de carga del navegador, y es deliberado: **al volver
-atrás, Chrome suele restaurar la página desde su caché de retroceso sin
-recargarla, y entonces no hay evento de carga**. Esperarlo dejaba cada `back`
-clavado el plazo entero —treinta segundos— para acabar continuando igual. Se
-mira la página, que es quien sabe dónde está.
-
-Un `back` sin historial lo dice en vez de no hacer nada. Ojo con una cosa que
-confunde: toda pestaña empieza en `about:blank`, así que después de una sola
-navegación **sí** queda una página a la que volver.
-
-### 10.2 `web.wait(pestaña, { idle: ms })`
-
-Espera a que la red se calme, para lo que ningún selector resuelve: no sabes
-**qué** va a aparecer, solo que la página sigue trayendo cosas. Es el caso del
-panel que se monta con tres llamadas encadenadas, o del listado que se recarga
-al filtrar.
+### 9.3 Credentials out of the logs
 
 ```orion
-web.click(p, "#filtrar")
-web.wait(p, { idle: 500 })      -- medio segundo sin peticiones
+web.fill(p, { "#user": u, "#password": c }, { secret: ["#password"] })
 ```
 
-La alternativa que usa todo el mundo es dormir dos segundos, y tiene los dos
-defectos a la vez: si la red va lenta se lee a medias, y si va rápida se tiran
-dos segundos en cada vuelta.
+A `fill` error can repeat the value that was not accepted, and that error ends up
+in a log or on a shared console. Marked fields do not report theirs.
+`{ secret: yes }` covers every field in the call.
 
-Las peticiones en vuelo se cuentan **dentro de la página**, envolviendo `fetch`
-y `XMLHttpRequest`. Así es una sola llamada y no depende de que el historial de
-eventos —que está acotado— haya conservado los que hacían falta.
+## 10. Stability
 
-El límite honesto: hay páginas que sondean el servidor para siempre y nunca se
-quedan quietas. En esas, el error lo dice y hay que esperar por un selector.
+### 10.1 `web.reload(tab, opts?)` / `web.back` / `web.forward`
 
-## 11. Capturas de pantalla
+They return the URL they end up on. `{ cache: no }` in `reload` forces fetching
+everything from the server.
 
-`web.screenshot(pestaña, ruta)` → escribe un PNG y devuelve la ruta.
+None of them waits for the browser's load event, and that is deliberate: **on
+going back, Chrome usually restores the page from its back/forward cache without
+reloading, and then there is no load event**. Waiting for it left every `back`
+stuck for the entire deadline — thirty seconds — only to carry on anyway. The page
+is asked instead, since it is the one that knows where it is.
 
-Requiere `images: yes` en `open` si quieres que salgan las imágenes.
+A `back` with no history says so instead of doing nothing. Watch out for one
+confusing detail: every tab starts at `about:blank`, so after a single navigation
+there **is** a page to go back to.
 
-## 12. Captura de red
+### 10.2 `web.wait(tab, { idle: ms })`
 
-Casi todo sitio moderno pinta sus listados con JavaScript a partir de un JSON
-que él mismo se descarga. Un scraper clásico espera a que ese JSON se convierta
-en HTML y luego **deshace el trabajo**: busca `div`s, quita etiquetas,
-reconstruye números que ya venían siendo números. Y se rompe el día que alguien
-renombra una clase de CSS.
-
-`watch` + `capture` leen la fuente.
+Waits for the network to go quiet, for what no selector can solve: you do not know
+**what** is going to appear, only that the page is still fetching things. It is
+the case of a dashboard assembled from three chained calls, or a listing that
+reloads when filtered.
 
 ```orion
-web.watch(p, "/api/productos")     -- 1. armar la escucha
-web.click(p, "#cargar")            -- 2. provocar la petición
-r = web.capture(p)                 -- 3. recoger, ya parseado
+web.click(p, "#filter")
+web.wait(p, { idle: 500 })      -- half a second with no requests
 ```
 
-Son dos llamadas y no una porque hay que armar **antes**: si la escucha se
-encendiera al recoger, la petición ya habría pasado y no quedaría nada que leer.
+The alternative everyone uses is to sleep two seconds, and it has both defects at
+once: if the network is slow you read half of it, and if it is fast you throw away
+two seconds on every pass.
 
-### 12.1 Qué se gana
+In-flight requests are counted **inside the page**, by wrapping `fetch` and
+`XMLHttpRequest`. That way it is a single call and does not depend on the event
+history — which is bounded — having kept the ones that mattered.
 
-En el ejemplo de los tests, la página pinta el nombre de cada producto. Su API
-devuelve esto:
+The honest limit: there are pages that poll the server forever and never go quiet.
+On those, the error says so and you have to wait on a selector.
+
+## 11. Screenshots
+
+`web.screenshot(tab, path)` → writes a PNG and returns the path.
+
+Requires `images: yes` in `open` if you want the images to show up.
+
+## 12. Network capture
+
+Almost every modern site paints its listings with JavaScript from a JSON it
+downloads itself. A classic scraper waits for that JSON to become HTML and then
+**undoes the work**: it looks for `div`s, strips tags, rebuilds numbers that were
+already numbers. And it breaks the day somebody renames a CSS class.
+
+`watch` + `capture` read the source.
+
+```orion
+web.watch(p, "/api/products")      -- 1. arm the listener
+web.click(p, "#load")              -- 2. trigger the request
+r = web.capture(p)                 -- 3. collect, already parsed
+```
+
+They are two calls and not one because you have to arm **beforehand**: if the
+listener switched on at collection time, the request would already have gone by
+and there would be nothing left to read.
+
+### 12.1 What you gain
+
+In the tests' example, the page paints each product's name. Its API returns this:
 
 ```
-{id: 1, nombre: Teclado, precio: 49.9, stock: 12, margen: 0.31, proveedor: ACME}
+{id: 1, name: Keyboard, price: 49.9, stock: 12, margin: 0.31, supplier: ACME}
 ```
 
-`stock`, `margen` y `proveedor` **no llegan al HTML**. No hay selector que los
-saque, porque no están. Y los que sí están llegan ya tipados: `49.9` es un
-número, no `"49,90 EUR"` que haya que convertir.
+`stock`, `margin` and `supplier` **never reach the HTML**. There is no selector
+that can get them, because they are not there. And the ones that do arrive come
+already typed: `49.9` is a number, not `"49,90 EUR"` to be converted.
 
-| | del HTML | de la API |
+| | from the HTML | from the API |
 |---|---|---|
-| Campos | los que el diseño enseñe | todos |
-| Tipos | texto, a convertir | ya tipados |
-| Se rompe cuando… | cambia una clase de CSS | cambia el contrato de la API |
+| Fields | the ones the design shows | all of them |
+| Types | text, to be converted | already typed |
+| Breaks when… | a CSS class changes | the API contract changes |
 
-Lo segundo pasa mucho menos: una clase de CSS la toca cualquier rediseño, y el
-contrato de una API lo defiende el propio equipo del sitio.
+The second happens far less: a CSS class is touched by any redesign, and an API's
+contract is defended by the site's own team.
 
-### 12.2 `web.watch(pestaña, patrón)`
+### 12.2 `web.watch(tab, pattern)`
 
-Sin `*`, el patrón es "contiene" — que es lo que casi siempre se quiere y lo que
-uno escribe primero:
+Without `*`, the pattern means "contains" — which is what you almost always want
+and what you write first:
 
 ```orion
 web.watch(p, "/api/")
 ```
 
-Con `*`, es un comodín que cubre cualquier trozo, para cuando hace falta afinar:
+With `*`, it is a wildcard covering any chunk, for when you need to narrow it:
 
 ```orion
-web.watch(p, "*/v2/pedidos?*")
+web.watch(p, "*/v2/orders?*")
 web.watch(p, "*.json")
 ```
 
-No son expresiones regulares a propósito: una URL lleva `?`, `.` y `+`, que en
-una regex significan otra cosa, y el patrón obvio daría resultados
-sorprendentes. Aquí esos signos son literales.
+They are deliberately not regular expressions: a URL carries `?`, `.` and `+`,
+which mean something else in a regex, and the obvious pattern would give
+surprising results. Here those signs are literals.
 
-El dominio de red del navegador solo se enciende al llamar a `watch`: con él
-puesto se emiten varios eventos por petición, y una página con cien recursos
-serían cientos de mensajes que nadie va a consumir.
+The browser's network domain is only switched on when `watch` is called: with it
+on, several events are emitted per request, and a page with a hundred resources
+would be hundreds of messages nobody is going to consume.
 
-### 12.3 `web.capture(pestaña, opts?)` → lista
+### 12.3 `web.capture(tab, opts?)` → list
 
-Cada elemento es `{url, status, json}`. Si el cuerpo no era JSON, `json` viene
-nulo y el texto crudo va en `text`.
+Each element is `{url, status, json}`. If the body was not JSON, `json` comes back
+null and the raw text goes in `text`.
 
 ```orion
 r = web.capture(p)
@@ -1054,429 +1062,432 @@ for resp in r {
 }
 ```
 
-**Espera a que llegue algo que case** en vez de mirar una vez y volver vacía. La
-petición sale después de la acción que la provoca, y una lista vacía convertiría
-un problema de tiempo en "este sitio no usa API" — una conclusión falsa y difícil
-de deshacer. Si de verdad no casa nada, devuelve vacío al agotar el plazo.
+**It waits for something matching to arrive** instead of looking once and coming
+back empty. The request goes out after the action that triggers it, and an empty
+list would turn a timing problem into "this site does not use an API" — a false
+conclusion and a hard one to undo. If nothing really matches, it returns empty
+once the deadline runs out.
 
-Se recogen **todas** las respuestas que casen, no la primera: un panel suele
-pedir tres o cuatro cosas a la vez, y quedarse con una daría un resultado
-incompleto con pinta de completo.
+**All** matching responses are collected, not the first: a dashboard usually asks
+for three or four things at once, and keeping one would give an incomplete result
+that looks complete.
 
-**El cuerpo puede haber desaparecido.** No viaja en el evento: se pide aparte, y
-el navegador lo guarda en un búfer que acaba reciclando. Si pasa, ese elemento
-trae `error` explicándolo en vez de tirar la captura entera. Se sube con:
+**The body may have disappeared.** It does not travel in the event: it is
+requested separately, and the browser keeps it in a buffer it eventually recycles.
+If that happens, that element carries an `error` explaining it instead of throwing
+away the whole capture. It is raised with:
 
 ```orion
 b = web.open({ tuning: { body_buffer: 52428800 } })
 ```
 
-### 12.4 Comparado
+### 12.4 Compared
 
-Playwright tiene `page.on("response")`: un callback donde hay que filtrar a
-mano, pedir el cuerpo con otro `await` y acordarse de que puede no estar.
-Selenium no tiene nada equivalente sin poner un proxy delante.
+Playwright has `page.on("response")`: a callback where you have to filter by hand,
+request the body with another `await` and remember that it might not be there.
+Selenium has nothing equivalent without putting a proxy in front.
 
-## 13. Intercepción: decidir qué hace el navegador con cada petición
+## 13. Interception: deciding what the browser does with each request
 
-`watch`/`capture` **miran** la red. `route` la **decide**. Es la diferencia
-entre observar un problema y poder provocarlo.
+`watch`/`capture` **look at** the network. `route` **decides** it. It is the
+difference between observing a problem and being able to cause one.
 
 ```orion
-web.route(p, "*/api/stock*", { mock: { status: 500, json: { "error": "caido" } } })
+web.route(p, "*/api/stock*", { mock: { status: 500, json: { "error": "down" } } })
 web.route(p, "*.png",        { block: yes })
 web.route(p, "*/api/*",      { headers: { Authorization: "Bearer " + token } })
-web.route(p, "*/lento*",     { fail: "timedout" })
+web.route(p, "*/slow*",      { fail: "timedout" })
 ```
 
-El patrón es el mismo de `watch`: sin `*` es "contiene", con `*` es comodín.
-Nunca una expresión regular, porque una URL lleva `?`, `.` y `+`.
+The pattern is the same as `watch`'s: without `*` it is "contains", with `*` it is
+a wildcard. Never a regular expression, because a URL carries `?`, `.` and `+`.
 
-### 13.1 Para qué sirve
+### 13.1 What it is for
 
-| Situación | Sin `route` | Con `route` |
+| Situation | Without `route` | With `route` |
 |---|---|---|
-| Probar qué hace la web si la API devuelve 500 | tocar el servidor de verdad | una línea |
-| El front está y el backend no | esperar | `mock` |
-| Un listado con imágenes y tres trazadores | se descarga todo | `block` y el trabajo entero baja |
-| Autenticarse donde no hay formulario | simular un login | `headers` |
-| Probar un reintento | no se puede | `{ times: 1 }` |
+| Test what the site does if the API returns 500 | touch the real server | one line |
+| The front end is there and the back end is not | wait | `mock` |
+| A listing with images and three trackers | everything is downloaded | `block`, and the whole job gets lighter |
+| Authenticate where there is no form | fake a login | `headers` |
+| Test a retry | not possible | `{ times: 1 }` |
 
-### 13.2 Las cuatro acciones
+### 13.2 The four actions
 
-| Acción | Qué hace |
+| Action | What it does |
 |---|---|
-| `{ block: yes }` | corta la petición, como un bloqueador de anuncios |
-| `{ fail: "timedout" }` | corta con un motivo de red concreto, para probar el camino de error |
-| `{ mock: { status, json\|body, headers } }` | responde desde Orion; la petición no llega a salir |
-| `{ headers: {...} }` | la deja pasar con esas cabeceras añadidas o reescritas |
+| `{ block: yes }` | cuts the request off, like an ad blocker |
+| `{ fail: "timedout" }` | cuts it off with a specific network reason, to test the error path |
+| `{ mock: { status, json\|body, headers } }` | answers from Orion; the request never goes out |
+| `{ headers: {...} }` | lets it through with those headers added or rewritten |
 
-Una acción por regla. `{ block: yes, mock: {...} }` no significa nada, y
-aceptarlo obligaría a inventar una precedencia que nadie recordaría.
+One action per rule. `{ block: yes, mock: {...} }` means nothing, and accepting it
+would force inventing a precedence nobody would remember.
 
-Con `json:` se serializa y **además se pone el `Content-Type`**: sin él la
-página recibe el texto correcto y su `response.json()` falla, que es un rato
-perdido persiguiendo un fallo que no está donde parece.
+With `json:` it is serialized **and the `Content-Type` is set too**: without it the
+page receives the correct text and its `response.json()` fails, which is a wasted
+while chasing a bug that is not where it seems.
 
-Los motivos de `fail` son los del navegador: `failed`, `aborted`, `timedout`,
+The `fail` reasons are the browser's: `failed`, `aborted`, `timedout`,
 `accessdenied`, `connectionclosed`, `connectionreset`, `connectionrefused`,
 `connectionaborted`, `connectionfailed`, `namenotresolved`,
 `internetdisconnected`, `addressunreachable`, `blockedbyclient`,
-`blockedbyresponse`. Se escriben como uno quiera —`timedout`, `TimedOut`,
-`timed_out`— y uno inventado lista los válidos.
+`blockedbyresponse`. They are written however you like — `timedout`, `TimedOut`,
+`timed_out` — and an invented one lists the valid ones.
 
-### 13.3 El orden manda, como en un cortafuegos
+### 13.3 Order rules, as in a firewall
 
-Las reglas se prueban en orden y decide **la primera que casa**. Así una regla
-concreta puede ir delante de otra general sin que el orden de evaluación sea un
-misterio:
+Rules are tried in order and **the first that matches** decides. That way a
+specific rule can come before a general one without the evaluation order being a
+mystery:
 
 ```orion
-web.route(p, "*/api/productos*", { mock: { status: 200, json: datos } })
-web.route(p, "*/api/*",          { fail: "timedout" })   -- todo lo demás
+web.route(p, "*/api/products*", { mock: { status: 200, json: data } })
+web.route(p, "*/api/*",         { fail: "timedout" })   -- everything else
 ```
 
-### 13.4 `{ times: n }` — fallar solo las primeras veces
+### 13.4 `{ times: n }` — failing only the first few times
 
 ```orion
 web.route(p, "*/api/*", { mock: { status: 503, body: "no" } }, { times: 1 })
 ```
 
-La primera petición recibe el 503 y la segunda sale de verdad. Es justo lo que
-hace falta para comprobar que un reintento reintenta, y no hay forma de probarlo
-tocando el servidor.
+The first request gets the 503 and the second goes out for real. It is exactly
+what you need to check that a retry retries, and there is no way to test that
+against the real server.
 
-### 13.5 `web.unroute(pestaña, patrón?)` y `web.routes(pestaña)`
+### 13.5 `web.unroute(tab, pattern?)` and `web.routes(tab)`
 
-`unroute` sin patrón quita todas y devuelve cuántas quitó. `routes` devuelve lo
-que hay puesto y **cuántas veces ha disparado cada regla**, que es la forma de
-saber si una regla que creías activa no está casando nada:
+`unroute` with no pattern removes them all and returns how many it removed.
+`routes` returns what is in place and **how many times each rule has fired**,
+which is how you find out that a rule you thought was active is not matching
+anything:
 
 ```orion
 show(web.routes(p))
 -- [{pattern: */api/*, hits: 3, times: null}]
 ```
 
-### 13.6 La lista blanca manda sobre las reglas
+### 13.6 The allowlist overrides the rules
 
-`open({ allow: [...] })` se comprueba **antes** que las rutas, y un `mock` no
-puede reabrir un dominio cerrado a propósito. Es una medida de seguridad; una
-regla de conveniencia no debe poder levantarla.
+`open({ allow: [...] })` is checked **before** the routes, and a `mock` cannot
+reopen a domain that was closed on purpose. It is a security measure; a
+convenience rule must not be able to lift it.
 
-## 14. Emulación: qué dispositivo, idioma y sitio cree ser el navegador
+## 14. Emulation: what device, language and place the browser believes it is
 
 ```orion
 web.emulate(p, { device: "iphone" })
 web.emulate(p, { width: 1920, height: 1080, locale: "es-ES", timezone: "Europe/Madrid" })
 web.emulate(p, { dark: yes, geo: { lat: 40.4168, lon: -3.7038 } })
-web.emulate(p, no)                       -- deshace todo
+web.emulate(p, no)                       -- undoes everything
 ```
 
-Sin esto hay sitios que sencillamente no se pueden automatizar:
+Without this there are sites that simply cannot be automated:
 
-- **Los que sirven otro HTML al móvil.** El menú que hay que pulsar no existe en
-  la versión de escritorio: el selector correcto "no aparece" y no hay manera de
-  que aparezca.
-- **Los que dependen de la zona horaria.** Un panel que muestra "hoy" cambia de
-  datos según dónde crea el navegador que está. Reproducir desde una máquina en
-  UTC el error que ve un compañero en Madrid es imposible sin fijarla.
-- **Los que cambian con el idioma.** `text=Comprar` contra un sitio que decidió
-  servir inglés por el `Accept-Language` del contenedor de CI.
-- **Los que piden ubicación.** El diálogo bloquea el flujo y no se puede clicar
-  desde JavaScript.
+- **The ones that serve different HTML to mobile.** The menu you need to press
+  does not exist in the desktop version: the correct selector "does not appear"
+  and there is no way to make it appear.
+- **The ones that depend on the time zone.** A dashboard showing "today" changes
+  its data depending on where the browser thinks it is. Reproducing, from a
+  machine on UTC, the bug a colleague sees in Madrid is impossible without
+  pinning it.
+- **The ones that change with the language.** `text=Buy` against a site that
+  decided to serve English because of the CI container's `Accept-Language`.
+- **The ones that ask for location.** The dialog blocks the flow and cannot be
+  clicked from JavaScript.
 
 ### 14.1 Presets
 
-`iphone`, `iphone-se`, `ipad`, `android`, `laptop`, `desktop`. Se escriben como
-uno quiera (`iPhone SE`, `iphone_se`) y uno inventado lista los que hay.
+`iphone`, `iphone-se`, `ipad`, `android`, `laptop`, `desktop`. They are written
+however you like (`iPhone SE`, `iphone_se`) and an invented one lists the
+available ones.
 
-Un preset es **un punto de partida, no una lista cerrada**: cualquiera de sus
-campos se sobrescribe en la misma llamada.
+A preset is **a starting point, not a closed list**: any of its fields can be
+overridden in the same call.
 
 ```orion
-web.emulate(p, { device: "iphone", width: 1000 })   -- móvil, pero más ancho
+web.emulate(p, { device: "iphone", width: 1000 })   -- mobile, but wider
 ```
 
-### 14.2 Todos los campos
+### 14.2 Every field
 
-| Campo | Qué controla |
+| Field | What it controls |
 |---|---|
-| `device` | preset de partida |
-| `width` / `height` / `scale` | medidas y densidad de pantalla |
-| `mobile` / `touch` | si el sitio ve un móvil y si hay eventos táctiles |
+| `device` | starting preset |
+| `width` / `height` / `scale` | dimensions and screen density |
+| `mobile` / `touch` | whether the site sees a mobile and whether there are touch events |
 | `ua` | User-Agent |
-| `locale` | idioma; viaja también en `Accept-Language` |
-| `timezone` | zona horaria IANA (`Europe/Madrid`) |
+| `locale` | language; travels in `Accept-Language` too |
+| `timezone` | IANA time zone (`Europe/Madrid`) |
 | `dark` | `prefers-color-scheme` |
 | `geo` | `{ lat, lon, accuracy? }` |
-| `permissions` | permisos concedidos por adelantado |
+| `permissions` | permissions granted in advance |
 
-**Lo que no se pide no se toca.** Cambiar la zona horaria no redimensiona la
-ventana.
+**What is not asked for is not touched.** Changing the time zone does not resize
+the window.
 
-**Emula antes de navegar.** Algunas cosas —el táctil, sobre todo— las mira la
-página al cargar: `emulate` y luego `goto`.
+**Emulate before navigating.** Some things — touch above all — are read by the
+page as it loads: `emulate` and then `goto`.
 
-**Un ancho sin alto** se completa con el que ya tiene la pestaña: CDP acepta
-medidas a medias y deja la ventana en un estado que el sitio no entiende.
+**A width with no height** is completed with the one the tab already has: CDP
+accepts half-given dimensions and leaves the window in a state the site does not
+understand.
 
-**Una página sin `<meta name="viewport">`** se dispone a 980 px aunque emules un
-móvil. No es un fallo: es lo que hace el navegador, y lo mismo que verías en sus
-herramientas de desarrollo.
+**A page with no `<meta name="viewport">`** is laid out at 980 px even if you
+emulate a mobile. It is not a bug: it is what the browser does, and the same
+thing you would see in its developer tools.
 
-### 14.3 Permisos
+### 14.3 Permissions
 
-El diálogo de permisos es un bloqueo de los de verdad: aparece encima de la
-página y no se puede clicar. Concederlo por adelantado hace que no exista.
+The permission dialog is a genuine blocker: it appears on top of the page and
+cannot be clicked. Granting it in advance means it never exists.
 
 ```orion
 web.emulate(p, { permissions: ["clipboard", "notifications"] })
 ```
 
-Admite `geolocation`, `notifications`, `camera`, `microphone`, `clipboard`,
+It accepts `geolocation`, `notifications`, `camera`, `microphone`, `clipboard`,
 `midi`, `sensors`, `background`.
 
-Poner `geo` concede `geolocation` **solo**: sin ello la página recibiría
-`PERMISSION_DENIED` y la posición emulada no llegaría a usarse nunca, que es el
-fallo más difícil de entender de todo esto.
+Setting `geo` grants `geolocation` **on its own**: without it the page would
+receive `PERMISSION_DENIED` and the emulated position would never actually be
+used, which is the hardest failure of all of this to understand.
 
 ## 15. Cookies
 
-`save_state`/`load_state` (9.1) mueven la sesión entera. Para una sola cookie:
+`save_state`/`load_state` (9.1) move the whole session. For a single cookie:
 
-| Función | Qué hace |
+| Function | What it does |
 |---|---|
-| `web.cookies(pestaña, nombre?)` | las cookies visibles, o solo la que se nombra |
-| `web.set_cookie(pestaña, cookie)` | `{ name, value, domain?, path?, expires?, http_only?, secure?, same_site? }` |
-| `web.clear_cookies(pestaña)` | borra todas las del navegador |
+| `web.cookies(tab, name?)` | the visible cookies, or just the named one |
+| `web.set_cookie(tab, cookie)` | `{ name, value, domain?, path?, expires?, http_only?, secure?, same_site? }` |
+| `web.clear_cookies(tab)` | deletes every cookie in the browser |
 
-Sin `domain` la cookie se ata a la url de la pestaña. Hace falta: sin dominio ni
-url el navegador la descarta **en silencio**.
+Without `domain` the cookie is tied to the tab's url. That is needed: with
+neither domain nor url the browser discards it **silently**.
 
 ## 16. JavaScript
 
-`web.eval(pestaña, js)` evalúa y devuelve el valor ya convertido a Orion.
+`web.eval(tab, js)` evaluates and returns the value already converted to Orion.
 
 ```orion
 n = web.eval(p, "document.querySelectorAll('.card').length")
 ```
 
-Una excepción del JavaScript se convierte en error de Orion, no en un `null`
-silencioso.
+A JavaScript exception becomes an Orion error, not a silent `null`.
 
-## 17. Memoria
+## 17. Memory
 
-Decisiones tomadas con el consumo como criterio, no como consecuencia:
+Decisions taken with consumption as the criterion, not as a consequence:
 
-- **El DOM nunca cruza el socket.** Toda evaluación usa `returnByValue`: vuelve
-  el valor pedido, no una referencia ni el HTML. BeautifulSoup se trae la página
-  entera al proceso y construye un árbol de objetos encima; aquí la memoria es
-  proporcional a los datos que pediste, no al peso de la página.
-- **Una llamada por consulta.** En Selenium cada lectura de un atributo es una
-  petición HTTP al driver. Toda la lectura de Orion se resuelve dentro de la
-  página, en una evaluación.
-- **Historial de eventos acotado** a 512. Un navegador activo emite miles por
-  minuto y nadie los consume; sin tope, una sesión larga se come la RAM en un
-  historial inútil.
-- **Imágenes desactivadas por defecto**, más las banderas que apagan
-  sincronización, extensiones y red de fondo.
-- **Las pestañas se cierran de verdad** al hacer `free`: es lo que libera la
-  memoria del proceso de render.
+- **The DOM never crosses the socket.** Every evaluation uses `returnByValue`: the
+  requested value comes back, not a reference and not the HTML. BeautifulSoup
+  brings the whole page into the process and builds a tree of objects on top of
+  it; here memory is proportional to the data you asked for, not to the weight of
+  the page.
+- **One call per query.** In Selenium every attribute read is an HTTP request to
+  the driver. All of Orion's reading is resolved inside the page, in one
+  evaluation.
+- **Event history bounded** to 512. An active browser emits thousands per minute
+  and nobody consumes them; without a cap, a long session eats RAM on a useless
+  history.
+- **Images off by default**, plus the flags that turn off sync, extensions and
+  background networking.
+- **Tabs are really closed** on `free`: that is what releases the render process's
+  memory.
 
-## 18. Arquitectura
+## 18. Architecture
 
 ```
 orion-vm/src/modules/browser/
-├── mod.rs      API pública y registro de handles
-├── cdp.rs      transporte: WebSocket, multiplexado por id, bus de eventos
-├── dom.rs      selectores, espera y accionabilidad
-├── input.rs    ratón y teclado por el dominio Input de CDP
-└── launch.rs   localización y arranque del navegador
+├── mod.rs      public API and handle registry
+├── cdp.rs      transport: WebSocket, multiplexing by id, event bus
+├── dom.rs      selectors, waiting and actionability
+├── input.rs    mouse and keyboard through CDP's Input domain
+└── launch.rs   locating and launching the browser
 ```
 
-Sobre un único socket viajan mezcladas las respuestas (llevan `id`) y los
-eventos (llevan `method`). Un hilo lector por conexión reparte cada respuesta a
-quien la espera, que duerme en una `Condvar` — el mismo parking que usa `await`
-en `task_pool`, sin introducir un segundo modelo de concurrencia.
+Over a single socket travel responses (which carry an `id`) and events (which
+carry a `method`), mixed together. One reader thread per connection hands each
+response to whoever is waiting for it, sleeping on a `Condvar` — the same parking
+`await` uses in `task_pool`, without introducing a second concurrency model.
 
-Los eventos de ratón y teclado se despachan por el dominio `Input` de CDP, que
-los inyecta en la misma capa por la que entran los del usuario. Y la posición se
-vuelve a medir **inmediatamente antes** de cada despacho, no al empezar una
-cadena de acciones: ahí está la diferencia práctica con `ActionChains`, que
-entre localizar y clicar deja que la página mueva el elemento.
+Mouse and keyboard events are dispatched through CDP's `Input` domain, which
+injects them into the same layer the user's own come in through. And the position
+is measured again **immediately before** each dispatch, not at the start of a
+chain of actions: that is the practical difference with `ActionChains`, which
+between locating and clicking lets the page move the element.
 
-## 19. Despliegue
+## 19. Deployment
 
-### 19.1 Qué entregas
+### 19.1 What you ship
 
 ```powershell
 orion --build app.orx -o app.exe
 ```
 
-**Un solo archivo.** `--build` no empaqueta el intérprete al lado: compila tu
-programa a nativo con Cranelift y lo enlaza contra el runtime de Orion como
-librería estática. El resultado no es un lanzador que busca `orion.exe`, es un
-ejecutable de verdad con el runtime dentro.
+**A single file.** `--build` does not bundle the interpreter alongside: it
+compiles your program to native code with Cranelift and links it against the
+Orion runtime as a static library. The result is not a launcher looking for
+`orion.exe`, it is a real executable with the runtime inside.
 
-Tu usuario recibe `app.exe` y no necesita saber que Orion existe.
+Your user receives `app.exe` and does not need to know Orion exists.
 
-#### Qué se probó exactamente
+#### What exactly was tested
 
-Un programa que usa `upload`, `fill`, `table`, `extract`, `save_state`, `pdf` y
-`reload` —es decir, el módulo entero, no un "hola mundo"— compilado a **nativo
-AOT** (61 MB) y ejecutado en una carpeta que contenía **solo `app.exe`**, sin
-ningún `orion.exe` cerca y con el `PATH` reducido a `system32`. Los diez
-resultados correctos y código de salida 0.
+A program using `upload`, `fill`, `table`, `extract`, `save_state`, `pdf` and
+`reload` — that is, the whole module, not a "hello world" — compiled to **native
+AOT** (61 MB) and run in a folder containing **only `app.exe`**, with no
+`orion.exe` anywhere near and with `PATH` reduced to `system32`. All ten results
+correct and exit code 0.
 
-Conviene decir cómo llegó a estar bien, porque hasta el 8 de agosto de 2026 esto
-**no funcionaba** y la documentación decía que sí. Dos defectos, los dos
-exclusivos del ejecutable compilado (`orion run` nunca estuvo afectado):
+It is worth saying how it came to be right, because until 8 August 2026 this
+**did not work** and the documentation said it did. Two defects, both exclusive to
+the compiled executable (`orion run` was never affected):
 
-1. **Una función no veía las variables globales.** El compilador daba a cada
-   función solo variables locales, así que un global leído dentro de ella
-   llegaba como `null`. Y como `use "browser"` define un global, cualquier
-   llamada al módulo dentro de una función moría con un error sobre
-   `CallMethod` que no apuntaba a la causa. Peor aún: un cálculo con una
-   constante global daba **otro resultado** sin avisar.
-2. **Llamar `main` a tu función** hacía chocar su símbolo con el `main` de C del
-   ejecutable, y la compilación se pasaba a bytecode embebido. Seguía
-   funcionando, pero ninguna aplicación real —que se escriben así— llegaba a
-   compilarse nativa.
+1. **A function could not see global variables.** The compiler gave each function
+   only local variables, so a global read inside one arrived as `null`. And since
+   `use "browser"` defines a global, any call to the module inside a function died
+   with an error about `CallMethod` that did not point at the cause. Worse still:
+   a computation with a global constant gave **a different result** without
+   warning.
+2. **Calling your function `main`** made its symbol clash with the executable's C
+   `main`, and compilation fell back to embedded bytecode. It still worked, but no
+   real application — which is how they are written — ever got natively compiled.
 
-Los dos tienen ahora tests de regresión en
-[`orion-vm/tests/aot_native.rs`](orion-vm/tests/aot_native.rs), que es lo que
-faltaba: la batería anterior solo probaba programas autocontenidos —aritmética,
-recursión, shapes, cadenas— y por eso nadie se enteró.
+Both now have regression tests in
+[`orion-vm/tests/aot_native.rs`](orion-vm/tests/aot_native.rs), which is what was
+missing: the previous suite only tested self-contained programs — arithmetic,
+recursion, shapes, strings — and that is why nobody noticed.
 
-**La lección para leer esta página**: si aquí pone "verificado", debería decir
-también *con qué programa*. Un "hola mundo" compilado no prueba que tu
-aplicación compile.
+**The lesson for reading this page**: if it says "verified" here, it should also
+say *with what program*. A compiled "hello world" does not prove your application
+compiles.
 
-### 19.2 Qué necesita la máquina del usuario
+### 19.2 What the user's machine needs
 
-**Un navegador basado en Chromium, y nada más.** En Windows ya está: Edge viene
-con el sistema. Si su instalación está en una ruta poco habitual, se resuelve
-sin recompilar con la variable `ORION_CHROME` o pasando `chrome:` en `open()`.
+**A Chromium-based browser, and nothing else.** On Windows it is already there:
+Edge comes with the system. If their installation is in an unusual path, it is
+solved without recompiling via the `ORION_CHROME` variable or by passing `chrome:`
+to `open()`.
 
-### 19.3 Comparado con Python
+### 19.3 Compared with Python
 
 | | Python + Selenium | Orion |
 |---|---|---|
-| `chromedriver.exe` | hay que entregarlo, y de la versión correcta | **no existe** |
-| Runtime | Python instalado, o PyInstaller | dentro del `.exe` |
-| Dependencias | selenium + webdriver-manager + transitivas | ninguna |
-| Archivos a entregar | carpeta o instalador | **uno** |
-| Cuando Chrome se actualiza | rebajar el driver, reempaquetar, redistribuir | **nada** |
+| `chromedriver.exe` | has to be shipped, and of the right version | **does not exist** |
+| Runtime | Python installed, or PyInstaller | inside the `.exe` |
+| Dependencies | selenium + webdriver-manager + transitive | none |
+| Files to ship | a folder or an installer | **one** |
+| When Chrome updates | downgrade the driver, repackage, redistribute | **nothing** |
 
-La última fila es la que más cuesta en la práctica: en Python cada actualización
-de Chrome obliga a volver a empaquetar. Aquí el ejecutable que entregaste hace
-seis meses sigue funcionando.
+The last row is the one that costs most in practice: in Python every Chrome update
+forces repackaging. Here the executable you shipped six months ago still works.
 
-#### Medido
+#### Measured
 
-500 tarjetas × 4 campos, las tres herramientas moviendo **el mismo Chrome**, en
-headless, contra el mismo archivo local, y comprobando que las tres devuelven la
-misma huella de datos. Reproducible con `bench\web\run_web.ps1`; metodología y
-avisos en [`bench/web/README.md`](bench/web/README.md).
+500 cards × 4 fields, all three tools driving **the same Chrome**, headless,
+against the same local file, and checking that all three return the same data
+fingerprint. Reproducible with `bench\web\run_web.ps1`; methodology and caveats in
+[`bench/web/README.md`](bench/web/README.md).
 
-| variante | extracción | proceso entero | RAM de la pila | auxiliar |
+| variant | extraction | full process | stack RAM | helper |
 |---|---:|---:|---:|---|
-| Selenium, idiomático | 14.844 ms | 27.028 ms | 62,3 MB | chromedriver |
-| Selenium, con JS a mano | 10,4 ms | 8.188 ms | 61,7 MB | chromedriver |
-| Playwright, idiomático | 13.200 ms | 12.407 ms | 318,2 MB | node |
-| Playwright, con JS a mano | 29,6 ms | 1.729 ms | 156,8 MB | node |
-| **Orion `extract`** | **14 ms** | **858 ms** | **16,8 MB** | **ninguno** |
+| Selenium, idiomatic | 14,844 ms | 27,028 ms | 62.3 MB | chromedriver |
+| Selenium, hand-written JS | 10.4 ms | 8,188 ms | 61.7 MB | chromedriver |
+| Playwright, idiomatic | 13,200 ms | 12,407 ms | 318.2 MB | node |
+| Playwright, hand-written JS | 29.6 ms | 1,729 ms | 156.8 MB | node |
+| **Orion `extract`** | **14 ms** | **858 ms** | **16.8 MB** | **none** |
 
-Medido el 2026-08-23, con el recorrido de shadow roots activado (lo que trae
-`extract` de serie desde esa fecha). Aislado en esta misma página: 17 ms con
-shadow y 15 ms sin él, así que ese recorrido explica ~2 ms. Las cifras de una
-medición anterior eran algo mejores en las cinco variantes — la máquina no
-estaba en el mismo estado, y por eso la tabla lleva fecha.
+Measured on 2026-08-23, with shadow root traversal enabled (which is what
+`extract` ships with from that date). Isolated on this same page: 17 ms with
+shadow and 15 ms without, so that traversal accounts for ~2 ms. The figures from
+an earlier measurement were somewhat better across all five variants — the machine
+was not in the same state, and that is why the table carries a date.
 
-La RAM es la del proceso de automatización **más el auxiliar que arranca**, que
-no es el navegador y no es el mismo en los tres: Selenium necesita
-`chromedriver.exe` y Playwright un `node.exe` porque su driver está escrito en
-JavaScript. Orion no necesita ninguno — habla CDP desde su propio proceso, que
-es la misma razón por la que no hay un segundo binario que mantener
-sincronizado con la versión de Chrome. El navegador se excluye de la cuenta: es
-idéntico para las tres.
+The RAM is that of the automation process **plus the helper it launches**, which is
+not the browser and is not the same for all three: Selenium needs
+`chromedriver.exe` and Playwright a `node.exe` because its driver is written in
+JavaScript. Orion needs neither — it speaks CDP from its own process, which is the
+same reason there is no second binary to keep in sync with Chrome's version. The
+browser is excluded from the count: it is identical for all three.
 
-Dos lecturas honestas de esta tabla:
+Two honest readings of this table:
 
-**Orion no ejecuta JavaScript más rápido que nadie.** Sus 14 ms están en el
-mismo orden que los 10,4 ms de Selenium mandando JavaScript a mano, y esa
-diferencia cabe en el ruido. El resultado no es ese.
+**Orion does not run JavaScript faster than anyone.** Its 14 ms are in the same
+order as Selenium's 10.4 ms sending JavaScript by hand, and that difference fits
+inside the noise. That is not the result.
 
-**El resultado es la primera fila contra la última: 15 segundos contra 14
-milisegundos.** Esa primera fila es cómo enseñan a hacerlo las dos
-documentaciones — localizar los elementos y pedirles el texto uno a uno, que con
-500 filas × 4 campos son 2.000 viajes. Lo que aporta `extract` no es velocidad
-bruta: es que **el camino rápido es el único que hay**. En las otras dos hay que
-saber que el problema existe y escribir JavaScript a mano dentro de Python, que
-es justo el trabajo que uno esperaba no tener que hacer.
+**The result is the first row against the last: 15 seconds against 14
+milliseconds.** That first row is how both documentations teach it — locate the
+elements and ask each one for its text, which with 500 rows × 4 fields is 2,000
+round trips. What `extract` contributes is not raw speed: it is that **the fast
+path is the only path**. In the other two you have to know the problem exists and
+write JavaScript by hand inside Python, which is exactly the work you were hoping
+not to have to do.
 
-De los 8 segundos de Selenium, la extracción son 10 ms: el resto es arrancar
-`chromedriver` (~1,4 s), `quit()` (~2,1 s) y **~4,2 s después de la última línea
-del script**, esperando a que su árbol de procesos termine de irse. Para una
-tarea suelta da igual; para un trabajo que corre cada cinco minutos, no.
+Of Selenium's 8 seconds, the extraction is 10 ms: the rest is launching
+`chromedriver` (~1.4 s), `quit()` (~2.1 s) and **~4.2 s after the script's last
+line**, waiting for its process tree to finish leaving. For a one-off task it does
+not matter; for a job that runs every five minutes, it does.
 
-En memoria la diferencia es de otro orden: **17 MB contra 62 y contra 157**. La
-versión idiomática de Playwright llega a 318 MB porque retiene un handle por
-cada elemento consultado, y aquí son 2.000 vivos a la vez. Eso pesa cuando el
-trabajo corre en un servidor con varias tareas en paralelo.
+In memory the difference is of another order: **17 MB against 62 and against
+157**. Playwright's idiomatic version reaches 318 MB because it retains a handle
+per element queried, and here that is 2,000 alive at once. That weighs when the
+job runs on a server with several tasks in parallel.
 
-### 19.4 Redes corporativas
+### 19.4 Corporate networks
 
-Este es el escenario donde la diferencia deja de ser comodidad y pasa a ser
-"puedo o no puedo".
+This is the scenario where the difference stops being convenience and becomes
+"can I or can't I".
 
-`webdriver-manager` **descarga chromedriver** desde dominios de Google en tiempo
-de ejecución. En una red corporativa eso choca con tres cosas a la vez: el
-egreso suele estar bloqueado (y seguridad no whitelistea la descarga de
-ejecutables), PyPI está cerrado o tras un espejo interno, y el problema se
-repite en cada actualización que empuja el departamento de sistemas.
+`webdriver-manager` **downloads chromedriver** from Google domains at runtime. On
+a corporate network that collides with three things at once: egress is usually
+blocked (and security does not whitelist downloading executables), PyPI is closed
+or behind an internal mirror, and the problem repeats with every update IT pushes.
 
-El módulo `browser` **no hace ni una llamada de red propia**. Lo único que abre
-es un WebSocket a `127.0.0.1`. Comprobado con un scraper contra una intranet
-local sin salida a internet en ningún momento.
+The `browser` module **does not make a single network call of its own**. The only
+thing it opens is a WebSocket to `127.0.0.1`. Verified with a scraper against a
+local intranet with no internet access at any point.
 
-Ventajas concretas:
+Concrete advantages:
 
-- **Funciona sin egreso** salvo hacia el sitio que automatizas.
-- **Usa el navegador que la empresa ya administra** — Edge en un Windows
-  corporativo está instalado y gestionado por política, no hay que aprobar nada.
-- **CI determinista**: desaparece el paso de "bajar el driver", fuente clásica
-  de fallos intermitentes ajenos a tu código.
-- **Una sola cosa que auditar**: un binario, en vez de un árbol de dependencias
-  que se resuelve en tiempo de instalación.
+- **It works with no egress** except towards the site you are automating.
+- **It uses the browser the company already administers** — Edge on a corporate
+  Windows is installed and managed by policy, nothing needs approving.
+- **Deterministic CI**: the "download the driver" step disappears, a classic
+  source of intermittent failures unrelated to your code.
+- **One single thing to audit**: one binary, instead of a dependency tree resolved
+  at install time.
 
-El proxy corporativo se indica como a cualquier otra herramienta, y llega al
-navegador:
+The corporate proxy is specified as it is for any other tool, and it reaches the
+browser:
 
 ```orion
-web.open({ args: ["--proxy-server=http://proxy.empresa:8080"] })
+web.open({ args: ["--proxy-server=http://proxy.company:8080"] })
 ```
 
-### 19.5 Lo que conviene saber
+### 19.5 Worth knowing
 
-**Tamaño.** El ejecutable ronda los 58 MB. Es el binario completo de Orion:
-lleva GUI, TUI, tres motores de base de datos, OCR con sus modelos… todo, se use
-o no. Hoy no hay forma de adelgazarlo.
+**Size.** The executable is around 58 MB. It is Orion's complete binary: it
+carries the GUI, the TUI, three database engines, OCR with its models… everything,
+used or not. Today there is no way to slim it down.
 
-**Runtime de C.** El binario enlaza el CRT de MSVC de forma dinámica, así que
-depende de `vcruntime140.dll`, presente en cualquier Windows moderno. No está
-probado compilar con el CRT estático.
+**C runtime.** The binary links the MSVC CRT dynamically, so it depends on
+`vcruntime140.dll`, present on any modern Windows. Compiling with the static CRT
+has not been tested.
 
-**Pruébalo en una máquina limpia** antes de entregarlo. Aislar el `PATH` descarta
-lo importante, pero un Windows recién instalado sin herramientas de desarrollo
-es la comprobación definitiva y cuesta cinco minutos.
+**Try it on a clean machine** before shipping it. Isolating `PATH` rules out the
+important things, but a freshly installed Windows with no development tools is the
+definitive check and costs five minutes.
 
-## 20. Diagnóstico
+## 20. Diagnostics
 
-| Síntoma | Qué mirar |
+| Symptom | What to look at |
 |---|---|
-| "no se encontró ningún navegador" | `web.info()`, o define `ORION_CHROME` |
-| "lo tapa `<...>`" | cierra ese elemento primero, o `{ force: yes }` |
-| "no apareció en N ms" | ¿el selector es correcto? ¿está en un iframe de otro origen? |
-| la página se queda congelada | `web.dialogs(p, "accept")` antes de la acción |
-| `text` devuelve vacío | ¿estás usando `count`/`exists`, que no esperan? |
+| "no browser was found" | `web.info()`, or set `ORION_CHROME` |
+| "it is covered by `<...>`" | close that element first, or `{ force: yes }` |
+| "did not appear within N ms" | is the selector right? is it in a cross-origin iframe? |
+| the page freezes | `web.dialogs(p, "accept")` before the action |
+| `text` returns empty | are you using `count`/`exists`, which do not wait? |

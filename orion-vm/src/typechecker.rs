@@ -20,9 +20,6 @@ impl TypeIssue {
         TypeIssue { message: msg.into(), kind: "warning", line, col }
     }
 
-    /// Un nombre que aún funciona pero está en retirada (SPEC.md §11).
-    /// Va con `kind` propio para que `orion check` lo enseñe SIEMPRE: esconder
-    /// una deprecación tras un flag es no avisar.
     fn deprecation(msg: impl Into<String>, line: u32, col: u32) -> Self {
         TypeIssue { message: msg.into(), kind: "deprecation", line, col }
     }
@@ -98,10 +95,6 @@ fn is_retired_builtin(module: &str, function: &str) -> bool {
     matches!((module, function), ("timewarp", "measure_time" | "measureMtime"))
 }
 
-/// `owner → {funciones}` derivado del registro de builtins, que es la misma
-/// fuente que alimenta `orion --builtins-json`, el typeshed de la extensión y
-/// la referencia de módulos del sitio. El test `registry_matches_runtime`
-/// vigila que no se desincronice del dispatch real.
 fn module_functions() -> &'static HashMap<String, HashSet<String>> {
     static TABLE: std::sync::OnceLock<HashMap<String, HashSet<String>>> = std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
@@ -115,10 +108,6 @@ fn module_functions() -> &'static HashMap<String, HashSet<String>> {
     })
 }
 
-/// Firmas de las funciones de módulo, indexadas por "modulo.funcion".
-///
-/// Sale del mismo registro que el hover, así que lo que el editor enseña y lo
-/// que aquí se comprueba son literalmente el mismo dato.
 fn module_signatures() -> &'static HashMap<String, Vec<crate::cli::builtins::ParamDoc>> {
     static TABLE: std::sync::OnceLock<HashMap<String, Vec<crate::cli::builtins::ParamDoc>>> =
         std::sync::OnceLock::new();
@@ -218,8 +207,6 @@ impl TypeChecker {
         }
     }
 
-    /// Tipos de todas las expresiones `return` del cuerpo (sin entrar en `fn`
-    /// anidadas). `None` = retorno sin valor o de tipo no determinable.
     fn collect_return_types(&self, body: &[Stmt]) -> Vec<Option<String>> {
         let mut out = Vec::new();
         for s in body {
@@ -247,9 +234,6 @@ impl TypeChecker {
         out
     }
 
-    /// Inferencia pura (sin scope, sin emitir issues) para el pase de retornos.
-    /// Devuelve `None` para todo lo que dependa de variables/params (Ident, etc.),
-    /// manteniendo el pase conservador.
     fn infer_pure(&self, expr: &Expr) -> Option<String> {
         match expr {
             Expr::Int(_)        => Some("int".into()),

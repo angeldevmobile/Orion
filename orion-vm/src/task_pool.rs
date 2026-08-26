@@ -101,6 +101,5 @@ fn worker_loop(p: Arc<PoolInner>) {
             st.total -= 1;
             return;
         }
-        // Si no, reintenta el pop (llegó trabajo o fue una notificación espuria).
     }
 }

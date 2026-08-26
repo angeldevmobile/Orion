@@ -440,9 +440,9 @@ impl Formato {
             Some("csv") => Ok(Formato::Csv),
             Some("odf") => Ok(Formato::Odf),
             Some(otra)  => Err(format!(
-                "extensión '.{otra}' no soportada.\n  Usa .csv (una fila cada vez) o .odf (binario por bloques)."
+                "extension '.{otra}' is not supported.\n  Use .csv (one row at a time) or .odf (binary, in blocks)."
             )),
-            None => Err("la salida necesita extensión: .csv o .odf".into()),
+            None => Err("the output needs an extension: .csv or .odf".into()),
         }
     }
 }

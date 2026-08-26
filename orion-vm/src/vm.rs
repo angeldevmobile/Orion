@@ -106,9 +106,6 @@ impl CallFrame {
         }
     }
 
-    /// Escribe de vuelta al entorno compartido del closure las variables
-    /// capturadas que pudieron mutar durante esta invocación. Solo persiste
-    /// las claves ya presentes en el entorno (las capturadas), no los locales nuevos.
     fn sync_to_closure(&self) {
         if let Some(env_rc) = &self.closure_env {
             let mut env = env_rc.borrow_mut();
@@ -179,13 +176,6 @@ impl VM {
         }
     }
 
-    /// Ejecuta una función por nombre en un contexto aislado (sus propias
-    /// funciones, shapes y variables globales), devolviendo el valor de retorno.
-    ///
-    /// Pensado como puente para el JIT: un módulo `.orx` se compila y sus
-    /// funciones corren bajo la VM cuando el código JIT las invoca. Como todo
-    /// vive en nombres simples dentro de este contexto, la recursión, los
-    /// helpers internos y las constantes/`use` del módulo resuelven sin prefijos.
     pub fn call_named(
         functions: IndexMap<String, FunctionDef>,
         shapes: IndexMap<String, ShapeDef>,
@@ -202,9 +192,6 @@ impl VM {
         vm.call_value(Value::Str(fn_name.to_string()), args)
     }
 
-    /// Ejecuta el cuerpo principal y devuelve las variables globales resultantes
-    /// (sin las que empiezan por `_`). Útil para extraer las constantes/`use` de
-    /// un módulo `.orx` al cargarlo desde el JIT.
     pub fn into_globals(mut self) -> IndexMap<String, Value> {
         self.run().ok();
         let mut globals = IndexMap::new();
@@ -218,8 +205,6 @@ impl VM {
         globals
     }
 
-    /// Devuelve las funciones más llamadas, ordenadas de mayor a menor.
-    /// Útil para profiling y para decidir qué compilar con JIT.
     pub fn hotspots(&self, top_n: usize) -> Vec<(&str, u64)> {
         let mut v: Vec<(&str, u64)> = self.call_counts.iter()
             .map(|(k, &c)| (k.as_str(), c))
@@ -240,10 +225,6 @@ impl VM {
             if let Some(ref inst) = frame.self_instance {
                 roots.push(Value::Instance(Rc::clone(inst)));
             }
-            // El entorno capturado de un closure es estado vivo alcanzable aunque
-            // no se haya copiado a `vars` (p. ej. si un parámetro homónimo lo
-            // sombrea). Sin esto, una instancia capturada solo por el closure
-            // sería barrida por error → corrupción silenciosa.
             if let Some(ref env_rc) = frame.closure_env {
                 roots.extend(env_rc.borrow().values().cloned());
             }
@@ -251,10 +232,6 @@ impl VM {
         self.gc.collect(&roots);
     }
 
-    /// Pasada final del GC al morir la VM: sin roots, TODO lo registrado se
-    /// barre → los ciclos residuales (push(a,a), closures recursivas…) se
-    /// rompen y el Rc devuelve cada byte antes de salir del proceso. Es lo
-    /// que mantiene a Orion limpio bajo LeakSanitizer (CI job `sanitizer`).
     fn gc_teardown(&mut self) {
         self.gc.collect(&[]);
     }
@@ -306,19 +283,12 @@ impl VM {
 
     /// Ejecuta un solo ciclo del loop principal. Retorna Ok(true) si el programa terminó.
     fn step(&mut self) -> Result<bool, String> {
-        // Cancelación cooperativa: solo las sub-VMs de `spawn`/`async fn` llevan
-        // token. Si se pidió cancelar, abortamos aquí entre instrucciones (punto
-        // seguro, igual que el safepoint del GC).
         if let Some(tok) = &self.cancel_token {
             if tok.is_cancelled() {
                 return Err("tarea cancelada".to_string());
             }
         }
 
-        // Safepoint del GC: SOLO aquí es seguro colectar. Entre instrucciones
-        // ningún local de Rust retiene Values fuera de los roots; colectar en
-        // medio de una instrucción (como hacía instantiate_shape) barría la
-        // instancia recién creada o los args aún no insertados en el frame.
         if self.gc.should_collect() {
             self.gc_collect();
         }
@@ -332,8 +302,6 @@ impl VM {
             if frame.ip >= frame.instructions.len() {
                 let frame = self.call_stack.pop().unwrap();
                 frame.sync_to_instance();
-                // Igual que en Return: descartar handlers de frames muertos
-                // (un attempt sin EndAttempt alcanzado no debe sobrevivir).
                 self.error_handlers.retain(|h| h.frame_depth <= self.call_stack.len());
                 return Ok(false);
             }
@@ -441,11 +409,6 @@ impl VM {
                     _ => return Err("Modulo only supports integers".to_string()),
                 }
             }
-            // Bit a bit. Solo enteros a propósito: aplicarlos a un flotante o a
-            // un bool sería reinterpretar su representación, que nunca es lo que
-            // se quiere decir. Los desplazamientos rechazan cuenta negativa y
-            // saturan en 64, en vez de dejar que el shift de Rust entre en
-            // pánico o dé un resultado dependiente de la máquina.
             Instruction::BitAnd => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "&")?); }
             Instruction::BitOr  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "|")?); }
             Instruction::BitXor => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "^")?); }
@@ -538,19 +501,6 @@ impl VM {
                     .collect::<Result<Vec<_>, _>>()?;
                 args.reverse();
 
-                // `__call__` es la llamada a algo invocable que NO es un nombre:
-                // una lambda invocada al vuelo `((n) => n + 1)(10)`, lo que
-                // devuelva una expresión, o la etapa de un `|>` escrita como
-                // lambda. El codegen la emite desde siempre pero nadie la
-                // atendía, así que esos programas morían con "Función
-                // '__call__' no definida" —el nombre de un símbolo interno que
-                // el programador nunca escribió—. El invocable queda apilado
-                // DEBAJO de los argumentos, que es lo que se acaba de sacar.
-                // `__apply__` es la llamada cuyo número de argumentos no se sabe
-                // hasta ejecutar, porque alguno venía de un `...`. El codegen
-                // deja dos cosas: el invocable y UNA lista con todos los
-                // argumentos ya montada. Aquí se deshace esa lista en la lista
-                // de argumentos real y el resto del despacho sigue igual.
                 if name == "__apply__" {
                     let list = args.pop().ok_or("__apply__ sin lista de argumentos")?;
                     let callee = args.pop().ok_or("__apply__ sin invocable")?;
@@ -562,12 +512,6 @@ impl VM {
                     };
                     let (rn, ce) = match callee {
                         Value::Closure { fn_name, env } => (fn_name, Some(env)),
-                        // Un nombre puede ser el de una función global O el de
-                        // una variable local que guarda una closure, y desde
-                        // aquí no se distinguen: hay que resolverlo igual que
-                        // la llamada por nombre. Sin esto, `f(...args)` con `f`
-                        // guardando una lambda buscaba una función llamada "f"
-                        // y no la encontraba.
                         Value::Str(s)                   => self.resolve_callable(&s),
                         other => return Err(format!(
                             "no se puede llamar a un valor de tipo {}", other.type_name()
@@ -595,10 +539,6 @@ impl VM {
                 let frame = self.call_stack.pop().ok_or("Return sin frame")?;
                 frame.sync_to_instance();
                 frame.sync_to_closure();
-                // Un return dentro de attempt se salta el EndAttempt → su
-                // handler quedaba huérfano y un error POSTERIOR en el caller
-                // saltaba a una dirección de otra función (corrupción). Los
-                // handlers de frames ya muertos se descartan aquí.
                 self.error_handlers.retain(|h| h.frame_depth <= self.call_stack.len());
                 if self.call_stack.is_empty() {
                     return Ok(true);
@@ -1241,13 +1181,9 @@ impl VM {
                     })
                     .collect();
 
-                // Handle compartido: parking (Condvar) para await + flag de cancelación.
                 let handle = TaskHandle::new();
                 let handle_worker = Arc::clone(&handle);
 
-                // La tarea corre en el POOL de hilos (reutiliza workers), no en un
-                // hilo nuevo por spawn. El pool crea uno bajo demanda si hace falta,
-                // así spawn/await anidados nunca hacen deadlock.
                 crate::task_pool::submit(move || {
                     // Si ya la cancelaron antes de arrancar, no ejecutamos nada.
                     if handle_worker.is_cancelled() {
@@ -1456,12 +1392,6 @@ impl VM {
         self.value_stack.pop().ok_or_else(|| "Empty stack".to_string())
     }
 
-    /// Traduce un nombre al nombre de función que hay que llamar de verdad.
-    ///
-    /// Un identificador puede ser una función global o una variable que guarda
-    /// una closure (o el nombre de otra función). Se mira primero el frame
-    /// actual y, si no está, el global; lo que no sea ninguna de las dos cosas
-    /// se devuelve tal cual para que lo resuelva el despacho.
     fn resolve_callable(
         &self,
         name: &str,
@@ -1481,16 +1411,6 @@ impl VM {
         }
     }
 
-    /// Llama a `name` con `args`, sea lo que sea: shape, función de usuario,
-    /// función externa o builtin. `closure_env` trae el entorno capturado cuando
-    /// lo que se llama vino de una closure.
-    ///
-    /// Es el cuerpo que antes vivía dentro de `Instruction::Call`. Está aparte
-    /// porque hay tres formas de llegar a una llamada —por nombre, por valor
-    /// invocable (`__call__`) y con los argumentos en una lista (`__apply__`)—
-    /// y las tres tienen que despachar exactamente igual una vez resuelto a qué
-    /// se llama; si no, cada una acabaría con su propia idea de qué es
-    /// llamable.
     fn dispatch_call(
         &mut self,
         name: String,
@@ -1534,14 +1454,8 @@ impl VM {
         let base_name = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or(path);
         let prefix = format!("{}__", base_name);
 
-        // Si el path referencia explícitamente un archivo (p.ej. "packages/validate"),
-        // el .orx tiene prioridad sobre el módulo nativo del mismo nombre. Así
-        // `use "validate"` carga el módulo nativo y `use "packages/validate"` carga
-        // el paquete instalado, sin que uno eclipse silenciosamente al otro.
         let explicit_path = path.contains('/') || path.contains('\\');
 
-        // La búsqueda del archivo vive en `paths`: el mismo orden (proyecto,
-        // archivo de entrada, cwd, global) que usan el JIT y el gestor.
         if explicit_path {
             if let Some(file) = crate::paths::resolve_module_file(path) {
                 let file = file.to_string_lossy().to_string();
@@ -1690,10 +1604,6 @@ impl VM {
             // La VM resolverá __math__X directamente en call_value / Call handler
         }
 
-        // Registrar un FunctionDef nativo fake para cada función math que haga dispatch
-        // La forma más simple: crear FunctionDef con body = [CallBuiltin, Return]
-        // Como no tenemos CallBuiltin, usamos una estrategia diferente:
-        // Añadimos la lógica en call_value para __math__* nombres
 
         Value::Dict(ns)
     }
@@ -1868,10 +1778,6 @@ impl VM {
             shape_name: shape_name.to_string(),
             fields,
         }));
-        // Solo registrar: colectar AQUÍ corrompía — inst_rc y args viven en
-        // locals de Rust, fuera de los roots, y el sweep les vaciaba los
-        // fields (cada instancia nº 512 nacía sin campos). La colección
-        // ocurre en el safepoint de step().
         self.gc.register(&inst_rc);
 
         let on_create = self.find_on_create(shape_name).cloned();
@@ -1953,9 +1859,6 @@ impl VM {
         Ok(())
     }
 
-    /// Ajusta los argumentos a la aridad de la función: si faltan, rellena la
-    /// cola con los valores por defecto (mini-bytecode). Error si sobran o si un
-    /// parámetro obligatorio quedó sin valor.
     fn bind_args_with_defaults(
         &mut self,
         func: &FunctionDef,
@@ -2051,10 +1954,6 @@ impl VM {
         None
     }
 
-    /// Ejecuta un act de una instancia de forma síncrona y AÍSLA los manejadores
-    /// de error externos: si el act lanza un error no capturado internamente,
-    /// se devuelve `Err` en vez de saltar a un `attempt/handle` externo. Lo usa
-    /// el hook `on_error` para envolver la ejecución de los acts.
     fn run_act_isolated(
         &mut self,
         inst_rc: &Rc<RefCell<InstanceData>>,
@@ -2287,14 +2186,10 @@ impl VM {
             .map(|a| a.ip().to_string())
             .unwrap_or_default();
 
-        // Body leído como BYTES: soporta subidas binarias (imágenes, multipart)
-        // sin corromper. body_str es la vista UTF-8 (lossy) para texto/JSON.
         let mut body_bytes: Vec<u8> = Vec::new();
         { request.as_reader().read_to_end(&mut body_bytes).ok(); }
         let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
 
-        // multipart/form-data → campos de texto en `form` y archivos en `files`
-        // (cada archivo se vuelca a un temporal; el handler lo mueve con fs.move).
         let (form_map, files_list) = {
             let ct = headers_map.get("content-type")
                 .and_then(|v| if let Value::Str(s) = v { Some(s.as_str()) } else { None })
@@ -2312,8 +2207,6 @@ impl VM {
         // Router activo primero; si no matchea, cae al handler global de serve.
         let routed = crate::modules::router_mod::active_match(&method, &path);
 
-        // Archivos estáticos (solo GET/HEAD y solo si ninguna ruta matcheó):
-        // MIME automático, index.html en directorios, anti path-traversal.
         if routed.is_none() && (method == "GET" || method == "HEAD") {
             if let Some((dir, rest)) = crate::modules::router_mod::active_static(&path) {
                 let (st, bytes, ct): (u16, Vec<u8>, String) = match resolve_static(&dir, &rest) {
@@ -2398,9 +2291,6 @@ impl VM {
             }
         }
 
-        // Sesión: reutiliza el sid de la cookie orion_sid o genera uno nuevo.
-        // Se expone en req["sid"]; el Set-Cookie solo se emite (abajo) si el
-        // handler guardó datos con session.set(req["sid"], ...).
         let incoming_sid = cookies_map.get("orion_sid")
             .and_then(|v| if let Value::Str(s) = v { Some(s.clone()) } else { None });
         let sid = incoming_sid.clone()
@@ -2433,8 +2323,6 @@ impl VM {
         }
         let req_val = Value::Dict(req_map);
 
-        // Middlewares del router: mw(req) → null continúa; un dict corta y
-        // se responde con él (p. ej. 401 de auth o 429 de rate limit).
         let mut early_response: Option<Value> = None;
         for mw in &middlewares {
             match self.run_handler(mw, req_val.clone()) {
@@ -2536,10 +2424,6 @@ impl VM {
                         extra,
                     )
                 } else {
-                    // { "status": 200, "body": <Dict|List> } → el body estructurado
-                    // se serializa a JSON, igual que un payload suelto o {"json": …}.
-                    // Sin esto el cliente recibía el Display de Orion ({a: 1}), que
-                    // no es JSON válido. Un content_type explícito sigue mandando.
                     let explicit_ct = m.get("content_type").map(|v| v.to_string());
                     let (body, ct) = match m.get("body") {
                         Some(v @ (Value::Dict(_) | Value::List(_))) if explicit_ct.is_none() => (
@@ -2570,9 +2454,6 @@ impl VM {
         if let Ok(h) = Header::from_str(&format!("Content-Type: {}", content_type)) {
             response = response.with_header(h);
         }
-        // Sesión: si el handler guardó datos con session.set(req["sid"], …) y el
-        // sid no venía ya en la cookie, emitir el Set-Cookie automáticamente.
-        // HttpOnly + SameSite=Lax por defecto (no accesible desde JS, anti-CSRF).
         if incoming_sid.as_deref() != Some(sid.as_str())
             && crate::modules::session_mod::exists(&sid)
         {
@@ -3357,10 +3238,6 @@ fn json_to_value(v: serde_json::Value) -> Value {
     }
 }
 
-/// ¿El Dict devuelto por un handler describe una respuesta HTTP (status,
-/// body, headers…) o es un payload de datos que debe salir como JSON?
-/// Las claves ambiguas solo cuentan si traen el tipo correcto: un dict de
-/// datos con "status": "ok" sigue siendo datos.
 fn is_response_spec(m: &IndexMap<String, Value>) -> bool {
     m.contains_key("body") || m.contains_key("json") || m.contains_key("file")
         || m.contains_key("redirect") || m.contains_key("content_type")
@@ -3385,9 +3262,6 @@ fn multipart_boundary(content_type: &str) -> Option<String> {
         .map(|b| b.trim_matches('"').to_string())
 }
 
-/// Parsea un cuerpo multipart en (campos_de_texto, archivos). Cada archivo se
-/// escribe a un temporal único y se describe con {field, filename, content_type,
-/// size, tmp_path}; el handler decide dónde guardarlo (fs.move/fs.copy).
 fn parse_multipart(body: &[u8], boundary: &str) -> (IndexMap<String, Value>, Vec<Value>) {
     let mut form = IndexMap::new();
     let mut files = Vec::new();
@@ -3518,9 +3392,6 @@ fn mime_for(path: &std::path::Path) -> String {
     }.to_string()
 }
 
-/// Resuelve un archivo bajo la carpeta estática de forma SEGURA: canonicaliza
-/// ambos paths y exige que el resultado siga dentro de la carpeta (un `../`
-/// codificado no puede escapar). Directorio → intenta index.html.
 fn resolve_static(dir: &str, rest: &str) -> Option<(Vec<u8>, String)> {
     let root = std::path::Path::new(dir).canonicalize().ok()?;
     let mut target = root.join(rest);

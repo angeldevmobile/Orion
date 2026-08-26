@@ -314,16 +314,16 @@ pub fn box_for_click(
 
       const intenta = () => {{
         const el = __find(sel);
-        let why = 'no apareció';
+        let why = 'did not appear';
 
         if (el) {{
           el.scrollIntoView({{ block: 'center', inline: 'center' }});
           const r = el.getBoundingClientRect();
           const st = getComputedStyle(el);
 
-          if (r.width === 0 || r.height === 0) why = 'no ocupa espacio';
+          if (r.width === 0 || r.height === 0) why = 'it takes up no space';
           else if (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0')
-            why = 'está oculto';
+            why = 'it is hidden';
           else {{
             const cands = __puntos(r);
             const [ox, oy] = __offset(el);
@@ -362,7 +362,7 @@ pub fn box_for_click(
           tapados.push(__nombre(enc));
         }}
         if (!__suyo(el, __enPunto(el, x, y))) {{
-          return resolve({{ ok: false, why: why + ' (ni forzando)' }});
+          return resolve({{ ok: false, why: why + ' (not even with force)' }});
         }}
         return resolve({{ ok: true, x: x + ox, y: y + oy, forced: true, through: tapados }});
       }};

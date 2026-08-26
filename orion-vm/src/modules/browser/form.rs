@@ -146,7 +146,7 @@ pub fn fill(
           try {{ r = __rellenar(el, c.val); }}
           catch (e) {{ r = {{ ok: false, why: String(e && e.message || e) }}; }}
           if (r.ok) puestos++;
-          else fallidos.push([c.sel, r.why + (r.opciones ? '\n  Opciones: ' + r.opciones.join(', ') : '')]);
+          else fallidos.push([c.sel, r.why + (r.opciones ? '\n  Options: ' + r.opciones.join(', ') : '')]);
         }}
         resolve({{ puestos: puestos, ausentes: ausentes, fallidos: fallidos }});
       }};
