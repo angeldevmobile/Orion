@@ -47,6 +47,19 @@ pub fn compile(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
 ///
 /// Los módulos cargados con `use` NO pasan por aquí — su cuerpo se ejecuta al
 /// importarlos, así que llamar a su `main` sería ejecutar el programa ajeno.
+/// Compila una entrada del REPL.
+///
+/// Igual que [`compile`], salvo que si la última sentencia es una expresión su
+/// valor se deja en la pila en lugar de descartarlo: la sesión lo saca y lo
+/// imprime, que es lo que hace de un REPL un REPL (`2 + 2` responde `4`).
+pub fn compile_repl(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
+    crate::named_args::resolve(&mut stmts)?;
+    let mut cg = Codegen::new();
+    cg.repl_echo = true;
+    cg.compile_program(stmts)?;
+    Ok(cg.into_bytecode())
+}
+
 pub fn compile_entry(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
     crate::named_args::resolve(&mut stmts)?;
     let mut cg = Codegen::new();
@@ -80,6 +93,9 @@ struct Codegen {
     /// Solo el archivo que se ejecuta: añade la llamada a `main` si el programa
     /// la define y no la llama. Ver [`compile_entry`].
     auto_main:    bool,
+    /// REPL: deja el valor de la última expresión en la pila en vez de
+    /// descartarlo, para que la sesión pueda imprimirlo. Ver [`compile_repl`].
+    repl_echo:    bool,
 }
 
 impl Codegen {
@@ -96,6 +112,7 @@ impl Codegen {
             match_counter: 0,
             loop_stack:    Vec::new(),
             auto_main:     false,
+            repl_echo:     false,
         }
     }
 
@@ -181,11 +198,20 @@ impl Codegen {
         }
 
         // Segundo pase: emitir código principal
+        let ends_in_expr = matches!(stmts.last(), Some(Stmt::Expr { .. }));
         for stmt in stmts {
             match &stmt {
                 Stmt::Fn { .. } | Stmt::AsyncFn { .. } | Stmt::Shape { .. } | Stmt::ExternFn { .. } => {}
                 _ => self.compile_stmt(stmt)?,
             }
+        }
+        // REPL: quitar el Pop de la expresión final deja su valor en la pila
+        // para que la sesión lo imprima.
+        if self.repl_echo && ends_in_expr
+            && matches!(self.main_instrs.last(), Some(Instruction::Pop))
+        {
+            self.main_instrs.pop();
+            self.main_lines.pop();
         }
         if self.auto_main && self.needs_auto_main() {
             self.emit(Instruction::Call("main".into(), 0));

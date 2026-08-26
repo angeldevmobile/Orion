@@ -11,7 +11,7 @@ use crate::value::{Value, InstanceData, SendValue, TaskHandle, from_send};
 use crate::bytecode::{ExternFnDef, FunctionDef, ShapeDef};
 use crate::gc::Gc;
 
-fn write_utf8_line(s: &str) {
+pub fn write_utf8_line(s: &str) {
     #[cfg(windows)]
     {
         use std::ffi::c_void;
@@ -190,6 +190,64 @@ impl VM {
             }
         }
         vm.call_value(Value::Str(fn_name.to_string()), args)
+    }
+
+    //    Sesión interactiva (REPL)                                            
+    //
+    // El REPL reutiliza UNA sola VM entre entradas: crear una nueva por línea
+    // tiraba las variables (`x = 5` y luego `show x` daba "no está definida") y
+    // además el Drop del GC habría liberado las instancias que se llevaran de
+    // una entrada a la siguiente.
+
+    /// Carga otro fragmento de código principal conservando las variables ya
+    /// definidas. Descarta el estado residual de la entrada anterior (frames y
+    /// pila, que quedan a medias si esa entrada terminó en error).
+    pub fn reset_main(&mut self, main: Vec<Instruction>, main_lines: Vec<u32>) {
+        self.call_stack.truncate(1);
+        self.value_stack.clear();
+        self.error_handlers.clear();
+        self.current_line = 0;
+        if let Some(frame) = self.call_stack.first_mut() {
+            frame.instructions = main;
+            frame.lines = main_lines;
+            frame.ip = 0;
+            frame.name = String::from("<main>");
+        }
+    }
+
+    /// Registra las funciones, shapes y externs compiladas después de `new`,
+    /// para que una `fn` definida en una entrada siga viva en las siguientes.
+    pub fn extend_defs(
+        &mut self,
+        functions: IndexMap<String, FunctionDef>,
+        shapes: IndexMap<String, ShapeDef>,
+        extern_fns: IndexMap<String, ExternFnDef>,
+    ) {
+        self.functions.extend(functions);
+        self.shapes.extend(shapes);
+        self.extern_fns.extend(extern_fns);
+    }
+
+    /// Valor que dejó en la pila la expresión final de la entrada, si la hubo.
+    /// Ver [`crate::codegen::compile_repl`].
+    pub fn take_result(&mut self) -> Option<Value> {
+        self.value_stack.pop()
+    }
+
+    /// Variables de nivel superior de la sesión, en orden de definición.
+    pub fn global_vars(&self) -> Vec<(String, Value)> {
+        match self.call_stack.first() {
+            Some(frame) => frame.vars.iter()
+                .filter(|(k, _)| !k.starts_with('_'))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Funciones definidas por el usuario en la sesión.
+    pub fn function_names(&self) -> Vec<String> {
+        self.functions.keys().cloned().collect()
     }
 
     pub fn into_globals(mut self) -> IndexMap<String, Value> {

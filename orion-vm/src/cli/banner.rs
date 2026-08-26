@@ -84,7 +84,6 @@ pub fn print_banner() {
               {DIM}·{RESET}  {BCYAN}Fast · Safe · Expressive{RESET}",
              env!("CARGO_PKG_VERSION"));
     println!("  {ORANGE}{BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{RESET}");
-    // Capacidades reales — da confianza de que es un runtime serio
     println!("  {DIM}Native JIT{RESET} {BBLUE}·{RESET} {DIM}Data engine{RESET} {BBLUE}·{RESET} \
               {DIM}GUI / TUI{RESET} {BBLUE}·{RESET} {DIM}Packages{RESET} {BBLUE}·{RESET} {DIM}FFI{RESET}");
     println!();
@@ -102,8 +101,6 @@ pub fn section(title: &str) {
     println!("  {DIM}{BBLUE}{}{RESET}", " ".repeat(title.chars().count() + 2));
 }
 
-/// Ancho de la columna de etiquetas. Con 26 la etiqueta más larga que existe
-/// ("Pipeline lex+parse+codegen") ocupaba justo el ancho y se pegaba al valor.
 const LABEL_W: usize = 28;
 
 pub fn row(label: &str, value: &str, good: bool) {
@@ -115,8 +112,6 @@ pub fn row(label: &str, value: &str, good: bool) {
     println!("  {icon}  {DIM}{label:<LABEL_W$}{RESET}{BWHITE}{value}{RESET}");
 }
 
-/// Fila de algo opcional: ni bien ni mal, simplemente no está configurado.
-/// Un ✗ rojo aquí haría leer como avería lo que es una ausencia legítima.
 pub fn row_opt(label: &str, value: &str) {
     println!("  {DIM}·  {label:<LABEL_W$}{value}{RESET}");
 }
@@ -138,10 +133,6 @@ pub fn table_row(cols: &[&str]) {
 
 //    Progreso de operaciones largas
 
-/// ¿La salida va a una terminal de verdad?
-///
-/// Todo lo que se reescribe con `\r` se calla cuando la respuesta es no: en un
-/// log de CI o en una tubería, las animaciones solo dejan basura ilegible.
 pub fn is_tty() -> bool {
     use std::io::IsTerminal;
     io::stdout().is_terminal()
@@ -157,11 +148,6 @@ pub fn human_size(n: u64) -> String {
     else                 { format!("{:.1} GB", f / (KB * KB * KB)) }
 }
 
-/// Indicador de progreso de una descarga: una sola línea que se reescribe.
-///
-/// Con tamaño conocido dibuja una barra; sin él, un spinner con los bytes que
-/// llevan bajados. Fuera de una terminal no imprime absolutamente nada, así que
-/// se puede usar sin condicionales en el sitio de llamada.
 pub struct Download {
     label:  String,
     total:  Option<u64>,
@@ -185,8 +171,6 @@ impl Download {
         d
     }
 
-    /// Suma bytes recibidos y redibuja como mucho cada 60 ms: pintar en cada
-    /// chunk gasta más tiempo en la terminal que en la descarga.
     pub fn advance(&mut self, n: usize) {
         self.done += n as u64;
         if !self.activo { return; }

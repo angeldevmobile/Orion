@@ -133,7 +133,7 @@ pub fn run_check(path: &str, check_types: bool) {
     if check_types {
         for w in &warnings {
             let prefix = if w.line > 0 { format!("line {} — ", w.line) } else { String::new() };
-            banner::warn(&format!("[advertencia] {}{}", prefix, w.message));
+            banner::warn(&format!("[warning] {}{}", prefix, w.message));
         }
         if errors.is_empty() && warnings.is_empty() {
             banner::ok("Type check — no type errors");
@@ -141,7 +141,7 @@ pub fn run_check(path: &str, check_types: bool) {
     }
     for e in &errors {
         let prefix = if e.line > 0 { format!("line {} — ", e.line) } else { String::new() };
-        banner::fail(&format!("[tipo] {}{}", prefix, e.message));
+        banner::fail(&format!("[type] {}{}", prefix, e.message));
     }
     if !errors.is_empty() {
         std::process::exit(1);
@@ -185,7 +185,7 @@ mod tests {
         let a = avisos(src);
         assert_eq!(a.len(), 1, "{:?}", a);
         assert_eq!(a[0].0, 3);
-        assert!(a[0].1.contains("no alinea"));
+        assert!(a[0].1.contains("does not align"));
     }
 
     #[test]
@@ -195,14 +195,14 @@ mod tests {
         let a = avisos(src);
         assert_eq!(a.len(), 1, "{:?}", a);
         assert_eq!(a[0].0, 2);
-        assert!(a[0].1.contains("FUERA"));
+        assert!(a[0].1.contains("OUTSIDE"));
     }
 
     #[test]
     fn tabs_y_espacios_mezclados_avisa() {
         let src = "if x > 1 {\n \tshow x\n}\n";
         let a = avisos(src);
-        assert!(a.iter().any(|(l, m)| *l == 2 && m.contains("mezclados")), "{:?}", a);
+        assert!(a.iter().any(|(l, m)| *l == 2 && m.contains("mixes tabs AND spaces")), "{:?}", a);
     }
 
     #[test]

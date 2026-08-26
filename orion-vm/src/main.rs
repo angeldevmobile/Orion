@@ -781,7 +781,13 @@ fn typecheck_gate(src: &str, path: &str, args: &[String]) {
 
 /// Lex + parse + codegen → OrionBytecode, o un error estructurado con span.
 pub fn compile_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, error::OrionError> {
-    compile_with(src, path, false)
+    compile_with(src, path, CompileMode::Plain)
+}
+
+/// Compila una entrada del REPL. Ver [`codegen::compile_repl`]: el valor de la
+/// expresión final sobrevive para que la sesión lo imprima.
+pub fn compile_repl_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, error::OrionError> {
+    compile_with(src, path, CompileMode::Repl)
 }
 
 /// Compila el archivo que el usuario manda ejecutar (`run`, `--build`, `.orbc`).
@@ -789,65 +795,164 @@ pub fn compile_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, 
 /// [`codegen::compile_entry`]. El REPL y los diagnósticos del LSP usan
 /// [`compile_source`]: allí definir `main` no debe ejecutarla.
 pub fn compile_entry_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, error::OrionError> {
-    compile_with(src, path, true)
+    compile_with(src, path, CompileMode::Entry)
 }
 
-fn compile_with(src: &str, path: &str, entry: bool) -> Result<bytecode::OrionBytecode, error::OrionError> {
+#[derive(Clone, Copy, PartialEq)]
+enum CompileMode { Plain, Entry, Repl }
+
+fn compile_with(src: &str, path: &str, mode: CompileMode) -> Result<bytecode::OrionBytecode, error::OrionError> {
     let tokens = lexer::lex(src)
         .map_err(|e| error::OrionError::from(e).with_file(path))?;
 
     let stmts = parser::parse(tokens)
         .map_err(|e| error::OrionError::from(e).with_file(path))?;
 
-    let bc = if entry { codegen::compile_entry(stmts) } else { codegen::compile(stmts) };
+    let bc = match mode {
+        CompileMode::Entry => codegen::compile_entry(stmts),
+        CompileMode::Repl  => codegen::compile_repl(stmts),
+        CompileMode::Plain => codegen::compile(stmts),
+    };
     bc.map_err(|e| error::OrionError::from(e).with_file(path))
 }
 
 //    REPL
 
 struct ReplSession {
+    /// UNA sola VM para toda la sesión: crear una por entrada tiraba las
+    /// variables (`x = 5` y en la línea siguiente `show x` fallaba) y su Drop
+    /// habría liberado por GC lo que sobreviviera de una entrada a la otra.
+    vm: vm::VM,
     history: Vec<String>,  // successfully executed source snippets
 }
 
 impl ReplSession {
-    fn new() -> Self { ReplSession { history: Vec::new() } }
+    fn new() -> Self {
+        ReplSession {
+            vm: vm::VM::new(
+                vec![instruction::Instruction::Halt],
+                vec![0],
+                indexmap::IndexMap::new(),
+                indexmap::IndexMap::new(),
+                indexmap::IndexMap::new(),
+            ),
+            history: Vec::new(),
+        }
+    }
 
     fn record(&mut self, src: &str) {
         self.history.push(src.to_string());
     }
 
-    fn vars(&self) -> Vec<String> {
-        let mut names = Vec::new();
-        for src in &self.history {
-            for line in src.lines() {
-                let t = line.trim();
-                if let Some(rest) = t.strip_prefix("let ").or_else(|| t.strip_prefix("const ")) {
-                    let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_')
-                        .next().unwrap_or("").to_string();
-                    if !name.is_empty() && !names.contains(&name) {
-                        names.push(name);
-                    }
-                }
-            }
-        }
-        names
+    fn vars(&self) -> Vec<(String, value::Value)> { self.vm.global_vars() }
+
+    fn fns(&self) -> Vec<String> { self.vm.function_names() }
+
+    /// ¿La sesión ya usa ese nombre? Decide si `history` (sin `:`) es el
+    /// meta-comando o la variable del usuario: gana siempre la variable.
+    fn defines(&self, name: &str) -> bool {
+        self.vars().iter().any(|(k, _)| k == name)
+            || self.fns().iter().any(|f| f == name)
+    }
+}
+
+//    Meta-comandos del REPL
+
+enum ReplCmd { Help, Clear, Vars, Fns, History, Exit }
+
+/// Reconoce un meta-comando. El `:` es opcional: escribir `help` a secas es lo
+/// primero que prueba cualquiera, y responder "Variable 'help' is not defined"
+/// era una bienvenida absurda. Sin `:` solo cuenta si el nombre está libre.
+fn parse_repl_cmd(line: &str, session: &ReplSession) -> Option<ReplCmd> {
+    let word = line.trim();
+    if word.is_empty() { return None; }
+
+    let (name, explicit) = match word.strip_prefix(':') {
+        Some(rest) => (rest.trim(), true),
+        None       => (word, false),
+    };
+    if !explicit {
+        if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '?') { return None; }
+        if session.defines(name) { return None; }
     }
 
-    fn fns(&self) -> Vec<String> {
-        let mut names = Vec::new();
-        for src in &self.history {
-            for line in src.lines() {
-                let t = line.trim();
-                if let Some(rest) = t.strip_prefix("fn ").or_else(|| t.strip_prefix("task ")) {
-                    let name = rest.split(|c: char| !c.is_alphanumeric() && c != '_')
-                        .next().unwrap_or("").to_string();
-                    if !name.is_empty() && !names.contains(&name) {
-                        names.push(name);
+    match name {
+        "help" | "h" | "?"     => Some(ReplCmd::Help),
+        "clear" | "cls"        => Some(ReplCmd::Clear),
+        "vars"                 => Some(ReplCmd::Vars),
+        "fns" | "functions"    => Some(ReplCmd::Fns),
+        "history"              => Some(ReplCmd::History),
+        "exit" | "quit" | "q"  => Some(ReplCmd::Exit),
+        _                      => None,
+    }
+}
+
+/// ¿La entrada sigue abierta? Cierto mientras queden llaves, corchetes o
+/// paréntesis sin cerrar, o una cadena sin terminar.
+///
+/// Antes se miraba solo el último carácter de la línea, así que un bloque
+/// seguía abierto únicamente si CADA línea acababa en `{` o `,`: el cuerpo de
+/// una `fn` se cortaba en la primera sentencia y la entrada moría con
+/// "Expected RBrace, found Eof".
+fn entry_is_open(src: &str) -> bool {
+    let cs: Vec<char> = src.chars().collect();
+    let mut depth: i32 = 0;
+    let mut i = 0usize;
+
+    while i < cs.len() {
+        match cs[i] {
+            // Comentario `--` (no el error `---`) y doc comment `///`
+            '-' if cs.get(i + 1) == Some(&'-') && cs.get(i + 2) != Some(&'-') => {
+                while i < cs.len() && cs[i] != '\n' { i += 1; }
+            }
+            '/' if cs.get(i + 1) == Some(&'/') => {
+                while i < cs.len() && cs[i] != '\n' { i += 1; }
+            }
+            // Cadena multilínea """..."""
+            '"' if cs.get(i + 1) == Some(&'"') && cs.get(i + 2) == Some(&'"') => {
+                i += 3;
+                loop {
+                    if i + 2 >= cs.len() { return true; }   // sin cerrar
+                    if cs[i] == '"' && cs[i + 1] == '"' && cs[i + 2] == '"' { i += 3; break; }
+                    i += 1;
+                }
+                continue;
+            }
+            c @ ('"' | '\'') => {
+                i += 1;
+                loop {
+                    match cs.get(i) {
+                        None => return true,                      // cadena sin cerrar
+                        Some('\\') => i += 2,
+                        Some(&ch) if ch == c => { i += 1; break; }
+                        Some('\n') if c == '\'' => break,         // char literal roto
+                        Some(_) => i += 1,
                     }
                 }
+                continue;
             }
+            '{' | '[' | '(' => depth += 1,
+            '}' | ']' | ')' => depth -= 1,
+            _ => {}
         }
-        names
+        i += 1;
+    }
+    depth > 0
+}
+
+/// Valor abreviado a una línea para `:vars`.
+fn value_preview(v: &value::Value) -> String {
+    let s = match v {
+        value::Value::Str(s)    => format!("\"{s}\""),
+        value::Value::Module(m) => format!("<module {m}>"),
+        other                   => format!("{other}"),
+    };
+    let s = s.replace('\n', " ");
+    if s.chars().count() > 60 {
+        let cut: String = s.chars().take(57).collect();
+        format!("{cut}...")
+    } else {
+        s
     }
 }
 
@@ -859,7 +964,7 @@ fn run_repl() {
     println!("  REPL v{V}  —  {DIM}Ctrl+C / Ctrl+D to exit{RESET}",
         V = env!("CARGO_PKG_VERSION"),
         DIM = cli::banner::DIM, RESET = cli::banner::RESET);
-    println!("  Comandos: {DIM}:help  :vars  :fns  :clear  :history{RESET}",
+    println!("  Commands: {DIM}:help  :vars  :fns  :clear  :history  :exit{RESET}",
         DIM = cli::banner::DIM, RESET = cli::banner::RESET);
     println!();
 
@@ -895,20 +1000,27 @@ fn run_repl() {
 
         // REPL meta-commands
         if buf.is_empty() {
-            match trimmed {
-                ":help" => { repl_help(); continue; }
-                ":clear" => { print!("\x1b[2J\x1b[H"); continue; }
-                ":vars" => {
+            match parse_repl_cmd(trimmed, &session) {
+                Some(ReplCmd::Help)  => { repl_help(); continue; }
+                Some(ReplCmd::Clear) => { print!("\x1b[2J\x1b[H"); continue; }
+                Some(ReplCmd::Exit)  => { println!(); break; }
+                Some(ReplCmd::Vars) => {
                     let vars = session.vars();
                     if vars.is_empty() {
                         cli::banner::info("No variables in this session");
                     } else {
                         cli::banner::section("Session variables");
-                        for v in vars { println!("    {v}"); }
+                        for (name, v) in vars {
+                            println!("    {BW}{name}{RESET} {DIM}={RESET} {}",
+                                value_preview(&v),
+                                BW = cli::banner::BWHITE,
+                                DIM = cli::banner::DIM,
+                                RESET = cli::banner::RESET);
+                        }
                     }
                     continue;
                 }
-                ":fns" => {
+                Some(ReplCmd::Fns) => {
                     let fns = session.fns();
                     if fns.is_empty() {
                         cli::banner::info("No functions in this session");
@@ -918,11 +1030,11 @@ fn run_repl() {
                     }
                     continue;
                 }
-                ":history" => {
+                Some(ReplCmd::History) => {
                     if session.history.is_empty() {
                         cli::banner::info("History is empty");
                     } else {
-                        cli::banner::section("Historial");
+                        cli::banner::section("Session history");
                         for (i, src) in session.history.iter().enumerate() {
                             println!("  {DIM}[{i}]{RESET} {}",
                                 src.lines().next().unwrap_or("").trim(),
@@ -931,7 +1043,7 @@ fn run_repl() {
                     }
                     continue;
                 }
-                _ => {}
+                None => {}
             }
         }
 
@@ -942,8 +1054,9 @@ fn run_repl() {
         } else {
             buf.push_str(trimmed);
             buf.push('\n');
-            let last_char = trimmed.chars().last().unwrap_or(' ');
-            if last_char != '{' && last_char != ',' && last_char != '\\' {
+            // Sigue abierta mientras falten cierres o la línea acabe en `\`.
+            // Una línea en blanco fuerza la ejecución (ver arriba).
+            if !entry_is_open(&buf) && !trimmed.ends_with('\\') {
                 let source = buf.clone();
                 buf.clear();
                 repl_exec(&source, &mut session);
@@ -954,13 +1067,14 @@ fn run_repl() {
 
 fn repl_help() {
     println!();
-    println!("  {BOLD}Comandos REPL:{RESET}", BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
+    println!("  {BOLD}REPL commands:{RESET}", BOLD = cli::banner::BOLD, RESET = cli::banner::RESET);
     let cmds = [
-        (":help",    "Mostrar esta ayuda"),
+        (":help",    "Show this help"),
         (":vars",    "List variables defined in the session"),
         (":fns",     "List functions defined in the session"),
-        (":clear",   "Limpiar pantalla"),
+        (":clear",   "Clear the screen"),
         (":history", "Show the session history"),
+        (":exit",    "Leave the REPL (same as Ctrl+C / Ctrl+D)"),
     ];
     let dim = cli::banner::DIM;
     let rst = cli::banner::RESET;
@@ -969,18 +1083,30 @@ fn repl_help() {
         println!("  {cy}{cmd:<12}{rst} {dim}{desc}{rst}");
     }
     println!();
+    println!("  {dim}The leading ':' is optional while the name is free.{rst}");
     println!("  {dim}Multi-line block: end it with a blank line.{rst}");
+    println!("  {dim}A top-level expression prints its value: 2 + 2 answers 4.{rst}");
     println!();
 }
 
 fn repl_exec(source: &str, session: &mut ReplSession) {
-    let bc = match compile_source(source, "<repl>") {
+    let bc = match compile_repl_source(source, "<repl>") {
         Ok(b) => b,
         Err(e) => { eprint!("{}", e.render(source)); return; }
     };
-    let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
-    match machine.run() {
-        Ok(_) => session.record(source),
+    // Las definiciones se acumulan entre entradas; el código principal se
+    // reemplaza conservando las variables ya definidas.
+    session.vm.extend_defs(bc.functions, bc.shapes, bc.extern_fns);
+    session.vm.reset_main(bc.main, bc.lines);
+    match session.vm.run() {
+        Ok(_) => {
+            session.record(source);
+            // Eco del valor de la expresión final, si la entrada era una.
+            match session.vm.take_result() {
+                Some(value::Value::Null) | None => {}
+                Some(v) => vm::write_utf8_line(&format!("{v}")),
+            }
+        }
         Err(e) => eprint!("{}", error::parse_vm_error(&e, "<repl>").render(source)),
     }
 }
