@@ -7,8 +7,15 @@ use crate::modules::gui;
 use super::banner;
 
 pub fn run_watch(path: &str) {
+    let lista = vigilados(path);
+    let extra = lista.len().saturating_sub(1);
     banner::info(&format!(
-        "Watch activo: {BOLD}{path}{RESET}  {DIM}(Ctrl+C to stop){RESET}",
+        "Watching {BOLD}{path}{RESET}{}  {DIM}(Ctrl+C to stop){RESET}",
+        if extra > 0 {
+            format!(" {DIM}+ {extra} imported{RESET}", DIM = banner::DIM, RESET = banner::RESET)
+        } else {
+            String::new()
+        },
         BOLD = banner::BOLD, RESET = banner::RESET, DIM = banner::DIM
     ));
     println!();
@@ -28,21 +35,91 @@ pub fn run_watch(path: &str) {
     }
 
     // Script no-GUI: loop de polling tradicional
-    let mut last_mtime = mtime(path);
+    let mut huella_ant = huella(&vigilados(path));
     loop {
         thread::sleep(Duration::from_millis(400));
-        let cur = mtime(path);
-        if cur != last_mtime {
-            last_mtime = cur;
-            println!("\n  {DIM}{}  cambio detectado{RESET}", "─".repeat(44),
-                DIM = banner::DIM, RESET = banner::RESET);
+        let cur = huella(&vigilados(path));
+        if cur != huella_ant {
+            huella_ant = cur;
+            aviso_cambio();
             compile_and_run(path);
         }
     }
 }
 
+fn aviso_cambio() {
+    println!("\n  {DIM}{}  change detected{RESET}", "─".repeat(44),
+        DIM = banner::DIM, RESET = banner::RESET);
+}
+
 fn mtime(path: &str) -> Option<SystemTime> {
     fs::metadata(path).ok()?.modified().ok()
+}
+
+/// Los archivos que hay que vigilar: el de entrada y todo lo que importa,
+/// recursivamente.
+///
+/// Sin esto solo se miraba el archivo de entrada, así que tocar un módulo no
+/// recargaba nada: el desarrollador guardaba, no pasaba nada, y acababa
+/// dudando de si el watch funcionaba. La lista se recalcula en cada vuelta
+/// porque un `use` nuevo también tiene que empezar a vigilarse.
+fn vigilados(entrada: &str) -> Vec<std::path::PathBuf> {
+    use std::collections::HashSet;
+
+    let raiz = std::path::PathBuf::from(entrada);
+    let mut fuera: Vec<std::path::PathBuf> = vec![raiz.clone()];
+    let mut vistos: HashSet<std::path::PathBuf> = HashSet::new();
+    vistos.insert(raiz.clone());
+
+    let mut cola = vec![raiz];
+    // Tope de profundidad: un ciclo de imports no debe colgar el watch.
+    let mut vueltas = 0;
+
+    while let Some(actual) = cola.pop() {
+        vueltas += 1;
+        if vueltas > 200 { break; }
+
+        let Ok(src) = fs::read_to_string(&actual) else { continue };
+        for m in imports(&src) {
+            // Solo los `use` que resuelven a un .orx del proyecto: los
+            // módulos nativos no son archivos y no hay nada que vigilar.
+            if let Some(f) = crate::paths::resolve_module_file(&m) {
+                if vistos.insert(f.clone()) {
+                    fuera.push(f.clone());
+                    cola.push(f);
+                }
+            }
+        }
+    }
+    fuera
+}
+
+/// Las rutas de los `use` de un programa, con el lexer y no a ojo: así un
+/// `use` dentro de un comentario o de una cadena no cuenta.
+fn imports(src: &str) -> Vec<String> {
+    use crate::token::TokenKind;
+    let Ok(tokens) = lexer::lex(src) else { return Vec::new() };
+
+    let mut fuera = Vec::new();
+    let mut i = 0;
+    while i + 1 < tokens.len() {
+        if matches!(tokens[i].kind, TokenKind::Use) {
+            match &tokens[i + 1].kind {
+                TokenKind::Str(s)   => fuera.push(s.clone()),
+                TokenKind::Ident(n) => fuera.push(n.clone()),
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    fuera
+}
+
+/// Un cambio en cualquiera de los archivos cambia la huella.
+fn huella(archivos: &[std::path::PathBuf]) -> Vec<Option<SystemTime>> {
+    archivos.iter()
+        .map(|f| fs::metadata(f).ok().and_then(|m| m.modified().ok()))
+        .collect()
 }
 
 fn script_has_serve(path: &str) -> bool {
@@ -60,7 +137,7 @@ fn run_watch_server(path: &str) {
 
     let spawn = |reason: &str| -> Option<Child> {
         banner::info(&format!(
-            "{reason}  {DIM}(servidor como proceso hijo){RESET}",
+            "{reason}  {DIM}(server runs as a child process){RESET}",
             DIM = banner::DIM, RESET = banner::RESET
         ));
         match Command::new(&exe).arg("run").arg(path).spawn() {
@@ -70,7 +147,7 @@ fn run_watch_server(path: &str) {
     };
 
     let mut child = spawn("Server started");
-    let mut last_mtime = mtime(path);
+    let mut huella_ant = huella(&vigilados(path));
 
     loop {
         thread::sleep(Duration::from_millis(400));
@@ -85,13 +162,12 @@ fn run_watch_server(path: &str) {
             }
         }
 
-        let cur = mtime(path);
-        if cur != last_mtime {
-            last_mtime = cur;
+        let cur = huella(&vigilados(path));
+        if cur != huella_ant {
+            huella_ant = cur;
             // Pausa breve para que el editor termine de escribir el archivo
             thread::sleep(Duration::from_millis(80));
-            println!("\n  {DIM}{}  cambio detectado{RESET}", "─".repeat(44),
-                DIM = banner::DIM, RESET = banner::RESET);
+            aviso_cambio();
             if let Some(mut c) = child.take() {
                 let _ = c.kill();
                 let _ = c.wait();

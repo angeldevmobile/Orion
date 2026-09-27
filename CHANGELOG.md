@@ -3,6 +3,22 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## Sin publicar
+
+### Corregido
+- **`--watch` ahora vigila también los archivos importados.** Sondeaba el
+  `mtime` de un solo archivo, así que en un proyecto repartido en varios
+  `.orx` tocar un módulo no recargaba nada: se guardaba, no pasaba nada, y uno
+  acababa dudando de si el watch funcionaba. Los `use` se resuelven con el
+  lexer (un `use` dentro de un comentario o de una cadena no cuenta), se
+  siguen de forma recursiva, y la lista se recalcula en cada vuelta para que un
+  `use` nuevo empiece a vigilarse sin reiniciar. Al arrancar dice cuántos
+  archivos vigila: `Watching backend/main.orx + 4 imported`.
+
+- **Los mensajes de `--watch` estaban en español** mientras el resto del CLI
+  está en inglés: `change detected`, `Watching`, `server runs as a child
+  process`.
+
 ## v0.1.5 - 2026-09-27
 
 Una tanda de arreglos del módulo `browser`, todos encontrados reproduciendo el

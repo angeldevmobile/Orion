@@ -3,22 +3,6 @@
 Cosas encontradas y no arregladas todavía, con el motivo por el que importan.
 Lo que se arregla sale de aquí y entra en [`CHANGELOG.md`](CHANGELOG.md).
 
-## `--watch` solo vigila el archivo de entrada
-
-`run_watch` sondea el `mtime` de **un** archivo cada 400 ms
-([`orion-vm/src/cli/watch.rs`](orion-vm/src/cli/watch.rs)). Un proyecto
-repartido en varios `.orx` no se recarga al tocar los importados: el
-desarrollador guarda, no pasa nada, y acaba dudando de si el watch funciona.
-
-El modo servidor está bien resuelto (lanza el servidor como proceso hijo y lo
-mata y relanza en cada cambio, como nodemon; un error de sintaxis se muestra
-con línea y columna y el servidor vuelve solo al guardar el arreglo). Lo que
-falta es el alcance: seguir también los archivos que el programa importa.
-
-Camino razonable: resolver los `use` del programa al arrancar el watch y
-vigilar ese conjunto, recalculándolo en cada recarga por si cambian los
-imports.
-
 ## En macOS el navegador sobrevive a un `kill`
 
 `browser` ata el navegador a la vida del proceso con un *job object* en
