@@ -1,56 +1,80 @@
 #!/usr/bin/env bash
 #
-# Reempaqueta e instala la extensión VSCode de Orion con el binario y el
-# server.js actuales del repo. Automatiza los 4 pasos manuales:
-#   1) compilar Orion en release   2) copiar el binario al bundle
-#   3) subir la versión de parche   4) empaquetar (.vsix) e instalar
+# Empaqueta la extensión de VS Code y la instala, para probar un cambio sin
+# pasar por el Marketplace.
 #
-# Uso:
-#   ./actualizar-extension.sh              # compila release y luego empaqueta
-#   ./actualizar-extension.sh --skip-build # usa el binario release ya compilado
+#   ./actualizar-extension.sh                  # empaqueta e instala
+#   ./actualizar-extension.sh --bump           # sube la versión de parche
+#   ./actualizar-extension.sh --solo-empaquetar
 #
+# No compila Orion: el compilador ya no va dentro del paquete, se descarga de
+# la última release.
 set -euo pipefail
 
-# REPO = repo del lenguaje (donde vive este script y el crate orion-vm).
-# EXT  = repo de la extensión, ahora en una carpeta HERMANA (orion-extension),
-#        tras la reorganización 2026-07-23 (antes: vscode-orion/orion-lang).
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXT="${ORION_EXT_DIR:-$(cd "$REPO/.." && pwd)/orion-extension}"
-BIN_SRC="$REPO/orion-vm/target/release/orion.exe"
-BIN_DST="$EXT/bin/win32-x64/orion.exe"
 
-[[ -d "$EXT" ]] || { echo "ERROR: no existe la carpeta de la extensión: $EXT"; echo "  (define ORION_EXT_DIR=/ruta/a/orion-extension si está en otro sitio)"; exit 1; }
-mkdir -p "$(dirname "$BIN_DST")"
+[[ -d "$EXT" ]] || {
+  echo "ERROR: no existe la carpeta de la extensión: $EXT"
+  echo "  (define ORION_EXT_DIR=/ruta/a/orion-extension si está en otro sitio)"
+  exit 1
+}
 
-# 1) Compilar release (salvo --skip-build)
-if [[ "${1:-}" != "--skip-build" ]]; then
-  echo "==> Compilando Orion en release (puede tardar varios minutos)..."
-  ( cd "$REPO/orion-vm" && cargo build --release )
+BUMP=no
+SOLO_EMPAQUETAR=no
+for arg in "$@"; do
+  case "$arg" in
+    --bump)            BUMP=yes ;;
+    --solo-empaquetar) SOLO_EMPAQUETAR=yes ;;
+    --skip-build)      ;;   # aceptado y sin efecto: ya no se compila nada
+    *) echo "Opción desconocida: $arg"; exit 1 ;;
+  esac
+done
+
+cd "$EXT"
+
+# Por defecto no se toca la versión: --force reinstala la misma, y subirla en
+# cada prueba la deja por delante del Marketplace sin nada que contar.
+if [[ "$BUMP" == "yes" ]]; then
+  anterior="$(node -p "require('./package.json').version")"
+  node -e '
+    const fs = require("fs");
+    const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    const [ma, mi, pa] = p.version.split(".").map(Number);
+    p.version = `${ma}.${mi}.${pa + 1}`;
+    fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
+  '
+  echo "==> Versión $anterior -> $(node -p "require('./package.json').version")"
 fi
 
-[[ -f "$BIN_SRC" ]] || { echo "ERROR: no existe $BIN_SRC — compila primero (sin --skip-build)"; exit 1; }
+VERSION="$(node -p "require('./package.json').version")"
+NOMBRE="$(node -p "require('./package.json').name")"
+VSIX="$EXT/$NOMBRE-$VERSION.vsix"
 
-# 2) Copiar el binario release al bundle de la extensión
-echo "==> Copiando binario al bundle..."
-cp "$BIN_SRC" "$BIN_DST"
+# El nombre sale de `name` del package.json: fijarlo a mano es lo que rompió
+# este script en el rename a `oriondev`.
+echo "==> Empaquetando $NOMBRE $VERSION..."
+if [[ -x ./node_modules/.bin/vsce ]]; then
+  ./node_modules/.bin/vsce package
+else
+  npx --yes @vscode/vsce package
+fi
 
-# 3) Subir la versión de parche (X.Y.Z -> X.Y.Z+1) en package.json
-cur="$(grep -m1 '"version"' "$EXT/package.json" | sed -E 's/.*"version" *: *"([0-9.]+)".*/\1/')"
-IFS=. read -r MA MI PA <<< "$cur"
-new="$MA.$MI.$((PA + 1))"
-sed -i -E "0,/\"version\" *: *\"[0-9.]+\"/s//\"version\": \"$new\"/" "$EXT/package.json"
-echo "==> Versión $cur -> $new"
+[[ -f "$VSIX" ]] || { echo "ERROR: no se generó $VSIX"; exit 1; }
+echo "==> $(du -h "$VSIX" | cut -f1)  $VSIX"
 
-# 4) Empaquetar e instalar
-echo "==> Empaquetando .vsix..."
-( cd "$EXT" && ./node_modules/.bin/vsce package )
+[[ "$SOLO_EMPAQUETAR" == "yes" ]] && { echo "LISTO (sin instalar)."; exit 0; }
 
-VSIX="$EXT/orion-lang-$new.vsix"
 CODE="code"
 command -v code >/dev/null 2>&1 || CODE="/c/Users/lenovo/AppData/Local/Programs/Microsoft VS Code/bin/code"
 echo "==> Instalando en VS Code..."
 "$CODE" --install-extension "$VSIX" --force
 
 echo ""
-echo "LISTO: orion-lang $new instalada."
-echo "Recarga la ventana de VS Code: Ctrl+Shift+P -> \"Reload Window\"."
+echo "LISTO: $NOMBRE $VERSION instalada. Recarga la ventana (Ctrl+Shift+P -> Reload Window)."
+
+BIN_LOCAL="$REPO/orion-vm/target/release/orion.exe"
+if [[ -f "$BIN_LOCAL" ]]; then
+  echo "Para usar tu compilador local en vez del de la release, añade a tus ajustes:"
+  echo "  \"orion.executablePath\": \"${BIN_LOCAL//\\//}\""
+fi
