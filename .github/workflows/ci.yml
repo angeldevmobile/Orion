@@ -65,6 +65,58 @@ jobs:
       - name: cargo test (tabla de deprecaciones)
         run: cargo test --test deprecated_sync
 
+  # ── El módulo browser contra un Chrome de verdad ───────────────────────────
+  # Estos tests levantan un navegador real y un servidor local, así que no
+  # entran en el job de arriba: son lentos y hay que correrlos EN SERIE (en
+  # paralelo caen un par al azar por contención, ver la cabecera de
+  # browser_e2e.rs). Van aparte para que su lentitud no frene al resto.
+  #
+  # Importa que corran en Linux: el cierre del navegador usa `PR_SET_PDEATHSIG`
+  # ahí y un job object en Windows, y ese camino no lo compila nadie más.
+  browser:
+    name: browser e2e (Chrome real)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: orion-vm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y \
+            libffi-dev libssl-dev libssh2-1-dev \
+            libx11-dev libxcb-composite0-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            orion-vm/target
+          key: ${{ runner.os }}-cargo-browser-${{ hashFiles('orion-vm/Cargo.lock') }}
+
+      # Los runners de Ubuntu traen Chrome instalado. Se le dice a Orion cuál
+      # usar en vez de dejar que lo busque: si un día cambia la imagen del
+      # runner, el fallo dirá esto y no "no se encontró navegador".
+      - name: Comprobar que hay navegador
+        run: |
+          which google-chrome || which chromium-browser || which chromium
+          google-chrome --version || true
+
+      - name: cargo test (browser e2e, en serie)
+        env:
+          ORION_CHROME: /usr/bin/google-chrome
+        run: cargo test --test browser_e2e -- --test-threads=1
+
   # ── Análisis dinámico: AddressSanitizer + LeakSanitizer ────────────────────
   # Corre la suite completa con el heap instrumentado: detecta use-after-free,
   # buffer overflows y FUGAS de memoria (LSan viene incluido en ASan en Linux

@@ -15,8 +15,38 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # El tag y la versión del paquete tienen que decir lo mismo.
+  #
+  # `v0.1.4` se publicó conteniendo `0.1.3`, así que el binario que la gente
+  # descargaba anunciaba una versión que no era la suya — y `--version` es
+  # justo lo que se mira para saber si un fallo ya está arreglado. Esto falla
+  # antes de compilar nada, en vez de descubrirlo cuando ya está publicado.
+  # El job corre SIEMPRE (no lleva `if`): un job que depende de otro saltado se
+  # salta también, y eso dejaría sin compilar el disparo manual. Lo que se
+  # omite es la comprobación, no el job.
+  version:
+    name: el tag coincide con Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Comparar tag y versión del paquete
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "No es un tag: no hay nada que comparar."; exit 0 ;;
+          esac
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(grep -m1 '^version' orion-vm/Cargo.toml | cut -d'"' -f2)
+          echo "tag=$tag  Cargo.toml=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::El tag v$tag no coincide con la versión $pkg de orion-vm/Cargo.toml."
+            echo "::error::Sube la versión en Cargo.toml y vuelve a taguear."
+            exit 1
+          fi
+
   build:
     name: build (${{ matrix.target_dir }})
+    needs: version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

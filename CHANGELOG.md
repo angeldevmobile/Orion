@@ -3,6 +3,71 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## v0.1.5 — 2026-09-27
+
+Una tanda de arreglos del módulo `browser`, todos encontrados reproduciendo el
+fallo en vivo y todos con su test de regresión. Dos de ellos hacían que un
+recorrido nocturno perdiera datos o dejara basura en la máquina, así que esta
+versión importa para quien ya use `crawl`.
+
+La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
+
+### Corregido
+- **`crawl` perdía filas al reanudar.** El progreso marcaba una URL como
+  terminada mientras sus filas seguían en el búfer de 8 KB del escritor CSV. Si
+  el proceso moría ahí —un `kill`, el OOM killer, un cron con timeout—, al
+  reanudar se saltaban esas páginas y las filas no se recuperaban nunca: el
+  recorrido terminaba diciendo `errors: []`. Ahora el CSV se vuelca a disco
+  **antes** de anotar el progreso, así que lo peor que puede pasar es repetir
+  una página. Reproducido matando el proceso a mitad: el progreso tenía 3 URLs
+  y el CSV 0 bytes.
+
+- **El navegador quedaba huérfano si mataban el proceso.** `with` lo cierra
+  aunque el cuerpo falle, pero no puede hacer nada ante una muerte súbita, y
+  cada pasada dejaba otro Chrome de cientos de MB. Ahora lo ata el sistema
+  operativo: **job object** en Windows y `PR_SET_PDEATHSIG` en Linux, sin
+  dependencias nuevas. En macOS no hay equivalente y se documenta.
+
+- **`discover` proponía selectores inválidos con Tailwind.** Las clases con dos
+  puntos (`md:flex`, `hover:shadow-lg`) volvían sin escapar, así que `.md:flex`
+  no casaba con nada. Y no se veía: la muestra se calcula con los nodos ya
+  encontrados, de modo que salía perfecta y `extract` devolvía una lista vacía
+  en silencio.
+
+- **`web.wait` no veía lo que aparecía dentro de un iframe o de una shadow
+  root.** El `MutationObserver` solo vigila su propio documento. El elemento
+  aparecía, `web.text` lo encontraba, y `wait` seguía dormido hasta agotar el
+  plazo — justo en los dos sitios donde más se espera: un modal de cookies en
+  iframe y un componente web. El observador sigue (es lo que da respuesta
+  inmediata) y se le suma un sondeo, que llega donde él no entra.
+
+- **Fuga de memoria en el transporte CDP.** Las respuestas que nadie esperaba
+  —una por cada `Fetch.continueRequest`, es decir una por PETICIÓN de la página
+  cuando hay `allow` o `route`— se quedaban para siempre en el mapa de
+  respuestas. Ahora solo se guarda lo que alguien espera y el resto se descarta.
+
+- **Riesgo de comandos CDP duplicados.** En tungstenite un `send` que devuelve
+  `WouldBlock` ya ha encolado el mensaje; reintentar con `send` lo encolaba dos
+  veces, y el navegador habría ejecutado el comando dos veces (dos clics, dos
+  navegaciones). A partir del primer `WouldBlock` solo se vacía el búfer.
+
+- **`force` dejaba la página tocada con shadow DOM.** El clic forzado vuelve
+  transparente al puntero lo que estorba y luego lo restaura, pero la
+  restauración no entraba en las shadow roots: la capa de un banner hecho como
+  componente web —Usercentrics, OneTrust— se quedaba con `pointer-events: none`
+  para siempre, y con una marca `data-orion-pe` que delata al scraper.
+
+- **Dos tests e2e desfasados.** Desde que `__nombre` prefiere el `id` a la
+  clase, el error dice `<div#velo>`; los tests seguían esperando el nombre de
+  la clase. El aviso de "94 e2e verificados" de BROWSER.md no era cierto
+  mientras tanto.
+
+### Cambiado
+- **La versión del paquete vuelve a cuadrar con el tag.** `v0.1.4` se publicó
+  conteniendo `0.1.3`, así que el binario descargado decía una versión que no
+  era. El workflow de release ahora **comprueba que el tag y `Cargo.toml`
+  coinciden** y falla si no, para que no vuelva a pasar.
+
 ## 2026-08-23
 
 ### Añadido
