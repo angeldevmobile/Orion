@@ -132,6 +132,8 @@ jobs:
     permissions:
       contents: write        # necesario para crear el Release
     steps:
+      - uses: actions/checkout@v4
+
       - name: Descargar todos los binarios
         uses: actions/download-artifact@v4
         with:
@@ -143,17 +145,53 @@ jobs:
           find artifacts -type f -exec cp {} dist/ \;
           ls -la dist
 
+      # Las notas de la release salen del CHANGELOG, no de los asuntos de los
+      # commits. Un commit dice "cambios en cdp"; el CHANGELOG dice que `crawl`
+      # perdía filas al reanudar y qué se hizo. Lo segundo es lo que alguien
+      # necesita para decidir si actualizar.
+      #
+      # Se extrae la sección de esta versión: desde `## vX.Y.Z` hasta el
+      # siguiente `## `. Si no la encuentra —una versión sin entrada— sigue
+      # adelante con el texto de siempre en vez de tumbar la publicación.
+      - name: Preparar las notas desde el CHANGELOG
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            $0 ~ "^## v" v "([^0-9]|$)" { dentro = 1; next }
+            dentro && /^## / { exit }
+            dentro { print }
+          ' CHANGELOG.md > seccion.md
+
+          if [ -s seccion.md ]; then
+            cat seccion.md > notas.md
+            echo "" >> notas.md
+          else
+            echo "::warning::No hay sección para v$version en CHANGELOG.md; se publica sin notas detalladas."
+            echo "Binarios del CLI de Orion para $GITHUB_REF_NAME." > notas.md
+            echo "" >> notas.md
+          fi
+
+          cat >> notas.md <<'PIE'
+          ---
+
+          ### Descargas
+
+          | Plataforma | Archivo |
+          |---|---|
+          | Windows x64 | `orion-win32-x64.exe` |
+          | macOS (Apple Silicon) | `orion-darwin-arm64` |
+          | Linux x64 | `orion-linux-x64` |
+
+          En macOS y Linux: `chmod +x orion-*` antes de ejecutarlo.
+          Comprueba cuál tienes con `orion --version`.
+          PIE
+
+          echo "--- notas.md ---"; cat notas.md
+
       - name: Crear GitHub Release con los binarios
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
-          body: |
-            Binarios del CLI de Orion para ${{ github.ref_name }}.
-
-            Descarga el de tu plataforma:
-            - **Windows**: `orion-win32-x64.exe`
-            - **macOS (Apple Silicon)**: `orion-darwin-arm64`
-            - **Linux**: `orion-linux-x64`
-
-            En macOS/Linux: `chmod +x orion-*` y ejecútalo. Ver uso en el README.
+          body_path: notas.md
