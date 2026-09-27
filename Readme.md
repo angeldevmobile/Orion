@@ -1731,4 +1731,18 @@ directions.
 
 ---
 
+## What changed, and when
+
+Every release is written down in [`CHANGELOG.md`](CHANGELOG.md), by what broke
+and what it did to you — not by commit subject. The binaries for each version
+are on the [releases page](https://github.com/angeldevmobile/Orion/releases);
+`orion --version` tells you which one you are running.
+
+Other reference pages: [`SPEC.md`](SPEC.md) for the language,
+[`BROWSER.md`](BROWSER.md) for web automation,
+[`ESTADO_MODULOS.md`](ESTADO_MODULOS.md) for how far each module is verified,
+and [`CONTRIBUTING.md`](CONTRIBUTING.md) to send a patch.
+
+---
+
 *Orion - built by Angel Zapata · 2025-2026*
