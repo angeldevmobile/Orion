@@ -126,6 +126,113 @@ pub struct Launched {
     pub temporal:  bool,
 }
 
+/// Atar el navegador a la vida de este proceso.
+///
+/// `with` cierra el navegador aunque el cuerpo lance un error, pero no puede
+/// hacer nada si el proceso muere de golpe: un `kill`, el OOM killer, un corte
+/// de luz o un cron que tumba la tarea. Ahí el navegador quedaba vivo, y una
+/// tarea que se cuelga cada noche va acumulando Chromes de cientos de MB.
+///
+/// Esto lo resuelve el sistema operativo, que es el único que sigue estando ahí
+/// cuando el proceso ya no está. Sin dependencias nuevas: se declaran las tres
+/// funciones del sistema que hacen falta.
+#[cfg(windows)]
+mod atadura {
+    use std::ffi::c_void;
+    use std::os::windows::io::AsRawHandle;
+
+    type Handle = *mut c_void;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct Contadores { lectura: u64, escritura: u64, otra: u64, leidos: u64, escritos: u64, otros: u64 }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct LimiteBasico {
+        tiempo_proceso: i64,
+        tiempo_job:     i64,
+        banderas:       u32,
+        min_working:    usize,
+        max_working:    usize,
+        max_procesos:   u32,
+        afinidad:       usize,
+        prioridad:      u32,
+        clase:          u32,
+    }
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct LimiteExtendido {
+        basico:        LimiteBasico,
+        io:            Contadores,
+        memoria_proc:  usize,
+        memoria_job:   usize,
+        pico_proc:     usize,
+        pico_job:      usize,
+    }
+
+    extern "system" {
+        fn CreateJobObjectW(atributos: *mut c_void, nombre: *const u16) -> Handle;
+        fn SetInformationJobObject(job: Handle, clase: i32, info: *const c_void, largo: u32) -> i32;
+        fn AssignProcessToJobObject(job: Handle, proceso: Handle) -> i32;
+    }
+
+    /// `JobObjectExtendedLimitInformation`.
+    const INFO_EXTENDIDA: i32 = 9;
+    /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: al cerrarse el job, mueren los suyos.
+    const MATAR_AL_CERRAR: u32 = 0x2000;
+
+    /// Mete al navegador en un *job object* que muere con este proceso.
+    ///
+    /// El handle se deja abierto A PROPÓSITO durante toda la vida del proceso:
+    /// cerrarlo mataría al navegador en el acto. Windows lo cierra solo cuando
+    /// el proceso termina —de la forma que sea, incluido un `kill`— y ese cierre
+    /// es justo lo que se lleva por delante al navegador y a sus hijos.
+    pub fn atar(child: &std::process::Child) {
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            if job.is_null() { return; }
+
+            let mut info = LimiteExtendido::default();
+            info.basico.banderas = MATAR_AL_CERRAR;
+            let ok = SetInformationJobObject(
+                job, INFO_EXTENDIDA,
+                &info as *const _ as *const c_void,
+                std::mem::size_of::<LimiteExtendido>() as u32,
+            );
+            // Si no se pudo configurar, NO se asigna: un job sin la bandera solo
+            // añadiría una atadura inútil.
+            if ok == 0 { return; }
+
+            AssignProcessToJobObject(job, child.as_raw_handle() as Handle);
+        }
+    }
+}
+
+/// En Linux lo hace el kernel: el hijo recibe SIGKILL cuando muere su padre.
+///
+/// Ojo a la letra pequeña de `PR_SET_PDEATHSIG`: la señal llega cuando muere el
+/// **hilo** que lanzó el proceso, no el proceso entero. Por eso el navegador se
+/// abre desde el hilo que conduce el recorrido y no desde uno auxiliar.
+#[cfg(target_os = "linux")]
+mod atadura {
+    /// `PR_SET_PDEATHSIG`
+    const SET_PDEATHSIG: i32 = 1;
+    /// `SIGKILL`
+    const MATAR: i64 = 9;
+
+    extern "C" {
+        fn prctl(opcion: i32, arg: i64) -> i32;
+    }
+
+    /// Se ejecuta en el hijo, entre `fork` y `exec`.
+    pub unsafe fn marcar_en_el_hijo() -> std::io::Result<()> {
+        prctl(SET_PDEATHSIG, MATAR);
+        Ok(())
+    }
+}
+
 /// Candidatos de instalación por plataforma, en orden de preferencia.
 fn candidatos() -> Vec<PathBuf> {
     let mut v: Vec<PathBuf> = Vec::new();
@@ -299,12 +406,26 @@ pub fn launch(opts: &LaunchOpts, tuning: &Tuning) -> Result<Launched, String> {
     let puerto_file = user_data.join("DevToolsActivePort");
     let _ = std::fs::remove_file(&puerto_file);
 
-    let mut child = Command::new(&exe)
-        .args(args(opts, &user_data))
+    let mut cmd = Command::new(&exe);
+    cmd.args(args(opts, &user_data))
         .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+
+    // Linux: se marca ANTES de arrancar, porque la marca la pone el propio hijo
+    // entre el `fork` y el `exec`. En macOS no hay equivalente y el navegador
+    // sigue sobreviviendo a un `kill` del proceso.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| atadura::marcar_en_el_hijo());
+    }
+
+    let mut child = cmd.spawn()
         .map_err(|e| format!("could not start {}: {e}", exe.display()))?;
+
+    // Windows: se ata DESPUÉS, con el proceso ya creado.
+    #[cfg(windows)]
+    atadura::atar(&child);
 
     let stderr = child.stderr.take()
         .ok_or("could not read the browser's output")?;

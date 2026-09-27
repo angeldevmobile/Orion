@@ -24,7 +24,7 @@
 //! candado solo microsegundos por sondeo y los emisores no se quedan esperando
 //! detrás de una lectura bloqueada.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -82,6 +82,16 @@ pub struct Event {
 #[derive(Default)]
 struct State {
     responses: HashMap<u64, serde_json::Value>,
+    /// Ids que alguien está esperando de verdad.
+    ///
+    /// Sin esto, `responses` crecía para siempre. No todo lo que se envía tiene
+    /// a alguien esperándolo: cada `Fetch.continueRequest` —uno por PETICIÓN de
+    /// la página cuando hay `allow` o `route`— y cada respuesta a un diálogo se
+    /// mandan y se olvidan, pero su respuesta llegaba igual y se quedaba en el
+    /// mapa. Un recorrido largo con allowlist acababa reteniendo un JSON por
+    /// cada imagen, fuente y XHR de cada página visitada. Lo mismo con las
+    /// respuestas que llegan tarde, después de vencer su plazo.
+    esperando: HashSet<u64>,
     events:    Vec<Event>,
     next_seq:  u64,
     dead:      Option<String>,
@@ -314,7 +324,11 @@ impl Conn {
         let mut st = self.state.lock().unwrap();
 
         if let Some(id) = v.get("id").and_then(|x| x.as_u64()) {
-            st.responses.insert(id, v);
+            // Solo se guarda si hay alguien esperándola. Una respuesta que ya
+            // no le importa a nadie se tira aquí: guardarla era una fuga.
+            if st.esperando.contains(&id) {
+                st.responses.insert(id, v);
+            }
         } else if let Some(method) = v.get("method").and_then(|x| x.as_str()) {
             let seq = st.next_seq;
             st.next_seq += 1;
@@ -389,6 +403,11 @@ impl Conn {
             msg["sessionId"] = serde_json::Value::String(s.to_string());
         }
 
+        // Apuntarse ANTES de enviar: la respuesta puede llegar mientras esta
+        // línea todavía no ha vuelto, y el hilo lector necesita saber ya que
+        // esta sí hay que guardarla.
+        self.state.lock().unwrap().esperando.insert(id);
+
         self.pending.fetch_add(1, Ordering::SeqCst);
         let enviado = self.send_text(msg.to_string());
         let resultado = match enviado {
@@ -396,18 +415,41 @@ impl Conn {
             Err(e) => Err(e),
         };
         self.pending.fetch_sub(1, Ordering::SeqCst);
+
+        // Y darse de baja pase lo que pase: respuesta recibida, plazo vencido o
+        // envío fallido. Si venció el plazo y la respuesta llega después, el
+        // lector ya la descartará; y si llegó justo ahora, se tira aquí.
+        {
+            let mut st = self.state.lock().unwrap();
+            st.esperando.remove(&id);
+            st.responses.remove(&id);
+        }
+
         resultado
     }
 
     fn send_text(&self, texto: String) -> Result<(), String> {
         let mut sock = self.socket.lock().unwrap();
         let limite = Instant::now() + self.limits.send;
+        // `send` de tungstenite = encolar + vaciar. Si el socket está lleno
+        // devuelve `WouldBlock`, pero el mensaje YA está en su búfer: volver a
+        // llamar a `send` lo encolaría por segunda vez, y el navegador
+        // ejecutaría el comando dos veces —dos clics, dos navegaciones— además
+        // de dejar una respuesta suelta con un id que nadie espera. A partir
+        // del primer `WouldBlock` solo se vacía.
+        let mut ya_encolado = false;
         loop {
-            match sock.send(Message::Text(texto.clone())) {
+            let intento = if ya_encolado {
+                sock.flush()
+            } else {
+                sock.send(Message::Text(texto.clone()))
+            };
+            match intento {
                 Ok(()) => return Ok(()),
                 Err(tungstenite::Error::Io(e))
                     if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
                 {
+                    ya_encolado = true;
                     if Instant::now() > limite {
                         return Err(format!("CDP: the send made no progress in {:?}", self.limits.send));
                     }
@@ -561,9 +603,43 @@ mod tests {
         }
     }
 
+    /// Lo que hace `call_once` antes de enviar: apuntarse como interesado en
+    /// esa respuesta. Sin esto el lector la descarta, que es justo lo que evita
+    /// que el mapa crezca sin límite.
+    fn esperando(c: &Conn, ids: &[u64]) {
+        let mut st = c.state.lock().unwrap();
+        for id in ids { st.esperando.insert(*id); }
+    }
+
+    #[test]
+    fn una_respuesta_sin_dueno_no_se_guarda() {
+        let c = conn_de_prueba();
+        // Un `Fetch.continueRequest` por cada petición de la página: se manda y
+        // se olvida. Su respuesta llega igual, y antes se quedaba para siempre.
+        for id in 1..=500 {
+            c.dispatch(&format!(r#"{{"id":{id},"result":{{}}}}"#));
+        }
+        assert_eq!(c.state.lock().unwrap().responses.len(), 0,
+                   "se retuvieron respuestas que nadie esperaba: la fuga sigue ahí");
+    }
+
+    #[test]
+    fn una_respuesta_esperada_deja_de_ocupar_sitio_al_recogerla() {
+        let c = conn_de_prueba();
+        esperando(&c, &[3]);
+        c.dispatch(r#"{"id":3,"result":{"value":"tres"}}"#);
+        assert_eq!(c.state.lock().unwrap().responses.len(), 1);
+
+        let r = c.await_response(3, "X", Duration::from_millis(50)).unwrap();
+        assert_eq!(r["value"], "tres");
+        assert_eq!(c.state.lock().unwrap().responses.len(), 0,
+                   "la respuesta recogida siguió ocupando sitio");
+    }
+
     #[test]
     fn una_respuesta_va_a_su_peticion() {
         let c = conn_de_prueba();
+        esperando(&c, &[7, 8]);
         c.dispatch(r#"{"id":7,"result":{"value":"siete"}}"#);
         c.dispatch(r#"{"id":8,"result":{"value":"ocho"}}"#);
 
@@ -577,6 +653,7 @@ mod tests {
     #[test]
     fn un_error_cdp_se_convierte_en_error_de_orion() {
         let c = conn_de_prueba();
+        esperando(&c, &[1]);
         c.dispatch(r#"{"id":1,"error":{"message":"Cannot find context","data":"id 42"}}"#);
         let e = c.await_response(1, "Runtime.evaluate", Duration::from_millis(50)).unwrap_err();
         assert!(e.contains("Runtime.evaluate"), "{e}");

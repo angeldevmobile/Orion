@@ -20,11 +20,19 @@ with b = web.open() {
 `with` desugars to `web.free(b)` even if the body raises an error, and `free`
 closes the browser's tabs in cascade. No orphan processes are left behind.
 
+That holds even when the process dies without running anything of its own — a
+`kill`, the OOM killer, a cron job hitting its timeout — because the browser is
+tied to this process by the operating system: a **job object** on Windows,
+`PR_SET_PDEATHSIG` on Linux. It matters for work that runs unattended: without
+it, every night that the task was cut off left another browser behind, holding
+hundreds of MB. On macOS there is no equivalent and a killed process does leave
+the browser running.
+
 > **Status**: transport, launch, navigation, interaction (iframes and shadow DOM
 > included), forms, tables, dialogs, windows, extraction (with schema
 > discovery), files, session, cookies, stability, network capture, request
 > interception, device emulation and parallel crawling (`crawl`) are verified
-> end to end (95 e2e tests in
+> end to end (98 e2e tests in
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), against a
 > local server). **Zero hardcoded constants**: everything that decides behaviour
 > can be changed from `open()` — see 1.2. Measured against Selenium and

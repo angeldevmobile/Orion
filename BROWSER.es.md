@@ -24,7 +24,7 @@ cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 > DOM incluidos), formularios, tablas, modales, ventanas, extracción (con
 > descubrimiento de esquema), archivos, sesión, cookies, estabilidad, captura de
 > red, intercepción de peticiones, emulación de dispositivo y recorrido paralelo
-> (`crawl`) verificados de punta a punta (95 tests e2e en
+> (`crawl`) verificados de punta a punta (98 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
 > comportamiento se puede cambiar desde `open()` — ver 1.2. Medido contra

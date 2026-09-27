@@ -2384,6 +2384,53 @@ setTimeout(() => {
 }, 700);
 </script></body></html>"#;
 
+/// Un banner de cookies hecho como componente web: la capa que tapa vive
+/// dentro de una shadow root, que es como lo hacen Usercentrics y OneTrust.
+const PAGINA_VELO_SHADOW: &str = r#"<!doctype html><html><head><title>V</title></head>
+<body style="margin:0">
+<button id="comprar" style="position:absolute;top:100px;left:100px;width:200px;height:60px"
+        onclick="window.pulsado=(window.pulsado||0)+1">Comprar</button>
+<banner-cookies></banner-cookies>
+<script>
+customElements.define('banner-cookies', class extends HTMLElement {
+  constructor() { super();
+    this.attachShadow({mode:'open'}).innerHTML =
+      '<div id="capa" style="position:fixed;inset:0;background:rgba(0,0,0,.3)">acepta</div>';
+  }
+});
+</script></body></html>"#;
+
+#[test]
+fn force_deja_la_pagina_como_estaba_tambien_en_shadow() {
+    let dir = tmp_dir("force_shadow");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_VELO_SHADOW);
+
+    // `force` atraviesa volviendo transparente al puntero lo que estorba, y
+    // luego lo restaura. La restauración no entraba en las shadow roots, así
+    // que la capa del banner se quedaba con `pointer-events: none` para
+    // siempre: la página quedaba alterada tras un simple clic, y con una marca
+    // `data-orion-pe` que delata al scraper.
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    web.click(p, "#comprar", {{ wait: 800, force: yes }})
+    show("PULSADO=" + str(web.eval(p, "window.pulsado")))
+    show("PE=[" + web.eval(p, "document.querySelector('banner-cookies').shadowRoot.getElementById('capa').style.pointerEvents") + "]")
+    show("MARCA=" + str(web.eval(p, "document.querySelector('banner-cookies').shadowRoot.getElementById('capa').hasAttribute('data-orion-pe')")))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("PULSADO=1"), "el clic con force no llegó al botón:\n{salida}");
+    assert!(salida.contains("PE=[]"),
+            "la capa del shadow se quedó sin pointer-events:\n{salida}");
+    assert!(salida.contains("MARCA=no"),
+            "quedó la marca data-orion-pe en la página:\n{salida}");
+}
+
 #[test]
 fn wait_ve_lo_que_aparece_tarde_en_un_iframe_y_en_shadow() {
     let dir = tmp_dir("wait_anidado");

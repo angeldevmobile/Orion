@@ -213,14 +213,32 @@ pub fn wait_for(
     ms: u64,
     t: &Tuning,
 ) -> Result<bool, String> {
+    let reintento = t.retry_ms;
     let cuerpo = format!(r#"
     return new Promise((resolve) => {{
-      if (__find(sel)) return resolve(true);
-      const obs = new MutationObserver(() => {{
-        if (__find(sel)) {{ obs.disconnect(); clearTimeout(t); resolve(true); }}
-      }});
+      let obs = null, iv = null, tope = null;
+      const fin = (v) => {{
+        if (obs) obs.disconnect();
+        if (iv) clearInterval(iv);
+        if (tope) clearTimeout(tope);
+        resolve(v);
+      }};
+
+      if (__find(sel)) return fin(true);
+
+      // El observador reacciona al instante, que es lo que hace que esperar no
+      // cueste latencia... pero solo ve ESTE documento.
+      obs = new MutationObserver(() => {{ if (__find(sel)) fin(true); }});
       obs.observe(document.documentElement, {{ childList: true, subtree: true, attributes: true }});
-      const t = setTimeout(() => {{ obs.disconnect(); resolve(false); }}, {ms});
+
+      // ...y por eso además se sondea. Un MutationObserver no cruza a los
+      // iframes ni entra en las shadow roots: el elemento aparecía, `__find`
+      // lo habría encontrado, y `wait` seguía dormido hasta agotar el plazo.
+      // Justo donde más se usa: el botón de un modal de cookies, que vive en
+      // un iframe, o el de un componente web.
+      iv = setInterval(() => {{ if (__find(sel)) fin(true); }}, {reintento});
+
+      tope = setTimeout(() => fin(false), {ms});
     }});
     "#);
 
@@ -398,13 +416,25 @@ pub fn box_for_click(
 }
 
 pub fn restore_pointer_events(conn: &Conn, session: &str, timeout: Duration) {
+    // Hay que recorrer lo MISMO que recorrió el hit-test al clicar, y ese baja
+    // por las shadow roots: `elementFromPoint` devuelve el host, y dentro está
+    // el elemento que de verdad tapaba. Un banner de cookies hecho como
+    // componente web —Usercentrics, OneTrust y compañía— es justo ese caso, y
+    // sin entrar aquí se quedaba con `pointer-events: none` PARA SIEMPRE: la
+    // página seguía viva pero muda a los clics, y encima delatada.
     let js = r#"(() => {
-      const docs = [document];
+      const raices = [document];
+      const sombras = (r) => {
+        let els; try { els = r.querySelectorAll('*'); } catch (err) { return; }
+        for (const e of els) if (e.shadowRoot) { raices.push(e.shadowRoot); sombras(e.shadowRoot); }
+      };
       const scan = (d) => { for (const f of d.querySelectorAll('iframe,frame')) {
         let c = null; try { c = f.contentDocument; } catch (err) {}
-        if (c) { docs.push(c); scan(c); } } };
+        if (c) { raices.push(c); scan(c); } } };
       try { scan(document); } catch (err) {}
-      for (const d of docs) for (const e of d.querySelectorAll('[data-orion-pe]')) {
+      // Las shadow roots de todos los documentos ya recogidos.
+      try { for (const d of [...raices]) sombras(d); } catch (err) {}
+      for (const d of raices) for (const e of d.querySelectorAll('[data-orion-pe]')) {
         const prev = e.getAttribute('data-orion-pe');
         if (prev) e.style.pointerEvents = prev; else e.style.removeProperty('pointer-events');
         e.removeAttribute('data-orion-pe');
