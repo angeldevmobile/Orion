@@ -1741,7 +1741,8 @@ are on the [releases page](https://github.com/angeldevmobile/Orion/releases);
 Other reference pages: [`SPEC.md`](SPEC.md) for the language,
 [`BROWSER.md`](BROWSER.md) for web automation,
 [`ESTADO_MODULOS.md`](ESTADO_MODULOS.md) for how far each module is verified,
-and [`CONTRIBUTING.md`](CONTRIBUTING.md) to send a patch.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) to send a patch, and
+[`BACKLOG.md`](BACKLOG.md) for what is known to be missing.
 
 ---
 
