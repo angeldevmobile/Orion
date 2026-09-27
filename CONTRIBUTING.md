@@ -66,7 +66,7 @@ will fail on you.
    `src/cli/builtins_gen.rs`, which feeds `orion --builtins-json`, the editor
    autocompletion and the type checker.
 4. Run `cargo test --release`. If `registry_matches_runtime` fails, the
-   generator did not pick your function up — usually a name with uppercase or
+   generator did not pick your function up - usually a name with uppercase or
    an accent that an over-narrow pattern skipped.
 
 **Never edit `builtins_gen.rs` by hand.** It is regenerated on every build and
@@ -105,7 +105,7 @@ until recently:
   It cannot be assigned to a variable.
 - `if` is a statement, not an expression.
 - Two lambda forms: `fn(x) { block }` and `x => expression_or_block`. They do
-  not mix — `fn x => ...` is a syntax error.
+  not mix - `fn x => ...` is a syntax error.
 - Module functions take positional arguments only. Named arguments (`x = 1`)
   work on functions you define.
 - `serve` takes a port and a **named** handler function. Anonymous lambdas

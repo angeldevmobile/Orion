@@ -1,6 +1,6 @@
-# Orion `browser` — reference
+# Orion `browser` - reference
 
-> Spanish version: [BROWSER.es.md](BROWSER.es.md) — kept for reference, but
+> Spanish version: [BROWSER.es.md](BROWSER.es.md) - kept for reference, but
 > this English page is the canonical one and the Spanish one lags behind it.
 
 Web automation over CDP (Chrome DevTools Protocol). No external driver, no
@@ -20,8 +20,8 @@ with b = web.open() {
 `with` desugars to `web.free(b)` even if the body raises an error, and `free`
 closes the browser's tabs in cascade. No orphan processes are left behind.
 
-That holds even when the process dies without running anything of its own — a
-`kill`, the OOM killer, a cron job hitting its timeout — because the browser is
+That holds even when the process dies without running anything of its own - a
+`kill`, the OOM killer, a cron job hitting its timeout - because the browser is
 tied to this process by the operating system: a **job object** on Windows,
 `PR_SET_PDEATHSIG` on Linux. It matters for work that runs unattended: without
 it, every night that the task was cut off left another browser behind, holding
@@ -35,7 +35,7 @@ the browser running.
 > end to end (98 e2e tests in
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), against a
 > local server). **Zero hardcoded constants**: everything that decides behaviour
-> can be changed from `open()` — see 1.2. Measured against Selenium and
+> can be changed from `open()` - see 1.2. Measured against Selenium and
 > Playwright in 19.3, with the methodology in
 > [`bench/web/README.md`](bench/web/README.md).
 
@@ -45,8 +45,8 @@ the browser running.
 
 It locates the browser in a cascade, **with nothing hardcoded**:
 
-1. `opts.chrome` — an explicit path
-2. `ORION_CHROME` — environment variable
+1. `opts.chrome` - an explicit path
+2. `ORION_CHROME` - environment variable
 3. Auto-detection: Chrome, Chromium, Brave or Edge
 
 On Windows it matters that Edge is accepted: it ships with the system, so there
@@ -98,7 +98,7 @@ between runs.
 Nothing in the engine is hardcoded. The parameters are grouped into two levels
 according to what they are:
 
-**Policy** — decisions about *your* problem, at the root of the options:
+**Policy** - decisions about *your* problem, at the root of the options:
 
 | Option | Default | What it controls |
 |---|---|---|
@@ -113,7 +113,7 @@ according to what they are:
 | `hit_inset` | 24 | margin in pixels when probing points of an element |
 | `nav_settle` | 5000 | how long the page is tolerated changing documents |
 
-**Mechanism** — resource usage, under `tuning` so the day-to-day API stays clean:
+**Mechanism** - resource usage, under `tuning` so the day-to-day API stays clean:
 
 | Option | Default | What it controls |
 |---|---|---|
@@ -194,7 +194,7 @@ search.
 **Selectors also enter open shadow roots**, at any depth. A web component keeps
 its content in a shadow root and the document's `querySelector` does not go in
 there: the correct selector "does not exist" and there is no hint as to why. Half
-the modern web — from a video player to Salesforce forms — is exactly this.
+the modern web - from a video player to Salesforce forms - is exactly this.
 
 ```orion
 -- <my-card> keeps its button in a shadow root: nothing needs to be said.
@@ -204,7 +204,7 @@ web.extract(p, ".row", { name: ".nm" })
 
 Both the search **and the click** go in: the hit test descends through shadow
 roots, because otherwise `elementFromPoint` returns the host, `host.contains(button)`
-is false — `contains` does not cross the boundary — and every component would
+is false - `contains` does not cross the boundary - and every component would
 look covered by itself.
 
 Three things worth knowing:
@@ -274,7 +274,7 @@ browser.click '#total': it is covered by <div.cookie-banner> (after waiting 1200
   If whatever is in the way will not go away, use: { force: yes }
 ```
 
-`{ force: yes }` goes through. **It does not blind-click the coordinates** — that
+`{ force: yes }` goes through. **It does not blind-click the coordinates** - that
 is how Selenium ends up pressing the banner instead of the button: whatever is in
 the way is made transparent to the pointer, the click is still a real browser
 event, and everything is restored afterwards (even if the click fails).
@@ -325,8 +325,8 @@ web.fill(p, {
 })
 ```
 
-Forcing you to choose the function based on what the field is made of — `type`
-for text, `select` for the dropdown, `check` for the checkbox — means reading the
+Forcing you to choose the function based on what the field is made of - `type`
+for text, `select` for the dropdown, `check` for the checkbox - means reading the
 HTML before you can write a single line.
 
 **Order is respected**, and it is needed: a province dropdown that only fills in
@@ -394,8 +394,8 @@ web.check(p, "#accept")
 web.check(p, "#accept")   -- already was: does nothing
 ```
 
-Idempotence is not a detail. If it just pressed, an innocent retry — or a loop
-that reviews the checkbox — would leave it in the opposite state to the one
+Idempotence is not a detail. If it just pressed, an innocent retry - or a loop
+that reviews the checkbox - would leave it in the opposite state to the one
 requested.
 
 An `<input type="radio">` cannot be unchecked by pressing it, and `uncheck` says
@@ -409,8 +409,8 @@ so instead of failing silently: you have to check another one in the group.
 | `web.texts(tab, sel, ms?)` | yes |
 | `web.html(tab, sel, ms?)` | yes |
 | `web.attr(tab, sel, attribute, ms?)` | yes |
-| `web.value(tab, sel)` | yes — what the field holds RIGHT NOW, see 5.1 |
-| `web.table(tab, sel, opts?)` | yes — a whole `<table>`, see 5.2 |
+| `web.value(tab, sel)` | yes - what the field holds RIGHT NOW, see 5.1 |
+| `web.table(tab, sel, opts?)` | yes - a whole `<table>`, see 5.2 |
 | `web.watch` + `web.capture` | the JSON the page asks its own API for, see 12 |
 | `web.discover(tab, opts?)` | works out the extraction schema by itself, see 7.5 |
 | `web.crawl(browser, opts)` | walks urls in parallel, dumps and resumes, see 7.6 |
@@ -423,7 +423,7 @@ so instead of failing silently: you have to check another one in the group.
 The rule: **what returns content waits; what reports state does not.**
 
 Returning `null` because the content had not arrived yet turns a timing problem
-into silently lost data — the failure that makes a scraper work on the laptop and
+into silently lost data - the failure that makes a scraper work on the laptop and
 not on the server. The other way round, making `exists` wait would turn a
 legitimate "it's not there" into ten seconds of blocking.
 
@@ -436,7 +436,7 @@ show(web.attr(p, "#name", "value"))  -- null
 ```
 
 The two lines above do not contradict each other, and confusing them is a
-classic: `attr` reads the **HTML attribute** — the one written in the page — and
+classic: `attr` reads the **HTML attribute** - the one written in the page - and
 that does not change when somebody types into the field. An `<input>` with no
 `value=` in the HTML returns `null` that way even when it has text inside, which
 is exactly the moment you believe your `fill` did not work.
@@ -467,7 +467,7 @@ of 13 tables across three Wikipedia pages:
 | With `colspan` or `rowspan` | 4 |
 | With another table inside | 1 |
 
-A reader that assumes `<thead>` — which is how the first version comes out —
+A reader that assumes `<thead>` - which is how the first version comes out -
 works perfectly on the demo site and fails on 100% of real tables. Hence the four
 decisions:
 
@@ -529,7 +529,7 @@ window handles and guess which one is new.
 ### 6.3 HTML modals
 
 They need nothing special: they are HTML. The blocking backdrop also behaves
-properly — with the modal open, a click outside fails naming the culprit instead
+properly - with the modal open, a click outside fails naming the culprit instead
 of slipping underneath.
 
 ## 7. Extraction
@@ -587,8 +587,8 @@ Conversions: `num`, `int`, `bool`, `html`, `text`, `trim`, `list`,
 
 Three details that prevent silent errors:
 
-**`list` collects them all.** Without it, a field with several values — a
-product's tags, a gallery's images — returned the first match and the rest were
+**`list` collects them all.** Without it, a field with several values - a
+product's tags, a gallery's images - returned the first match and the rest were
 lost without a word. An empty list in **every** row counts as a dead selector
 just like a `null`, so the warning in 7.3 still works there, which is where it is
 needed most.
@@ -612,7 +612,7 @@ not. A non-numeric value such as `Sold out` gives `null`, not an invented number
 
 A field that is empty in **every** row is almost never missing data: it is the
 wrong selector, or the site that changed structure. Keeping quiet returns a list
-that looks fine and blows up a hundred lines later — the classic BeautifulSoup
+that looks fine and blows up a hundred lines later - the classic BeautifulSoup
 failure.
 
 ```
@@ -655,8 +655,8 @@ the walk, because each page is extracted in one go.
 
 **Formats**, according to the extension:
 
-- `.csv` — written row by row, a single file, genuinely constant memory.
-- `.odf` — the binary format carries the row count in its header and does not
+- `.csv` - written row by row, a single file, genuinely constant memory.
+- `.odf` - the binary format carries the row count in its header and does not
   allow appending, so it is dumped in blocks (`chunk`, 50,000 by default),
   freeing each one. The first keeps the requested name and the rest are numbered.
   `frame` reads it directly, with the types already inferred:
@@ -701,7 +701,7 @@ would extract.
 How it works it out, so it is not magic:
 
 - **The row** is the group of sibling elements that repeats most with the same
-  internal structure, scored by count **and richness** — text and number of
+  internal structure, scored by count **and richness** - text and number of
   fields. That way it does not mistake a product listing for the navigation menu,
   which also repeats but is empty.
 - Repetition is detected by **structure, not by classes**: modern sites generate
@@ -713,7 +713,7 @@ How it works it out, so it is not magic:
 - **Fields** are only kept if they appear in most of the rows: one that is in a
   single row is not a field, it is a coincidence.
 
-It does not guess intent — it does not know that something is a "price", so a
+It does not guess intent - it does not know that something is a "price", so a
 field with no readable class is called `campo_1`. It does not replace `extract`:
 it leaves you one step away from it instead of twenty minutes. Nobody ships this;
 in Python you sit down and read the HTML by hand.
@@ -725,8 +725,8 @@ link, the thumbnail and the price; on a quotes listing, the text and the author.
 ### 7.6 `web.crawl(browser, opts)` → summary
 
 `extract_to` walks a list of URLs with **a single tab, serially**. It works, but
-it leaves the machine at an eighth throttle: while one page loads — which is
-waiting on the network, not computing — the rest of the browser sits idle.
+it leaves the machine at an eighth throttle: while one page loads - which is
+waiting on the network, not computing - the rest of the browser sits idle.
 
 `web.crawl` opens **N tabs and drives them in parallel from N system threads**:
 
@@ -750,17 +750,17 @@ You pass it the **browser**, not a tab: it opens them itself. It takes `row` and
 **The parallelism is real, and it is the muscle Orion has and a Python scraper
 does not**: genuine system threads over the same CDP socket, which the transport
 multiplexes. It is not cooperative `asyncio`. Measured against a local server of
-12 slow pages: `extract_to` serially **7.9 s**, `crawl` with 8 workers **1.8 s** —
+12 slow pages: `extract_to` serially **7.9 s**, `crawl` with 8 workers **1.8 s** -
 the same 120 rows. The factor depends on how many pages and on the network; what
 changes is the shape.
 
 **It resumes.** A ten-thousand-page walk that is cut off at seven thousand cannot
 start from scratch. Every finished URL is recorded in `<out>.progress`, and on
 starting again with `resume: yes` the completed ones are skipped (`skipped` counts
-them). It is recorded **after** its rows have reached the disk — the CSV buffer is
+them). It is recorded **after** its rows have reached the disk - the CSV buffer is
 flushed first, not merely written to: if the process is killed in between, that
 page is repeated on resume instead of being lost. Resuming is for
-`.csv` — which allows appending; `.odf` forces starting over and says so.
+`.csv` - which allows appending; `.odf` forces starting over and says so.
 
 Like `extract`, a field that brings no value on **any** page gives itself away
 instead of leaving an empty column that looks fine; with `{ strict: no }` it is
@@ -793,7 +793,7 @@ The selector can point at two different things, and both work:
 
 1. **The `<input type="file">` itself.** The files are assigned to it and that is
    that.
-2. **Anything that opens the picker when pressed** — the "Browse" button, a
+2. **Anything that opens the picker when pressed** - the "Browse" button, a
    drag-and-drop zone, a `<label>`. The real `<input>` is usually hidden behind
    the site's design and sometimes is not even reachable with a selector.
 
@@ -833,7 +833,7 @@ pressing.
 `.crdownload` file and renames it when done. Without a notification, the usual
 recipe is to sleep a few seconds and cross your fingers: if the network is slow
 you read a half-written file, and if it is fast you waste the time. Here the
-completion event is awaited, so the call returns exactly when the file is whole —
+completion event is awaited, so the call returns exactly when the file is whole -
 and `bytes` confirms it.
 
 | Option | What it does |
@@ -867,7 +867,7 @@ text. To save a receipt or an invoice from a web portal it is what you need, and
 it is exactly what forces you to fight the print dialog if done by hand.
 
 Options: `landscape`, `background`, `headers`, `scale`, `width`, `height`,
-`margin`, `pages`. Measurements are in inches, which is the browser's unit — an A4
+`margin`, `pages`. Measurements are in inches, which is the browser's unit - an A4
 is 8.27 × 11.69. Anything not specified is decided by the browser with the same
 default the dialog would apply.
 
@@ -880,7 +880,7 @@ alternating rows come out blank.
 ### 9.1 `web.save_state(tab, path)` / `web.load_state(tab, path)`
 
 The most expensive part of an automation that runs daily is not navigating: it is
-**logging in again on every run**. It is slow, and above all it is fragile — every
+**logging in again on every run**. It is slow, and above all it is fragile - every
 login is a form that can change, a captcha that can appear and a second factor
 that can fire. A process that logs in a hundred times a day is also a process that
 looks like an attack.
@@ -903,7 +903,7 @@ web.reload(p)                        -- already inside
 ```
 
 **You have to be on the origin before restoring.** Cookies go to the whole
-browser, but local storage can only be written while on its domain — the browser
+browser, but local storage can only be written while on its domain - the browser
 does not allow touching another's. Origins that do not match come back in
 `skipped` instead of being lost silently, because a half-restored session gives no
 error at all and is impossible to debug.
@@ -917,14 +917,14 @@ can move, version separately or keep in a secrets manager.
 > repository. It is worth exactly as much as the password, with the aggravating
 > factor that it does not expire when you change it.
 
-### 9.2 `open({ allow: [...] })` — domain allowlist
+### 9.2 `open({ allow: [...] })` - domain allowlist
 
 ```orion
 b = web.open({ allow: ["*.company.com", "cdn.provider.net"] })
 ```
 
 An automated process carries the company's session with it. If the page it visits
-is compromised — or if an ad injected into it redirects — the bot goes elsewhere
+is compromised - or if an ad injected into it redirects - the bot goes elsewhere
 **wearing that session**. The allowlist bounds where it can go: what is not on it
 is not loaded.
 
@@ -959,7 +959,7 @@ everything from the server.
 None of them waits for the browser's load event, and that is deliberate: **on
 going back, Chrome usually restores the page from its back/forward cache without
 reloading, and then there is no load event**. Waiting for it left every `back`
-stuck for the entire deadline — thirty seconds — only to carry on anyway. The page
+stuck for the entire deadline - thirty seconds - only to carry on anyway. The page
 is asked instead, since it is the one that knows where it is.
 
 A `back` with no history says so instead of doing nothing. Watch out for one
@@ -984,7 +984,7 @@ two seconds on every pass.
 
 In-flight requests are counted **inside the page**, by wrapping `fetch` and
 `XMLHttpRequest`. That way it is a single call and does not depend on the event
-history — which is bounded — having kept the ones that mattered.
+history - which is bounded - having kept the ones that mattered.
 
 The honest limit: there are pages that poll the server forever and never go quiet.
 On those, the error says so and you have to wait on a selector.
@@ -1037,7 +1037,7 @@ contract is defended by the site's own team.
 
 ### 12.2 `web.watch(tab, pattern)`
 
-Without `*`, the pattern means "contains" — which is what you almost always want
+Without `*`, the pattern means "contains" - which is what you almost always want
 and what you write first:
 
 ```orion
@@ -1073,7 +1073,7 @@ for resp in r {
 
 **It waits for something matching to arrive** instead of looking once and coming
 back empty. The request goes out after the action that triggers it, and an empty
-list would turn a timing problem into "this site does not use an API" — a false
+list would turn a timing problem into "this site does not use an API" - a false
 conclusion and a hard one to undo. If nothing really matches, it returns empty
 once the deadline runs out.
 
@@ -1141,8 +1141,8 @@ The `fail` reasons are the browser's: `failed`, `aborted`, `timedout`,
 `accessdenied`, `connectionclosed`, `connectionreset`, `connectionrefused`,
 `connectionaborted`, `connectionfailed`, `namenotresolved`,
 `internetdisconnected`, `addressunreachable`, `blockedbyclient`,
-`blockedbyresponse`. They are written however you like — `timedout`, `TimedOut`,
-`timed_out` — and an invented one lists the valid ones.
+`blockedbyresponse`. They are written however you like - `timedout`, `TimedOut`,
+`timed_out` - and an invented one lists the valid ones.
 
 ### 13.3 Order rules, as in a firewall
 
@@ -1155,7 +1155,7 @@ web.route(p, "*/api/products*", { mock: { status: 200, json: data } })
 web.route(p, "*/api/*",         { fail: "timedout" })   -- everything else
 ```
 
-### 13.4 `{ times: n }` — failing only the first few times
+### 13.4 `{ times: n }` - failing only the first few times
 
 ```orion
 web.route(p, "*/api/*", { mock: { status: 503, body: "no" } }, { times: 1 })
@@ -1236,7 +1236,7 @@ web.emulate(p, { device: "iphone", width: 1000 })   -- mobile, but wider
 **What is not asked for is not touched.** Changing the time zone does not resize
 the window.
 
-**Emulate before navigating.** Some things — touch above all — are read by the
+**Emulate before navigating.** Some things - touch above all - are read by the
 page as it loads: `emulate` and then `goto`.
 
 **A width with no height** is completed with the one the tab already has: CDP
@@ -1319,7 +1319,7 @@ orion-vm/src/modules/browser/
 
 Over a single socket travel responses (which carry an `id`) and events (which
 carry a `method`), mixed together. One reader thread per connection hands each
-response to whoever is waiting for it, sleeping on a `Condvar` — the same parking
+response to whoever is waiting for it, sleeping on a `Condvar` - the same parking
 `await` uses in `task_pool`, without introducing a second concurrency model.
 
 Mouse and keyboard events are dispatched through CDP's `Input` domain, which
@@ -1346,7 +1346,7 @@ Your user receives `app.exe` and does not need to know Orion exists.
 #### What exactly was tested
 
 A program using `upload`, `fill`, `table`, `extract`, `save_state`, `pdf` and
-`reload` — that is, the whole module, not a "hello world" — compiled to **native
+`reload` - that is, the whole module, not a "hello world" - compiled to **native
 AOT** (61 MB) and run in a folder containing **only `app.exe`**, with no
 `orion.exe` anywhere near and with `PATH` reduced to `system32`. All ten results
 correct and exit code 0.
@@ -1363,12 +1363,12 @@ the compiled executable (`orion run` was never affected):
    warning.
 2. **Calling your function `main`** made its symbol clash with the executable's C
    `main`, and compilation fell back to embedded bytecode. It still worked, but no
-   real application — which is how they are written — ever got natively compiled.
+   real application - which is how they are written - ever got natively compiled.
 
 Both now have regression tests in
 [`orion-vm/tests/aot_native.rs`](orion-vm/tests/aot_native.rs), which is what was
-missing: the previous suite only tested self-contained programs — arithmetic,
-recursion, shapes, strings — and that is why nobody noticed.
+missing: the previous suite only tested self-contained programs - arithmetic,
+recursion, shapes, strings - and that is why nobody noticed.
 
 **The lesson for reading this page**: if it says "verified" here, it should also
 say *with what program*. A compiled "hello world" does not prove your application
@@ -1412,13 +1412,13 @@ fingerprint. Reproducible with `bench\web\run_web.ps1`; methodology and caveats 
 Measured on 2026-08-23, with shadow root traversal enabled (which is what
 `extract` ships with from that date). Isolated on this same page: 17 ms with
 shadow and 15 ms without, so that traversal accounts for ~2 ms. The figures from
-an earlier measurement were somewhat better across all five variants — the machine
+an earlier measurement were somewhat better across all five variants - the machine
 was not in the same state, and that is why the table carries a date.
 
 The RAM is that of the automation process **plus the helper it launches**, which is
 not the browser and is not the same for all three: Selenium needs
 `chromedriver.exe` and Playwright a `node.exe` because its driver is written in
-JavaScript. Orion needs neither — it speaks CDP from its own process, which is the
+JavaScript. Orion needs neither - it speaks CDP from its own process, which is the
 same reason there is no second binary to keep in sync with Chrome's version. The
 browser is excluded from the count: it is identical for all three.
 
@@ -1429,7 +1429,7 @@ order as Selenium's 10.4 ms sending JavaScript by hand, and that difference fits
 inside the noise. That is not the result.
 
 **The result is the first row against the last: 15 seconds against 14
-milliseconds.** That first row is how both documentations teach it — locate the
+milliseconds.** That first row is how both documentations teach it - locate the
 elements and ask each one for its text, which with 500 rows × 4 fields is 2,000
 round trips. What `extract` contributes is not raw speed: it is that **the fast
 path is the only path**. In the other two you have to know the problem exists and
@@ -1463,7 +1463,7 @@ local intranet with no internet access at any point.
 Concrete advantages:
 
 - **It works with no egress** except towards the site you are automating.
-- **It uses the browser the company already administers** — Edge on a corporate
+- **It uses the browser the company already administers** - Edge on a corporate
   Windows is installed and managed by policy, nothing needs approving.
 - **Deterministic CI**: the "download the driver" step disappears, a classic
   source of intermittent failures unrelated to your code.

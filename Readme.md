@@ -186,7 +186,7 @@ pattern = "\\d{4}-\\d{2}-\\d{2}"       -- regex: \d{4}-\d{2}-\d{2}
 ### Control flow
 
 ```orion
--- if / else if / else — the middle branch is two tokens, `else if`.
+-- if / else if / else - the middle branch is two tokens, `else if`.
 -- There is no `elsif` keyword.
 if age >= 18 {
     show "Adult"
@@ -203,7 +203,7 @@ while i < 5 {
     i += 1
 }
 
--- for over a range — half-open: 1..10 covers 1 through 9
+-- for over a range - half-open: 1..10 covers 1 through 9
 for x in 1..10 { show x }
 
 -- for over a collection
@@ -1560,7 +1560,7 @@ Turns wide format into long format. A clear name: `long`, not `melt`.
 -- Before (wide): region | CRM Pro | Analytics | Cloud
 -- After (long):  region | product | sales
 
--- excel.long(data, keep, var, val) — positional, like every module function
+-- excel.long(data, keep, var, val) - positional, like every module function
 long_data = excel.long(wide_data, ["region", "seller"], "product", "sales")
 ```
 
@@ -1734,7 +1734,7 @@ directions.
 ## What changed, and when
 
 Every release is written down in [`CHANGELOG.md`](CHANGELOG.md), by what broke
-and what it did to you — not by commit subject. The binaries for each version
+and what it did to you - not by commit subject. The binaries for each version
 are on the [releases page](https://github.com/angeldevmobile/Orion/releases);
 `orion --version` tells you which one you are running.
 

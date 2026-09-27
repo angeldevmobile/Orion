@@ -8,14 +8,14 @@ powershell -ExecutionPolicy Bypass -File bench\web\run_web.ps1
 ```
 
 Requirements: `python` with `selenium` and `playwright` (`pip install selenium
-playwright` — you do **not** need `playwright install`, the Chrome you already
+playwright` - you do **not** need `playwright install`, the Chrome you already
 have is used), Chrome installed, and the release binary of Orion.
 
 ## The task
 
 500 cards × 4 fields = **2,000 reads**: two texts, an attribute of the row
 itself and an attribute of a descendant. One of the texts is a price with
-thousands separators, so it has to be converted to a number — in the Python
+thousands separators, so it has to be converted to a number - in the Python
 variants that conversion is written by hand, because it is part of the work
 being compared.
 
@@ -59,7 +59,7 @@ tool needs a different companion, and it is not the browser:
 
 | | its own helper process |
 |---|---|
-| Orion | **none** — it speaks CDP from its own process |
+| Orion | **none** - it speaks CDP from its own process |
 | Selenium | `chromedriver.exe`, a second binary whose version has to match Chrome's |
 | Playwright | a `node.exe`, because its driver is written in JavaScript |
 
@@ -68,8 +68,8 @@ work in all three cases, so adding it would only contribute noise equally to all
 of them.
 
 The helpers are identified by PID against a snapshot taken just before launch: on
-a development machine there are `node` processes belonging to other things — the
-editor, for one — and counting those would skew the result.
+a development machine there are `node` processes belonging to other things - the
+editor, for one - and counting those would skew the result.
 
 ## Results (2026-08-08)
 
@@ -102,13 +102,13 @@ would be lying.
 
 **The real result is the first row against the last: 14 seconds against 8
 milliseconds.** That first row is how Selenium and Playwright teach it in their
-own documentation — locate the elements and ask each one for its text. With 500
+own documentation - locate the elements and ask each one for its text. With 500
 rows × 4 fields that is 2,000 round trips, and the price is not visible in a
 ten-row example: it shows up the day the catalogue grows.
 
 What `extract` contributes is not raw speed, it is that **the fast path is the
 only path**. In the other two you have to know the problem exists, and then write
-JavaScript by hand inside Python — which is exactly the work you were hoping not
+JavaScript by hand inside Python - which is exactly the work you were hoping not
 to have to do.
 
 **Launching and closing is a fundamental difference: 745 ms against Selenium's

@@ -15,7 +15,7 @@ Requisitos: `python` en el PATH y el binario release
 La misma para ambos lenguajes, sin trucos: **cargar 500.000 filas × 4
 columnas a columnas tipadas** (int, str, str, float) **y agregar** (`sum` +
 `mean` sobre la columna numérica). La línea base de Python usa solo stdlib
-(`csv`) — el equivalente honesto de `frame.open`, no una comparación contra
+(`csv`) - el equivalente honesto de `frame.open`, no una comparación contra
 pandas ni contra un Python artificialmente lento.
 
 ## Metodología
@@ -38,7 +38,7 @@ Intel i7-1165G7, 24 GB RAM, Windows 11, Python 3.13, Orion release.
 | **Orion `frame.open` .odf** | **88 ms** | **121 ms** | **73 MB** |
 
 Bonus de corrección: la suma y la media que imprimen Python y Orion
-coinciden dígito a dígito — el benchmark es también un test cruzado.
+coinciden dígito a dígito - el benchmark es también un test cruzado.
 
 Lecturas honestas:
 
@@ -68,13 +68,13 @@ memoria:
 
 ## Archivos
 
-- `gen_data.py` — genera `data.csv` (determinista, seed 42)
-- `bench_py.py` — línea base Python stdlib
-- `bench_csv.orx` / `bench_odf.orx` — pipeline Orion (CSV / binario)
-- `conv_odf.orx` — conversión CSV → `.odf` (una vez)
-- `gc_ciclos.orx` — estrés del GC
-- `medir.ps1` — tiempo de pared + pico de RAM muestreado
-- `run_all.ps1` — orquestador
+- `gen_data.py` - genera `data.csv` (determinista, seed 42)
+- `bench_py.py` - línea base Python stdlib
+- `bench_csv.orx` / `bench_odf.orx` - pipeline Orion (CSV / binario)
+- `conv_odf.orx` - conversión CSV → `.odf` (una vez)
+- `gc_ciclos.orx` - estrés del GC
+- `medir.ps1` - tiempo de pared + pico de RAM muestreado
+- `run_all.ps1` - orquestador
 
 Los artefactos generados (`data.csv`, `data.odf`, `out_*.txt`) están en el
-`.gitignore` — solo se versionan los scripts.
+`.gitignore` - solo se versionan los scripts.

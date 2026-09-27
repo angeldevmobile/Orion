@@ -1,9 +1,9 @@
-# Changelog — Orion Language
+# Changelog - Orion Language
 
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
-## v0.1.5 — 2026-09-27
+## v0.1.5 - 2026-09-27
 
 Una tanda de arreglos del módulo `browser`, todos encontrados reproduciendo el
 fallo en vivo y todos con su test de regresión. Dos de ellos hacían que un
@@ -15,7 +15,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 ### Corregido
 - **`crawl` perdía filas al reanudar.** El progreso marcaba una URL como
   terminada mientras sus filas seguían en el búfer de 8 KB del escritor CSV. Si
-  el proceso moría ahí —un `kill`, el OOM killer, un cron con timeout—, al
+  el proceso moría ahí (un `kill`, el OOM killer, un cron con timeout), al
   reanudar se saltaban esas páginas y las filas no se recuperaban nunca: el
   recorrido terminaba diciendo `errors: []`. Ahora el CSV se vuelca a disco
   **antes** de anotar el progreso, así que lo peor que puede pasar es repetir
@@ -37,13 +37,13 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 - **`web.wait` no veía lo que aparecía dentro de un iframe o de una shadow
   root.** El `MutationObserver` solo vigila su propio documento. El elemento
   aparecía, `web.text` lo encontraba, y `wait` seguía dormido hasta agotar el
-  plazo — justo en los dos sitios donde más se espera: un modal de cookies en
+  plazo - justo en los dos sitios donde más se espera: un modal de cookies en
   iframe y un componente web. El observador sigue (es lo que da respuesta
   inmediata) y se le suma un sondeo, que llega donde él no entra.
 
 - **Fuga de memoria en el transporte CDP.** Las respuestas que nadie esperaba
-  —una por cada `Fetch.continueRequest`, es decir una por PETICIÓN de la página
-  cuando hay `allow` o `route`— se quedaban para siempre en el mapa de
+  (una por cada `Fetch.continueRequest`, es decir una por PETICIÓN de la página
+  cuando hay `allow` o `route`) se quedaban para siempre en el mapa de
   respuestas. Ahora solo se guarda lo que alguien espera y el resto se descarta.
 
 - **Riesgo de comandos CDP duplicados.** En tungstenite un `send` que devuelve
@@ -54,7 +54,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 - **`force` dejaba la página tocada con shadow DOM.** El clic forzado vuelve
   transparente al puntero lo que estorba y luego lo restaura, pero la
   restauración no entraba en las shadow roots: la capa de un banner hecho como
-  componente web —Usercentrics, OneTrust— se quedaba con `pointer-events: none`
+  componente web (Usercentrics, OneTrust) se quedaba con `pointer-events: none`
   para siempre, y con una marca `data-orion-pe` que delata al scraper.
 
 - **Dos tests e2e desfasados.** Desde que `__nombre` prefiere el `id` a la
@@ -79,7 +79,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 
   Entra la búsqueda **y el clic**: el hit-test baja por las shadow roots,
   porque `elementFromPoint` devuelve el host y `host.contains(boton)` es false
-  —`contains` no cruza la frontera—, así que sin esto todo componente parecería
+  (`contains` no cruza la frontera), así que sin esto todo componente parecería
   tapado por sí mismo y `click` fallaría con un motivo imposible de entender.
 
   Las roots cerradas (`mode: 'closed'`) no son accesibles ni para el navegador:
@@ -87,7 +87,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
   recorrido (3 ms en una página de 500 filas), y se apaga con
   `open({ shadow: no })`.
 
-- **`browser.route` — intercepción de peticiones.** `watch`/`capture` miraban
+- **`browser.route` - intercepción de peticiones.** `watch`/`capture` miraban
   la red; ahora se puede decidir:
 
   ```orion
@@ -107,7 +107,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
   cada una. La lista blanca de `open({ allow })` se comprueba **antes**: un
   `mock` no puede reabrir un dominio cerrado a propósito.
 
-- **`browser.emulate` — dispositivo, idioma, zona horaria y ubicación.**
+- **`browser.emulate` - dispositivo, idioma, zona horaria y ubicación.**
   Presets (`iphone`, `ipad`, `android`, `laptop`, `desktop`) que son un punto de
   partida, no una lista cerrada: cualquier campo se sobrescribe en la misma
   llamada. Sin esto no se pueden automatizar los sitios que sirven otro HTML al
@@ -123,8 +123,8 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 - **`fn main()` se llama sola.** Un programa cuyo código entero vivía dentro de
   `main` terminaba con éxito, sin salida y sin aviso: el peor fallo posible,
   porque no se parece a un fallo. Ahora la llamada se añade si el programa
-  define `main` y **no la nombra en ninguna parte** —ni a nivel superior, ni
-  desde otra función, ni pasándola como valor—, así que los programas que ya
+  define `main` y **no la nombra en ninguna parte** (ni a nivel superior, ni
+  desde otra función, ni pasándola como valor), así que los programas que ya
   escribían `main()` a mano siguen ejecutándose una sola vez.
 
   Los módulos cargados con `use` no pasan por ahí: su `main` no debe correr al
@@ -134,8 +134,8 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 ### Cambiado
 - **Los mensajes de error están en inglés**, como el resto del lenguaje. Eran
   ~920 cadenas repartidas por el núcleo (VM, value, named args, pkg, JIT/AOT),
-  el módulo `browser` entero —incluido el JavaScript que se inyecta en la
-  página— y la librería estándar. La traza de pila (`at f (line 3)`) y el
+  el módulo `browser` entero (incluido el JavaScript que se inyecta en la
+  página) y la librería estándar. La traza de pila (`at f (line 3)`) y el
   prefijo que el renderizador de errores parsea cambiaron con ellas.
 
   Quedan en español los nombres de los alias obsoletos (`db.insertar`,
@@ -145,7 +145,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 ## 2026-08-20
 
 ### Añadido
-- **`SPEC.md` — especificación del lenguaje, y es ejecutable**: 11 secciones
+- **`SPEC.md` - especificación del lenguaje, y es ejecutable**: 11 secciones
   derivadas del compilador (lexer, parser, typechecker, VM), no de la memoria.
   Cubre estructura léxica, comentarios, identificadores, keywords, literales,
   precedencia completa de 14 niveles, el desugar de `|>`, resolución de
@@ -168,11 +168,11 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
   que los sustituye:
 
   ```
-  !  [deprecated] line 1 — use "formato" uses a deprecated Spanish module name;
-                           write use "format" instead — see SPEC.md section 11.
-  !  [deprecated] line 6 — db.insertar() is a deprecated Spanish alias of
+  !  [deprecated] line 1 - use "formato" uses a deprecated Spanish module name;
+                           write use "format" instead - see SPEC.md section 11.
+  !  [deprecated] line 6 - db.insertar() is a deprecated Spanish alias of
                            db.insert(). It still works, but it is scheduled for
-                           removal — see SPEC.md section 11.
+                           removal - see SPEC.md section 11.
   ```
 
   Sin esto, la retirada anunciada en SPEC.md §11 era una trampa: el usuario se
@@ -291,7 +291,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 ## 2026-08-08
 
 ### Arreglado
-- **`orion build` — las funciones no veían las variables globales (P0)**: el
+- **`orion build` - las funciones no veían las variables globales (P0)**: el
   compilador nativo daba a cada función únicamente variables locales de
   Cranelift, así que un nombre definido fuera de ella llegaba como `null`. Solo
   afectaba al **ejecutable compilado**; `orion run` nunca estuvo mal, ni
@@ -313,13 +313,13 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 
   Ahora el runtime del JIT tiene una tabla de globales: el nivel superior
   publica al asignar (y al hacer `use`), y una función lee de ahí los nombres
-  que no son suyos. La regla de qué es local se conserva igual que en la VM —
-  parámetros, lo que la función asigna, y los campos del shape en el cuerpo de
-  un `act`—, así que asignar dentro sigue creando una variable propia sin tocar
+  que no son suyos. La regla de qué es local se conserva igual que en la VM
+  (parámetros, lo que la función asigna, y los campos del shape en el cuerpo de
+  un `act`), así que asignar dentro sigue creando una variable propia sin tocar
   el global. La tabla es de proceso, no por hilo, para que una tarea lanzada con
   `spawn` vea lo mismo que el resto.
 
-- **`orion build` — un programa con `fn main()` no compilaba nativo**: el objeto
+- **`orion build` - un programa con `fn main()` no compilaba nativo**: el objeto
   generado comparte espacio de nombres con el `main` de C que arranca el
   ejecutable, así que el símbolo se declaraba dos veces con firmas distintas
   (`i64` contra `i32`), la compilación nativa se abortaba y caía al modo
@@ -328,18 +328,18 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
   escribirlas. Los símbolos de usuario ahora se prefijan en AOT; el nombre de
   Orion se conserva para el registro en tiempo de ejecución.
 
-- **`orion build` — un diccionario salía con las claves invertidas**: los pares
+- **`orion build` - un diccionario salía con las claves invertidas**: los pares
   de un literal salen de la pila al revés que en el código, y la VM los voltea
   para conservar el orden de escritura. El JIT decía replicar al intérprete y se
   saltaba justo ese paso, así que `{zeta: 1, alfa: 2}` se convertía en
   `{alfa: 2, zeta: 1}` **solo en el ejecutable compilado**. De ese orden dependen
   cosas que se ven: el JSON generado, las columnas de un CSV, lo que imprime un
-  `show` — y el esquema de `browser.extract`, que es un literal y hacía salir los
+  `show` - y el esquema de `browser.extract`, que es un literal y hacía salir los
   registros con los campos al revés. Dos tests nuevos en `differential.rs`.
 
 ### Tests
 - `aot_native.rs`: seis casos nuevos que cubren el hueco por el que se colaron
-  los dos defectos anteriores — un global leído dentro de una función (número,
+  los dos defectos anteriores - un global leído dentro de una función (número,
   cadena y namespace de módulo), que una asignación local no pise el global, que
   el valor visto sea el del momento de la llamada, y que `fn main()` compile
   nativo. La batería anterior solo probaba programas autocontenidos
@@ -349,7 +349,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 ## 2026-07-15
 
 ### Añadido
-- **Lenguaje — `with` (recursos con ámbito)**: nueva sintaxis
+- **Lenguaje - `with` (recursos con ámbito)**: nueva sintaxis
   `with h = modulo.abrir(...) { ... }` que garantiza `modulo.free(h)` al salir
   del bloque, **también si el cuerpo lanza un error** (se libera y el error se
   re-lanza, capturable por un `attempt` exterior). Funciona con cualquier
@@ -358,15 +358,15 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
   parser: el inicializador debe ser `modulo.fn(...)`, y `return`/`break`/
   `continue` que escaparían del bloque sin liberar se rechazan en compilación
   con un mensaje claro (los loops internos del cuerpo sí pueden usar break).
-  Implementado por desugar a `attempt/handle` en codegen — el JIT hereda la
+  Implementado por desugar a `attempt/handle` en codegen - el JIT hereda la
   semántica sin cambios porque compila desde el mismo bytecode. Soporte
   completo en typechecker (sin falsos positivos), `orion fmt` y resaltado de
   la extensión VSCode.
-- **frame — gestión del store**: `frame.free(handle)` (libera un frame; las
-  transformaciones crean frames nuevos que antes vivían para siempre — la misma
+- **frame - gestión del store**: `frame.free(handle)` (libera un frame; las
+  transformaciones crean frames nuevos que antes vivían para siempre - la misma
   fuga que ya se arregló en `serie`) y `frame.frames()` (frames vivos en
   memoria). Imprescindibles en procesos largos (`serve`).
-- **Tests**: `tests/test_frame.orx` — barrido funcional e2e del motor de datos
+- **Tests**: `tests/test_frame.orx` - barrido funcional e2e del motor de datos
   columnar con valores exactos (17 tests / ~85 checks): inferencia de tipos,
   keep/drop/rename, where_ por tipo, head/tail/sort, estadísticas (std
   poblacional, percentiles interpolados), group, add_col, roundtrips CSV y
@@ -374,7 +374,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
   Excel/odf streaming, free/frames. +1 test de regresión en modules_smoke.
 
 ### Arreglado
-- **break/continue (P0)**: estaban rotos en TODO el lenguaje — codegen emitía
+- **break/continue (P0)**: estaban rotos en TODO el lenguaje - codegen emitía
   `Jump(0)` que nunca se parcheaba, así que `break` y `continue` saltaban a la
   instrucción 0 (reinicio del programa o de la función) y el loop se volvía
   infinito. Ningún test los ejercitaba; lo destapó el barrido de `with`. Ahora
@@ -382,7 +382,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
   loop y continue → re-evaluación de condición (while) o paso de incremento
   (for). `break`/`continue` fuera de un loop son error de compilación con
   mensaje claro. +9 tests de regresión y +3 diferenciales VM/JIT.
-- **VM — handlers huérfanos**: un `return` dentro de `attempt` se saltaba el
+- **VM - handlers huérfanos**: un `return` dentro de `attempt` se saltaba el
   `EndAttempt` y su handler quedaba vivo en la pila de errores; un error
   posterior en el caller saltaba a una dirección de otra función (el programa
   podía "terminar" en silencio en vez de reportar). Al morir un frame se
@@ -393,7 +393,7 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
   bloque; los argumentos extra se ignoran por compatibilidad.
 
 ### Validado
-- **GC — ciclos huérfanos**: el fix del 2026-07-11 verificado e2e con el
+- **GC - ciclos huérfanos**: el fix del 2026-07-11 verificado e2e con el
   binario release: 200k y 1M de ciclos de listas (`push(a,a)`), closures
   (env→lista→closure→env) e instancias (`a.next=b, b.next=a`) → RAM pico
   plana (~11 MB, igual que el control sin ciclos; antes del fix 200k ciclos
@@ -402,11 +402,11 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 ## 2026-07-14
 
 ### Añadido
-- **GUI — animación y dibujo libre**: `gui.tick(ms)` (evento periódico que
+- **GUI - animación y dibujo libre**: `gui.tick(ms)` (evento periódico que
   re-ejecuta el script; los clics tienen prioridad y el reloj se apaga si el
   script deja de pedirlo) y `gui.canvas(w, h) … gui.end()` con formas
   genéricas `circle`, `line`, `rect`, `arrow`, `text_at` (colores temables).
-- **Demo**: `demo/demo_bloch_anim.orx` — esfera de Bloch animada con física
+- **Demo**: `demo/demo_bloch_anim.orx` - esfera de Bloch animada con física
   real: cada tick rota el estado cuántico 6° y redibuja desde `q.bloch()`.
 - **Typeshed automática**: el generador cubre módulos-directorio (`gui`,
   `tui`) → 875 funciones en 58 módulos, y `build.rs` la regenera en cada
@@ -421,21 +421,21 @@ La suite pasa de 94 a **98 tests e2e** y de 76 a **81 unitarios**.
 ## 2026-07-13
 
 ### Añadido
-- **quantum — simulador de circuitos real**: `circuit(n)` hasta 24 qubits con
+- **quantum - simulador de circuitos real**: `circuit(n)` hasta 24 qubits con
   puertas por qubit en O(2^n) (nunca se construye la matriz 2^n×2^n), después
   paralelizadas con rayon (GHZ-20: 11 ms). Puertas `h/x/y/z/sgate/tgate`,
   paramétricas `rx/ry/rz/phase`, multi-qubit `cnot/cz/cphase/swap/ccx`, y
   `ugate`/`cugate` para puertas definidas por el usuario (con validación de
   unitariedad). Medición: `probs`, `sample` (regla de Born), `collapse`
   (mide un qubit y colapsa), `state`, `reset`, `free`.
-- **Demo**: `demo/demo_grover.orx` — búsqueda de Grover en Orion puro
+- **Demo**: `demo/demo_grover.orx` - búsqueda de Grover en Orion puro
   (P(101) = 0.9453125, el valor teórico exacto) y
-  `demo/demo_quantum_lab.orx` — laboratorio interactivo de 1 qubit.
-- **matrix — álgebra lineal numérica**: motor nalgebra a partir de 32×32
+  `demo/demo_quantum_lab.orx` - laboratorio interactivo de 1 qubit.
+- **matrix - álgebra lineal numérica**: motor nalgebra a partir de 32×32
   (mul tipo BLAS, LU con pivoteo; 512×512 ≈ 10× más rápido). Funciones
   nuevas: `solve` (sistemas lineales), `eig` (valores propios),
   `svd` ({u, s, vt}), `rank`, `norm`.
-- **serie**: `free(handle)` y `count()` — las transformaciones acumulaban
+- **serie**: `free(handle)` y `count()` - las transformaciones acumulaban
   handles sin forma de liberarlos en procesos largos.
 
 ### Arreglado

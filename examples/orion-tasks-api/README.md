@@ -7,17 +7,17 @@ Demuestra que Orion sirve para construir aplicaciones de servidor reales.
 
 Una API de gestión de tareas con todas las operaciones CRUD, validación de entrada,
 códigos de estado HTTP correctos y respuestas JSON. El estado persiste en disco
-(`tasks_db.json`) — sobrevive entre peticiones y entre reinicios del servidor.
+(`tasks_db.json`) - sobrevive entre peticiones y entre reinicios del servidor.
 
 | Método | Ruta          | Descripción                          | Body                       |
 |--------|---------------|--------------------------------------|----------------------------|
-| GET    | `/`           | Info de la API                       | —                          |
-| GET    | `/health`     | Estado del servicio                  | —                          |
-| GET    | `/tasks`      | Lista todas las tareas               | —                          |
+| GET    | `/`           | Info de la API                       | -                          |
+| GET    | `/health`     | Estado del servicio                  | -                          |
+| GET    | `/tasks`      | Lista todas las tareas               | -                          |
 | POST   | `/tasks`      | Crea una tarea                       | `{"title": "..."}`         |
-| GET    | `/tasks/:id`  | Obtiene una tarea                    | —                          |
+| GET    | `/tasks/:id`  | Obtiene una tarea                    | -                          |
 | PUT    | `/tasks/:id`  | Actualiza una tarea                  | `{"title"?, "done"?}`      |
-| DELETE | `/tasks/:id`  | Elimina una tarea                    | —                          |
+| DELETE | `/tasks/:id`  | Elimina una tarea                    | -                          |
 
 Códigos de estado: `200` OK · `201` creado · `400` body inválido · `404` no encontrado · `405` método no permitido.
 
@@ -60,9 +60,9 @@ curl http://localhost:8088/tasks/999                  # → 404
 
 ## Cómo está construido
 
-- **`use net`** — servidor HTTP nativo (`serve PORT router`). El router recibe un
+- **`use net`** - servidor HTTP nativo (`serve PORT router`). El router recibe un
   dict `req` con `path`, `method`, `body` y `params` (query string).
-- **`use json`** — `json.parse` (string → valor), `json.forge` (valor → JSON con
+- **`use json`** - `json.parse` (string → valor), `json.forge` (valor → JSON con
   claves ordenadas, determinista), `json.absorb`/`json.emit` (leer/escribir archivo).
 - **Persistencia**: como el estado en memoria no sobrevive entre peticiones, la
   fuente de verdad es `tasks_db.json`. Cada petición carga el archivo, opera y lo

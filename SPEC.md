@@ -63,12 +63,12 @@ The receiver inside a method is `me`, not `self` or `this`.
 | Kind | Forms |
 |---|---|
 | Integer | Decimal (`42`), hexadecimal (`0x2A`), binary (`0b101010`) |
-| Float | `3.14` — a digit is required on both sides of the dot. Exponent notation is supported: `1e3` is 1000, `1.5e2` is 150, `E` also works |
+| Float | `3.14` - a digit is required on both sides of the dot. Exponent notation is supported: `1e3` is 1000, `1.5e2` is 150, `E` also works |
 | Boolean | `yes`, `no` |
 | Null | `null`, `undefined` |
 | String | `"..."`, and triple-quoted `"""..."""` for multi-line |
 | List | `[a, b, c]` |
-| Dict | `{key: value}` — insertion order is preserved |
+| Dict | `{key: value}` - insertion order is preserved |
 
 An empty `0x` or `0b` is an error, not zero.
 
@@ -178,7 +178,7 @@ fn greet(x) { return "hi " + x }
 show type(greet)          -- "string", not "fn"
 show greet == "greet"     -- yes
 s = "greet"
-show s(2)                 -- "hi 2"  — a plain string is callable
+show s(2)                 -- "hi 2"  - a plain string is callable
 ```
 
 Both forms are first class in the sense that matters: they can be stored,

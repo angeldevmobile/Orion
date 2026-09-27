@@ -1,4 +1,4 @@
-# Orion GUI — referencia
+# Orion GUI - referencia
 
 GUI de escritorio nativo sobre `egui`. Modo inmediato: el script se **re-ejecuta
 en cada evento** y el estado vive en `gui.set/gui.val`. Cero hardcodeo: el
@@ -11,7 +11,7 @@ gui.heading("Hola Orion")
 gui.run()                       -- abre la ventana (bloqueante)
 ```
 
-## Tema — `gui.theme({...})`
+## Tema - `gui.theme({...})`
 
 Sobrescribe lo que quieras; lo que no fijes cae al default.
 
@@ -53,7 +53,7 @@ gui.end()
 Claves de estilo: `bg`/`fill`, `fg`/`color`/`text`, `border`, `border_w`,
 `rounding`/`radius`, `size`/`font_size`, `pad`/`padding`.
 
-## Layout (contenedores — se cierran con `gui.end()`)
+## Layout (contenedores - se cierran con `gui.end()`)
 
 | Función | Qué hace |
 |---|---|
@@ -71,7 +71,7 @@ Claves de estilo: `bg`/`fill`, `fg`/`color`/`text`, `border`, `border_w`,
 **Texto:** `gui.heading(t, estilo?)` · `gui.text(t, estilo?)` · `gui.caption(t, estilo?)`
 
 **Acciones:** `gui.press(label, bg?, fg?)` · `gui.ghost(label, color?)` · `gui.tap(label)`
-— al pulsar disparan `label` como evento → `if gui.pressed("label") { … }`
+- al pulsar disparan `label` como evento → `if gui.pressed("label") { … }`
 
 Para disparar un evento **distinto del texto visible** (clave en listas dinámicas:
 ícono fijo, evento por índice), pásalo en el dict de estilo:
@@ -98,7 +98,7 @@ gui.setval("nueva", "")         -- fija/limpia el campo (p.ej. tras agregar)
 `gui.avatar(t, tam?, estilo?)` · `gui.divider()` · `gui.spacer(px?)`
 
 **Datos:** `gui.table([dicts], {height?, cols?})` ·
-`gui.chart([dicts], tipo, {x, y, color, height…})` — tipo: `bar|line|area|scatter|pie|hist`
+`gui.chart([dicts], tipo, {x, y, color, height…})` - tipo: `bar|line|area|scatter|pie|hist`
 
 **Nuevos:**
 | Widget | Uso |
@@ -119,7 +119,7 @@ if gui.pressed("+1") { gui.set("contador", n + 1) }   -- escribe
 
 `gui.fade(id, mostrar) … gui.end()` · `gui.slide_in(id) … gui.end()`
 
-### Reloj — `gui.tick(ms)`
+### Reloj - `gui.tick(ms)`
 
 Dispara el evento `"tick"` cada `ms` milisegundos y re-ejecuta el script,
 igual que un clic. Con eso cualquier cosa se anima en Orion puro: el script
@@ -134,7 +134,7 @@ if gui.val("animando", no) { gui.tick(30) }   -- pedirlo en CADA re-ejecución
 - No es pegajoso: si el script deja de llamar `gui.tick`, el reloj se apaga.
 - Pídelo solo mientras haya algo que animar (no gastar CPU en reposo).
 
-### Lienzo — `gui.canvas(ancho, alto) … gui.end()`
+### Lienzo - `gui.canvas(ancho, alto) … gui.end()`
 
 Dibujo 2D libre con coordenadas locales al lienzo (`(0,0)` = esquina superior
 izquierda). Las formas van dentro del bloque; los colores aceptan nombres del
@@ -162,6 +162,6 @@ Ejemplos completos: [`demo/demo_design.orx`](demo/demo_design.orx) (dashboard),
 [`demo/demo_widgets.orx`](demo/demo_widgets.orx) (widgets nuevos),
 [`demo/demo_calc.orx`](demo/demo_calc.orx) (calculadora reactiva),
 [`demo/demo_tasks.orx`](demo/demo_tasks.orx) (gestor de tareas: GUI + módulo
-`state` + persistencia a disco — las tareas sobreviven al reinicio),
+`state` + persistencia a disco - las tareas sobreviven al reinicio),
 [`demo/demo_bloch_anim.orx`](demo/demo_bloch_anim.orx) (esfera de Bloch
 animada: `tick` + `canvas` + física cuántica real paso a paso).

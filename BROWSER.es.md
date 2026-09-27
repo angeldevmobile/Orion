@@ -1,4 +1,4 @@
-# Orion `browser` — referencia
+# Orion `browser` - referencia
 
 > **Esta version esta desactualizada.** La pagina canonica es
 > [BROWSER.md](BROWSER.md), en ingles.
@@ -27,7 +27,7 @@ cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 > (`crawl`) verificados de punta a punta (98 tests e2e en
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), contra
 > servidor local). **Cero constantes fijadas**: todo lo que decide el
-> comportamiento se puede cambiar desde `open()` — ver 1.2. Medido contra
+> comportamiento se puede cambiar desde `open()` - ver 1.2. Medido contra
 > Selenium y Playwright en 19.3, con la metodología en
 > [`bench/web/README.md`](bench/web/README.md).
 
@@ -37,8 +37,8 @@ cierra en cascada las pestañas del navegador. No quedan procesos huérfanos.
 
 Localiza el navegador en cascada, **sin nada fijado en el código**:
 
-1. `opts.chrome` — ruta explícita
-2. `ORION_CHROME` — variable de entorno
+1. `opts.chrome` - ruta explícita
+2. `ORION_CHROME` - variable de entorno
 3. Detección automática: Chrome, Chromium, Brave o Edge
 
 En Windows importa que acepte Edge: viene instalado de fábrica, así que no hay
@@ -89,7 +89,7 @@ entre ejecuciones.
 Nada del motor está fijado en el código. Los parámetros se agrupan en dos
 niveles según lo que sean:
 
-**Política** — decisiones sobre *tu* problema, en la raíz de las opciones:
+**Política** - decisiones sobre *tu* problema, en la raíz de las opciones:
 
 | Opción | Default | Qué controla |
 |---|---|---|
@@ -104,7 +104,7 @@ niveles según lo que sean:
 | `hit_inset` | 24 | margen en píxeles al probar puntos de un elemento |
 | `nav_settle` | 5000 | cuánto se tolera que la página esté cambiando de documento |
 
-**Mecanismo** — uso de recursos, bajo `tuning` para no ensuciar la API diaria:
+**Mecanismo** - uso de recursos, bajo `tuning` para no ensuciar la API diaria:
 
 | Opción | Default | Qué controla |
 |---|---|---|
@@ -184,8 +184,8 @@ saltan sin romper la búsqueda.
 **Los selectores también entran en las shadow roots abiertas**, a cualquier
 profundidad. Un componente web guarda su contenido en una shadow root y el
 `querySelector` del documento no entra ahí: el selector correcto "no existe" y
-no hay pista de por qué. Media web moderna —de un reproductor de vídeo a los
-formularios de Salesforce— es exactamente esto.
+no hay pista de por qué. Media web moderna (de un reproductor de vídeo a los
+formularios de Salesforce) es exactamente esto.
 
 ```orion
 -- <mi-ficha> guarda su botón en una shadow root: no hace falta decir nada.
@@ -194,8 +194,8 @@ web.extract(p, ".fila", { nombre: ".nom" })
 ```
 
 Entra la búsqueda **y el clic**: el hit-test baja por las shadow roots, porque
-si no `elementFromPoint` devuelve el host, `host.contains(boton)` es false —
-`contains` no cruza la frontera— y todo componente parecería tapado por sí
+si no `elementFromPoint` devuelve el host, `host.contains(boton)` es false
+(`contains` no cruza la frontera) y todo componente parecería tapado por sí
 mismo.
 
 Tres cosas que conviene saber:
@@ -266,7 +266,7 @@ browser.click '#total': lo tapa <div.cookie-banner> (tras esperar 1200 ms)
 ```
 
 Con `{ force: yes }` se atraviesa. **No se clica a ciegas en las coordenadas**
-—eso es como Selenium acaba pulsando el banner en lugar del botón—: se vuelve
+(eso es como Selenium acaba pulsando el banner en lugar del botón): se vuelve
 transparente al puntero lo que estorba, el clic sigue siendo un evento real del
 navegador, y después se restaura todo (incluso si el clic falla).
 
@@ -316,8 +316,8 @@ web.fill(p, {
 })
 ```
 
-Obligar a elegir la función según de qué está hecho el campo —`type` para el
-texto, `select` para el desplegable, `check` para la casilla— significa mirar el
+Obligar a elegir la función según de qué está hecho el campo (`type` para el
+texto, `select` para el desplegable, `check` para la casilla) significa mirar el
 HTML antes de poder escribir una línea.
 
 **El orden se respeta**, y hace falta: un desplegable de provincia que solo se
@@ -387,7 +387,7 @@ web.check(p, "#acepto")   -- ya estaba: no hace nada
 ```
 
 La idempotencia no es un detalle. Si se limitara a pulsar, un reintento inocente
-—o un bucle que revisa la casilla— la dejaría en el contrario de lo que se pedía.
+(o un bucle que revisa la casilla) la dejaría en el contrario de lo que se pedía.
 
 Un `<input type="radio">` no se puede desmarcar pulsándolo, y `uncheck` lo dice
 en vez de fallar en silencio: hay que marcar otro del grupo.
@@ -400,8 +400,8 @@ en vez de fallar en silencio: hay que marcar otro del grupo.
 | `web.texts(pestaña, sel, ms?)` | sí |
 | `web.html(pestaña, sel, ms?)` | sí |
 | `web.attr(pestaña, sel, atributo, ms?)` | sí |
-| `web.value(pestaña, sel)` | sí — lo que el campo contiene AHORA, ver 5.1 |
-| `web.table(pestaña, sel, opts?)` | sí — una `<table>` entera, ver 5.2 |
+| `web.value(pestaña, sel)` | sí - lo que el campo contiene AHORA, ver 5.1 |
+| `web.table(pestaña, sel, opts?)` | sí - una `<table>` entera, ver 5.2 |
 | `web.watch` + `web.capture` | el JSON que la página pide a su API, ver 12 |
 | `web.discover(pestaña, opts?)` | deduce el esquema de extracción solo, ver 7.5 |
 | `web.crawl(navegador, opts)` | recorre urls en paralelo, vuelca y reanuda, ver 7.6 |
@@ -414,7 +414,7 @@ en vez de fallar en silencio: hay que marcar otro del grupo.
 La regla: **lo que devuelve contenido espera; lo que informa del estado no.**
 
 Devolver `null` porque el contenido aún no había llegado convierte un problema
-de tiempo en un dato perdido en silencio — el fallo que hace que un scraper
+de tiempo en un dato perdido en silencio - el fallo que hace que un scraper
 funcione en el portátil y no en el servidor. Al revés, hacer esperar a `exists`
 convertiría un "no está" legítimo en diez segundos de bloqueo.
 
@@ -427,7 +427,7 @@ show(web.attr(p, "#nombre", "value"))  -- null
 ```
 
 Las dos líneas de arriba no se contradicen, y confundirlas es un clásico:
-`attr` lee el **atributo del HTML** —el que venía escrito en la página— y ese no
+`attr` lee el **atributo del HTML** (el que venía escrito en la página) y ese no
 cambia cuando alguien escribe en el campo. Un `<input>` sin `value=` en el HTML
 devuelve `null` por ahí aunque tenga texto dentro, que es justo el momento en el
 que uno cree que su `fill` no funcionó.
@@ -458,7 +458,7 @@ tablas en tres páginas de Wikipedia:
 | Con `colspan` o `rowspan` | 4 |
 | Con otra tabla dentro | 1 |
 
-Un lector que dé por hecho el `<thead>` —que es como sale la primera versión—
+Un lector que dé por hecho el `<thead>` (que es como sale la primera versión)
 funciona perfecto en el sitio de demostración y falla en el 100% de las tablas
 de verdad. De ahí las cuatro decisiones:
 
@@ -520,7 +520,7 @@ handles de ventana y adivinar cuál es la nueva.
 ### 6.3 Modales HTML
 
 No necesitan nada especial: son HTML. Además el fondo bloqueante se comporta
-bien — con el modal abierto, un clic fuera falla nombrando al culpable en vez de
+bien - con el modal abierto, un clic fuera falla nombrando al culpable en vez de
 colarse por debajo.
 
 ## 7. Extracción
@@ -577,8 +577,8 @@ Conversiones: `num`, `int`, `bool`, `html`, `text`, `trim`, `list`,
 
 Tres detalles que evitan errores silenciosos:
 
-**`list` recoge todas.** Sin él, un campo con varios valores —las etiquetas de un
-producto, las imágenes de una galería— devolvía la primera coincidencia y las
+**`list` recoge todas.** Sin él, un campo con varios valores (las etiquetas de un
+producto, las imágenes de una galería) devolvía la primera coincidencia y las
 demás se perdían sin decir nada. Una lista vacía en **todas** las filas cuenta
 como selector muerto igual que un `null`, así que el aviso de 7.3 sigue
 funcionando ahí, que es donde más falta hace.
@@ -601,7 +601,7 @@ valor no numérico como `Agotado` da `null`, no un número inventado.
 
 Un campo vacío en **todas** las filas casi nunca es un dato ausente: es un
 selector equivocado, o el sitio que cambió de estructura. Callarlo devuelve una
-lista que parece buena y revienta cien líneas después — el fallo clásico de
+lista que parece buena y revienta cien líneas después - el fallo clásico de
 BeautifulSoup.
 
 ```
@@ -644,8 +644,8 @@ el total del recorrido, porque cada página se extrae de una vez.
 
 **Formatos**, según la extensión:
 
-- `.csv` — se escribe fila a fila, un solo archivo, memoria constante de verdad.
-- `.odf` — el formato binario lleva el número de filas en la cabecera y no admite
+- `.csv` - se escribe fila a fila, un solo archivo, memoria constante de verdad.
+- `.odf` - el formato binario lleva el número de filas en la cabecera y no admite
   añadir al final, así que se vuelca por bloques (`chunk`, 50.000 por defecto)
   liberando cada uno. El primero conserva el nombre pedido y los siguientes se
   numeran. Lo lee `frame` directamente, con los tipos ya inferidos:
@@ -688,8 +688,8 @@ hace fiable: no te pide que confíes en la propuesta, te enseña qué extraería
 Cómo lo deduce, para que no sea magia:
 
 - **La fila** es el grupo de elementos hermanos que más se repite con la misma
-  estructura interna, puntuado por cantidad **y riqueza** —texto y número de
-  campos—. Así no confunde un listado de productos con el menú de navegación,
+  estructura interna, puntuado por cantidad **y riqueza** (texto y número de
+  campos). Así no confunde un listado de productos con el menú de navegación,
   que también se repite pero está vacío.
 - La repetición se detecta por **estructura, no por clases**: los sitios
   modernos generan clases como `x1i10hfl` que no significan nada, así que se
@@ -700,8 +700,8 @@ Cómo lo deduce, para que no sea magia:
 - **Los campos** solo se conservan si aparecen en la mayoría de las filas: uno
   que esté en una sola no es un campo, es una casualidad.
 
-No adivina la intención —no sabe que eso es un "precio", así que un campo sin
-clase legible se llama `campo_1`—. No sustituye a `extract`: te deja a un paso
+No adivina la intención (no sabe que eso es un "precio", así que un campo sin
+clase legible se llama `campo_1`). No sustituye a `extract`: te deja a un paso
 de él en vez de a veinte minutos. Nadie lo tiene de serie; en Python te pones a
 leer el HTML a mano.
 
@@ -712,8 +712,8 @@ y el precio; en un listado de citas, el texto y el autor.
 ### 7.6 `web.crawl(navegador, opts)` → resumen
 
 `extract_to` recorre una lista de URLs con **una sola pestaña, en serie**. Sirve,
-pero deja la máquina a un octavo de gas: mientras una página carga —que es
-esperar a la red, no calcular— el resto del navegador está parado.
+pero deja la máquina a un octavo de gas: mientras una página carga (que es
+esperar a la red, no calcular) el resto del navegador está parado.
 
 `web.crawl` abre **N pestañas y las conduce en paralelo desde N hilos de
 sistema**:
@@ -739,7 +739,7 @@ Se le pasa el **navegador**, no una pestaña: las abre él. Toma el `row` y el
 no**: hilos de sistema de verdad sobre el mismo socket CDP, que el transporte
 multiplexa. No es `asyncio` cooperativo. Medido contra un servidor local de 12
 páginas lentas: `extract_to` en serie **7,9 s**, `crawl` con 8 workers **1,8 s**
-— las mismas 120 filas. El factor depende de cuántas páginas y de la red; la
+- las mismas 120 filas. El factor depende de cuántas páginas y de la red; la
 forma es la que cambia.
 
 **Reanuda.** Un recorrido de diez mil páginas que se corta en la siete mil no
@@ -747,7 +747,7 @@ puede empezar de cero. Cada URL terminada se anota en `<salida>.progress`, y al
 volver a arrancar con `resume: yes` las hechas se saltan (`skipped` las cuenta).
 Se anota **después** de escribir sus filas: si el proceso muere entre medias, esa
 página se repite al reanudar en vez de perderse. La reanudación es para `.csv`
-—que admite añadir al final—; el `.odf` obliga a empezar de cero y se avisa.
+(que admite añadir al final); el `.odf` obliga a empezar de cero y se avisa.
 
 Como `extract`, un campo que no trae valor en **ninguna** página se delata en vez
 de dejar una columna vacía que parece buena; con `{ strict: no }` se acepta.
@@ -777,7 +777,7 @@ web.upload(p, "#adjunto", ["a.pdf", "b.pdf"])        -- varios
 El selector puede apuntar a dos cosas distintas, y las dos funcionan:
 
 1. **El propio `<input type="file">`.** Se le asignan los archivos y ya está.
-2. **Cualquier cosa que abra el selector al pulsarla** — el botón "Examinar",
+2. **Cualquier cosa que abra el selector al pulsarla** - el botón "Examinar",
    una zona de arrastrar y soltar, un `<label>`. El `<input>` real suele estar
    oculto tras el diseño del sitio y a veces ni siquiera es alcanzable con un
    selector.
@@ -818,7 +818,7 @@ antes de pulsar.
 `.crdownload` y lo renombra al acabar. Sin un aviso, la receta habitual es dormir
 unos segundos y cruzar los dedos: si la red va lenta se lee un archivo a medias,
 y si va rápida se pierde el tiempo. Aquí se espera el evento de finalización, así
-que la llamada vuelve exactamente cuando el archivo está entero — y `bytes` lo
+que la llamada vuelve exactamente cuando el archivo está entero - y `bytes` lo
 confirma.
 
 | Opción | Qué hace |
@@ -852,7 +852,7 @@ Para guardar un justificante o una factura de un portal web es lo que hace falta
 y es justo lo que obliga a pelearse con el diálogo de impresión si se hace a mano.
 
 Opciones: `landscape`, `background`, `headers`, `scale`, `width`, `height`,
-`margin`, `pages`. Las medidas van en pulgadas, que es la unidad del navegador —
+`margin`, `pages`. Las medidas van en pulgadas, que es la unidad del navegador -
 un A4 son 8,27 × 11,69. Lo que no se indique lo decide el navegador con el mismo
 default que aplicaría el diálogo.
 
@@ -865,7 +865,7 @@ las tablas con filas alternas salgan en blanco.
 ### 9.1 `web.save_state(pestaña, ruta)` / `web.load_state(pestaña, ruta)`
 
 Lo más caro de una automatización que corre a diario no es navegar: es **volver
-a iniciar sesión en cada ejecución**. Es lento, y sobre todo es frágil — cada
+a iniciar sesión en cada ejecución**. Es lento, y sobre todo es frágil - cada
 login es un formulario que puede cambiar, un captcha que puede aparecer y un
 doble factor que puede saltar. Un proceso que se loguea cien veces al día
 también es un proceso que parece un ataque.
@@ -889,7 +889,7 @@ web.reload(p)                        -- ya dentro
 
 **Hay que estar en el origen antes de restaurar.** Las cookies van al navegador
 entero, pero el almacenamiento local solo se puede escribir estando en su
-dominio — el navegador no deja tocar el de otro. Los orígenes que no coinciden
+dominio - el navegador no deja tocar el de otro. Los orígenes que no coinciden
 salen en `skipped` en vez de perderse en silencio, porque una sesión restaurada
 a medias no da ningún error y es indepurable.
 
@@ -902,14 +902,14 @@ puede mover, versionar aparte o guardar en un gestor de secretos.
 > repositorio. Vale exactamente lo mismo que la contraseña, con el agravante de
 > que no caduca cuando la cambias.
 
-### 9.2 `open({ allow: [...] })` — lista blanca de dominios
+### 9.2 `open({ allow: [...] })` - lista blanca de dominios
 
 ```orion
 b = web.open({ allow: ["*.empresa.com", "cdn.proveedor.net"] })
 ```
 
 Un proceso automático lleva encima la sesión de la empresa. Si la página que
-visita está comprometida —o si un anuncio inyectado en ella redirige— el bot se
+visita está comprometida (o si un anuncio inyectado en ella redirige) el bot se
 va a otro sitio **con esa sesión puesta**. La lista blanca acota a dónde puede
 ir: lo que no esté, no se carga.
 
@@ -944,7 +944,7 @@ todo del servidor.
 Ninguna espera el evento de carga del navegador, y es deliberado: **al volver
 atrás, Chrome suele restaurar la página desde su caché de retroceso sin
 recargarla, y entonces no hay evento de carga**. Esperarlo dejaba cada `back`
-clavado el plazo entero —treinta segundos— para acabar continuando igual. Se
+clavado el plazo entero (treinta segundos) para acabar continuando igual. Se
 mira la página, que es quien sabe dónde está.
 
 Un `back` sin historial lo dice en vez de no hacer nada. Ojo con una cosa que
@@ -969,7 +969,7 @@ dos segundos en cada vuelta.
 
 Las peticiones en vuelo se cuentan **dentro de la página**, envolviendo `fetch`
 y `XMLHttpRequest`. Así es una sola llamada y no depende de que el historial de
-eventos —que está acotado— haya conservado los que hacían falta.
+eventos (que está acotado) haya conservado los que hacían falta.
 
 El límite honesto: hay páginas que sondean el servidor para siempre y nunca se
 quedan quietas. En esas, el error lo dice y hay que esperar por un selector.
@@ -1023,7 +1023,7 @@ contrato de una API lo defiende el propio equipo del sitio.
 
 ### 12.2 `web.watch(pestaña, patrón)`
 
-Sin `*`, el patrón es "contiene" — que es lo que casi siempre se quiere y lo que
+Sin `*`, el patrón es "contiene" - que es lo que casi siempre se quiere y lo que
 uno escribe primero:
 
 ```orion
@@ -1059,7 +1059,7 @@ for resp in r {
 
 **Espera a que llegue algo que case** en vez de mirar una vez y volver vacía. La
 petición sale después de la acción que la provoca, y una lista vacía convertiría
-un problema de tiempo en "este sitio no usa API" — una conclusión falsa y difícil
+un problema de tiempo en "este sitio no usa API" - una conclusión falsa y difícil
 de deshacer. Si de verdad no casa nada, devuelve vacío al agotar el plazo.
 
 Se recogen **todas** las respuestas que casen, no la primera: un panel suele
@@ -1125,8 +1125,8 @@ Los motivos de `fail` son los del navegador: `failed`, `aborted`, `timedout`,
 `accessdenied`, `connectionclosed`, `connectionreset`, `connectionrefused`,
 `connectionaborted`, `connectionfailed`, `namenotresolved`,
 `internetdisconnected`, `addressunreachable`, `blockedbyclient`,
-`blockedbyresponse`. Se escriben como uno quiera —`timedout`, `TimedOut`,
-`timed_out`— y uno inventado lista los válidos.
+`blockedbyresponse`. Se escriben como uno quiera (`timedout`, `TimedOut`,
+`timed_out`) y uno inventado lista los válidos.
 
 ### 13.3 El orden manda, como en un cortafuegos
 
@@ -1139,7 +1139,7 @@ web.route(p, "*/api/productos*", { mock: { status: 200, json: datos } })
 web.route(p, "*/api/*",          { fail: "timedout" })   -- todo lo demás
 ```
 
-### 13.4 `{ times: n }` — fallar solo las primeras veces
+### 13.4 `{ times: n }` - fallar solo las primeras veces
 
 ```orion
 web.route(p, "*/api/*", { mock: { status: 503, body: "no" } }, { times: 1 })
@@ -1217,7 +1217,7 @@ web.emulate(p, { device: "iphone", width: 1000 })   -- móvil, pero más ancho
 **Lo que no se pide no se toca.** Cambiar la zona horaria no redimensiona la
 ventana.
 
-**Emula antes de navegar.** Algunas cosas —el táctil, sobre todo— las mira la
+**Emula antes de navegar.** Algunas cosas (el táctil, sobre todo) las mira la
 página al cargar: `emulate` y luego `goto`.
 
 **Un ancho sin alto** se completa con el que ya tiene la pestaña: CDP acepta
@@ -1299,7 +1299,7 @@ orion-vm/src/modules/browser/
 
 Sobre un único socket viajan mezcladas las respuestas (llevan `id`) y los
 eventos (llevan `method`). Un hilo lector por conexión reparte cada respuesta a
-quien la espera, que duerme en una `Condvar` — el mismo parking que usa `await`
+quien la espera, que duerme en una `Condvar` - el mismo parking que usa `await`
 en `task_pool`, sin introducir un segundo modelo de concurrencia.
 
 Los eventos de ratón y teclado se despachan por el dominio `Input` de CDP, que
@@ -1326,7 +1326,7 @@ Tu usuario recibe `app.exe` y no necesita saber que Orion existe.
 #### Qué se probó exactamente
 
 Un programa que usa `upload`, `fill`, `table`, `extract`, `save_state`, `pdf` y
-`reload` —es decir, el módulo entero, no un "hola mundo"— compilado a **nativo
+`reload` (es decir, el módulo entero, no un "hola mundo") compilado a **nativo
 AOT** (61 MB) y ejecutado en una carpeta que contenía **solo `app.exe`**, sin
 ningún `orion.exe` cerca y con el `PATH` reducido a `system32`. Los diez
 resultados correctos y código de salida 0.
@@ -1343,13 +1343,13 @@ exclusivos del ejecutable compilado (`orion run` nunca estuvo afectado):
    constante global daba **otro resultado** sin avisar.
 2. **Llamar `main` a tu función** hacía chocar su símbolo con el `main` de C del
    ejecutable, y la compilación se pasaba a bytecode embebido. Seguía
-   funcionando, pero ninguna aplicación real —que se escriben así— llegaba a
+   funcionando, pero ninguna aplicación real (que se escriben así) llegaba a
    compilarse nativa.
 
 Los dos tienen ahora tests de regresión en
 [`orion-vm/tests/aot_native.rs`](orion-vm/tests/aot_native.rs), que es lo que
-faltaba: la batería anterior solo probaba programas autocontenidos —aritmética,
-recursión, shapes, cadenas— y por eso nadie se enteró.
+faltaba: la batería anterior solo probaba programas autocontenidos (aritmética,
+recursión, shapes, cadenas) y por eso nadie se enteró.
 
 **La lección para leer esta página**: si aquí pone "verificado", debería decir
 también *con qué programa*. Un "hola mundo" compilado no prueba que tu
@@ -1393,13 +1393,13 @@ avisos en [`bench/web/README.md`](bench/web/README.md).
 Medido el 2026-08-23, con el recorrido de shadow roots activado (lo que trae
 `extract` de serie desde esa fecha). Aislado en esta misma página: 17 ms con
 shadow y 15 ms sin él, así que ese recorrido explica ~2 ms. Las cifras de una
-medición anterior eran algo mejores en las cinco variantes — la máquina no
+medición anterior eran algo mejores en las cinco variantes - la máquina no
 estaba en el mismo estado, y por eso la tabla lleva fecha.
 
 La RAM es la del proceso de automatización **más el auxiliar que arranca**, que
 no es el navegador y no es el mismo en los tres: Selenium necesita
 `chromedriver.exe` y Playwright un `node.exe` porque su driver está escrito en
-JavaScript. Orion no necesita ninguno — habla CDP desde su propio proceso, que
+JavaScript. Orion no necesita ninguno - habla CDP desde su propio proceso, que
 es la misma razón por la que no hay un segundo binario que mantener
 sincronizado con la versión de Chrome. El navegador se excluye de la cuenta: es
 idéntico para las tres.
@@ -1412,7 +1412,7 @@ diferencia cabe en el ruido. El resultado no es ese.
 
 **El resultado es la primera fila contra la última: 15 segundos contra 14
 milisegundos.** Esa primera fila es cómo enseñan a hacerlo las dos
-documentaciones — localizar los elementos y pedirles el texto uno a uno, que con
+documentaciones - localizar los elementos y pedirles el texto uno a uno, que con
 500 filas × 4 campos son 2.000 viajes. Lo que aporta `extract` no es velocidad
 bruta: es que **el camino rápido es el único que hay**. En las otras dos hay que
 saber que el problema existe y escribir JavaScript a mano dentro de Python, que
@@ -1446,7 +1446,7 @@ local sin salida a internet en ningún momento.
 Ventajas concretas:
 
 - **Funciona sin egreso** salvo hacia el sitio que automatizas.
-- **Usa el navegador que la empresa ya administra** — Edge en un Windows
+- **Usa el navegador que la empresa ya administra** - Edge en un Windows
   corporativo está instalado y gestionado por política, no hay que aprobar nada.
 - **CI determinista**: desaparece el paso de "bajar el driver", fuente clásica
   de fallos intermitentes ajenos a tu código.
