@@ -15,6 +15,24 @@ formato AAAA-MM-DD.
   `use` nuevo empiece a vigilarse sin reiniciar. Al arrancar dice cuántos
   archivos vigila: `Watching backend/main.orx + 4 imported`.
 
+- **`--watch` reacciona al doble de rápido y gasta la mitad de nada.** El
+  sondeo pasa a ser adaptativo: cada 120 ms mientras se está editando y cada
+  800 ms tras minuto y medio sin cambios. La latencia al guardar baja de hasta
+  480 ms a unos 220.
+
+  Y la lista de archivos vigilados se calcula una vez, no en cada vuelta:
+  rehacerla exige leer y lexar cada archivo, y medido costaba un **6,9% de un
+  núcleo** de forma continua. Sondear solo los `stat` cuesta **0,31%**. La
+  lista se rehace al detectar un cambio, que es cuando un `use` nuevo puede
+  haber aparecido.
+
+  Se valoró usar eventos del sistema de archivos (`notify`) y se descartó: el
+  sondeo ya no se nota en CPU, la ganancia sería de latencia, y a cambio entra
+  una dependencia nueva con su árbol, hace falta *debounce* porque un guardado
+  son varios eventos, y en unidades de red o algunos montajes de contenedor
+  los eventos no llegan (habría que mantener el sondeo igualmente como
+  respaldo).
+
 - **Los mensajes de `--watch` estaban en español** mientras el resto del CLI
   está en inglés: `change detected`, `Watching`, `server runs as a child
   process`.
