@@ -183,6 +183,18 @@ pub fn crawl(
                                     return par;
                                 }
                             }
+                            // Las filas tienen que estar EN DISCO antes de que
+                            // el progreso diga que esta URL está hecha. Si el
+                            // proceso muere entre las dos cosas, lo peor que
+                            // puede pasar es repetir una página al reanudar;
+                            // al revés se perdía en silencio.
+                            if let Err(e) = w.asegurar_en_disco() {
+                                par.errores.push(format!("(escritura) {e}"));
+                                drop(w); drop(vis);
+                                let _ = conn.call("Target.closeTarget",
+                                    serde_json::json!({ "targetId": target }), None, timeout);
+                                return par;
+                            }
                         }
                         par.ok += 1;
                         if let Ok(mut pf) = progreso.lock() {

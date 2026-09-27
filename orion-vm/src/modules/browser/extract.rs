@@ -338,6 +338,67 @@ pub fn extract(
 }
 
 #[cfg(test)]
+mod tests_volcador {
+    use super::*;
+
+    fn tmp(nombre: &str) -> String {
+        let d = std::env::temp_dir().join("orion_volcador_tests");
+        let _ = std::fs::create_dir_all(&d);
+        let f = d.join(nombre);
+        let _ = std::fs::remove_file(&f);
+        f.display().to_string()
+    }
+
+    #[test]
+    fn lo_escrito_llega_a_disco_sin_cerrar_el_volcador() {
+        // El escenario real: `crawl` anota la URL como terminada NADA MÁS
+        // escribir sus filas. Si estas siguen en el búfer del csv::Writer y el
+        // proceso muere, al reanudar se saltan esas páginas y las filas se
+        // pierden sin un solo error.
+        let ruta = tmp("vivo.csv");
+        let mut v = Volcador::nuevo(&ruta, vec!["a".into(), "b".into()], 100).unwrap();
+        v.escribir(vec!["1".into(), "2".into()]).unwrap();
+        v.asegurar_en_disco().unwrap();
+
+        // Se lee SIN cerrar: es justo lo que vería alguien mirando el archivo
+        // con el recorrido a medias.
+        let txt = std::fs::read_to_string(&ruta).unwrap();
+        assert!(txt.contains("a,b"), "falta la cabecera en disco: {txt:?}");
+        assert!(txt.contains("1,2"), "la fila se quedó en el búfer: {txt:?}");
+    }
+
+    #[test]
+    fn reanudar_sobre_un_archivo_vacio_escribe_la_cabecera() {
+        // Un archivo de 0 bytes es lo que deja un recorrido que murió antes de
+        // volcar nada. Tratarlo como "ya tiene cabecera" dejaba un CSV sin
+        // cabecera para siempre.
+        let ruta = tmp("vacio.csv");
+        std::fs::write(&ruta, "").unwrap();
+
+        let mut v = Volcador::continuar(&ruta, vec!["a".into(), "b".into()], 100).unwrap();
+        v.escribir(vec!["1".into(), "2".into()]).unwrap();
+        v.cerrar().unwrap();
+
+        let txt = std::fs::read_to_string(&ruta).unwrap();
+        assert!(txt.starts_with("a,b"), "el CSV quedó sin cabecera: {txt:?}");
+    }
+
+    #[test]
+    fn reanudar_sobre_un_archivo_con_datos_no_repite_la_cabecera() {
+        let ruta = tmp("condatos.csv");
+        std::fs::write(&ruta, "a,b\n1,2\n").unwrap();
+
+        let mut v = Volcador::continuar(&ruta, vec!["a".into(), "b".into()], 100).unwrap();
+        v.escribir(vec!["3".into(), "4".into()]).unwrap();
+        v.cerrar().unwrap();
+
+        let txt = std::fs::read_to_string(&ruta).unwrap();
+        assert_eq!(txt.matches("a,b").count(), 1, "cabecera duplicada: {txt:?}");
+        assert!(txt.contains("1,2") && txt.contains("3,4"), "{txt:?}");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -487,7 +548,13 @@ impl Volcador {
             ));
         }
         // Si no existe todavía, es un primer arranque normal con cabecera.
-        if !std::path::Path::new(ruta).exists() {
+        //
+        // Un archivo de CERO bytes cuenta como que no existe: es lo que deja un
+        // recorrido que murió antes de volcar nada. Tratarlo como "ya tiene
+        // cabecera" producía un CSV sin cabecera para siempre, con las columnas
+        // adivinándose por el orden.
+        let vacio = std::fs::metadata(ruta).map(|m| m.len() == 0).unwrap_or(false);
+        if !std::path::Path::new(ruta).exists() || vacio {
             return Self::nuevo(ruta, headers, chunk);
         }
         let f = std::fs::OpenOptions::new().append(true).open(ruta)
@@ -512,6 +579,26 @@ impl Volcador {
                 self.buffer.push(fila);
                 if self.buffer.len() >= self.chunk { self.volcar_bloque()?; }
             }
+        }
+        Ok(())
+    }
+
+    /// Deja en disco lo escrito hasta ahora, sin cerrar nada.
+    ///
+    /// `crawl` la llama antes de anotar una URL como terminada. El orden
+    /// importa: el `csv::Writer` guarda las filas en un búfer propio de 8 KB,
+    /// así que un recorrido que muere de golpe —un `kill`, un corte de luz, el
+    /// OOM killer— dejaba el progreso diciendo que esas páginas ya estaban y
+    /// las filas todavía en memoria. Al reanudar se saltaban, y se perdían sin
+    /// un solo error: el recorrido terminaba con `errors: []`.
+    ///
+    /// En `.odf` no hace nada a propósito: el bloque se vuelca entero cada
+    /// `chunk` filas, y reanudar no está soportado en ese formato —`continuar`
+    /// lo rechaza—, así que no hay progreso que pueda mentir. Volcar aquí
+    /// crearía un archivo suelto por página.
+    pub fn asegurar_en_disco(&mut self) -> Result<(), String> {
+        if let Some(w) = self.csv.as_mut() {
+            w.flush().map_err(|e| format!("csv: {e}"))?;
         }
         Ok(())
     }

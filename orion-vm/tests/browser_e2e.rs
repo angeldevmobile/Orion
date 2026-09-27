@@ -465,7 +465,9 @@ with b = web.open() {{
 "##));
     assert!(salida.contains("E="), "debería haber fallado:\n{salida}");
     assert!(salida.contains("it is covered by"), "el error no dice qué estorba:\n{salida}");
-    assert!(salida.contains("cookie-banner"),
+    // El nombre sale del `id` si lo hay, y de la primera clase si no: es lo que
+    // identifica al culpable de verdad y lo que se puede buscar en la página.
+    assert!(salida.contains("velo"),
             "el error no identifica al elemento que tapa:\n{salida}");
 }
 
@@ -612,7 +614,7 @@ with b = web.open() {{
     attempt {{ web.click(p, "#total", 900) }} handle e {{ show("E=" + e) }}
 }}
 "##));
-    assert!(salida.contains("cookie-banner"), "no nombra al culpable:\n{salida}");
+    assert!(salida.contains("velo"), "no nombra al culpable:\n{salida}");
     assert!(salida.contains("force: yes"), "no sugiere la salida:\n{salida}");
 }
 
@@ -2342,6 +2344,169 @@ with b = web.open() {{
     assert!(salida.contains("N=4"), "el row de discover no sirvio en extract:\n{salida}");
     assert!(salida.contains("t: Teclado") && salida.contains("pr: 49.9"), "{salida}");
     assert!(salida.contains("t: Webcam"), "{salida}");
+}
+
+/// Página con clases de Tailwind, que llevan dos puntos en el nombre.
+///
+/// No es un caso raro: `md:flex` o `hover:shadow-lg` están en buena parte de la
+/// web actual. `.md:flex` SIN escapar no es un selector CSS válido.
+const PAGINA_TAILWIND: &str = r#"<!doctype html><html><head><title>T</title></head>
+<body>
+<nav><a href="/x">Inicio</a></nav>
+<ul>
+<li class="md:flex hover:shadow-lg"><span class="titulo">Teclado mecanico</span><span class="precio">49,90</span><a href="/p/1">ver</a></li>
+<li class="md:flex hover:shadow-lg"><span class="titulo">Raton vertical</span><span class="precio">25,00</span><a href="/p/2">ver</a></li>
+<li class="md:flex hover:shadow-lg"><span class="titulo">Monitor curvo</span><span class="precio">199,95</span><a href="/p/3">ver</a></li>
+<li class="md:flex hover:shadow-lg"><span class="titulo">Webcam full hd</span><span class="precio">35,50</span><a href="/p/4">ver</a></li>
+</ul></body></html>"#;
+
+/// Un botón que aparece tarde DENTRO de un iframe, y otro dentro de una shadow
+/// root. Es el caso del modal de cookies que se pinta cuando le llega la
+/// respuesta al banner, no al cargar.
+const PAGINA_TARDE_ANIDADA: &str = r#"<!doctype html><html><head><title>T</title></head>
+<body>
+<iframe id="marco" srcdoc="<body><p>dentro</p></body>"></iframe>
+<mi-caja></mi-caja>
+<script>
+customElements.define('mi-caja', class extends HTMLElement {
+  constructor() { super(); this.attachShadow({mode:'open'}).innerHTML = '<p>caja</p>'; }
+});
+setTimeout(() => {
+  const d = document.getElementById('marco').contentDocument;
+  const b = d.createElement('button');
+  b.id = 'tardio'; b.textContent = 'ya estoy';
+  d.body.appendChild(b);
+
+  const s = document.querySelector('mi-caja').shadowRoot;
+  const e = document.createElement('span');
+  e.className = 'en-sombra'; e.textContent = 'sombra tardia';
+  s.appendChild(e);
+}, 700);
+</script></body></html>"#;
+
+#[test]
+fn wait_ve_lo_que_aparece_tarde_en_un_iframe_y_en_shadow() {
+    let dir = tmp_dir("wait_anidado");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TARDE_ANIDADA);
+
+    // El MutationObserver que implementaba la espera solo veía el documento de
+    // arriba: no cruza a un iframe ni entra en una shadow root. El elemento
+    // aparecía, `web.text` lo encontraba sin problema, y `web.wait` se quedaba
+    // dormido hasta agotar el plazo y fallaba. Justo en los dos sitios donde
+    // más se espera a algo: un modal en iframe y un componente web.
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    show("IFRAME=" + str(web.wait(p, "#tardio", 6000)))
+    show("SHADOW=" + str(web.wait(p, ".en-sombra", 6000)))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains("IFRAME=yes"), "no esperó al elemento del iframe:\n{salida}");
+    assert!(salida.contains("SHADOW=yes"), "no esperó al elemento de la shadow root:\n{salida}");
+}
+
+#[test]
+fn matar_el_proceso_no_deja_el_navegador_huerfano() {
+    let dir = tmp_dir("huerfano");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+
+    // `with` cierra el navegador aunque el cuerpo falle, pero no puede hacer
+    // nada si al proceso lo matan de golpe. Eso no es raro: un crawl de noche
+    // que alguien corta, el OOM killer, un cron con timeout. El navegador
+    // quedaba vivo consumiendo cientos de MB, y cada pasada dejaba otro.
+    let f = dir.join("prog.orx");
+    fs::write(&f, r#"
+use "browser" as web
+use "timewarp"
+b = web.open()
+p = web.page(b)
+show("LISTO")
+timewarp.wait("30s")
+"#).unwrap();
+
+    let mut hijo = Command::new(orion_bin())
+        .arg("run").arg(&f)
+        .current_dir(&dir)
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("no se pudo lanzar orion");
+
+    // Esperar a que el navegador esté realmente en pie.
+    let salida = hijo.stdout.take().unwrap();
+    let mut lector = std::io::BufReader::new(salida);
+    let mut linea = String::new();
+    let arrancado = std::time::Instant::now();
+    while !linea.contains("LISTO") && arrancado.elapsed() < std::time::Duration::from_secs(60) {
+        linea.clear();
+        if std::io::BufRead::read_line(&mut lector, &mut linea).unwrap_or(0) == 0 { break; }
+    }
+    assert!(linea.contains("LISTO"), "el navegador no llegó a abrirse");
+
+    // El perfil temporal lleva el pid del proceso de Orion, y dentro está el
+    // puerto CDP. Preguntarle al puerto es la forma de saber si el navegador
+    // sigue vivo sin depender de herramientas del sistema.
+    let marca = format!("orion-browser-{}-", hijo.id());
+    let perfil = fs::read_dir(std::env::temp_dir()).unwrap()
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().starts_with(&marca))
+        .map(|e| e.path())
+        .expect("no se encontró el perfil temporal del navegador");
+    let puerto: u16 = fs::read_to_string(perfil.join("DevToolsActivePort"))
+        .expect("el navegador no dejó su puerto")
+        .lines().next().unwrap().trim().parse().unwrap();
+
+    let vivo = || std::net::TcpStream::connect_timeout(
+        &format!("127.0.0.1:{puerto}").parse().unwrap(),
+        std::time::Duration::from_millis(500),
+    ).is_ok();
+    assert!(vivo(), "el navegador debería estar escuchando antes de matar nada");
+
+    // Muerte súbita: mata SOLO al proceso de Orion, no a su descendencia.
+    hijo.kill().unwrap();
+    let _ = hijo.wait();
+
+    // El sistema tarda un instante en llevarse al navegador.
+    let limite = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while vivo() && std::time::Instant::now() < limite {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    assert!(!vivo(),
+            "el navegador quedó huérfano escuchando en el puerto {puerto} \
+             tras matar a orion");
+}
+
+#[test]
+fn discover_escapa_las_clases_con_dos_puntos() {
+    let dir = tmp_dir("discover_tailwind");
+    if !hay_navegador(&dir) { return; }
+    let _turno = turno();
+    let url = serve_html(PAGINA_TAILWIND);
+
+    // Antes: `discover` proponía `.md:flex` sin escapar. La muestra salía
+    // perfecta —se calcula con los nodos ya encontrados, no con el selector— y
+    // `extract` devolvía una lista VACÍA, sin error y sin aviso de selector
+    // muerto. El fallo más caro de todos: el que no se ve.
+    let (salida, ok) = run_orion(&dir, &format!(r##"
+use "browser" as web
+with b = web.open() {{
+    p = web.page(b)
+    web.goto(p, "{url}")
+    e = web.discover(p)
+    show("ROW=" + e["row"])
+    filas = web.extract(p, e["row"], {{ t: ".titulo" }})
+    show("N=" + str(len(filas)))
+}}
+"##));
+    assert!(ok, "falló:\n{salida}");
+    assert!(salida.contains(r"\:"), "el selector de fila no viene escapado:\n{salida}");
+    assert!(salida.contains("N=4"),
+            "lo que propuso discover no extrajo nada — selector sin escapar:\n{salida}");
 }
 
 #[test]

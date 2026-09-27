@@ -86,7 +86,13 @@ pub const DISCOVER_JS: &str = r#"
 
   // Una sola clase que seleccione EXACTAMENTE las filas.
   for (const c of comunes) {
-    try { if (document.querySelectorAll('.' + esc(c)).length === rows.length) { rowSel = '.' + c; break; } }
+    // El selector va escapado TAMBIÉN al devolverlo, no solo al probarlo aquí.
+    // Las clases de Tailwind llevan dos puntos (`md:flex`, `hover:shadow-lg`) y
+    // `.md:flex` sin escapar no es un selector válido: la prueba de abajo
+    // acertaba y el esquema devuelto no casaba con nada. Y no fallaba a la
+    // vista, porque `sample` se calcula con los nodos ya encontrados: la
+    // muestra salía perfecta y `extract` devolvía una lista vacía.
+    try { if (document.querySelectorAll('.' + esc(c)).length === rows.length) { rowSel = '.' + esc(c); break; } }
     catch (e) {}
   }
   // Si no, un par de clases combinadas.
@@ -95,7 +101,7 @@ pub const DISCOVER_JS: &str = r#"
     for (let i = 0; i < comunes.length; i++)
       for (let j = i + 1; j < comunes.length; j++) {
         const sel = '.' + esc(comunes[i]) + '.' + esc(comunes[j]);
-        try { if (document.querySelectorAll(sel).length === rows.length) { rowSel = '.' + comunes[i] + '.' + comunes[j]; break outer; } }
+        try { if (document.querySelectorAll(sel).length === rows.length) { rowSel = sel; break outer; } }
         catch (e) {}
       }
   }
@@ -126,7 +132,7 @@ pub const DISCOVER_JS: &str = r#"
   // Hacker News—.
   const relSel = (el, root) => {
     for (const c of Array.from(el.classList)) {
-      try { if (root.querySelectorAll('.' + esc(c)).length === 1) return '.' + c; } catch (e) {}
+      try { if (root.querySelectorAll('.' + esc(c)).length === 1) return '.' + esc(c); } catch (e) {}
     }
     const partes = [];
     let cur = el;

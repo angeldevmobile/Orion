@@ -24,7 +24,7 @@ closes the browser's tabs in cascade. No orphan processes are left behind.
 > included), forms, tables, dialogs, windows, extraction (with schema
 > discovery), files, session, cookies, stability, network capture, request
 > interception, device emulation and parallel crawling (`crawl`) are verified
-> end to end (94 e2e tests in
+> end to end (95 e2e tests in
 > [`orion-vm/tests/browser_e2e.rs`](orion-vm/tests/browser_e2e.rs), against a
 > local server). **Zero hardcoded constants**: everything that decides behaviour
 > can be changed from `open()` — see 1.2. Measured against Selenium and
@@ -749,8 +749,9 @@ changes is the shape.
 **It resumes.** A ten-thousand-page walk that is cut off at seven thousand cannot
 start from scratch. Every finished URL is recorded in `<out>.progress`, and on
 starting again with `resume: yes` the completed ones are skipped (`skipped` counts
-them). It is recorded **after** its rows are written: if the process dies in
-between, that page is repeated on resume instead of being lost. Resuming is for
+them). It is recorded **after** its rows have reached the disk — the CSV buffer is
+flushed first, not merely written to: if the process is killed in between, that
+page is repeated on resume instead of being lost. Resuming is for
 `.csv` — which allows appending; `.odf` forces starting over and says so.
 
 Like `extract`, a field that brings no value on **any** page gives itself away
