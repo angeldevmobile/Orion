@@ -33,7 +33,7 @@ Probados con aserciones reales sobre su salida:
 | `db` | SQLite: create/insert/query |
 | `process` | execute (code/out) |
 | `env` | set/get/has |
-| `state` | barrido e2e (2026-07-18, `tests/test_infra.orx`): set (devuelve valor)/get con default/has, incr/decr atómicos que conservan Int y ERROR claro sobre valor no numérico (antes lo pisaba), **setnx** atómico (candado simple entre requests), delete devuelve si existía, keys en orden de inserción, all/len/clear, persist siembra desde archivo + cada escritura queda en disco (verificado leyendo el JSON crudo) |
+| `state` | barrido e2e (2026-07-18, `tests/test_infra.orx`): set (devuelve valor)/get con default/has, incr/decr atómicos que conservan Int y ERROR claro sobre valor no numérico (antes lo pisaba), **setnx** atómico **dentro del proceso** (candado simple entre requests de un mismo servidor; ver el aviso sobre varias instancias), delete devuelve si existía, keys en orden de inserción, all/len/clear, persist siembra desde archivo + cada escritura queda en disco (verificado leyendo el JSON crudo) |
 | `cache` | barrido e2e (2026-07-18, `tests/test_infra.orx`): set/get con default, **TTL opcional en segundos** (expiración perezosa sin hilos: get/has/size/keys solo ven entradas vivas; `ttl(clave)` → segundos restantes o null), del/has honestos (dicen si existía), roundtrip de estructuras anidadas conservando orden de claves |
 | `config` | get sobre dict |
 | `grafo` | create/node/edge |
@@ -56,6 +56,32 @@ Probados con aserciones reales sobre su salida:
 | `secret` | mask |
 | `embed` | similarity (matemática de vectores) |
 | `excel` | estadísticas sobre datos |
+
+## ⚠️ Viven en la memoria del proceso
+
+Estos cuatro guardan su estado en una estructura estática del proceso. Entre
+los hilos de **un** servidor funcionan y están probados: el banco de
+concurrencia de las demos hace 120 escrituras con 24 peticiones a la vez y los
+contadores cuadran exactos.
+
+Lo que no hacen es cruzar de un proceso a otro. En cuanto haya **dos
+instancias detrás de un balanceador**, cada una tiene lo suyo:
+
+| Módulo | Qué pasa con varias instancias | Con qué sustituirlo |
+|---|---|---|
+| `session` | La sesión vive en una instancia; el usuario la "pierde" al ir a otra | JWT (sin estado), o la sesión en la base |
+| `cache` | Cada instancia con su copia, desincronizadas | Redis, o aceptar que es una caché local |
+| `state` | `setnx` **deja de ser un candado**: dos instancias lo consiguen a la vez | Un `UPDATE ... WHERE` condicional en la base, o un advisory lock de Postgres |
+| `cola` | Los trabajos de una instancia no existen en la otra, y un reinicio los pierde | Una tabla con `SELECT ... FOR UPDATE SKIP LOCKED` |
+
+El caso de `state.setnx` es el que más cuesta detectar, porque no falla: dos
+instancias creen las dos que tienen el candado y el programa sigue como si
+nada.
+
+Comprobado en la demo `comercio`: tres instancias tras un nginx, seis compras
+simultáneas de la última unidad, y se vende exactamente una - pero **porque la
+regla vive en Postgres**, no en el proceso. Si esa comprobación se hubiera
+apoyado en `state.setnx`, habría vendido tres.
 
 ## ⚠️ Cableado - existe y valida, requiere servicio externo
 

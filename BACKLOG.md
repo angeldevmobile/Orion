@@ -3,6 +3,21 @@
 Cosas encontradas y no arregladas todavía, con el motivo por el que importan.
 Lo que se arregla sale de aquí y entra en [`CHANGELOG.md`](CHANGELOG.md).
 
+## `db.transaction` no deja decidir dentro de la transacción
+
+Recibe una **lista fija** de sentencias y las ejecuta todas: no hay forma de
+leer un valor a mitad y ramificar en Orion. Un checkout del tipo "mira el
+stock, y si no alcanza aborta" no se puede escribir tal cual.
+
+En la demo `comercio` se resolvió apoyándose en un `CHECK (stock >= 0)` que
+aborta la sentencia, lo cual además es mejor diseño. Pero no todo caso se deja
+expresar en SQL puro: por ejemplo, cobrar a una pasarela externa entre dos
+escrituras.
+
+Camino razonable: una transacción interactiva con `db.begin(url)` que devuelva
+un handle y permita `query`/`exec`/`commit`/`rollback` sobre esa misma
+conexión, dejando la lista de sentencias como atajo para el caso sencillo.
+
 ## En macOS el navegador sobrevive a un `kill`
 
 `browser` ata el navegador a la vida del proceso con un *job object* en

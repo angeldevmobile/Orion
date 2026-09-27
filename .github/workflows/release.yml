@@ -56,7 +56,13 @@ jobs:
             target_dir: win32-x64
             bin_name: orion.exe
             asset: orion-win32-x64.exe
-          - os: ubuntu-latest
+          # ubuntu-22.04 y NO ubuntu-latest: un binario enlazado contra glibc
+          # exige en destino una versión igual o más nueva que la de la
+          # máquina donde se compiló. `ubuntu-latest` es 24.04 (glibc 2.39), y
+          # con eso el binario no arranca en Debian 12 (2.36) ni en Ubuntu
+          # 22.04: "version GLIBC_2.39 not found". Compilando en 22.04
+          # (glibc 2.35) funciona en todas ellas y en las más nuevas.
+          - os: ubuntu-22.04
             target_dir: linux-x64
             bin_name: orion
             asset: orion-linux-x64

@@ -6,6 +6,17 @@ formato AAAA-MM-DD.
 ## Sin publicar
 
 ### Corregido
+- **El binario de Linux no arrancaba en Debian 12 ni en Ubuntu 22.04.** Se
+  compilaba en `ubuntu-latest`, que hoy es 24.04 con glibc 2.39, y un binario
+  enlazado contra glibc exige en destino una versión igual o más nueva:
+  `orion: /lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found`.
+  Quedaba fuera Debian estable, que es la base de media imagen de contenedor
+  que se usa para desplegar. Ahora se compila en `ubuntu-22.04` (glibc 2.35),
+  que funciona tanto en las distribuciones viejas como en las nuevas.
+
+  Encontrado desplegando la demo `comercio` en contenedores, no en una
+  revisión: el CI compila y prueba en el mismo Ubuntu donde publica, así que
+  nunca se vio.
 - **`--watch` ahora vigila también los archivos importados.** Sondeaba el
   `mtime` de un solo archivo, así que en un proyecto repartido en varios
   `.orx` tocar un módulo no recargaba nada: se guardaba, no pasaba nada, y uno
