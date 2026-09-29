@@ -475,7 +475,7 @@ mod pg {
                     let boxed = box_params(&params);
                     let refs  = as_refs(&boxed);
                     let n = c.execute(sql.as_str(), &refs)
-                        .map_err(|e| format!("db.ejecutar(postgres): {}", e))?;
+                        .map_err(|e| format!("db.ejecutar(postgres): {}", pg_err(&e)))?;
                     Ok(EvalValue::Int(n as i64))
                 })
             }
@@ -489,7 +489,7 @@ mod pg {
                     let boxed = box_params(&params);
                     let refs  = as_refs(&boxed);
                     let rows = c.query(sql.as_str(), &refs)
-                        .map_err(|e| format!("db.insertar(postgres): {} — is 'RETURNING id' missing?", e))?;
+                        .map_err(|e| format!("db.insertar(postgres): {}", pg_err(&e)))?;
                     match rows.first() {
                         Some(r) if !r.is_empty() => Ok(pg_cell(r, 0)),
                         _ => Ok(EvalValue::Null),
@@ -504,7 +504,7 @@ mod pg {
                 };
                 with_client(&to_str(&args[0]), |c| {
                     let mut tx = c.transaction()
-                        .map_err(|e| format!("db.transaccion(postgres): {}", e))?;
+                        .map_err(|e| format!("db.transaccion(postgres): {}", pg_err(&e)))?;
                     for paso in &pasos {
                         let (raw, params) = match paso {
                             EvalValue::List(par) if par.len() >= 2 => (to_str(&par[0]), extract_params(par.get(1))),
@@ -514,9 +514,9 @@ mod pg {
                         let boxed = box_params(&params);
                         let refs  = as_refs(&boxed);
                         tx.execute(sql.as_str(), &refs)
-                            .map_err(|e| format!("db.transaccion(postgres) '{}': {}", sql, e))?;
+                            .map_err(|e| format!("db.transaccion(postgres) '{}': {}", sql, pg_err(&e)))?;
                     }
-                    tx.commit().map_err(|e| format!("db.transaccion commit(postgres): {}", e))?;
+                    tx.commit().map_err(|e| format!("db.transaccion commit(postgres): {}", pg_err(&e)))?;
                     Ok(EvalValue::Bool(true))
                 })
             }
@@ -527,7 +527,7 @@ mod pg {
                         "SELECT tablename FROM pg_catalog.pg_tables \
                          WHERE schemaname NOT IN ('pg_catalog','information_schema') \
                          ORDER BY tablename", &[])
-                        .map_err(|e| format!("db.tablas(postgres): {}", e))?;
+                        .map_err(|e| format!("db.tablas(postgres): {}", pg_err(&e)))?;
                     Ok(EvalValue::List(rows.iter().map(|r| pg_cell(r, 0)).collect()))
                 })
             }
@@ -555,7 +555,7 @@ mod pg {
                     use std::io::Write;
                     let sql = format!("COPY {} ({}) FROM STDIN", tabla, cols.join(", "));
                     let mut w = c.copy_in(sql.as_str())
-                        .map_err(|e| format!("db.copiar: {}", e))?;
+                        .map_err(|e| format!("db.copiar: {}", pg_err(&e)))?;
                     let mut line = Vec::new();
                     for fila in &filas {
                         let campos = match fila {
@@ -570,7 +570,7 @@ mod pg {
                         line.push(b'\n');
                         w.write_all(&line).map_err(|e| format!("db.copiar write: {}", e))?;
                     }
-                    let n = w.finish().map_err(|e| format!("db.copiar finish: {}", e))?;
+                    let n = w.finish().map_err(|e| format!("db.copiar finish: {}", pg_err(&e)))?;
                     Ok(EvalValue::Int(n as i64))
                 })
             }
@@ -597,14 +597,14 @@ mod pg {
                         .map_err(|e| format!("db.copiar_archivo: could not open '{}': {}", ruta, e))?;
                     let mut reader = std::io::BufReader::new(file);
                     let mut w = c.copy_in(sql.as_str())
-                        .map_err(|e| format!("db.copiar_archivo: {}", e))?;
+                        .map_err(|e| format!("db.copiar_archivo: {}", pg_err(&e)))?;
                     let mut buf = [0u8; 65536];
                     loop {
                         let n = reader.read(&mut buf).map_err(|e| format!("db.copiar_archivo read: {}", e))?;
                         if n == 0 { break; }
                         w.write_all(&buf[..n]).map_err(|e| format!("db.copiar_archivo write: {}", e))?;
                     }
-                    let filas = w.finish().map_err(|e| format!("db.copiar_archivo finish: {}", e))?;
+                    let filas = w.finish().map_err(|e| format!("db.copiar_archivo finish: {}", pg_err(&e)))?;
                     Ok(EvalValue::Int(filas as i64))
                 })
             }
@@ -614,6 +614,36 @@ mod pg {
                 Ok(EvalValue::Bool(removed))
             }
             f => Err(format!("db.{}() does not exist for Postgres", f)),
+        }
+    }
+
+    /// El mensaje de un error de Postgres, con lo que haga falta para
+    /// entenderlo. `postgres::Error` imprime solo "db error" con `{}`: el
+    /// mensaje del servidor va en el error de dentro. Así, un CHECK violado,
+    /// una clave duplicada o una fila mala en un COPY llegaban a Orion como
+    /// "db error" a secas, y no había forma de saber qué había pasado.
+    ///
+    /// Formato: `mensaje — detalle (pista: …) [contexto] (SQLSTATE xxxxx)`.
+    /// El contexto es lo que dice, por ejemplo, en qué línea falló un COPY; el
+    /// SQLSTATE deja distinguir casos sin depender del idioma del servidor
+    /// (23505 = duplicado, 23514 = CHECK, 23503 = clave ajena).
+    fn pg_err(e: &postgres::Error) -> String {
+        match e.as_db_error() {
+            Some(db) => {
+                let mut s = db.message().to_string();
+                if let Some(d) = db.detail() { s.push_str(" — "); s.push_str(d); }
+                if let Some(h) = db.hint()   { s.push_str(&format!(" (pista: {h})")); }
+                if let Some(w) = db.where_() { s.push_str(&format!(" [{w}]")); }
+                s.push_str(&format!(" (SQLSTATE {})", db.code().code()));
+                s
+            }
+            None => {
+                use std::error::Error as _;
+                match e.source() {
+                    Some(causa) => format!("{e}: {causa}"),
+                    None => e.to_string(),
+                }
+            }
         }
     }
 
@@ -657,7 +687,7 @@ mod pg {
         let boxed = box_params(params);
         let refs  = as_refs(&boxed);
         let rows = c.query(sql, &refs)
-            .map_err(|e| format!("db.query(postgres): {}", e))?;
+            .map_err(|e| format!("db.query(postgres): {}", pg_err(&e)))?;
         let out = rows.iter().map(|row| {
             let mut m = IndexMap::new();
             for (i, col) in row.columns().iter().enumerate() {

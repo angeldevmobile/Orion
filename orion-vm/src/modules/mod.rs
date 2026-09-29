@@ -82,6 +82,8 @@ pub mod template_mod;
 pub mod formato_mod;
 pub mod grafo_mod;
 pub mod pdf_mod;
+pub mod pdf_layout;
+pub mod pdf_edit;
 
 use crate::eval_value::EvalValue;
 

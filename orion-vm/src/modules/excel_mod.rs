@@ -20,7 +20,7 @@ use rust_xlsxwriter::conditional_format::{
 /// perdía entera. Al ser un IndexSet, el orden es el de aparición y no el
 /// alfabético — el dict de Orion preserva el orden de inserción y ordenarlo
 /// aquí descartaba una decisión deliberada de quien escribió el reporte.
-fn collect_headers(rows: &[EvalValue]) -> Vec<String> {
+pub(crate) fn collect_headers(rows: &[EvalValue]) -> Vec<String> {
     let mut cols: IndexSet<String> = IndexSet::new();
     for r in rows {
         if let EvalValue::Dict(m) = r {
@@ -862,12 +862,12 @@ fn write_styled_impl(
         _ => (0x2D5F8A, 0xFFFFFF),
     };
 
+    // Mismo criterio que `write`: el orden en que el developer escribió las
+    // claves, y todas las que aparezcan en cualquier fila. Aquí se ordenaban
+    // alfabéticamente, así que "Fecha, Pedidos, Importe" salía como
+    // "Fecha, Importe, Pedidos" y no había forma de pedir otro orden.
     let headers: Vec<String> = match rows.first() {
-        Some(EvalValue::Dict(m)) => {
-            let mut h: Vec<String> = m.keys().cloned().collect();
-            h.sort();
-            h
-        }
+        Some(EvalValue::Dict(_)) => collect_headers(&rows),
         _ => return Err("excel.write_styled: the data must be a list of dicts".into()),
     };
     if headers.is_empty() {

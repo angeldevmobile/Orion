@@ -83,13 +83,11 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
                 .from_path(&path)
                 .map_err(|e| format!("csv.write: could not create '{}': {}", path, e))?;
 
-            // Extraer cabeceras del primer dict
+            // Cabeceras en el orden en que se escribieron las claves, y todas
+            // las que aparezcan en cualquier fila (antes: solo las del primer
+            // dict, y en orden alfabético).
             let headers = match rows.first() {
-                Some(EvalValue::Dict(m)) => {
-                    let mut h: Vec<String> = m.keys().cloned().collect();
-                    h.sort();
-                    h
-                }
+                Some(EvalValue::Dict(_)) => crate::modules::excel_mod::collect_headers(&rows),
                 Some(EvalValue::List(_)) => vec![],
                 _ => return Err("csv.write: the data must be a list of dicts or lists".into()),
             };
@@ -124,13 +122,10 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "headers" => {
             let rows = list_arg("headers", &args, 0)?;
             match rows.first() {
-                Some(EvalValue::Dict(m)) => {
-                    let mut h: Vec<EvalValue> = m.keys()
-                        .map(|k| EvalValue::Str(k.clone()))
-                        .collect();
-                    h.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
-                    Ok(EvalValue::List(h))
-                }
+                Some(EvalValue::Dict(_)) => Ok(EvalValue::List(
+                    crate::modules::excel_mod::collect_headers(&rows)
+                        .into_iter().map(EvalValue::Str).collect(),
+                )),
                 _ => Ok(EvalValue::List(vec![])),
             }
         }

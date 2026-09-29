@@ -70,10 +70,6 @@ fn aviso_cambio() {
         DIM = banner::DIM, RESET = banner::RESET);
 }
 
-fn mtime(path: &str) -> Option<SystemTime> {
-    fs::metadata(path).ok()?.modified().ok()
-}
-
 /// Los archivos que hay que vigilar: el de entrada y todo lo que importa,
 /// recursivamente.
 ///

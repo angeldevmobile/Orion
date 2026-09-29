@@ -1613,6 +1613,29 @@ impl VM {
             ns.insert(k, v);
         }
 
+        // 5) Lo que el módulo importó a su vez. Esos módulos se cargaron en la
+        //    sub-VM, así que sus funciones (`cola__stats`) y sus globales
+        //    (`cola__LIMITE`) solo existían ahí: el namespace `cola` que este
+        //    módulo guarda apunta a nombres que la VM principal no conocía. Si
+        //    el programa no importaba `cola` por su cuenta, llamar a través
+        //    de este módulo fallaba con "Function 'cola__stats' not found".
+        //    Ya vienen con el prefijo de su propio archivo; si el programa
+        //    importó el mismo módulo antes, se queda la copia que ya tenía.
+        for (fname, fdef) in &sub_vm.functions {
+            if !own_fns.contains(fname) && !self.functions.contains_key(fname) {
+                self.functions.insert(fname.clone(), fdef.clone());
+            }
+        }
+        if let (Some(sub_frame), Some(main_frame)) =
+            (sub_vm.call_stack.first(), self.call_stack.first_mut())
+        {
+            for (k, v) in &sub_frame.vars {
+                if k.contains("__") && !k.starts_with('_') && !main_frame.vars.contains_key(k) {
+                    main_frame.vars.insert(k.clone(), v.clone());
+                }
+            }
+        }
+
         Ok(Value::Dict(ns))
     }
 
@@ -1903,14 +1926,38 @@ impl VM {
                 None => {
                     let frame = self.call_stack.pop().unwrap();
                     frame.sync_to_instance();
+                    self.error_handlers.retain(|h| h.frame_depth <= self.call_stack.len());
                 }
                 Some((Instruction::Return, _)) => {
                     let frame = self.call_stack.pop().ok_or("Return sin frame")?;
                     frame.sync_to_instance();
+                    // Un `return` dentro de un `attempt` sale sin pasar por
+                    // EndAttempt: su manejador no puede sobrevivir al frame.
+                    self.error_handlers.retain(|h| h.frame_depth <= self.call_stack.len());
                 }
                 Some((other, line)) => {
                     if line > 0 { self.current_line = line; }
-                    self.dispatch_instr(other)?;
+                    if let Err(e) = self.dispatch_instr(other) {
+                        // Igual que en `step`: si hay un `attempt` abierto
+                        // DENTRO de esta ejecución, el error va a su `handle`.
+                        // Antes el error subía directo, así que en los
+                        // handlers de `serve` (que corren por aquí) ningún
+                        // `attempt` del script capturaba nada.
+                        let atrapable = self.error_handlers.last()
+                            .map_or(false, |h| h.frame_depth >= target_depth);
+                        if !atrapable {
+                            return Err(e);
+                        }
+                        let handler = self.error_handlers.pop().unwrap();
+                        while self.call_stack.len() > handler.frame_depth {
+                            let f = self.call_stack.pop().unwrap();
+                            f.sync_to_instance();
+                        }
+                        self.value_stack.push(Value::Str(e));
+                        self.call_stack.last_mut()
+                            .ok_or("Sin frame activo para handle")?
+                            .ip = handler.handler_addr;
+                    }
                 }
             }
         }
@@ -2386,10 +2433,16 @@ impl VM {
             match self.run_handler(mw, req_val.clone()) {
                 Ok(Value::Null) => continue,
                 Ok(other) => { early_response = Some(other); break; }
+                // Un middleware que falla es un 500, igual que un handler.
+                // Antes su mensaje se devolvía como cuerpo de la respuesta, y
+                // un Str suelto sale con 200: el error parecía un éxito.
                 Err(e) => {
                     eprintln!("[Orion] middleware '{}' failed: {}", mw, e);
-                    early_response = Some(Value::Str(format!("error interno: {}", e)));
-                    break;
+                    log_req(500, &e);
+                    let resp = Response::from_string(format!("error interno: {}", e))
+                        .with_status_code(500);
+                    let _ = request.respond(resp);
+                    return;
                 }
             }
         }

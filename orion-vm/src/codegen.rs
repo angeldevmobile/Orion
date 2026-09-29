@@ -1309,6 +1309,49 @@ fn compile_expr_into(
             emit!(Instruction::Call("range".into(), 2));
         }
 
+        // `a and b` / `a or b` con cortocircuito: la derecha solo se evalúa si
+        // hace falta. Antes se bajaban a `And`/`Or` con los dos lados ya en la
+        // pila, así que `has_key(d, "k") and d["k"] > 0` reventaba justo en el
+        // caso que la izquierda existía para evitar.
+        //
+        // El resultado pasa por una variable oculta en vez de quedarse en la
+        // pila: el JIT vacía la pila en cada frontera de bloque (ver el
+        // ternario, más abajo), y así la pila está vacía en los dos saltos y
+        // las funciones con `and`/`or` siguen compilando a nativo.
+        //
+        //   <a>  Not Not  StoreVar t        t = bool(a)
+        //   LoadVar t  JumpIfFalse/True fin   `and` corta si es falso, `or` si es cierto
+        //   <b>  Not Not  StoreVar t        t = bool(b)
+        //   fin: LoadVar t
+        Expr::BinaryOp { op, left, right } if op == "&&" || op == "||" => {
+            static CONTADOR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let t = format!(
+                "__corto{}",
+                CONTADOR.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
+
+            recurse!(left);
+            emit!(Instruction::Not);
+            emit!(Instruction::Not);
+            emit!(Instruction::StoreVar(t.clone()));
+            emit!(Instruction::LoadVar(t.clone()));
+            let salto = instrs.len();
+            emit!(Instruction::Jump(0));
+
+            recurse!(right);
+            emit!(Instruction::Not);
+            emit!(Instruction::Not);
+            emit!(Instruction::StoreVar(t.clone()));
+
+            let fin = instrs.len();
+            instrs[salto] = if op == "&&" {
+                Instruction::JumpIfFalse(fin)
+            } else {
+                Instruction::JumpIfTrue(fin)
+            };
+            emit!(Instruction::LoadVar(t));
+        }
+
         Expr::BinaryOp { op, left, right } => {
             recurse!(left);
             recurse!(right);
