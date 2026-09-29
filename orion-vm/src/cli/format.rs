@@ -450,11 +450,8 @@ impl Formatter {
 
 //   Formatter de expresiones (puro, sin estado)           
 
-/// Reimprime un patrón de `match` tal y como se escribe.
-///
-/// La abreviatura `{clave}` se reconstruye cuando el sub-patrón es la ligadura
-/// del mismo nombre: reimprimirla como `{clave: clave}` sería correcto pero
-/// ruidoso, y el formatter no está para ensuciar lo que ya estaba limpio.
+/// Reimprime un patrón de `match`. `{clave}` se mantiene abreviado en vez de
+/// escribirlo como `{clave: clave}`.
 pub fn fmt_pattern(p: &Pattern) -> String {
     let campos = |fields: &[(String, Pattern)]| -> String {
         fields.iter()

@@ -1,9 +1,5 @@
-//! Interfaz de biblioteca de Orion VM.
-//!
-//! Usos:
-//!   - `orion_rt_exec`: punto de entrada C-ABI para ejecutables nativos AOT
-//!   - `lexer_fuzz`, `parser_fuzz`, `pipeline_fuzz`: targets de fuzzing
-//!   - Módulos públicos: lexer, parser, codegen, etc.
+//! Orion VM como biblioteca: entrada C-ABI de los ejecutables AOT, targets de
+//! fuzzing y los módulos públicos (lexer, parser, codegen…).
 
 pub mod token;
 pub mod ast;
@@ -26,23 +22,16 @@ pub mod modules;
 pub mod ai;
 pub mod jit;
 
-/// El binario (main.rs) declara su propio árbol de módulos y no enlaza esta
-/// librería, así que `typechecker.rs` se compila en ambos. Consulta el registro
-/// de builtins por `crate::cli::builtins`, y esa ruta tiene que resolver
-/// también aquí: se declaran los dos únicos archivos del registro (solo
-/// dependen de serde), no el resto del CLI.
+/// El typechecker consulta `crate::cli::builtins`: aquí se declaran solo los
+/// dos archivos del registro, no todo el CLI.
 pub mod cli {
     pub mod builtins;
     pub mod builtins_gen;
 }
 
-//    Punto de entrada C-ABI para ejecutables AOT                               
-//
-// El compilador AOT (aot.rs) genera un main() en Cranelift IR que llama a
-// esta función con el bytecode embebido. La staticlib de orion_vm provee el
-// símbolo para el paso de enlazado.
-//
-// Signature: (bytecode_ptr: *const u8, bytecode_len: usize) -> i32 (exit code)
+//    Punto de entrada C-ABI para ejecutables AOT
+// El main() que genera aot.rs llama aquí con el bytecode embebido:
+// (bytecode_ptr: *const u8, bytecode_len: usize) -> i32 (código de salida).
 
 #[no_mangle]
 pub extern "C" fn orion_rt_exec(bytecode_ptr: *const u8, bytecode_len: usize) -> i32 {

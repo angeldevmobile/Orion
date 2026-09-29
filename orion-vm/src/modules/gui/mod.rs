@@ -97,11 +97,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             push(Component::Avatar { text, size, style })
         }
 
-        //    Diálogos de archivo del sistema
-        //
-        //    Abren el selector nativo y bloquean hasta que el usuario responde,
-        //    igual que cualquier app de escritorio. Devuelven la ruta elegida o
-        //    null si se cancela — nunca un error, cancelar no es un fallo.
+        //    Diálogos de archivo del sistema: bloquean hasta la respuesta y
+        //    devuelven la ruta, o null si se cancela (cancelar no es un error).
 
         // file_open(opts?) → ruta | null
         // opts = { title, filter, extensions, dir, multiple }
@@ -202,12 +199,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        //    Layout — containers anidados
-        //    gui.card() / gui.row() / gui.col() / gui.zone() → abre el contenedor
-        //    gui.end() → cierra el último contenedor abierto
-        // gui.card({ width: N?, fill: bool? }) — config opcional.
-        // Por defecto la tarjeta llena el ancho de su celda; el dev puede fijar
-        // un width concreto o pedir fill:false para que se encoja al contenido.
+        //    Layout: card / row / col / zone abren un contenedor y end() lo cierra.
+        // gui.card({ width: N?, fill: bool? }) — por defecto llena el ancho de su
+        // celda; `width` lo fija y `fill: no` la ajusta al contenido.
         "card" => {
             let cfg   = dict_opt(&args, 0);
             let width = cfg_f32_opt(&cfg, "width");
@@ -223,12 +217,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        //    Composiciones de alto nivel
-        //
-        //    Son los dos arreglos que aparecen en casi cualquier panel y que a
-        //    mano cuestan una veintena de líneas de row/col/card/end anidados.
-        //    Emiten exactamente los mismos componentes que se escribirían a
-        //    mano, así que el tema y el estilo siguen siendo los del developer.
+        //    Composiciones de alto nivel: emiten los mismos componentes que se
+        //    escribirían a mano, así que tema y estilo siguen siendo del developer.
 
         // gui.stats([{label, value, caption?}, …], opts?) — fila de tarjetas.
         // Cada item admite dict {label, value} o par ["label", "value"].
@@ -320,10 +310,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        // gui.chips(lista, opts?) — fila de botones a partir de una lista.
-        // opts = { event: "prefijo:" , style… }. El evento de cada botón es el
-        // prefijo seguido del propio texto, que es el patrón con el que se
-        // manejan listas dinámicas (`gui.ev()` empieza por el prefijo).
+        // gui.chips(lista, opts?) — fila de botones a partir de una lista; el evento
+        // de cada uno es opts.event + su texto (para `gui.ev()` con prefijo).
         "chips" | "opciones" => {
             let items = list_arg(&args, 0, "chips")?;
             if items.is_empty() { return Ok(EvalValue::Null); }
@@ -478,12 +466,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             });
             Ok(EvalValue::Null)
         }
-        // free(handle) → cierra el contenedor abierto; lo llama `with`.
-        //
-        // `with c = gui.card() { … }` desugar a una llamada a `gui.free` al
-        // salir del bloque, también si el cuerpo lanza un error. La pila de
-        // contenedores es LIFO, así que el del tope es siempre el de este
-        // bloque y el handle en sí no hace falta para nada.
+        // free(handle) → cierra el contenedor abierto; lo llama `with` al salir,
+        // también si el cuerpo falla.
         "free" => call("end", vec![]),
 
         "end" => {
@@ -877,10 +861,8 @@ fn parse_rgb_tag(s: &str) -> Option<[u8; 3]> {
 
 type CfgMap = Option<indexmap::IndexMap<String, EvalValue>>;
 
-/// Emite el botón descrito por `{ press | ghost, event? }`.
-///
-/// Lo comparten `header` y `section`: en ambos la acción es un único botón
-/// alineado a la derecha, y el resto de claves del dict pasan como estilo.
+/// Botón de acción `{ press | ghost, event? }` de `header` y `section`,
+/// alineado a la derecha; el resto de claves pasan como estilo.
 fn boton_de(accion: &EvalValue) -> Result<EvalValue, String> {
     let EvalValue::Dict(m) = accion else { return Ok(EvalValue::Null) };
     let (etiqueta, solido) = match m.get("press").or_else(|| m.get("boton")) {
@@ -910,12 +892,8 @@ fn texto(v: &EvalValue) -> String {
     }
 }
 
-/// (etiqueta, valor, extra) de un item de `stats`/`fields`.
-///
-/// Se aceptan las dos formas que resultan naturales al escribir un panel: el
-/// par posicional `["Etiqueta", valor]` y el dict `{label, value}`. En el dict
-/// se admiten alias en español y las claves `Campo`/`Valor`, que son las que
-/// produce un reporte leído de Excel.
+/// (etiqueta, valor, extra) de un item de `stats`/`fields`: `["Etiqueta", valor]`
+/// o `{label, value}` (también en español o `Campo`/`Valor`).
 fn tri_texto(v: &EvalValue) -> (String, String, Option<String>) {
     match v {
         EvalValue::List(l) => (
@@ -937,10 +915,8 @@ fn tri_texto(v: &EvalValue) -> (String, String, Option<String>) {
     }
 }
 
-/// Construye el diálogo nativo a partir de las opciones del developer.
-///
-/// `extensions` acepta una lista (`["xlsx", "xls"]`) o una cadena suelta; el
-/// punto inicial es opcional para que dé igual escribir "xlsx" o ".xlsx".
+/// Diálogo nativo con las opciones del developer. `extensions` admite lista o
+/// cadena, con o sin punto inicial.
 fn file_dialog(cfg: &CfgMap) -> rfd::FileDialog {
     let mut d = rfd::FileDialog::new();
 

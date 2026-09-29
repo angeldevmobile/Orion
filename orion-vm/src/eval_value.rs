@@ -3,11 +3,8 @@ use std::fmt;
 use std::sync::{Arc, Condvar, Mutex};
 use serde_json::Value as Json;
 
-/// Tipo de valor de interfaz del stdlib (independiente del bytecode VM).
-///
-/// Algunas variantes (Function, Future, Shape, Instance) ya no se construyen
-/// desde que se retiró el intérprete tree-walk, pero se conservan como parte
-/// del tipo de interfaz que los módulos del stdlib están escritos para manejar.
+/// Valor de interfaz de la stdlib. Function, Future, Shape e Instance ya no se
+/// construyen, pero los módulos siguen escritos para manejarlos.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum EvalValue {

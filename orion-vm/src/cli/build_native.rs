@@ -1,10 +1,5 @@
-//! `orion --build <archivo.orx> [-o salida]`
-//!
-//! Pipeline completo:
-//!   1. Lex → Parse → Codegen → bytecode (JSON)
-//!   2. cranelift-object → object file (.o/.obj) con main() + bytecode embebido
-//!   3. cargo build --lib → staticlib de orion_vm (en caché)
-//!   4. Linker del sistema → ejecutable nativo standalone
+//! `orion --build <archivo.orx> [-o salida]`: bytecode → objeto Cranelift con el
+//! bytecode embebido → staticlib de orion_vm (en caché) → ejecutable del linker.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

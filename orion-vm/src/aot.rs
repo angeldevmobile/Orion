@@ -1,12 +1,6 @@
-//! Compilador AOT (Ahead-of-Time) de Orion usando cranelift-object.
-//!
-//! Produce un archivo objeto nativo (.o / .obj) que contiene:
-//!   - El bytecode serializado como sección RODATA (`_orion_bc`)
-//!   - La longitud del bytecode como dato de 8 bytes (`_orion_bc_len`)
-//!   - Una función `main()` en Cranelift IR que llama `orion_rt_exec(ptr, len)`
-//!
-//! El archivo objeto se enlaza con la staticlib de Orion VM para producir
-//! un ejecutable nativo standalone.
+//! Compilador AOT: un objeto nativo con el bytecode embebido (`_orion_bc`,
+//! `_orion_bc_len`) y un `main()` que llama a `orion_rt_exec`. Se enlaza con la
+//! staticlib de Orion VM.
 
 use cranelift_codegen::ir::{types, AbiParam, InstBuilder};
 use cranelift_codegen::settings::{self, Configurable};

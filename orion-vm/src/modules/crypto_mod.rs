@@ -165,15 +165,9 @@ fn hmac_sign(data: &[u8], key: &[u8]) -> Result<String, String> {
     Ok(hex_encode(&mac.finalize().into_bytes()))
 }
 
-//     AES-256-GCM — cifrado autenticado real
-//
-// Clave AES derivada del password con Argon2id + salt aleatorio (memory-hard).
-// La clave puede venir del usuario (posible password débil), así que un SHA-256
-// plano —el esquema viejo— la dejaba rompible por fuerza bruta en GPU y sin salt
-// exponía a rainbow tables. Formato versionado:
-//   v1 (actual):  base64( 0x01 ‖ salt[16] ‖ nonce[12] ‖ ct )
-//   legacy:       base64(                    nonce[12] ‖ ct )   (SHA-256)
-// GCM autentica el tag, lo que desambigua v1 vs legacy al descifrar.
+//     AES-256-GCM: clave con Argon2id + salt. Formato v1: base64(0x01 ‖ salt[16]
+//     ‖ nonce[12] ‖ ct); legacy (SHA-256 sin salt): base64(nonce[12] ‖ ct). El tag
+//     GCM distingue v1 de legacy al descifrar.
 
 const AES_V1: u8 = 0x01;
 

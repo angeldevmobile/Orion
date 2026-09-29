@@ -1,7 +1,5 @@
-/// search_mod — búsqueda rápida en archivos sin cargar todo en RAM
-///
-/// Streaming en todos los casos: BufReader para texto, csv::Reader para CSV,
-/// calamine para Excel. Regex via crate `regex`. Nunca > chunk de líneas en RAM.
+/// search_mod — búsqueda en archivos en streaming (texto, CSV y Excel), sin
+/// cargarlos enteros en RAM.
 
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap as HashMap;
@@ -11,10 +9,8 @@ use std::path::Path;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // Los comentarios van ENCIMA del arm, no al final de la línea: el
-        // generador de la documentación solo recoge los de arriba, y con los de
-        // al lado este módulo entero salía sin describir en el editor.
-        //
+        // Comentarios encima del arm, no al final de la línea: el generador de
+        // documentación solo recoge los de arriba.
         // in_file(ruta: string, patron: string) -> list → elige el buscador por la extensión del archivo
         "in_file"  => fn_in_file(args),
         // text(ruta: string, patron: string, distingue_mayusculas?: bool) -> list → una entrada { line, content } por línea que casa

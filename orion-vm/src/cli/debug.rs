@@ -1,25 +1,6 @@
-//! Debugger interactivo de terminal para Orion.
-//!
-//! Uso:  orion --debug <archivo.orx>
-//!
-//! Comandos:
-//!   b <line> [if <cond>]   — breakpoint
-//!   rb <id|line>           — eliminar breakpoint
-//!   tb <id|line>           — toggle breakpoint
-//!   lb                      — listar breakpoints
-//!   n                       — next (step over)
-//!   s                       — step into
-//!   o                       — step out
-//!   c                       — continue
-//!   p <var>                 — imprimir variable
-//!   w <var>                 — agregar watch
-//!   rw <var>                — eliminar watch
-//!   lw                      — listar watches
-//!   v                       — variables del scope
-//!   bt                      — backtrace
-//!   stack                   — value stack
-//!   l [n]                   — código fuente (contexto ±n líneas, por defecto 3)
-//!   q                       — salir
+//! Depurador de terminal: `orion --debug <archivo.orx>`. Comandos: b, rb, tb, lb
+//! (breakpoints), n, s, o, c (pasos), p, w, rw, lw, v (variables y watches), bt,
+//! stack, l [n] y q. `help` dentro del depurador los describe.
 
 use std::io::{self, BufRead, Write};
 use crate::debugger::{DebugSession, PauseReason};

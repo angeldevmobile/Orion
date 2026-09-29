@@ -1,7 +1,5 @@
-//! Runtime OOP — JIT-5: DefineShape, GetAttr, SetAttr, IsInstance, PushSelf, CallMethod
-//!
-//! Las instancias son OrionVal con tag=TAG_INSTANCE, data_i → OrionInstance heap.
-//! Los acts compilados se registran en METHOD_TABLE y se llaman via dispatch de puntero.
+//! Runtime OOP del JIT: instancias con TAG_INSTANCE y acts compilados en
+//! METHOD_TABLE, llamados por puntero.
 
 use std::cell::RefCell;
 use indexmap::IndexMap as HashMap;

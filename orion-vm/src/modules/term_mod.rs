@@ -1,9 +1,5 @@
-//! term — primitivos de terminal para construir UIs de consola (barras de
-//! progreso, spinners, etc.) DESDE Orion, sin hardcodear nada en el runtime.
-//!
-//! El runtime solo aporta la I/O cruda (la syscall): escribir sin salto de
-//! línea, hacer flush y saber si la salida es una terminal. La lógica visual
-//! (spinner, barra, colores) se escribe en Orion — ver `packages/progress.orx`.
+//! term — solo la I/O cruda de terminal (escribir sin salto, flush, ¿es una
+//! terminal?). Spinners y barras se escriben en Orion: ver `packages/progress.orx`.
 
 use crate::eval_value::EvalValue;
 use std::io::{IsTerminal, Write};

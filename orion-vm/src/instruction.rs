@@ -115,15 +115,8 @@ pub enum Instruction {
     //   Fin
     Halt,
 
-    //   Cortocircuito de `and` / `or`
-    //
-    // Van al final, y no junto a los otros saltos, para no cambiar el índice
-    // de las variantes que ya existen en los .orbc compilados.
-    //
-    // `a and b` se compila a: <a>  JumpIfFalseOrPop(fin)  <b>  ToBool  fin:
-    // Si el valor de la cima ya decide el resultado (falso en un `and`, cierto
-    // en un `or`), se queda en la pila convertido a booleano y se salta al
-    // final sin evaluar la derecha. Si no, se descarta y se sigue.
+    //   Cortocircuito de `and` / `or` (ver codegen). Al final del enum para no
+    //   cambiar los índices de las variantes que ya hay en los .orbc.
     JumpIfFalseOrPop(usize),
     JumpIfTrueOrPop(usize),
     ToBool,              // pop x → push Bool(truthy(x))

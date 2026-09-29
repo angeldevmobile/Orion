@@ -1,7 +1,5 @@
-//! Core del debugger de Orion.
-//!
-//! `DebugSession` envuelve la VM y controla la ejecución instrucción a instrucción,
-//! gestionando breakpoints, modos de step y watches.
+//! Depurador: `DebugSession` ejecuta la VM instrucción a instrucción, con
+//! breakpoints, pasos y watches.
 
 use crate::vm::VM;
 use crate::bytecode::OrionBytecode;

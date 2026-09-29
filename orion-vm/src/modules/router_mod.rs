@@ -281,17 +281,9 @@ pub fn active_match(method: &str, path: &str) -> Option<ActiveMatch> {
 
 //    Helpers
 
-/// Valida un handler EN EL REGISTRO, no en el despacho.
-///
-/// Los workers de serve corren cada petición en su propia VM e invocan los
-/// handlers POR NOMBRE, así que una lambda anónima es inservible: no tiene
-/// nombre que buscar. Antes eso se descubría en tiempo de request —
-/// `handler_name` devolvía `None`, la ruta caía al fallback y el middleware
-/// se descartaba en silencio. Un middleware de autorización escrito como
-/// lambda no bloqueaba nada y el endpoint quedaba abierto sin un solo aviso.
-///
-/// Fallar aquí convierte ese silencio en un error que apunta a la línea
-/// exacta donde se registró la ruta.
+/// Valida el handler al registrar la ruta: serve lo invoca por nombre, así que una
+/// lambda anónima no sirve, y descubrirlo en la petición dejaba un middleware de
+/// autorización sin efecto y sin aviso.
 fn check_handler(fn_name: &str, arg_desc: &str, h: &EvalValue) -> Result<(), String> {
     match h {
         EvalValue::Str(s) if !s.is_empty() => Ok(()),

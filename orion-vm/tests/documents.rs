@@ -1,17 +1,5 @@
 //! Generación y edición de documentos: `pdf`, `excel.write_styled` y
-//! `csv.write`.
-//!
-//! Regresiones que cubre:
-//!   - pdf.report cortaba en silencio: 4 columnas como mucho, y al llegar al
-//!     pie de la primera página dejaba de pintar filas.
-//!   - Al repartir el ancho, las cifras se recortaban ("1.335.0…").
-//!   - pdf.watermark borraba las fuentes de la página: la marca salía y el
-//!     texto del documento dejaba de verse.
-//!   - pdf.info leía como UTF-8 los metadatos guardados en UTF-16.
-//!   - excel.write_styled y csv.write ordenaban las columnas alfabéticamente.
-//!
-//! Los programas Orion se autoverifican con `error`; lo que Orion no puede
-//! mirar (las fuentes de una página) se comprueba con lopdf.
+//! `csv.write`. Los programas se autoverifican con `error`.
 
 use orion_vm::{codegen, lexer, parser, vm};
 use std::fs;

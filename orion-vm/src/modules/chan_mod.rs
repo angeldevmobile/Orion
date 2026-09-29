@@ -1,18 +1,6 @@
-//! Canales de comunicación entre tareas (`spawn` / `async fn`).
-//!
-//! Da a Orion paso de mensajes estilo Go: productor/consumidor, fan-out/fan-in,
-//! y —vía `select` sobre un canal "done"— cancelación y concurrencia estructurada.
-//!
-//! Un canal se identifica con un handle entero (igual patrón que `cola`): así el
-//! handle es un `Int` que cruza sin problemas a una tarea `spawn` (`to_send`).
-//! Los valores viajan serializados a `serde_json::Value` para no chocar con las
-//! restricciones de `Send` sobre `EvalValue`.
-//!
-//! Bloqueo con parking real (Condvar), nunca espera activa:
-//!   - `recibir` se aparca hasta que llega un valor o el canal se cierra.
-//!   - `enviar` sobre un canal con capacidad se aparca si está lleno.
-//!   - `select` se aparca en un Condvar global que toda emisión/cierre despierta;
-//!     un contador de generación cierra la ventana de "wakeup perdido".
+//! Canales entre tareas, estilo Go. El canal es un handle entero y los valores
+//! viajan como JSON; enviar, recibir y `select` se aparcan en una Condvar (con un
+//! contador de generación para no perder avisos), nunca en espera activa.
 
 use crate::eval_value::EvalValue;
 use crate::modules::json_mod::{eval_to_json, json_to_eval};
@@ -186,9 +174,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
 
         // select([id1, id2, ...]) → Dict {canal, valor} | Null.
-        // Bloquea hasta que ALGÚN canal tenga un valor y lo devuelve junto con su
-        // handle. Devuelve Null si todos los canales están cerrados y vacíos.
-        // Es la base de la cancelación (canal "done") y del fan-in estructurado.
+        // Bloquea hasta que un canal tenga valor; Null si todos están cerrados y vacíos.
         "select" | "seleccionar" => {
             let ids: Vec<i64> = match args.get(0) {
                 Some(EvalValue::List(items)) => items.iter()

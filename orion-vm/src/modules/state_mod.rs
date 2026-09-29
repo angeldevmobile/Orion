@@ -1,23 +1,5 @@
-//! Módulo `state`: estado compartido, thread-safe y opcionalmente persistente.
-//!
-//! Resuelve el punto débil clásico de los servidores en Orion: las variables
-//! globales crean LOCALES dentro de cada handler y no sobreviven entre requests.
-//! `state` mantiene un único store en memoria protegido por `Mutex` —seguro bajo
-//! el pool de hilos de `serve`— con:
-//!   • operaciones atómicas (`incr`/`decr`): get-modify-set bajo un solo lock,
-//!     sin condiciones de carrera aunque dos requests lleguen a la vez;
-//!   • persistencia opcional a disco (`persist`): sobrevive reinicios sin que el
-//!     usuario tenga que serializar a JSON a mano.
-//!
-//! ```orion
-//! use state
-//! state.persist("app.db")        -- respalda a disco (y carga lo existente)
-//! state.set("visitas", 0)
-//! fn router(req) {
-//!     n = state.incr("visitas")  -- atómico y seguro con N hilos
-//!     return { "status": 200, "body": "visita #" + str(n) }
-//! }
-//! ```
+//! `state`: estado compartido entre las peticiones de `serve`, protegido por un
+//! Mutex, con `incr`/`decr` atómicos y persistencia opcional a disco (`persist`).
 
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};

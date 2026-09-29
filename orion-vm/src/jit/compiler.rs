@@ -1,9 +1,5 @@
-//! Compilador Bytecode → Cranelift JIT — Fase JIT-4: I/O nativo y UseModule
-//!
-//! Todos los valores son punteros a OrionVal en heap (pasados como i64).
-//! Cada operación delega a una función de runtime (rt_add, rt_eq, etc.).
-//! JIT-4: ReadInput, ReadFile, WriteFile, ReadEnv, UseModule.
-//! Fase JIT-5 añadirá DefineShape, CallMethod, IsInstance, PushSelf, GetAttr, SetAttr.
+//! Bytecode → Cranelift (JIT y AOT). Los valores son punteros a OrionVal (i64)
+//! y cada operación llama a una función del runtime (rt_add, rt_eq…).
 
 use std::collections::HashSet;
 use indexmap::IndexMap as HashMap;
@@ -182,11 +178,8 @@ fn is_eligible(instr: &Instruction) -> bool {
 
 //     Compilador JIT                                                           
 
-/// Generador de código Cranelift, parametrizado por el backend del módulo.
-///
-/// `JITModule` compila en memoria y ejecuta en el acto; `ObjectModule` emite un
-/// archivo objeto para enlazar (AOT). La generación de IR es idéntica salvo en
-/// cómo se materializan los literales de cadena — ver [`CodeGen::cstr_ptr`].
+/// Generador Cranelift: `JITModule` compila en memoria y `ObjectModule` emite un
+/// objeto para enlazar (AOT). Solo cambia cómo se emiten las cadenas.
 pub struct CodeGen<M: Module> {
     module:         M,
     fn_counter:     usize,
@@ -203,10 +196,8 @@ pub struct CodeGen<M: Module> {
 /// El compilador JIT es el generador sobre el backend en memoria.
 pub type JitCompiler = CodeGen<JITModule>;
 
-/// Resultado de compilar un programa: lo que el backend necesita para cerrar.
-///
-/// El JIT resuelve los `FuncId` a direcciones reales tras `finalize_definitions`;
-/// el AOT los referencia por símbolo dentro del objeto.
+/// Resultado de compilar: el JIT resuelve los `FuncId` a direcciones y el AOT
+/// los referencia por símbolo.
 pub struct CompiledProgram {
     /// `None` solo para el programa vacío, que no tiene nada que ejecutar.
     pub main:      Option<FuncId>,
@@ -804,12 +795,8 @@ impl<M: Module> CodeGen<M> {
             var_table.insert(name.clone(), v);
         }
 
-        // Puntos de llegada de `and` / `or`: el único caso en que un valor
-        // cruza de un bloque a otro. Llega por dos caminos (el salto que
-        // corta, o la derecha ya evaluada), así que no puede ir en la pila del
-        // compilador, que se vacía en cada bloque. Cada punto tiene su
-        // variable de Cranelift: los dos caminos la escriben, el bloque de
-        // llegada la lee, y Cranelift construye el SSA.
+        // Puntos de llegada de `and`/`or`: el valor llega por dos caminos, así
+        // que va en una variable de Cranelift por punto y no en la pila.
         let mut cruces: HashMap<usize, Variable> = HashMap::new();
         for instr in instructions {
             if let Instruction::JumpIfFalseOrPop(t) | Instruction::JumpIfTrueOrPop(t) = instr {
@@ -893,16 +880,27 @@ impl<M: Module> CodeGen<M> {
             // Cambio de bloque básico
             if i > 0 && block_starts.contains(&i) {
                 if !terminated && !stack.is_empty() {
-                    return Err(format!(
-                        "valores vivos al cruzar el bloque en la instrucción {i}: \
-                         el JIT no emite parámetros de bloque todavía"
-                    ));
+                    // La derecha de un `and`/`or` llega a su punto de llegada
+                    // con su resultado: va por la variable de ese punto.
+                    match cruces.get(&i) {
+                        Some(&var) if stack.len() == 1 => {
+                            let v = stack.pop().unwrap();
+                            builder.def_var(var, v);
+                        }
+                        _ => return Err(format!(
+                            "valores vivos al cruzar el bloque en la instrucción {i}: \
+                             el JIT no emite parámetros de bloque todavía"
+                        )),
+                    }
                 }
                 let next_block = block_map[&i];
                 if !terminated { builder.ins().jump(next_block, &[]); }
                 builder.switch_to_block(next_block);
                 terminated = false;
                 stack.clear();
+                if let Some(&var) = cruces.get(&i) {
+                    stack.push(builder.use_var(var));
+                }
                 // JIT-3: si este bloque es el inicio del handler, poner el error en el stack
                 if handler_block_addrs.contains(&i) {
                     let call = builder.ins().call(take_error_ref, &[]);
@@ -1012,6 +1010,35 @@ impl<M: Module> CodeGen<M> {
                         .ok_or_else(|| format!("JumpIfFalse: {} no encontrado", i + 1))?;
                     builder.ins().brif(cond, true_block, &[], false_block, &[]);
                     terminated = true;
+                }
+                // `and` / `or`: si el valor ya decide, llega convertido a
+                // booleano al punto de llegada; si no, se sigue con la derecha.
+                Instruction::JumpIfFalseOrPop(target) | Instruction::JumpIfTrueOrPop(target) => {
+                    let corta_si_falso = matches!(instr, Instruction::JumpIfFalseOrPop(_));
+                    let val = stack.pop().ok_or("JumpIfOrPop: pila vacía")?;
+                    let cond_call = builder.ins().call(is_truthy_ref, &[val]);
+                    let cond = builder.inst_results(cond_call)[0];
+                    let n1 = builder.ins().call(not_ref, &[val]);
+                    let n1 = builder.inst_results(n1)[0];
+                    let como_bool = builder.ins().call(not_ref, &[n1]);
+                    let como_bool = builder.inst_results(como_bool)[0];
+                    let var = *cruces.get(target)
+                        .ok_or_else(|| format!("JumpIfOrPop: sin punto de llegada {target}"))?;
+                    builder.def_var(var, como_bool);
+                    let llegada = *block_map.get(target)
+                        .ok_or_else(|| format!("JumpIfOrPop: {target} no encontrado"))?;
+                    let derecha = *block_map.get(&(i + 1))
+                        .ok_or_else(|| format!("JumpIfOrPop: {} no encontrado", i + 1))?;
+                    if corta_si_falso {
+                        builder.ins().brif(cond, derecha, &[], llegada, &[]);
+                    } else {
+                        builder.ins().brif(cond, llegada, &[], derecha, &[]);
+                    }
+                    terminated = true;
+                }
+                Instruction::ToBool => {
+                    unop!(not_ref);
+                    unop!(not_ref);
                 }
                 Instruction::JumpIfTrue(target) => {
                     let val = stack.pop().ok_or("JumpIfTrue: pila vacía")?;

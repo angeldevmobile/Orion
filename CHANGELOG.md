@@ -5,6 +5,46 @@ formato AAAA-MM-DD.
 
 ## Sin publicar
 
+### Añadido
+- **`pdf.build(ruta, bloques, opts?)`: documentos libres a base de bloques.**
+  `title`, `heading`, `text`, `table`, `fields`, `image`, `line`, `space` y
+  `page_break`, con su nombre en español como alias. Un texto suelto en la
+  lista es un párrafo. `pdf.report`, `pdf.create` y `pdf.template` pasan a ser
+  atajos de lo mismo, y todos aceptan un `opts` final.
+- **La maquetación de PDF se configura entera desde el código.** Página:
+  `size` (A3, A4, A5, letter, legal o `[ancho, alto]`), `orientation`,
+  `margin`, `header`, `footer`, `page_numbers`, `page_format`
+  (`"{page}/{pages}"`), y metadatos `title`, `author` y `subject`. Tabla:
+  `columns` por nombre o por posición (`width`, `align`, `format`, `bold`,
+  `color`, `title`, `hidden`), `headers`, `font_size`, `header_bg`,
+  `header_color`, `zebra`, `borders`, `total`, y los separadores `decimal` y
+  `thousands`. Formatos numéricos por columna: `integer`, `decimal:3`,
+  `money` (o `money:$`) y `percent:1`. Los colores admiten `#rrggbb`, `#rgb`,
+  nombres o un gris de 0 a 1.
+- **Imágenes en PDF.** Bloque `image` (PNG, JPEG, GIF, BMP) con `width`,
+  `height` y `align`; la transparencia se funde sobre blanco. Se construye el
+  objeto de imagen a partir de los píxeles para no arrastrar una segunda
+  versión del crate `image` (la de `printpdf` es la 0.24 y Orion usa la 0.25).
+- **Editar PDF existentes:** `pdf.merge`, `pdf.delete_pages`, `pdf.reorder`,
+  `pdf.rotate`, `pdf.stamp` (texto con posición, tamaño, color, giro y
+  opacidad, y `{page}`/`{pages}` para numerar), `pdf.stamp_image` (logo, firma
+  o sello) y `pdf.set_info`. Las páginas se eligen con un número, una lista,
+  un texto `"1-3,7"` o negativos desde el final (`-1` es la última).
+  `pdf.info` devuelve también `pages` y el resto de metadatos, y lee bien los
+  títulos con tildes, que se guardan en UTF-16.
+- **`docs/paquetes.md`**: dónde viven los paquetes y los esquemas de
+  `registry.json`, `installed.json`, `orion.json` y `orion.lock`, que antes
+  estaban en comentarios de `pkg.rs` y `paths.rs`.
+
+### Cambiado
+- **Los comentarios del código fuente pasan a 2-3 líneas como máximo.** Había
+  224 bloques de más de tres líneas en `orion-vm/src`, que contaban la
+  historia de cada decisión entre línea y línea de código. Esa historia va al
+  CHANGELOG y a los mensajes de commit. Quedan unas 1.300 líneas menos.
+  Los comentarios que generan la ayuda del editor (`nombre(args) →
+  descripción`, que lee `scripts/gen_builtins.js`) conservan esa línea de
+  contrato.
+
 ### Corregido
 - **El binario de Linux no arrancaba en Debian 12 ni en Ubuntu 22.04.** Se
   compilaba en `ubuntu-latest`, que hoy es 24.04 con glibc 2.39, y un binario
@@ -47,6 +87,81 @@ formato AAAA-MM-DD.
 - **Los mensajes de `--watch` estaban en español** mientras el resto del CLI
   está en inglés: `change detected`, `Watching`, `server runs as a child
   process`.
+- **`and` y `or` no cortocircuitaban.** Se evaluaban siempre los dos lados, así
+  que `has_key(d, "k") and d["k"] > 0` reventaba con `Key 'k' not found`
+  justo en el caso que la izquierda existía para evitar, y lo mismo con
+  `x != null and x.algo`. En la demo `comercio` el login respondía 500 cuando
+  el email no existía, que además delataba qué emails estaban registrados.
+
+  Se compilan a tres instrucciones nuevas: `<a> JumpIfFalseOrPop fin <b>
+  ToBool fin:` (`JumpIfTrueOrPop` para `or`), con el valor en la pila, como en
+  CPython o Lua. Una primera versión pasaba el resultado por una variable
+  oculta para no dejar valores vivos entre bloques del JIT, y costaba un
+  **57 % más** en el intérprete. Con las instrucciones dedicadas, el mismo
+  programa de 3 millones de iteraciones va un 7 % más rápido que antes del
+  arreglo en el intérprete y un 5 % en el JIT: pesa más no evaluar la derecha
+  que el salto extra. El JIT lleva el valor en una variable de Cranelift por
+  punto de llegada, así que las funciones con `and`/`or` siguen compilando a
+  nativo. Las instrucciones van al final del enum para no cambiar los índices
+  de los `.orbc` ya compilados.
+- **`attempt` no capturaba nada dentro de los handlers de `serve`.** El bucle
+  que ejecuta los handlers propagaba el error sin mirar los `attempt` abiertos,
+  así que un `json.parse` fallido dentro de un `attempt` salía como 500. Solo
+  funcionaba si el `attempt` estaba en un módulo importado, porque ese camino
+  pasaba por otro bucle.
+- **Un `return` dentro de `attempt` dejaba su manejador vivo.** Un error
+  posterior, ya fuera del `attempt`, saltaba a aquel `handle`.
+- **Un middleware que fallaba respondía HTTP 200** con "error interno" como
+  cuerpo. Ahora es un 500, igual que un handler.
+- **Un módulo importado solo por otro módulo no llegaba a la VM.** Sus
+  funciones se quedaban en la sub-VM donde se cargó el primer módulo, y
+  llamarlas desde él fallaba con `Function 'cola__estadisticas' not found`
+  (también bajo `serve`). En la demo `comercio` había que repetir el `use` en
+  `main.orx` para que funcionara.
+- **Los errores de Postgres llegaban como "db error" a secas.** El crate
+  `postgres` solo imprime eso con `{}`; el mensaje del servidor va dentro. Un
+  CHECK violado, una clave duplicada o una fila mala en un COPY eran
+  indistinguibles. Ahora llegan con mensaje, detalle, pista, contexto (en un
+  COPY, la línea del archivo) y SQLSTATE: `… (SQLSTATE 23505)`. Y
+  `db.insert` ya no añade "is 'RETURNING id' missing?" a cualquier fallo.
+  El checkout de `comercio` parecía funcionar porque `db.transaction` metía el
+  SQL en el mensaje, y el SQL contenía las palabras que se buscaban.
+- **`excel.write_styled` y `csv.write` ordenaban las columnas
+  alfabéticamente**, y `csv.write` solo miraba las claves de la primera fila.
+  Un informe "Fecha, Pedidos, Importe" salía "Fecha, Importe, Pedidos" sin
+  forma de pedir otro orden. Ahora usan el orden en que se escribieron las
+  claves, en todas las filas, como ya hacía `excel.write`.
+- **`pdf.report` cortaba en silencio**: pintaba como mucho 4 columnas de 38
+  mm, y al llegar al pie de la primera página dejaba de pintar filas. Un texto
+  más ancho que su columna se montaba encima de la siguiente. Ahora el texto
+  se mide con las métricas de Helvetica, pagina repitiendo la cabecera y
+  recorta con "…" solo las columnas de texto: una cifra nunca se recorta.
+  Las columnas numéricas se alinean a la derecha.
+- **`pdf.create` escribía una sola línea en tamaño Carta** y sin codificar las
+  tildes. Ahora es A4, parte el texto al ancho y pagina.
+- **`pdf.watermark` borraba las fuentes de la página.** Si el diccionario de
+  fuentes era una referencia (lo normal en los PDF que genera el propio
+  Orion), lo sustituía por uno con solo la fuente de la marca: la marca salía
+  y el texto del documento dejaba de verse. Además era opaca, tapaba lo que
+  hubiera debajo, se centraba para Carta aunque la página fuese A4, y no
+  codificaba las tildes ni el "€".
+- **La documentación de `compile_entry` estaba pegada a `compile_repl`**, así
+  que el editor mostraba la descripción de una en la otra.
+
+### Tests
+- **25 tests nuevos**, de 799 a **824**:
+  - `logic_and_errors` (11): cortocircuito, precedencia, recursión, `and`/`or`
+    anidados comparando intérprete y JIT, `return` dentro de `attempt` y
+    módulos importados por otro módulo.
+  - `serve_handlers` (1, con un servidor real): `attempt` en un handler del
+    script principal, módulo anidado en un handler, middleware que falla y
+    cortocircuito dentro de `serve`.
+  - `documents` (12): paginación, columnas configurables, separadores propios,
+    `pdf.build` con todos los bloques, edición de páginas, estampados, que la
+    marca de agua conserve las fuentes (comprobado con lopdf), metadatos con
+    tildes, y el orden de columnas en Excel y CSV.
+  - `postgres_errors` (1): mensaje y SQLSTATE en CHECK, duplicado, `db.insert`
+    y COPY. Se salta si no hay una base en `ORION_TEST_PG`.
 
 ## v0.1.5 - 2026-09-27
 

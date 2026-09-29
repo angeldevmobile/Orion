@@ -1,9 +1,5 @@
-/// Orion Cosmos — simulación gravitacional en Rust puro.
-/// Cuerpos como Dicts, universo como Dict con lista de cuerpos.
-///
-/// Ninguna constante de la simulación está fijada: G, el softening y los rangos
-/// de generación se pasan en un Dict de opciones. Los valores por defecto son
-/// los del SI en el vacío, pero nada impide simular otras escalas o unidades.
+/// Orion Cosmos — simulación gravitacional. G, el softening y los rangos de
+/// generación van en el dict de opciones (por defecto, SI en el vacío).
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap as HashMap;
 use rand::{Rng, SeedableRng};

@@ -5,11 +5,8 @@ use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Estado compartido de una tarea async lanzada con `spawn` o al invocar una
-/// `async fn`. Reemplaza el antiguo `Arc<Mutex<Option<...>>>` con busy-wait:
-///   - `result`/`done`  → parking real vía Condvar (await no gira en un sleep-loop).
-///   - `cancel`         → cancelación cooperativa; la sub-VM la consulta en su
-///                        bucle de instrucciones y aborta limpiamente si se activa.
+/// Estado compartido de una tarea async (`spawn` o `async fn`): Condvar para
+/// esperar el resultado y `cancel` para cancelarla de forma cooperativa.
 #[derive(Debug)]
 pub struct TaskHandle {
     result: Mutex<Option<Result<SendValue, String>>>,

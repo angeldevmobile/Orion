@@ -1,13 +1,5 @@
-//! Ratón y teclado.
-//!
-//! Los eventos se despachan por el dominio `Input` de CDP, que los inyecta en la
-//! misma capa por la que entran los del usuario. No son `element.click()` ni
-//! eventos sintetizados desde JavaScript, que muchos sitios ignoran o detectan.
-//!
-//! La posición se vuelve a medir en `dom::box_for_click` inmediatamente antes de
-//! cada despacho, no al empezar una cadena de acciones. Ahí está la diferencia
-//! práctica con `ActionChains`: entre localizar y clicar, una página moderna ha
-//! movido el elemento o le ha puesto un banner encima.
+//! Ratón y teclado por el dominio `Input` de CDP, como los del usuario. La
+//! posición se vuelve a medir justo antes de cada evento.
 
 use std::time::Duration;
 

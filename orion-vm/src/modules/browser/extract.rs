@@ -1,32 +1,6 @@
-//! Extracción declarativa.
-//!
-//! El esquema es un diccionario de `campo -> especificación`, y todo él se
-//! compila a **una única** `Runtime.evaluate` que corre dentro de la página y
-//! vuelve con los registros ya convertidos.
-//!
-//! ```orion
-//! esquema = { nombre: ".title", precio: ".price|num", stock: "[data-qty]@data-qty|num" }
-//! items   = web.extract(p, ".card", esquema)
-//! ```
-//!
-//! Ahí está la diferencia de fondo con Selenium: allí cada lectura de un
-//! atributo es una petición HTTP al driver, así que 500 productos por 3 campos
-//! son unas 1.500 idas y vueltas más las 500 de localizar las filas. Esto es
-//! **una**. Y como se usa `returnByValue`, lo que cruza el socket son los datos
-//! pedidos, no el HTML: la memoria es proporcional a lo que querías, no al peso
-//! de la página.
-//!
-//! Gramática de una especificación, con las tres partes opcionales:
-//!
-//! ```text
-//!   <selector> @<atributo> |<conversión>
-//!   ".price"                 texto del elemento
-//!   "a@href"                 atributo de un descendiente
-//!   "@data-id"               atributo de la propia fila
-//!   ".price|num"             texto convertido a número
-//!   "//td[2]|num"            XPath relativo a la fila
-//!   "|num"                   el texto de la fila, como número
-//! ```
+//! Extracción declarativa: un esquema `campo → "selector@atributo|conversión"`
+//! que se compila a una sola evaluación en la página y devuelve solo los datos
+//! pedidos (p. ej. `".price|num"`, `"a@href"`, `"//td[2]|num"`).
 
 use std::time::Duration;
 
@@ -114,10 +88,8 @@ const EXTRAER_JS: &str = r#"
 const __enFila = (fila, sel) => {
   if (!sel) return fila;
   if (sel.startsWith('/') || sel.startsWith('(/') || sel.startsWith('./')) {
-    // Un XPath absoluto dentro de un campo busca desde la raíz del documento y
-    // devuelve el MISMO nodo para todas las filas: el listado entero sale
-    // repetido y con datos que parecen buenos. Como una especificación de campo
-    // describe por definición algo que está dentro de la fila, se relativiza.
+    // Un XPath absoluto devolvería el mismo nodo para todas las filas: un campo
+    // está dentro de la fila por definición, así que se relativiza.
     let x = sel;
     if (x.startsWith('/'))  x = '.' + x;
     if (x.startsWith('(/')) x = '(.' + x.slice(1);
@@ -161,11 +133,7 @@ const __aNumero = (s) => {
   return Number.isFinite(n) ? n : null;
 };
 
-// Como `__enFila` pero en plural, para los campos `|list`.
-//
-// Un campo que recoge varios valores —las etiquetas de un producto, las
-// imágenes de una galería— es habitual, y con la versión singular devolvía la
-// primera coincidencia y las demás se perdían en silencio.
+// Como `__enFila` pero en plural, para los campos `|list` (etiquetas, imágenes…).
 const __todosEnFila = (fila, sel) => {
   if (!sel) return [fila];
   if (sel.startsWith('/') || sel.startsWith('(/') || sel.startsWith('./')) {
@@ -218,10 +186,8 @@ const __valor = (fila, c) => {
     const out = [];
     for (const el of __todosEnFila(fila, c.sel)) {
       const b = __bruto(el, c.attr, sub);
-      // Un elemento sin nada dentro es ruido, no un valor: se salta, igual que
-      // en el caso singular. Lo que sí se conserva es un null que venga de la
-      // conversión ("Agotado" con |num), porque ahí sí hubo algo y hace falta
-      // verlo para entender por qué no salió el número.
+      // Un elemento vacío se salta; un null que viene de la conversión se
+      // conserva, porque explica por qué no salió el número.
       if (b === null || (b === '' && !c.attr)) continue;
       out.push(__convertir(b, sub));
     }
@@ -351,10 +317,8 @@ mod tests_volcador {
 
     #[test]
     fn lo_escrito_llega_a_disco_sin_cerrar_el_volcador() {
-        // El escenario real: `crawl` anota la URL como terminada NADA MÁS
-        // escribir sus filas. Si estas siguen en el búfer del csv::Writer y el
-        // proceso muere, al reanudar se saltan esas páginas y las filas se
-        // pierden sin un solo error.
+        // `crawl` anota la URL como terminada al escribir sus filas: si siguen en
+        // el búfer y el proceso muere, al reanudar se perderían.
         let ruta = tmp("vivo.csv");
         let mut v = Volcador::nuevo(&ruta, vec!["a".into(), "b".into()], 100).unwrap();
         v.escribir(vec!["1".into(), "2".into()]).unwrap();
@@ -547,12 +511,8 @@ impl Volcador {
                 "reanudar solo funciona con salida .csv; '{ruta}' obliga a empezar de cero"
             ));
         }
-        // Si no existe todavía, es un primer arranque normal con cabecera.
-        //
-        // Un archivo de CERO bytes cuenta como que no existe: es lo que deja un
-        // recorrido que murió antes de volcar nada. Tratarlo como "ya tiene
-        // cabecera" producía un CSV sin cabecera para siempre, con las columnas
-        // adivinándose por el orden.
+        // Si no existe (o tiene 0 bytes, lo que deja un recorrido que murió
+        // pronto), es un arranque normal con cabecera.
         let vacio = std::fs::metadata(ruta).map(|m| m.len() == 0).unwrap_or(false);
         if !std::path::Path::new(ruta).exists() || vacio {
             return Self::nuevo(ruta, headers, chunk);
@@ -583,19 +543,9 @@ impl Volcador {
         Ok(())
     }
 
-    /// Deja en disco lo escrito hasta ahora, sin cerrar nada.
-    ///
-    /// `crawl` la llama antes de anotar una URL como terminada. El orden
-    /// importa: el `csv::Writer` guarda las filas en un búfer propio de 8 KB,
-    /// así que un recorrido que muere de golpe —un `kill`, un corte de luz, el
-    /// OOM killer— dejaba el progreso diciendo que esas páginas ya estaban y
-    /// las filas todavía en memoria. Al reanudar se saltaban, y se perdían sin
-    /// un solo error: el recorrido terminaba con `errors: []`.
-    ///
-    /// En `.odf` no hace nada a propósito: el bloque se vuelca entero cada
-    /// `chunk` filas, y reanudar no está soportado en ese formato —`continuar`
-    /// lo rechaza—, así que no hay progreso que pueda mentir. Volcar aquí
-    /// crearía un archivo suelto por página.
+    /// Vuelca a disco lo escrito, sin cerrar: `crawl` la llama antes de anotar una
+    /// URL como terminada, para que un corte no pierda filas. En `.odf` no hace
+    /// nada: ese formato no admite reanudar.
     pub fn asegurar_en_disco(&mut self) -> Result<(), String> {
         if let Some(w) = self.csv.as_mut() {
             w.flush().map_err(|e| format!("csv: {e}"))?;

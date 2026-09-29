@@ -1,34 +1,6 @@
-//! Recorrido paralelo con reanudación.
-//!
-//! `extract_to` recorre una lista de URLs **con una sola pestaña, en serie**.
-//! Sirve, pero deja la máquina a un octavo de gas: mientras una página carga
-//! —que es esperar a la red, no calcular— el resto del navegador está parado.
-//!
-//! `crawl` abre **N pestañas y las conduce en paralelo desde N hilos de
-//! sistema**. Ahí está el músculo que Orion tiene y un scraper de Python no:
-//! hilos de verdad sobre el mismo socket CDP, que el transporte ya multiplexa
-//! (cada respuesta vuelve a su emisor por `id`). No es `asyncio` cooperativo, son
-//! núcleos trabajando a la vez mientras otras pestañas esperan la red.
-//!
-//! Y **reanuda**. Un recorrido de diez mil páginas que se corta en la siete mil
-//! no puede empezar de cero: se anota cada URL terminada en un archivo de
-//! progreso y, al volver a arrancar, las hechas se saltan. Es lo que separa un
-//! juguete de algo que corre de noche en un servidor.
-//!
-//! ```orion
-//! r = web.crawl(b, {
-//!     urls:    urls,              -- la lista de páginas
-//!     row:     ".card",
-//!     schema:  { nombre: ".title", precio: ".price|num" },
-//!     out:     "catalogo.csv",
-//!     workers: 8,                 -- 8 pestañas en paralelo
-//!     resume:  yes                -- retoma donde se cortó
-//! })
-//! ```
-//!
-//! En Python esto es Scrapy: un framework entero, otro fichero de settings, otra
-//! mentalidad. Aquí es una llamada, apoyada en piezas que ya existen —el pool de
-//! pestañas, `extract`, el volcador en streaming de `extract_to`—.
+//! `crawl`: recorre URLs con N pestañas en paralelo desde N hilos sobre el mismo
+//! socket CDP, y reanuda: cada URL terminada se anota en un archivo de progreso
+//! y al volver a arrancar se salta.
 
 use std::collections::{HashSet, VecDeque};
 use std::io::Write;
@@ -183,11 +155,8 @@ pub fn crawl(
                                     return par;
                                 }
                             }
-                            // Las filas tienen que estar EN DISCO antes de que
-                            // el progreso diga que esta URL está hecha. Si el
-                            // proceso muere entre las dos cosas, lo peor que
-                            // puede pasar es repetir una página al reanudar;
-                            // al revés se perdía en silencio.
+                            // Las filas van a disco antes de anotar la URL como
+                            // hecha: si el proceso muere, se repite una página, no se pierde.
                             if let Err(e) = w.asegurar_en_disco() {
                                 par.errores.push(format!("(escritura) {e}"));
                                 drop(w); drop(vis);

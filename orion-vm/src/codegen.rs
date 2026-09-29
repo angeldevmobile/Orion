@@ -1,8 +1,5 @@
 #![allow(dead_code)]
-/// codegen.rs — Generador de bytecode Orion
-/// Convierte Vec<Stmt> (AST de parser.rs) en OrionBytecode listo para la VM.
-///
-/// Equivale a compiler/bytecode_compiler.py pero en Rust puro.
+/// codegen.rs — convierte el AST (Vec<Stmt>) en OrionBytecode para la VM.
 
 use indexmap::IndexMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -37,21 +34,8 @@ pub fn compile(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
     Ok(cg.into_bytecode())
 }
 
-/// Compila el archivo que el usuario ejecuta (`orion run x.orx`, `--build`,
-/// `watch`, el depurador).
-///
-/// Igual que [`compile`], salvo que si el programa define `main` y no la llama
-/// en ninguna parte, la llamada se añade al final. Sin esto, un programa cuyo
-/// código entero vive dentro de `fn main()` terminaba con éxito y sin imprimir
-/// nada: el peor fallo posible, porque no se parece a un fallo.
-///
-/// Los módulos cargados con `use` NO pasan por aquí — su cuerpo se ejecuta al
-/// importarlos, así que llamar a su `main` sería ejecutar el programa ajeno.
-/// Compila una entrada del REPL.
-///
-/// Igual que [`compile`], salvo que si la última sentencia es una expresión su
-/// valor se deja en la pila en lugar de descartarlo: la sesión lo saca y lo
-/// imprime, que es lo que hace de un REPL un REPL (`2 + 2` responde `4`).
+/// Compila una entrada del REPL: si la última sentencia es una expresión, su
+/// valor queda en la pila para imprimirlo (`2 + 2` responde `4`).
 pub fn compile_repl(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
     crate::named_args::resolve(&mut stmts)?;
     let mut cg = Codegen::new();
@@ -60,6 +44,8 @@ pub fn compile_repl(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError>
     Ok(cg.into_bytecode())
 }
 
+/// Compila el archivo que se ejecuta: si define `main` y no la llama, añade la
+/// llamada al final. Los módulos de `use` no pasan por aquí.
 pub fn compile_entry(mut stmts: Vec<Stmt>) -> Result<OrionBytecode, CodegenError> {
     crate::named_args::resolve(&mut stmts)?;
     let mut cg = Codegen::new();
@@ -163,12 +149,8 @@ impl Codegen {
                     self.async_fns.insert(name.clone());
                 }
                 Stmt::Shape { name, fields, on_create, on_error, acts, using, .. } => {
-                    // Los `static act` no son métodos: no reciben instancia y no
-                    // se buscan sobre un valor. Se registran como funciones
-                    // normales con el nombre compuesto "Shape::act", que es
-                    // exactamente lo que el parser produce al ver `Shape::act`.
-                    // Así el despacho, los defaults de parámetros y el JIT los
-                    // tratan como a cualquier función, sin un camino aparte.
+                    // `static act` se registra como función normal "Shape::act", igual
+                    // que la produce el parser: sin un camino de despacho aparte.
                     let (statics, instance_acts): (Vec<&ActDef>, Vec<&ActDef>) =
                         acts.iter().partition(|a| a.is_static);
 
@@ -222,21 +204,13 @@ impl Codegen {
         Ok(())
     }
 
-    /// ¿Hay que añadir la llamada a `main`?
-    ///
-    /// Solo si se cumplen las tres cosas: existe, se puede llamar sin
-    /// argumentos, y **nadie la nombra ya**. Lo último se comprueba sobre el
-    /// bytecode ya emitido, no sobre el AST, porque así se cubre por igual la
-    /// llamada de nivel superior (`main()`), la que hace otra función, pasarla
-    /// como valor (`spawn main()`, `f(main)`) y usarla de handler de `serve`.
-    /// Un programa que ya llama a `main` a mano sigue ejecutándola una sola vez.
+    /// ¿Hay que añadir la llamada a `main`? Solo si existe, no pide argumentos y
+    /// nadie la nombra ya en el bytecode (llamada, valor o handler de `serve`).
     fn needs_auto_main(&self) -> bool {
         let Some(def) = self.functions.get("main") else { return false };
 
-        // Un `main` con parámetros obligatorios no se puede llamar sin
-        // argumentos. No se inventa una llamada que fallaría, pero tampoco se
-        // calla: el programa terminaría con éxito y sin hacer nada, que es
-        // justo el silencio que esto viene a quitar.
+        // Un `main` con parámetros obligatorios no se llama solo; se avisa para no
+        // terminar con éxito sin hacer nada.
         let required = def.params.len().saturating_sub(
             def.param_defaults.iter().filter(|d| d.is_some()).count(),
         );
@@ -516,12 +490,8 @@ impl Codegen {
                 let ctr = self.for_counter;
                 self.for_counter += 1;
 
-                // range syntax: for i in start..end  (y ..<, ...)
-                //
-                // Recorrer el rango con un contador evita construir la lista, así
-                // que `for i in 0..1000000` no reserva un millón de elementos. La
-                // única diferencia entre las tres formas es el comparador: los
-                // exclusivos paran antes del extremo, el inclusivo lo incluye.
+                // for i in a..b (y ..<, ...): se recorre con un contador, sin
+                // construir la lista; solo cambia el comparador.
                 if let Expr::BinaryOp { op, left, right } = &iter {
                     if op == ".." || op == "..<" || op == "..." {
                         let cur_var = format!("__cur_{ctr}__");
@@ -961,10 +931,7 @@ impl FnCompiler {
                 let ctr = self.for_counter;
                 self.for_counter += 1;
 
-                // range syntax: for i in start..end  (y ..<, ...)
-                // Mismo criterio que en el camino de `main`: contador en vez de
-                // lista, y el comparador es lo único que separa el inclusivo de
-                // los dos exclusivos.
+                // for i in a..b (y ..<, ...): contador en vez de lista, como arriba.
                 if let Expr::BinaryOp { op, left, right } = iter {
                     if op == ".." || op == "..<" || op == "..." {
                         let cur_var = format!("__cur_{ctr}__");
@@ -1287,18 +1254,8 @@ fn compile_expr_into(
             }
         }
 
-        // Un rango como EXPRESIÓN se materializa en la lista `range(a, b)`.
-        //
-        // El `for` tiene su propio camino en `compile_stmt`, que itera con un
-        // contador y no llega aquí: recorrer un rango no reserva la lista. Este
-        // caso cubre todo lo demás (`x = 1..4`, `len(1..n)`, pasarlo a una
-        // función), que hasta ahora caía al operador genérico y, con el
-        // fallback a `Add`, devolvía la SUMA de los extremos en silencio.
-        //
-        // `range` excluye el extremo derecho —`range(1,4)` es `[1,2,3]`—, así
-        // que el inclusivo se pide como `range(a, b+1)`. Está en
-        // `is_jit_builtin`, con lo que este desugar vale igual en VM, JIT y AOT
-        // sin tocar ninguno de los tres.
+        // Un rango como expresión (`x = 1..4`) se convierte en `range(a, b)`; el
+        // inclusivo pide `range(a, b + 1)`. El `for` no pasa por aquí.
         Expr::BinaryOp { op, left, right } if op == ".." || op == "..<" || op == "..." => {
             recurse!(left);
             recurse!(right);
@@ -1309,19 +1266,9 @@ fn compile_expr_into(
             emit!(Instruction::Call("range".into(), 2));
         }
 
-        // `a and b` / `a or b` con cortocircuito: la derecha solo se evalúa si
-        // hace falta. Antes se bajaban a `And`/`Or` con los dos lados ya en la
-        // pila, así que `has_key(d, "k") and d["k"] > 0` reventaba justo en el
-        // caso que la izquierda existía para evitar.
-        //
-        //   <a>  JumpIfFalseOrPop(fin)  <b>  ToBool  fin:      (`or`: JumpIfTrueOrPop)
-        //
-        // Tres instrucciones y el valor en la pila, como en cualquier VM de
-        // pila. Una primera versión pasaba el resultado por una variable
-        // oculta para no dejar valores vivos entre bloques (el JIT no sabía
-        // llevarlos), y costaba un 57 % más en el intérprete. El JIT ahora
-        // lleva ese valor en una variable de Cranelift propia del punto de
-        // llegada (ver `cruces` en jit/compiler.rs).
+        // `and`/`or` con cortocircuito: <a> JumpIfFalseOrPop(fin) <b> ToBool fin:
+        // El valor viaja en la pila; el JIT lo lleva en una variable por punto
+        // de llegada (`cruces` en jit/compiler.rs).
         Expr::BinaryOp { op, left, right } if op == "&&" || op == "||" => {
             recurse!(left);
             let salto = instrs.len();
@@ -1346,16 +1293,8 @@ fn compile_expr_into(
             emit!(instr);
         }
 
-        // `cond ? a : b` — solo se evalúa la rama que toca.
-        //
-        // Se baja a los mismos saltos que un if/else, con una diferencia que
-        // importa: aquí las dos ramas dejan un valor en la pila y el bloque de
-        // fusión lo tiene que encontrar. La VM no se inmuta, pero el JIT limpia
-        // la pila en cada frontera de bloque, así que una función con ternario
-        // no compila a nativo y cae al intérprete. Cae con error, no con un
-        // resultado inventado, que es lo que importa; hacerlo nativo pediría
-        // parámetros de bloque en el punto de fusión y eso es un análisis de
-        // flujo que el JIT todavía no hace.
+        // `cond ? a : b`: solo se evalúa la rama que toca. Deja un valor vivo entre
+        // bloques, así que una función con ternario aún no compila a nativo.
         Expr::Ternary { cond, then_e, else_e } => {
             recurse!(cond);
             let jf = instrs.len();
@@ -1392,10 +1331,8 @@ fn compile_expr_into(
             emit!(Instruction::MakeList(n as u8));
         }
 
-        // Un `...` que llega hasta aquí está fuera de una lista o de unos
-        // argumentos, que son los dos únicos sitios donde expandir significa
-        // algo. El parser ya no lo produce en otras posiciones; esto cubre el
-        // caso por si alguna vez lo hiciera.
+        // `...` fuera de una lista o de unos argumentos: el parser ya no lo
+        // produce; esto es solo por si acaso.
         Expr::Spread(_) => {
             return Err(CodegenError {
                 message: "'...' solo se puede usar dentro de una lista o de los \
@@ -1425,12 +1362,8 @@ fn compile_expr_into(
                     line: current_line,
                 });
             }
-            // Argumentos con `...`: el número de argumentos deja de conocerse en
-            // compilación, así que no se puede emitir `Call(f, n)`. Se construye
-            // la lista completa —mezclando sueltos y expandidos— y se despacha
-            // por `__apply__`, que en la VM saca los elementos de la lista y
-            // llama con ellos. Un callee con nombre viaja como cadena, que es
-            // una de las formas que `__call__` ya sabe resolver.
+            // Con `...` en los argumentos, su número no se conoce al compilar: se
+            // arma la lista completa y se llama por `__apply__`.
             if args.iter().any(|a| matches!(a, Expr::Spread(_))) {
                 match callee.as_ref() {
                     Expr::Ident(fn_name) => emit!(Instruction::LoadStr(fn_name.clone())),
@@ -1611,10 +1544,8 @@ fn compile_interpolated(
         return Ok(());
     }
 
-    // Arrancamos con un string vacío y concatenamos cada parte con Add.
-    // Add coacciona a string cuando un operando es string, así que el resultado
-    // SIEMPRE es String — incluso con una sola interpolación ("${n}" → "5", no Int)
-    // o con interpolaciones adyacentes ("${a}${b}" → concat, no suma numérica).
+    // Se parte de "" y se concatena con Add, así el resultado siempre es String
+    // ("${n}" da "5", y "${a}${b}" concatena en vez de sumar).
     instrs.push(Instruction::LoadStr(String::new()));
     lines.push(current_line);
     for (is_expr, content) in &parts {
@@ -1644,10 +1575,8 @@ fn compile_sub_expr(
     let tokens = lex(src).map_err(|e| CodegenError { message: e.message, line: current_line })?;
     let stmts  = parse(tokens).map_err(|e| CodegenError { message: e.message, line: e.line })?;
     if let Some(Stmt::Expr { expr, .. }) = stmts.into_iter().next() {
-        // El vector de lambdas generadas es el DEL LLAMANTE, no uno local: una
-        // lambda dentro de `${...}` compila su cuerpo a una función con nombre
-        // sintético, y si ese cuerpo no sube hasta quien registra las funciones,
-        // la llamada sobrevive pero su destino no existe.
+        // Las lambdas de dentro de `${...}` van al vector del llamante, para que
+        // su función llegue a registrarse.
         compile_expr_into(instrs, lines, current_line, async_fns, extra_fns, &expr)?;
     }
     Ok(())
@@ -1655,23 +1584,8 @@ fn compile_sub_expr(
 
 //    Patrones de `match`
 
-/// Emite las comprobaciones y las ligaduras de un patrón sobre `subj_var`.
-///
-/// Cada comprobación que puede fallar deja un `JumpIfFalse(0)` sin destino y
-/// apunta su índice en `fail_jumps`; el que llama los parchea todos al brazo
-/// siguiente. Las ligaduras se hacen SOBRE LA MARCHA, no al final: un patrón
-/// como `[a, {tipo}]` necesita haber sacado ya el elemento para poder mirar
-/// dentro de él.
-///
-/// Que las ligaduras ocurran aunque el brazo acabe no casando es visible: si
-/// `[a, b]` casa la longitud pero un sub-patrón falla, `a` se queda escrito.
-/// Es el precio de no copiar el sujeto entero por brazo, y no afecta a la
-/// semántica del brazo que sí casa, que es el único cuyo cuerpo se ejecuta.
-///
-/// Ojo con el orden de las comprobaciones: `len()` sobre un entero es un ERROR
-/// de ejecución, no un `no casa`. Por eso todo patrón que mira dentro comprueba
-/// primero el tipo; sin eso, `match 5 { [a] {...} _ {...} }` reventaría en vez
-/// de caer al comodín.
+/// Comprueba y liga un patrón sobre `subj_var`. Cada comprobación deja un
+/// `JumpIfFalse(0)` en `fail_jumps`; el tipo se mira antes de mirar dentro.
 fn compile_pattern_into(
     instrs: &mut Vec<Instruction>,
     lines:  &mut Vec<u32>,
@@ -1787,15 +1701,8 @@ fn compile_pattern_into(
 
 //    Helpers
 
-/// Construye en la pila una lista con `...` expandidos, concatenando trozos.
-///
-/// `[a, ...b, c]` se compila como `[] + [a] + b + [c]`. Los elementos sueltos
-/// consecutivos se agrupan en un solo `MakeList`, así que solo hay una suma por
-/// expansión, no una por elemento.
-///
-/// Empieza por una lista vacía a propósito: garantiza que el resultado sea
-/// SIEMPRE nuevo. Sin eso, `x = [...b]` compilaría al propio `b`, y como las
-/// listas de Orion van por referencia, escribir en `x` habría escrito en `b`.
+/// Lista con `...`: `[a, ...b, c]` → `[] + [a] + b + [c]`. Empieza por `[]`
+/// para que el resultado sea siempre una lista nueva y no `b` misma.
 fn compile_list_with_spread(
     instrs: &mut Vec<Instruction>,
     lines:  &mut Vec<u32>,
@@ -1842,14 +1749,8 @@ fn compile_list_with_spread(
     Ok(())
 }
 
-/// Instrucción que implementa un operador binario.
-///
-/// Devuelve `None` para lo que no sea un operador aritmético/lógico. Antes esta
-/// función caía a `Add` para todo lo desconocido, y el efecto no era un error
-/// sino una respuesta equivocada en silencio: `1..4` fuera de un `for` no se
-/// quejaba, devolvía `5`. Cualquier operador que se añada al lexer y no se
-/// cablee aquí vuelve a sumar, así que el caso por defecto tiene que ser un
-/// error del compilador, no una suma.
+/// Instrucción de un operador binario, o `None`: un operador sin cablear tiene
+/// que ser error de compilación, no una suma en silencio.
 fn op_instr(op: &str) -> Option<Instruction> {
     Some(match op {
         "+"  => Instruction::Add,

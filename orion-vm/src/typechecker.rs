@@ -536,11 +536,8 @@ impl TypeChecker {
                 self.push_scope();
                 for tp in type_params {
                     self.scope_set(tp.clone(), "any".to_string());
-                    // Un parámetro de tipo no es una variable: se declara para
-                    // que los hints que lo nombren resuelvan, no para leerlo.
-                    // Sin esto, TODA función genérica arrastraba un
-                    // "Variable 'T' asignada pero nunca usada" que no señalaba
-                    // ningún problema y enseñaba a ignorar los avisos.
+                    // Un parámetro de tipo se declara para que resuelvan los hints, no
+                    // para leerlo: sin esto avisaba "asignada pero nunca usada".
                     if let Some(top) = self.written_not_read.last_mut() {
                         top.remove(tp);
                     }

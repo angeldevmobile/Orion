@@ -133,9 +133,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             })
         }
         // copy_file(path, tabla, [columnas], ruta_csv, opts?) → Int
-        // Carga en STREAMING con RAM constante: el crate csv lee fila a fila y
-        // se insertan en una transacción con sentencia preparada. No materializa
-        // el CSV en memoria — vale para archivos enormes.
+        // En streaming, con RAM constante: vale para archivos enormes.
         "copy_file" | "copiar_archivo" => {
             if args.len() < 4 { return Err("db.copiar_archivo requires (path, table, columns, csv_path, opts?)".into()); }
             let tabla = to_str(&args[1]);
@@ -185,13 +183,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-//    Pool de conexiones persistentes
-//
-// Reabrir SQLite en cada query costaba ms por llamada y borraba las bases
-// `:memory:`. Ahora cada ruta guarda UNA conexión viva reutilizable (tras un
-// Mutex para el pool de workers de serve). Las escrituras a un mismo archivo
-// se serializan — el modelo de SQLite — pero WAL permite lectores concurrentes
-// y busy_timeout evita el error "database is locked" bajo contención.
+//    Pool de conexiones: una conexión viva por ruta (WAL + busy_timeout), en vez
+//    de reabrir SQLite en cada consulta.
 
 static POOL: OnceLock<Mutex<StdHashMap<String, Arc<Mutex<Connection>>>>> = OnceLock::new();
 
@@ -324,13 +317,8 @@ fn copy_file_opts(arg: Option<&EvalValue>) -> (bool, u8) {
     (header, delim)
 }
 
-//    Backend Postgres
-//
-// Misma API que SQLite pero contra un servidor Postgres (cliente-servidor). El
-// primer argumento es una URL postgres://user:pass@host:puerto/base. Igual que
-// en SQLite mantenemos un pool de una conexión persistente por URL. Los `?` del
-// SQL se traducen a `$1..$n` (estilo Postgres) para que el código del dev no
-// cambie entre motores.
+//    Backend Postgres: misma API que SQLite con una URL postgres://…; los `?` se
+//    traducen a `$1..$n`.
 
 mod pg {
     use super::{EvalValue, extract_params, to_str};
@@ -343,10 +331,8 @@ mod pg {
 
     const DEFAULT_MAX: usize = 8;
 
-    /// Pool de N conexiones por URL. Los workers de serve toman una conexión
-    /// libre (o crean una hasta el tope) y la devuelven al terminar, así las
-    /// peticiones concurrentes NO se serializan en una sola conexión. Al llegar
-    /// al tope, un checkout espera a que otro devuelva la suya.
+    /// Pool de N conexiones por URL: cada worker de serve toma una libre y la
+    /// devuelve; al llegar al tope, espera.
     struct PgPool {
         url:     String,
         max:     AtomicUsize,
@@ -421,12 +407,8 @@ mod pg {
         p
     }
 
-    /// Conecta usando TLS o no según `sslmode` en la URL (semántica libpq):
-    /// - `disable` (o ausente) → sin cifrar (por defecto, dev local).
-    /// - `require`/`prefer`    → cifrado, SIN verificar el certificado (acepta
-    ///   self-signed — común en dev y en muchos Postgres cloud).
-    /// - `verify-ca`/`verify-full` → cifrado y verificando el certificado.
-    /// En Windows native-tls usa SChannel: no hace falta OpenSSL.
+    /// TLS según `sslmode` (como libpq): disable = sin cifrar; require/prefer =
+    /// cifrado sin verificar; verify-ca/verify-full = cifrado y verificado.
     fn connect_tls_aware(url: &str) -> Result<Client, Box<dyn std::error::Error + Sync + Send>> {
         let mode = sslmode(url);
         if mode == "disable" || mode.is_empty() {
@@ -575,9 +557,7 @@ mod pg {
                 })
             }
             // copy_file(url, tabla, [columnas], ruta_csv, opts?) → Int
-            // Carga en STREAMING con RAM constante: lee el CSV en trozos de 64KB
-            // y los empuja a COPY … FROM STDIN (Postgres parsea el CSV). No
-            // materializa el archivo en memoria — sirve para millones de filas.
+            // COPY … FROM STDIN en trozos de 64 KB: RAM constante, millones de filas.
             "copy_file" | "copiar_archivo" => {
                 if args.len() < 4 { return Err("db.copiar_archivo requires (url, table, columns, csv_path, opts?)".into()); }
                 let tabla = to_str(&args[1]);
@@ -617,16 +597,8 @@ mod pg {
         }
     }
 
-    /// El mensaje de un error de Postgres, con lo que haga falta para
-    /// entenderlo. `postgres::Error` imprime solo "db error" con `{}`: el
-    /// mensaje del servidor va en el error de dentro. Así, un CHECK violado,
-    /// una clave duplicada o una fila mala en un COPY llegaban a Orion como
-    /// "db error" a secas, y no había forma de saber qué había pasado.
-    ///
+    /// El error de Postgres con su mensaje real (`{}` solo imprime "db error").
     /// Formato: `mensaje — detalle (pista: …) [contexto] (SQLSTATE xxxxx)`.
-    /// El contexto es lo que dice, por ejemplo, en qué línea falló un COPY; el
-    /// SQLSTATE deja distinguir casos sin depender del idioma del servidor
-    /// (23505 = duplicado, 23514 = CHECK, 23503 = clave ajena).
     fn pg_err(e: &postgres::Error) -> String {
         match e.as_db_error() {
             Some(db) => {
@@ -713,10 +685,8 @@ mod pg {
         out
     }
 
-    /// Adaptador de parámetro: codifica un EvalValue según el tipo que la
-    /// columna espera (`ty`, que el driver conoce al preparar la sentencia).
-    /// Así un número Orion entra correctamente en NUMERIC/INT/FLOAT sin que el
-    /// dev tenga que castear, y List/Dict viajan como JSON(b).
+    /// Codifica cada parámetro según el tipo de su columna: un número entra en
+    /// NUMERIC/INT/FLOAT sin castear, y List/Dict van como JSON.
     #[derive(Debug)]
     struct Param(EvalValue);
 
@@ -822,12 +792,8 @@ mod pg {
     }
 }
 
-//    Backend MySQL / MariaDB
-//
-// Misma API que SQLite/Postgres, contra un servidor MySQL. La URL es
-// mysql://user:pass@host:puerto/base. MySQL usa `?` como placeholder igual que
-// SQLite, así que NO hace falta traducir. El crate `mysql` ya trae su propio
-// pool interno (mysql::Pool), guardamos uno por URL.
+//    Backend MySQL / MariaDB: misma API con una URL mysql://…; usa `?` como
+//    SQLite y el pool propio del crate `mysql`.
 
 mod my {
     use super::{EvalValue, extract_params, to_str};

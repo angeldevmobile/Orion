@@ -1,19 +1,6 @@
-//! Alias en español obsoletos — SPEC.md sección 11.
-//!
-//! El inglés es el nombre canónico de la stdlib; los nombres españoles que
-//! vinieron primero siguen funcionando durante toda la 0.1.x y está previsto
-//! retirarlos. Esta tabla existe para avisar antes de ese día, no el día.
-//!
-//! **Por qué es una lista curada y no se deriva del registro.** El registro
-//! marca TODOS los alias con "Alias de modulo.principal.", pero no todos son
-//! traducciones: `log.warn`, `log.err` y `log.debug` comparten brazo con
-//! `log.info` y son niveles distintos; `state.increment` es alias inglés de
-//! `state.incr`; `router.post` de `router.get`. Avisar de esos sería decirle
-//! al usuario que su código está obsoleto cuando no lo está. Distinguir español
-//! de inglés no es derivable, así que se decide una vez y se escribe aquí.
-//!
-//! Al añadir un alias español nuevo, añádelo también aquí. `deprecated_sync`
-//! en tests/ comprueba que cada entrada siga existiendo en el registro.
+//! Alias en español obsoletos (SPEC.md §11): funcionan en la 0.1.x y avisan antes
+//! de retirarse. Lista curada a mano: no todo alias del registro es español. Al
+//! añadir uno, ponlo aquí también (lo comprueba tests/deprecated_sync).
 
 /// ("modulo.alias_español", "nombre_inglés"). ORDENADA: se busca por bisección.
 static ALIAS: &[(&str, &str)] = &[
@@ -163,10 +150,7 @@ static ALIAS: &[(&str, &str)] = &[
     ("ws.recibir", "recv"),
 ];
 
-/// El nombre inglés de un alias español, si `function` lo es.
-///
-/// `module` es el nombre CANÓNICO del módulo (el typechecker ya resolvió
-/// `formato` a `format` antes de llegar aquí).
+/// El nombre inglés de un alias español. `module` ya llega canónico.
 pub fn canonical_for(module: &str, function: &str) -> Option<&'static str> {
     let clave = format!("{module}.{function}");
     ALIAS.binary_search_by(|(k, _)| (*k).cmp(clave.as_str()))
@@ -174,10 +158,7 @@ pub fn canonical_for(module: &str, function: &str) -> Option<&'static str> {
         .map(|i| ALIAS[i].1)
 }
 
-/// Módulos cuyo propio nombre es un alias español obsoleto.
-///
-/// `df` y `embeddings` NO están: son abreviaturas inglesas deliberadas, no
-/// herencia del español, y seguirán existiendo.
+/// Módulos cuyo nombre es un alias español (`df` y `embeddings` no: son inglés).
 pub fn module_canonical(name: &str) -> Option<&'static str> {
     match name {
         "tarea"   => Some("task"),

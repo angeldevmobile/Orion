@@ -1,43 +1,17 @@
-//! Localización de elementos y espera.
-//!
-//! Un único tipo de selector, deducido del propio texto:
-//!
-//! | Forma            | Significa                          |
-//! |------------------|------------------------------------|
-//! | `//div[@id='x']` | XPath (empieza por `//` o `(//`)   |
-//! | `text=Comprar`   | por texto visible                  |
-//! | `.card > button` | CSS                                |
-//!
-//! No hay `find_element_by_xpath` y `find_element_by_css`: una sola función que
-//! mira lo que le has dado. La variante por texto existe porque la mayoría de
-//! los XPath que escribe la gente son para buscar por contenido, y salen
-//! frágiles e ilegibles.
-//!
-//! Todo se resuelve **dentro de la página**, en una sola evaluación. La
-//! alternativa —traerse nodos a Orion y consultarlos uno a uno— es lo que hace
-//! Selenium, y es la razón de que leer 500 elementos le cueste 1.500 idas y
-//! vueltas.
+//! Localización de elementos y espera. Un solo tipo de selector, deducido del
+//! texto: XPath (`//…`), `text=…` o CSS. Todo se resuelve dentro de la página en
+//! una sola evaluación, no nodo a nodo como Selenium.
 
 use std::time::Duration;
 
 use super::cdp::Conn;
 use super::launch::Tuning;
 
-/// Helper JS que se inyecta en cada evaluación.
-///
-/// Va como IIFE en vez de definirse una vez en la página: así no depende de
-/// que sobreviva a una navegación ni ensucia el espacio global del sitio, que
-/// es una forma barata de que un scraper se delate.
+/// Helper JS que se inyecta en cada evaluación, como IIFE: no depende de que
+/// sobreviva a una navegación ni ensucia el espacio global del sitio.
 pub const FIND_JS: &str = r#"
-// Shadow roots ABIERTAS que cuelgan de una raíz.
-//
-// Un componente web guarda su contenido en una shadow root, y `querySelector`
-// del documento no entra ahí: el selector correcto "no existe" y no hay pista
-// de por qué. Media web moderna —de un reproductor de vídeo a los formularios
-// de Salesforce— es esto, así que la búsqueda entra sola.
-//
-// Una shadow root CERRADA (`mode: 'closed'`) no es accesible ni para el
-// navegador desde fuera. No hay truco: se dice en el error en vez de fingir.
+// Shadow roots abiertas bajo una raíz: querySelector no entra en ellas. Las
+// cerradas no son accesibles ni desde fuera, y así se dice en el error.
 const __sombras = (raiz, out, prof) => {
   if (prof > __SPROF) return;
   let els;
@@ -48,13 +22,8 @@ const __sombras = (raiz, out, prof) => {
   }
 };
 
-// Raíces donde buscar: el documento principal, el de cada iframe accesible, y
-// las shadow roots abiertas de todos ellos.
-//
-// Muchos modales —los de consentimiento de cookies sobre todo— viven dentro de
-// un iframe. Sin esto, el selector correcto "no existe" y el usuario acaba
-// buscando en las herramientas del navegador por qué. Los iframes de otro
-// origen lanzan al tocarlos y simplemente se saltan: no hay forma de entrar.
+// Raíces donde buscar: el documento, cada iframe accesible (ahí viven muchos
+// modales de cookies) y sus shadow roots. Los iframes de otro origen se saltan.
 const __docs = () => {
   const out = [document];
   const scan = (doc) => {
@@ -171,20 +140,9 @@ pub fn expr_multi(cuerpo: &str, t: &Tuning) -> String {
     format!("(() => {{ {c}\n {FIND_JS}\n {cuerpo} }})()")
 }
 
-/// Como `expr`, pero reintentando hasta obtener algo o agotar el plazo.
-///
-/// Las lecturas que devuelven contenido (`text`, `html`, `attr`, `texts`) tienen
-/// que esperar: en una página moderna el contenido llega después del clic que lo
-/// pidió, y devolver `null` porque aún no estaba convierte un problema de tiempo
-/// en un dato perdido en silencio. Es justo el fallo que hace que un scraper de
-/// Python funcione en el portátil y no en el servidor.
-///
-/// Las que preguntan por el estado —`exists`, `visible`, `count`— **no** pasan
-/// por aquí: su trabajo es responder sobre el momento actual, y hacerlas esperar
-/// convertiría un "no está" legítimo en diez segundos de bloqueo.
-///
-/// Se considera "aún no hay nada" un `null`, un `undefined` o una lista vacía.
-/// El bucle vive en la página, así que sigue siendo una única llamada CDP.
+/// Como `expr`, pero reintentando hasta tener algo (no null, undefined ni lista
+/// vacía) o agotar el plazo. Solo las lecturas de contenido; exists, visible y
+/// count responden al instante. El bucle corre en la página: una sola llamada CDP.
 pub fn expr_waiting(sel: &str, cuerpo: &str, ms: u64, t: &Tuning) -> String {
     let reintento = t.retry_ms;
     let envuelto = format!(r#"
@@ -231,11 +189,8 @@ pub fn wait_for(
       obs = new MutationObserver(() => {{ if (__find(sel)) fin(true); }});
       obs.observe(document.documentElement, {{ childList: true, subtree: true, attributes: true }});
 
-      // ...y por eso además se sondea. Un MutationObserver no cruza a los
-      // iframes ni entra en las shadow roots: el elemento aparecía, `__find`
-      // lo habría encontrado, y `wait` seguía dormido hasta agotar el plazo.
-      // Justo donde más se usa: el botón de un modal de cookies, que vive en
-      // un iframe, o el de un componente web.
+      // ...y además se sondea: un MutationObserver no cruza iframes ni shadow
+      // roots, justo donde viven los botones de los modales de cookies.
       iv = setInterval(() => {{ if (__find(sel)) fin(true); }}, {reintento});
 
       tope = setTimeout(() => fin(false), {ms});
@@ -284,10 +239,8 @@ pub fn box_for_click(
     let capas  = t.force_layers;
     let reintento = t.retry_ms;
     let cuerpo = format!(r#"
-    // Puntos candidatos dentro del elemento. Probar solo el centro es lo que
-    // hacen las demás herramientas, y por eso fallan con una cabecera fija que
-    // cubre media mitad de un botón: la otra mitad era perfectamente clicable.
-    // Una persona pincharía en la parte visible, y esto hace lo mismo.
+    // Varios puntos candidatos, no solo el centro: con una cabecera fija que
+    // tapa medio botón, se pincha en la mitad visible, como una persona.
     const __puntos = (r) => {{
       const dx = Math.min(r.width / 4, {inset}), dy = Math.min(r.height / 4, {inset});
       const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
@@ -299,15 +252,8 @@ pub fn box_for_click(
       ].filter(([x, y]) => x >= 0 && y >= 0 && x < innerWidth && y < innerHeight);
     }};
     const __suyo = (el, enc) => enc && (enc === el || el.contains(enc) || enc.contains(el));
-    // El hit-test tiene que ocurrir en el documento del elemento: dentro de un
-    // iframe, `document.elementFromPoint` de la página de arriba devolvería el
-    // propio iframe y todo parecería tapado.
-    //
-    // Con shadow DOM pasa lo mismo un nivel más abajo: `elementFromPoint`
-    // devuelve el HOST, no el botón de dentro, y `host.contains(boton)` es
-    // false porque `contains` no cruza la frontera. Sin bajar por las shadow
-    // roots, todo componente web parecería tapado por sí mismo y `click`
-    // fallaría con un motivo que no hay forma de entender.
+    // El hit-test se hace en el documento del elemento (iframe) y bajando por las
+    // shadow roots: elementFromPoint devuelve el host, no el botón de dentro.
     const __enPunto = (el, x, y) => {{
       let enc = el.ownerDocument.elementFromPoint(x, y);
       for (let i = 0; __SHADOW && enc && enc.shadowRoot && i < __SPROF; i++) {{
@@ -360,10 +306,8 @@ pub fn box_for_click(
         // Se agotó el plazo. Sin `force` se informa y se acabó.
         if (!{forzar} || !el) return resolve({{ ok: false, why: why }});
 
-        // Con `force`: en vez de clicar a ciegas unas coordenadas —que es como
-        // Selenium acaba pulsando el banner en lugar del botón— se vuelve
-        // transparente al puntero lo que estorba. El clic sigue siendo un
-        // evento real del navegador y ahora sí alcanza al elemento.
+        // Con `force`, lo que estorba se vuelve transparente al puntero: el clic
+        // sigue siendo un evento real y alcanza al elemento, no a un banner.
         const r = el.getBoundingClientRect();
         const cands = __puntos(r);
         const [x, y] = cands[0];
@@ -416,12 +360,8 @@ pub fn box_for_click(
 }
 
 pub fn restore_pointer_events(conn: &Conn, session: &str, timeout: Duration) {
-    // Hay que recorrer lo MISMO que recorrió el hit-test al clicar, y ese baja
-    // por las shadow roots: `elementFromPoint` devuelve el host, y dentro está
-    // el elemento que de verdad tapaba. Un banner de cookies hecho como
-    // componente web —Usercentrics, OneTrust y compañía— es justo ese caso, y
-    // sin entrar aquí se quedaba con `pointer-events: none` PARA SIEMPRE: la
-    // página seguía viva pero muda a los clics, y encima delatada.
+    // Se recorre lo mismo que en el clic, bajando por las shadow roots: si no, un
+    // banner hecho como componente web se quedaba sin eventos para siempre.
     let js = r#"(() => {
       const raices = [document];
       const sombras = (r) => {

@@ -1,10 +1,5 @@
-//! Pase de argumentos con nombre (named args).
-//!
-//! Reordena `f(x = 1, y = 2)` a forma posicional usando la firma de `f`,
-//! rellenando huecos intermedios con los valores por defecto del parámetro. Se
-//! ejecuta sobre el AST antes de compilar. Lo que no se pueda resolver (módulo
-//! nativo, método, callee dinámico o función desconocida) conserva sus kwargs;
-//! codegen los rechaza luego con un error claro.
+//! Argumentos con nombre: reordena `f(x = 1, y = 2)` a posicional con la firma
+//! de `f`, rellenando huecos con los defaults. Lo que no se resuelve lo rechaza codegen.
 
 use crate::ast::{Expr, Param, Stmt, Pattern};
 use crate::codegen::CodegenError;
@@ -113,11 +108,8 @@ fn walk_stmts(ss: &mut [Stmt], sigs: &Sigs) -> Result<(), CodegenError> {
     Ok(())
 }
 
-/// Recorre un patrón buscando las expresiones que lleva dentro.
-///
-/// Solo `Value` contiene una expresión que pueda traer argumentos con nombre;
-/// el resto de formas son estructura y ligaduras. Se recorre igual entero para
-/// que un patrón anidado como `{clave: [f(x = 1)]}` no se quede sin pasar.
+/// Recorre un patrón buscando expresiones con argumentos con nombre, también
+/// anidadas (`{clave: [f(x = 1)]}`).
 fn walk_pattern(p: &mut Pattern, sigs: &Sigs) -> Result<(), CodegenError> {
     match p {
         Pattern::Wildcard | Pattern::Bind(_) => {}

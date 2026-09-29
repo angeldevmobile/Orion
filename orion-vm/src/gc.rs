@@ -1,12 +1,5 @@
-//! Mark-and-sweep GC para instancias de Orion (`Rc<RefCell<InstanceData>>`).
-//!
-//! Problema: `Value::Instance` usa `Rc<RefCell<InstanceData>>` con campos que pueden
-//! apuntar a otras instancias → ciclos → el conteo de referencias nunca llega a 0 → memory leak.
-//!
-//! Solución: mantener un registro de todos los `Rc` asignados como `Weak`. Al colectar:
-//!   1. Mark — recorrer desde los roots (stack + vars) y marcar instancias alcanzables.
-//!   2. Sweep — las no marcadas son ciclos; vaciamos sus `fields` para romper el ciclo.
-//!             El `Rc` baja a 0 y Rust los libera solos.
+//! Mark-and-sweep para los ciclos que el conteo de `Rc` no libera: se marca
+//! desde las raíces y se vacía lo no alcanzable, y el `Rc` cae a 0.
 
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
@@ -26,17 +19,10 @@ pub fn is_container(v: &Value) -> bool {
 pub struct Gc {
     /// Registro débil de todos los `Rc<RefCell<InstanceData>>` vivos.
     heap: Vec<Weak<RefCell<InstanceData>>>,
-    /// Listas candidatas a ciclo. NO se registra cada lista al crearse (sería
-    /// costo en el camino caliente): un ciclo solo puede cerrarse cuando una
-    /// mutación (push/append/set-index) guarda un contenedor dentro de una
-    /// lista, así que se registra SOLO la lista receptora en ese momento.
-    /// Todo ciclo queda con al menos un miembro registrado, y vaciar uno
-    /// rompe el ciclo entero (el resto cae por conteo de Rc).
+    /// Listas candidatas a ciclo: se registran al guardar un contenedor dentro
+    /// (push, append, set-index), no al crearse.
     lists: Vec<Weak<RefCell<ListData>>>,
-    /// Dedup de `lists` por puntero. Se reconstruye en cada collect; si el
-    /// allocator recicla una dirección entre collects, a lo sumo se retrasa
-    /// el registro de esa lista hasta después del siguiente collect (fuga
-    /// acotada, nunca corrupción).
+    /// Dedup de `lists` por puntero; se reconstruye en cada collect.
     lists_seen: HashSet<*const RefCell<ListData>>,
     /// Entornos de closures (registrados al crear la closure; un env puede
     /// ciclarse consigo mismo vía el write-back de una closure recursiva).
@@ -87,12 +73,8 @@ impl Gc {
         self.alloc_since_collect >= self.threshold
     }
 
-    /// Ejecuta el ciclo completo mark-and-sweep.
-    /// `roots` debe contener todos los `Value` accesibles desde el programa
-    /// (value_stack + vars de todos los frames + self_instance + closure_env).
-    /// IMPORTANTE: llamar solo desde un safepoint (ningún local de Rust puede
-    /// retener Values fuera de los roots, o el sweep los corrompe).
-    /// Devuelve el número de objetos liberados.
+    /// Mark-and-sweep completo; devuelve cuántos objetos liberó. `roots` son todos
+    /// los Value vivos, y solo se llama desde un safepoint.
     pub fn collect(&mut self, roots: &[Value]) -> usize {
         self.alloc_since_collect = 0;
 
@@ -111,9 +93,7 @@ impl Gc {
         let reach = mark_roots(roots);
 
         //    Sweep
-        // Vaciar el contenido de lo no alcanzable → rompe el ciclo → Rc cae a 0.
-        // El vaciado dispara drops en cascada; el Drop iterativo de
-        // InstanceData/ListData (value.rs) acota la profundidad de llamadas.
+        // Vaciar lo no alcanzable rompe el ciclo; el Drop iterativo acota la pila.
         for weak in &self.heap {
             if let Some(rc) = weak.upgrade() {
                 if !reach.instances.contains(&Rc::as_ptr(&rc)) {
@@ -165,19 +145,8 @@ struct Reachable {
     envs: HashSet<*const RefCell<EnvData>>,
 }
 
-/// Marca todas las instancias alcanzables desde los roots.
-///
-/// ITERATIVO a propósito (worklist en el heap, no recursión): el call stack
-/// nativo es de ~1MB y una cadena de 100k instancias enlazadas lo desbordaba.
-/// Con la worklist el límite es la RAM.
-///
-/// Los sets de visitados cubren TODO lo que comparte backing por `Rc`
-/// (instancias, listas, envs de closures), no solo instancias: desde las
-/// listas por referencia, `push(a, a)` crea una lista que se contiene a sí
-/// misma y sin su set el mark no terminaba nunca. Los dicts son por valor
-/// (no pueden contenerse a sí mismos), así que no necesitan set.
-/// Los tres sets son a la vez protección contra ciclos Y el resultado del
-/// mark: el sweep barre lo registrado que no aparezca en ellos.
+/// Marca lo alcanzable desde las raíces con una worklist, no con recursión (una
+/// cadena de 100k instancias desbordaba la pila). Los sets cortan los ciclos.
 fn mark_roots(roots: &[Value]) -> Reachable {
     let mut reach = Reachable {
         instances: HashSet::new(),
@@ -405,10 +374,8 @@ mod tests {
 
     #[test]
     fn test_deep_nested_pure_lists_mark_and_drop() {
-        // Torre de listas puras [[[[…]]]] de 200k niveles, sin instancias.
-        // Cubre los DOS recorridos profundos: el mark del GC (worklist
-        // iterativa) y el Drop de ListData (cola de drops) — antes el drop
-        // glue recursivo de Rust desbordaba el stack al soltar la torre.
+        // Torre de 200k listas anidadas: el mark iterativo y el Drop no deben
+        // desbordar la pila.
         let mut gc = Gc::new();
         let inst = make_inst("Fondo");
         gc.register(&inst);

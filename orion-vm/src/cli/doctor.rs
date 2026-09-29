@@ -57,10 +57,7 @@ pub fn run_doctor() {
         }
     }
 
-    // 6. Installed packages
-    //
-    // Se leen de installed.json, no listando subdirectorios: los paquetes son
-    // archivos .orx sueltos, así que el listado anterior siempre salía vacío.
+    // 6. Paquetes instalados, leídos de installed.json (son .orx sueltos, no carpetas).
     println!();
     banner::section("Installed packages");
     let inventario = crate::pkg::installed_everywhere();

@@ -201,10 +201,8 @@ fn main() {
 
         //    Verificar sintaxis (salida legible para humanos)
         "--check" => {
-            // La ruta es el primer argumento que no es un flag: así
-            // `check archivo.orx --types` y `check --types archivo.orx`
-            // funcionan igual. Antes se tomaba args[2] a secas y la segunda
-            // forma intentaba abrir un archivo llamado "--types".
+            // La ruta es el primer argumento que no es un flag: el orden de
+            // `--types` da igual.
             let check_types = args.iter().any(|a| a == "--types");
             let path = args.iter().skip(2).find(|a| !a.starts_with("--"));
             match path {
@@ -790,10 +788,8 @@ pub fn compile_repl_source(src: &str, path: &str) -> Result<bytecode::OrionBytec
     compile_with(src, path, CompileMode::Repl)
 }
 
-/// Compila el archivo que el usuario manda ejecutar (`run`, `--build`, `.orbc`).
-/// Añade la llamada a `main` si el programa la define y no la llama — ver
-/// [`codegen::compile_entry`]. El REPL y los diagnósticos del LSP usan
-/// [`compile_source`]: allí definir `main` no debe ejecutarla.
+/// Compila el archivo a ejecutar (`run`, `--build`, `.orbc`), añadiendo la
+/// llamada a `main` si hace falta. El REPL y el LSP usan [`compile_source`].
 pub fn compile_entry_source(src: &str, path: &str) -> Result<bytecode::OrionBytecode, error::OrionError> {
     compile_with(src, path, CompileMode::Entry)
 }
@@ -887,13 +883,8 @@ fn parse_repl_cmd(line: &str, session: &ReplSession) -> Option<ReplCmd> {
     }
 }
 
-/// ¿La entrada sigue abierta? Cierto mientras queden llaves, corchetes o
-/// paréntesis sin cerrar, o una cadena sin terminar.
-///
-/// Antes se miraba solo el último carácter de la línea, así que un bloque
-/// seguía abierto únicamente si CADA línea acababa en `{` o `,`: el cuerpo de
-/// una `fn` se cortaba en la primera sentencia y la entrada moría con
-/// "Expected RBrace, found Eof".
+/// ¿La entrada del REPL sigue abierta? Sí mientras quede una llave, corchete,
+/// paréntesis o cadena sin cerrar.
 fn entry_is_open(src: &str) -> bool {
     let cs: Vec<char> = src.chars().collect();
     let mut depth: i32 = 0;

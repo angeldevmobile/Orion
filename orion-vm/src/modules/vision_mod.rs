@@ -18,9 +18,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Dict(m))
         }
         // ocr(path, opts?) → String  — reconoce el texto de una imagen.
-        // Por defecto usa el motor `ocrs` (Rust puro, local, sin externos).
-        // opts = { "engine": "ocrs"|"tesseract", "lang": "spa" } — con "tesseract"
-        // llama al binario del sistema si el developer lo tiene instalado.
+        // Motor `ocrs` (local, sin dependencias) u opts.engine = "tesseract" si está
+        // instalado; opts.lang = "spa".
         "ocr" | "leer_texto" | "read_text" => {
             if args.is_empty() { return Err("vision.ocr requires (path, opts?)".into()); }
             let path = to_str(&args[0]);
@@ -344,12 +343,8 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-//    OCR — reconocimiento de texto
-//
-// Motor por defecto: `ocrs` (Rust puro, redes ONNX corriendo local vía rten, sin
-// Tesseract, sin API, sin internet). Los modelos van INCRUSTADOS en el binario
-// (include_bytes) → OCR out-of-the-box, sin archivos sueltos que instalar.
-// Motor opcional: Tesseract, solo si el developer lo tiene instalado y lo pide.
+//    OCR: motor `ocrs` con los modelos ONNX incrustados (local, sin internet ni
+//    instalación); Tesseract solo si el developer lo tiene y lo pide.
 
 use std::sync::{Mutex, OnceLock};
 

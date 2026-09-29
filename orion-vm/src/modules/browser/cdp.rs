@@ -1,28 +1,6 @@
-//! Transporte del Chrome DevTools Protocol.
-//!
-//! CDP es WebSocket + JSON, así que no hace falta ningún cliente externo: basta
-//! el `tungstenite` síncrono que Orion ya usa en `ws`. Lo único que hay que
-//! resolver de verdad es el multiplexado.
-//!
-//! Sobre un único socket viajan mezcladas las respuestas a las peticiones
-//! (llevan `id`) y los eventos del navegador (llevan `method`). Si dos tareas de
-//! Orion comparten un navegador, hace falta alguien que reparta:
-//!
-//! ```text
-//!   tarea A  ── id=7 ──┐                     ┌─► responses[7] ─► despierta A
-//!                      ├─►  socket CDP  ─────┤
-//!   tarea B  ── id=8 ──┘     (1 hilo lector) └─► responses[8] ─► despierta B
-//!                                            └─► events[] ─────► quien espere
-//! ```
-//!
-//! Un hilo lector por conexión desencola mensajes y deja cada respuesta donde
-//! su emisor la espera; el emisor duerme en una `Condvar` en vez de girar en
-//! vacío. Es el mismo patrón de parking que usa `await` en `task_pool`, así que
-//! no se introduce un segundo modelo de concurrencia junto al que ya existe.
-//!
-//! El socket se pone en modo no bloqueante: así el hilo lector retiene el
-//! candado solo microsegundos por sondeo y los emisores no se quedan esperando
-//! detrás de una lectura bloqueada.
+//! Transporte CDP (WebSocket + JSON con `tungstenite`). Un hilo lector por
+//! conexión reparte cada respuesta a quien la espera (Condvar, como `await`) y
+//! los eventos a sus suscriptores; el socket va en modo no bloqueante.
 
 use std::collections::{HashMap, HashSet};
 use std::io::ErrorKind;
@@ -82,15 +60,8 @@ pub struct Event {
 #[derive(Default)]
 struct State {
     responses: HashMap<u64, serde_json::Value>,
-    /// Ids que alguien está esperando de verdad.
-    ///
-    /// Sin esto, `responses` crecía para siempre. No todo lo que se envía tiene
-    /// a alguien esperándolo: cada `Fetch.continueRequest` —uno por PETICIÓN de
-    /// la página cuando hay `allow` o `route`— y cada respuesta a un diálogo se
-    /// mandan y se olvidan, pero su respuesta llegaba igual y se quedaba en el
-    /// mapa. Un recorrido largo con allowlist acababa reteniendo un JSON por
-    /// cada imagen, fuente y XHR de cada página visitada. Lo mismo con las
-    /// respuestas que llegan tarde, después de vencer su plazo.
+    /// Ids que alguien espera: las respuestas sin nadie esperando (los
+    /// `Fetch.continueRequest`, las que llegan tarde) se descartan, no se acumulan.
     esperando: HashSet<u64>,
     events:    Vec<Event>,
     next_seq:  u64,
@@ -431,12 +402,8 @@ impl Conn {
     fn send_text(&self, texto: String) -> Result<(), String> {
         let mut sock = self.socket.lock().unwrap();
         let limite = Instant::now() + self.limits.send;
-        // `send` de tungstenite = encolar + vaciar. Si el socket está lleno
-        // devuelve `WouldBlock`, pero el mensaje YA está en su búfer: volver a
-        // llamar a `send` lo encolaría por segunda vez, y el navegador
-        // ejecutaría el comando dos veces —dos clics, dos navegaciones— además
-        // de dejar una respuesta suelta con un id que nadie espera. A partir
-        // del primer `WouldBlock` solo se vacía.
+        // Tras el primer `WouldBlock` solo se vacía: el mensaje ya está en el
+        // búfer, y reenviarlo ejecutaría el comando dos veces.
         let mut ya_encolado = false;
         loop {
             let intento = if ya_encolado {

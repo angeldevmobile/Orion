@@ -163,12 +163,8 @@ fn analyze_with_ai(path: &str, question: &str, opts: &Opts) -> Result<EvalValue,
 
 //     Umbral y binarización
 
-/// Umbral de intensidad bajo el cual un píxel cuenta como "tinta".
-///
-/// Sin indicación del developer se calcula por Otsu sobre el histograma de la
-/// propia imagen. Un valor fijo solo acierta en escaneos de blanco y negro
-/// puros: en un documento gris o con fondo tintado deja fuera todo el
-/// contenido, que es de donde salían los falsos negativos.
+/// Umbral de "tinta": el que diga el developer o, si no, Otsu sobre la propia
+/// imagen (un valor fijo falla con fondos grises o tintados).
 enum Threshold {
     Otsu,
     Fixed(u8),
@@ -210,11 +206,8 @@ fn otsu(gray: &image::GrayImage) -> u8 {
     best_t
 }
 
-/// Máscara de tinta: `true` donde el píxel llega al umbral de oscuridad.
-///
-/// El umbral es INCLUSIVO (`<=`), que es como lo define Otsu: la clase oscura
-/// es `[0..=t]`. Con `<` una imagen de blanco y negro puros da umbral 0 y no
-/// se marcaría ni un píxel.
+/// Máscara de tinta: `true` donde el píxel llega al umbral. Inclusivo (`<=`),
+/// como lo define Otsu.
 struct Ink {
     w: usize,
     h: usize,
@@ -235,11 +228,8 @@ impl Ink {
         if total == 0 { 0.0 } else { self.count() as f64 / total as f64 }
     }
 
-    /// Caja que encierra toda la tinta, o `None` si no hay ninguna.
-    ///
-    /// Las líneas se miden contra esto y no contra la imagen completa: una
-    /// tabla centrada en una hoja con márgenes no llega al 70% del ancho del
-    /// papel aunque sus reglas la crucen entera.
+    /// Caja que encierra toda la tinta: las líneas se miden contra ella, no
+    /// contra la hoja entera con sus márgenes.
     fn content_box(&self) -> Option<(usize, usize, usize, usize)> {
         let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0usize, 0usize);
         for y in 0..self.h {
@@ -283,12 +273,8 @@ fn extract_metadata_from_img(img: &DynamicImage, opts: &Opts) -> EvalValue {
     EvalValue::Dict(m)
 }
 
-/// Longitud del tramo continuo de tinta más largo de una fila o columna.
-///
-/// Es lo que distingue una regla de tabla de una línea de texto: el texto tiene
-/// muchos píxeles oscuros pero interrumpidos, mientras que un borde de tabla es
-/// un tramo seguido. Contar el total de oscuros, como se hacía antes, confundía
-/// ambos casos en los dos sentidos.
+/// Tramo continuo de tinta más largo de una fila o columna: un borde de tabla
+/// es un tramo seguido, el texto está interrumpido.
 fn longest_run(ink: &Ink, along_x: bool, idx: usize, tolerance: usize) -> usize {
     let n = if along_x { ink.w } else { ink.h };
     let (mut best, mut cur, mut gap) = (0usize, 0usize, 0usize);
@@ -383,10 +369,8 @@ impl Blob {
     }
 }
 
-/// Tramo recto más largo dentro de la caja del blob, en fracción de su ancho
-/// o su alto. Sirve para separar tinta manuscrita de estructura impresa: una
-/// rejilla de tabla es una sola componente conexa que pasa todos los filtros
-/// de forma, y lo que la delata es que contiene rectas que la cruzan entera.
+/// Tramo recto más largo en la caja de un blob: separa lo manuscrito de una
+/// rejilla impresa, que tiene rectas que la cruzan entera.
 fn straightness(ink: &Ink, b: &Blob, tol: usize) -> f64 {
     let mut best = 0.0f64;
     for y in b.y0..=b.y1.min(ink.h.saturating_sub(1)) {
@@ -489,10 +473,8 @@ fn detect_signatures(path: &str, opts: &Opts) -> Result<EvalValue, String> {
         let min_px = ((opts.min_stroke_ratio * (full.w * band_h) as f64) as usize).max(1);
         blobs = connected_blobs(&band, min_px);
 
-        // Una firma es un trazo: caja ancha respecto a la banda, relleno bajo
-        // (poca tinta para el espacio que abarca) y proporción apaisada pero
-        // NO plana — una regla de tabla cumple todo lo demás y se distingue
-        // justo por ahí: es un rectángulo de 2 px de alto y cientos de ancho.
+        // Una firma es un trazo ancho, con poco relleno y apaisado pero no plano:
+        // eso último la separa de una regla de tabla (2 px de alto).
         for b in &blobs {
             let ancho_rel = b.w() as f64 / full.w as f64;
             if ancho_rel < opts.min_width_ratio { continue; }

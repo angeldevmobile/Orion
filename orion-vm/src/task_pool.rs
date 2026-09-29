@@ -1,19 +1,6 @@
-//! Pool de hilos cacheado para tareas `spawn` / `async fn`.
-//!
-//! Antes, cada `spawn` hacía `std::thread::spawn` directo: N tareas = N hilos de
-//! SO, sin reutilización. Este pool reutiliza hilos ociosos y solo crea uno nuevo
-//! cuando *todos* están ocupados, de modo que:
-//!
-//!   - Una ráfaga de miles de `spawn` cortos reutiliza un puñado de hilos.
-//!   - Nunca hay deadlock: si una tarea hace `await` de otra y no queda ningún
-//!     worker libre, el pool arranca uno nuevo bajo demanda (pool "cacheado",
-//!     no acotado por un tope fijo). Esto es lo que permite anidar spawn/await.
-//!   - Los hilos ociosos se reciclan tras `IDLE_TIMEOUT` para no acumular hilos
-//!     dormidos indefinidamente.
-//!
-//! Toda la coordinación va bajo un único `Mutex<State>` + `Condvar`, así la
-//! decisión "¿notifico a un ocioso o creo un worker?" es atómica respecto al
-//! encolado y no puede perder un trabajo por una carrera.
+//! Pool de hilos para `spawn` / `async fn`: reutiliza hilos ociosos, crea uno si
+//! todos están ocupados (así un `await` anidado nunca se bloquea) y recicla los
+//! ociosos tras `IDLE_TIMEOUT`.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};

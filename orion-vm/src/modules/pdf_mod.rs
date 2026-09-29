@@ -9,10 +9,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             if args.len() < 2 { return Err("pdf.create requires (path, text, opts?)".into()); }
             super::pdf_layout::texto_corrido(&to_str(&args[0]), &to_str(&args[1]), args.get(2))
         }
-        // build(path, bloques, opts?) → Bool  — documento libre por bloques:
-        // title, heading, text, table, fields, image, line, space, page_break.
-        // opts: size, orientation, margin, header, footer, page_numbers,
-        // page_format, title, author, subject.
+        // build(path, bloques, opts?) → Bool  — documento libre por bloques.
         "build" | "construir" => {
             if args.len() < 2 { return Err("pdf.build requires (path, blocks, opts?)".into()); }
             super::pdf_layout::construir(&to_str(&args[0]), &args[1], args.get(2))
@@ -31,9 +28,6 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // report(path, titulo, filas, opts?) → Bool
         // filas: List<List> (la primera es la cabecera) o List<Dict>.
-        // opts: las de página, subtitle, columns ({ nombre: { width, align,
-        // format, bold, color, title, hidden } }), font_size, header_bg,
-        // header_color, zebra, borders, total, decimal, thousands.
         "report" | "reporte" => {
             if args.len() < 3 { return Err("pdf.report requires (path, titulo, filas, opts?)".into()); }
             super::pdf_layout::reporte(&to_str(&args[0]), &to_str(&args[1]), &args[2], args.get(3))
@@ -287,12 +281,8 @@ fn ocr_pdf(path: &str, _opts: Option<&EvalValue>) -> Result<EvalValue, String> {
     Ok(EvalValue::Str(partes.join("\n")))
 }
 
-//    Rasterización de PDF con pdfium (binario incrustado, self-contained)
-//
-// El binario de pdfium correspondiente a la plataforma va INCRUSTADO en Orion
-// (include_bytes) y se extrae a un temporal en el 1er uso. Lo ÚNICO específico
-// de cada SO es qué binario se incrusta (pdfium_blob); la lógica de rasterizado
-// es compartida. Soporta Windows/Linux x64 y macOS arm64/x64.
+//    Rasterización con pdfium: el binario de cada plataforma va incrustado y se
+//    extrae a un temporal en el primer uso (Windows/Linux x64, macOS arm64/x64).
 
 // Selección del binario por plataforma (lo único que cambia entre SOs).
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]

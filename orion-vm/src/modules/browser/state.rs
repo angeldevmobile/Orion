@@ -1,31 +1,6 @@
-//! Sesión reutilizable: cookies y almacenamiento del navegador, a un archivo.
-//!
-//! El problema que resuelve es el más caro de una automatización que corre a
-//! diario: **volver a iniciar sesión en cada ejecución**. Es lento, y sobre todo
-//! es frágil — cada login es un formulario que puede cambiar, un captcha que
-//! puede aparecer y un doble factor que puede saltar. Un proceso que se loguea
-//! cien veces al día también es un proceso que parece un ataque.
-//!
-//! ```orion
-//! -- una vez, a mano
-//! web.save_state(p, "sesion.json")
-//!
-//! -- todos los días
-//! web.goto(p, "https://portal.empresa.com")
-//! web.load_state(p, "sesion.json")
-//! web.reload(p)                       -- ya dentro
-//! ```
-//!
-//! `user_data` en `open()` resuelve algo parecido guardando el perfil entero,
-//! pero es una carpeta de cientos de megas atada a una máquina. Esto es un JSON
-//! que se puede mover, versionar aparte o guardar en un gestor de secretos.
-//!
-//! ## Este archivo es una credencial
-//!
-//! Dentro van las cookies de sesión. Quien lo tenga entra como tú, sin
-//! contraseña y sin segundo factor. No va al repositorio y no se comparte: vale
-//! exactamente lo mismo que la contraseña, con el agravante de que no caduca
-//! cuando la cambias.
+//! Guarda y carga cookies y almacenamiento del navegador en un JSON, para no
+//! volver a iniciar sesión en cada ejecución. OJO: el archivo es una credencial
+//! (entra como tú sin contraseña ni segundo factor): no va al repositorio.
 
 use std::time::Duration;
 

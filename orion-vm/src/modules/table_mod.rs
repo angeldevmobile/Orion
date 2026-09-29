@@ -237,8 +237,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //    Filtros y ordenación                                              
 
         // where(table, condicion) → table filtrada
-        // Soporta: comparadores (== != > >= < <= contains starts_with ends_with),
-        // lógica (&& || !), paréntesis, aritmética, columna vs columna y funciones.
+        // Comparadores, && || !, paréntesis, aritmética y funciones.
         // Ej: "(region == 'Norte' || region == 'Sur') && venta * 1.19 > meta"
         "where" => {
             if args.len() < 2 { return Err("table.where requires (tabla, condicion)".into()); }
@@ -325,10 +324,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         //    Transformación                                                    
 
         // add(table, "nueva_col", "expresion") → table con columna calculada
-        // Aritmética completa (+ - * / % con precedencia, paréntesis, negativos),
-        // concatenación de texto con +, comparadores (producen columna booleana)
-        // y funciones: upper lower trim len abs round floor ceil sqrt min max pow.
-        // Ej: "round((venta - costo) / venta * 100, 2)", "upper(nombre) + ' (' + region + ')'"
+        // Aritmética, concatenación, comparadores y funciones (upper, round, sqrt…).
+        // Ej: "round((venta - costo) / venta * 100, 2)"
         "add" => {
             if args.len() < 3 { return Err("table.add requires (tabla, nombre_col, expresion)".into()); }
             let rows = list_arg("add", &args, 0)?;
@@ -480,10 +477,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         //    Combinación                                                       
 
-        // join(t1, t2, "clave" | ["c1","c2"]) → inner join (multi-clave soportada)
-        // join(..., "left") → conserva todas las filas de t1 y rellena con null.
-        // Colisión de nombre (columna no-clave en ambos lados): la derecha entra
-        // como col_2, col_3… — nada se pisa en silencio.
+        // join(t1, t2, "clave" | ["c1","c2"], "left"?) → inner join, o left
+        // Si una columna no clave está en los dos lados, la derecha entra como col_2.
         "join" => {
             if args.len() < 3 { return Err("table.join requires (table1, table2, key)".into()); }
             let left  = list_arg("join", &args, 0)?;
@@ -1128,19 +1123,9 @@ fn print_schema(rows: &[EvalValue]) {
     println!();
 }
 
-//    Motor de expresiones (where / add / count / stream)
-//
-//    Gramática única para condiciones y columnas calculadas; se parsea UNA vez
-//    por llamada y se evalúa por fila. Precedencia de menor a mayor:
-//      or      := and ('||' and)*
-//      and     := not ('&&' not)*
-//      not     := '!' not | cmp
-//      cmp     := sum (('=='|'!='|'>='|'<='|'>'|'<'|contains|starts_with|ends_with) sum)?
-//      sum     := term (('+'|'-') term)*
-//      term    := factor (('*'|'/'|'%') factor)*
-//      factor  := '-' factor | primary
-//      primary := número | 'texto' | true/yes | false/no | null | columna
-//              | función '(' expr (',' expr)* ')' | '(' or ')'
+//    Motor de expresiones (where / add / count / stream), de menor a mayor
+//    precedencia: ||, &&, !, comparación (== … contains), + -, * / %, - unario,
+//    y primario (número, 'texto', yes/no, null, columna, función(…), (…)).
 
 #[derive(Debug, Clone)]
 enum Tok {

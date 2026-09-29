@@ -1,28 +1,6 @@
-//! Archivos: subir, descargar e imprimir a PDF.
-//!
-//! El problema que resuelve este archivo no es escribir en disco, es que **el
-//! navegador delega estas tres cosas en el sistema operativo**. Al pulsar
-//! "Adjuntar" se abre el explorador de archivos de Windows; al pulsar "Descargar"
-//! se abre "Guardar como"; al imprimir, el diálogo de impresión. Son ventanas
-//! nativas, fuera del DOM: ningún clic ni ninguna tecla sintética las alcanza.
-//!
-//! Ahí es donde se atasca la automatización web. La salida habitual en Python es
-//! `pyautogui` mandando pulsaciones a ciegas a una ventana cuyo título depende
-//! del idioma del Windows, que además muere en headless y depende de que nadie
-//! toque el ratón mientras tanto.
-//!
-//! La solución de aquí es la contraria: **no se maneja la ventana, se impide que
-//! exista**. CDP permite interceptar las tres antes de que el navegador se las
-//! pida al sistema.
-//!
-//! | Ventana nativa      | Cómo se evita                            |
-//! |---------------------|------------------------------------------|
-//! | Abrir archivo       | `Page.setInterceptFileChooserDialog`     |
-//! | Guardar como        | `Browser.setDownloadBehavior`            |
-//! | Imprimir            | `Page.printToPDF`                        |
-//!
-//! Nada de esto depende del idioma del sistema, ni de la resolución, ni de que
-//! haya escritorio: funciona igual en headless y en un servidor sin pantalla.
+//! Subir, descargar e imprimir a PDF sin ventanas del sistema: CDP las intercepta
+//! antes de que existan (setInterceptFileChooserDialog, setDownloadBehavior,
+//! printToPDF). Funciona igual en headless y sin idioma de sistema.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

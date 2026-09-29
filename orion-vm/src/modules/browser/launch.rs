@@ -1,14 +1,6 @@
-//! Localización y arranque del navegador.
-//!
-//! Se busca en cascada y sin nada fijado en el código: primero lo que diga el
-//! programa (`opts.chrome`), luego el entorno (`ORION_CHROME`), y solo después
-//! la detección automática. Cualquier navegador basado en Chromium sirve —
-//! Chrome, Chromium, Brave o Edge— porque todos hablan CDP; en Windows eso
-//! importa porque Edge viene instalado de fábrica.
-//!
-//! El puerto se pide como 0 (que lo elija el sistema) y se lee del propio
-//! navegador por su stderr. Fijar un puerto sería un choque garantizado en
-//! cuanto se abran dos navegadores a la vez.
+//! Arranque del navegador: `opts.chrome`, luego `ORION_CHROME` y luego detección
+//! (cualquier Chromium: Chrome, Brave, Edge). Puerto 0, leído del stderr del
+//! navegador, para que dos navegadores no choquen.
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -126,16 +118,8 @@ pub struct Launched {
     pub temporal:  bool,
 }
 
-/// Atar el navegador a la vida de este proceso.
-///
-/// `with` cierra el navegador aunque el cuerpo lance un error, pero no puede
-/// hacer nada si el proceso muere de golpe: un `kill`, el OOM killer, un corte
-/// de luz o un cron que tumba la tarea. Ahí el navegador quedaba vivo, y una
-/// tarea que se cuelga cada noche va acumulando Chromes de cientos de MB.
-///
-/// Esto lo resuelve el sistema operativo, que es el único que sigue estando ahí
-/// cuando el proceso ya no está. Sin dependencias nuevas: se declaran las tres
-/// funciones del sistema que hacen falta.
+/// Ata el navegador a la vida de este proceso, para que un `kill` o un OOM no lo
+/// dejen vivo. Lo hace el sistema operativo, sin dependencias nuevas.
 #[cfg(windows)]
 mod atadura {
     use std::ffi::c_void;
@@ -183,12 +167,8 @@ mod atadura {
     /// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: al cerrarse el job, mueren los suyos.
     const MATAR_AL_CERRAR: u32 = 0x2000;
 
-    /// Mete al navegador en un *job object* que muere con este proceso.
-    ///
-    /// El handle se deja abierto A PROPÓSITO durante toda la vida del proceso:
-    /// cerrarlo mataría al navegador en el acto. Windows lo cierra solo cuando
-    /// el proceso termina —de la forma que sea, incluido un `kill`— y ese cierre
-    /// es justo lo que se lleva por delante al navegador y a sus hijos.
+    /// Mete al navegador en un job object que muere con este proceso. El handle
+    /// se deja abierto a propósito: cerrarlo mataría al navegador.
     pub fn atar(child: &std::process::Child) {
         unsafe {
             let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
@@ -210,11 +190,8 @@ mod atadura {
     }
 }
 
-/// En Linux lo hace el kernel: el hijo recibe SIGKILL cuando muere su padre.
-///
-/// Ojo a la letra pequeña de `PR_SET_PDEATHSIG`: la señal llega cuando muere el
-/// **hilo** que lanzó el proceso, no el proceso entero. Por eso el navegador se
-/// abre desde el hilo que conduce el recorrido y no desde uno auxiliar.
+/// En Linux, SIGKILL al hijo cuando muere su padre. `PR_SET_PDEATHSIG` mira el
+/// hilo que lo lanzó, así que se abre desde el hilo del recorrido.
 #[cfg(target_os = "linux")]
 mod atadura {
     /// `PR_SET_PDEATHSIG`

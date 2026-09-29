@@ -382,11 +382,8 @@ impl eframe::App for OrionAppReactive {
             ctx.request_repaint_after(Duration::from_millis(tick_ms.min(16) as u64));
         }
 
-        // Si se disparó un evento, re-evaluar el script EN ESTE MISMO HILO de UI.
-        // El state_store vive en el thread_local STATE de este hilo; correrlo en
-        // un hilo aparte (thread::spawn) usaría un STATE nuevo y vacío, perdiendo
-        // todo el estado (acc/op/cur) en cada clic. La re-evaluación es trivial
-        // en coste, así que correrla síncronamente no afecta la fluidez.
+        // Un evento re-evalúa el script en este mismo hilo de UI: el estado vive
+        // en su thread_local, y otro hilo empezaría con el estado vacío.
         if let Some(ev) = fired_event {
             if let Some((new_comps, new_fields)) =
                 rerun_script(&self.path, ev, self.field_vals.clone())

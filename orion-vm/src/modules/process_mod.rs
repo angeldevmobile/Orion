@@ -31,13 +31,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Dict(m))
         }
         // args() → lista de argumentos pasados al script
-        //
-        //   orion run reporte.orx datos.xlsx 913916
-        //   → ["datos.xlsx", "913916"]
-        //
-        // Se devuelve lo que va DESPUÉS del .orx, que es lo que el script pidió;
-        // los flags del propio Orion (--profile, --no-typecheck…) se descartan
-        // porque son del intérprete y no del programa.
+        // Lo que va después del .orx (`orion run r.orx a b` → ["a", "b"]), sin los
+        // flags del propio Orion.
         "args" | "argumentos" => {
             const FLAGS_ORION: &[&str] = &["--profile", "--no-typecheck", "--jit", "--debug"];
             let todos: Vec<String> = std::env::args().collect();

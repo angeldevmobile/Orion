@@ -60,9 +60,7 @@ where
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // Las funciones de este módulo DECLARAN la interfaz; no dibujan nada
-        // hasta que se llama a run(), que toma el control de la terminal.
-        //
+        // Estas funciones declaran la interfaz; nada se dibuja hasta run().
         // panel(titulo?: string) -> nada → título de la ventana; sin él, "Orion TUI"
         "panel" => {
             let title = str_arg(&args, 0).unwrap_or_else(|| "Orion TUI".into());

@@ -12,14 +12,8 @@ use rust_xlsxwriter::conditional_format::{
     ConditionalFormatText, ConditionalFormatTextRule,
 };
 
-/// Columnas de una hoja, en el orden en que las escribió el developer.
-///
-/// Se recorren TODAS las filas, no solo la primera: es normal que un campo
-/// opcional aparezca a mitad de la lista (los datos de vehículo de un
-/// certificado, por ejemplo), y mirando solo la primera fila esa columna se
-/// perdía entera. Al ser un IndexSet, el orden es el de aparición y no el
-/// alfabético — el dict de Orion preserva el orden de inserción y ordenarlo
-/// aquí descartaba una decisión deliberada de quien escribió el reporte.
+/// Columnas de una hoja en el orden en que se escribieron, mirando todas las
+/// filas (un campo opcional puede aparecer a mitad de la lista).
 pub(crate) fn collect_headers(rows: &[EvalValue]) -> Vec<String> {
     let mut cols: IndexSet<String> = IndexSet::new();
     for r in rows {
@@ -284,12 +278,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Dict(result))
         }
 
-        //   write_styled                              
-        // write_styled(path, datos, config?) → xlsx con formato avanzado por columna
-        // config: {
-        //   hoja, titulo, cabecera:{fondo,texto}, alternar, freeze, autofilter,
-        //   anchos:{col:n}, totales:[cols], formatos:{col:{numero,bold,fondo,texto,condicional:[...]}}
-        // }
+        // write_styled(path, datos, config?) → xlsx con formato por columna
+        // config: hoja, titulo, cabecera, alternar, freeze, autofilter, anchos,
+        // totales, formatos, formulas, charts
         "write_styled" => {
             if args.len() < 2 {
                 return Err("excel.write_styled requires (path, datos, config?)".into());
@@ -324,11 +315,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::List(result))
         }
 
-        // group(datos, campo, config?) → list agrupada
-        // config: {"suma": ["col1","col2"], "conteo": yes, "promedio": ["col1"]}
-        // group(data, campo, spec) — multi-agg
-        // spec: { "col": ["sum","avg","max","min","count","first","last","std","median"],
-        //         "count": yes }
+        // group(datos, campo, spec?) → list agrupada
+        // spec: { "col": ["sum","avg","max","min","count","first","last","std","median"] }
         "group" | "agrupar" => {
             if args.len() < 2 {
                 return Err("excel.group requires (datos, campo, spec?)".into());
@@ -342,14 +330,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             group_by_multi(rows, campo, spec)
         }
 
-        // sort(datos, campo, dir?) → sorted — dir: "asc" (default) | "desc"
-        // sort(data, criterios...) — multi-columna
-        // Formas:
-        //   excel.sort(data, "col+")              → col asc
-        //   excel.sort(data, "col-")              → col desc
-        //   excel.sort(data, "region+", "sales-") → multi-col shorthand
-        //   excel.sort(data, [{by:"col",dir:"asc"}, ...]) → explícito
-        //   excel.sort(data, "col", "asc"|"desc") → compat. 1-col anterior
+        // sort(datos, criterios...) → list ordenada
+        // "col+" / "col-", varios a la vez, [{by, dir}], o (col, "asc"|"desc")
         "sort" | "ordenar" | "sort_by" => {
             if args.len() < 2 {
                 return Err("excel.sort requires (datos, criterio...)".into());
@@ -752,11 +734,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // f → retorna el sub-módulo formula builder (excel.f.pct, .ratio, .rank, ...)
         "f" => Ok(EvalValue::Module("excel_f".to_string())),
 
-        // chart(path, datos, config) → genera xlsx con gráfico
-        // config: { type, x, y, title, x_title, y_title,
-        //           palette, colors, sheet, data_sheet,
-        //           stacked, smooth, show_values, goal,
-        //           width, height }
+        // chart(path, datos, config) → xlsx con gráfico
+        // config: type, x, y, title, x_title, y_title, palette, colors, sheet,
+        // data_sheet, stacked, smooth, show_values, goal, width, height
         "chart" => {
             if args.len() < 2 {
                 return Err("excel.chart requires (path, datos, config?)".into());
@@ -862,10 +842,7 @@ fn write_styled_impl(
         _ => (0x2D5F8A, 0xFFFFFF),
     };
 
-    // Mismo criterio que `write`: el orden en que el developer escribió las
-    // claves, y todas las que aparezcan en cualquier fila. Aquí se ordenaban
-    // alfabéticamente, así que "Fecha, Pedidos, Importe" salía como
-    // "Fecha, Importe, Pedidos" y no había forma de pedir otro orden.
+    // Columnas en el orden en que se escribieron las claves, como `write`.
     let headers: Vec<String> = match rows.first() {
         Some(EvalValue::Dict(_)) => collect_headers(&rows),
         _ => return Err("excel.write_styled: the data must be a list of dicts".into()),
@@ -1645,16 +1622,8 @@ fn excel_chart_impl(
     Ok(EvalValue::Str(path.to_string()))
 }
 
-//     Constructor de gráfico compartido                                        
-// Usado por excel.chart y por el key `charts` de excel.write_styled.
-//
-// Parámetros:
-//   cfg          — config del gráfico (type, x, y, title, palette, style, ...)
-//   data_sheet   — nombre de la hoja donde están los datos
-//   headers      — nombres de columnas en orden
-//   first_row    — primera fila de datos (1-based, fila 0 = encabezados)
-//   last_row     — última fila de datos  (inclusive)
-//   goal_col_idx — Some(col) si hay línea de meta ya escrita en esa columna
+//     Constructor de gráfico, compartido por excel.chart y `charts` de
+//     write_styled. Filas 1-based; goal_col_idx si hay línea de meta.
 fn build_chart_from_cfg(
     cfg:          &HashMap<String, EvalValue>,
     data_sheet:   &str,
@@ -1814,13 +1783,8 @@ fn chart_palette(name: &str) -> Vec<u32> {
     }
 }
 
-//     Generador de fórmulas Excel                                              
-// Convierte un descriptor { _f, col, ... } en una string de fórmula Excel.
-//
-// excel_row     — fila actual en notación Excel (1-based)
-// col_map       — nombre de columna → índice de columna (0-based xlsxwriter)
-// data_start    — primera fila de datos en Excel (1-based)
-// data_end      — última fila de datos en Excel  (1-based)
+//     Fórmula Excel a partir de un descriptor { _f, col, … }. Filas en notación
+//     Excel (1-based); col_map va de nombre a índice 0-based.
 fn generate_formula_str(
     desc:       &HashMap<String, EvalValue>,
     excel_row:  u32,

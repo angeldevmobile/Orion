@@ -1,17 +1,6 @@
-//! Backend AOT: compila el programa a código nativo dentro de un archivo objeto.
-//!
-//! Reutiliza el mismo generador de IR que el JIT ([`super::compiler::CodeGen`])
-//! cambiando el backend de `JITModule` a `ObjectModule`. La diferencia con el
-//! modo bundle (ver `crate::aot`) es sustancial: allí el objeto solo lleva el
-//! bytecode y un `main` que arranca el intérprete, aquí el objeto lleva el
-//! código máquina de las funciones del programa.
-//!
-//! Dos cosas que en JIT resuelve el compilador en tiempo de compilación tienen
-//! que ocurrir dentro del binario, y por eso se emite un prólogo en `main`:
-//!
-//!   1. El registro de shapes (campos y padres), que vive en TLS.
-//!   2. El registro de punteros de funciones y acts, que en JIT vienen de
-//!      `get_finalized_function` y aquí los resuelve el linker.
+//! Backend AOT: el mismo generador de IR que el JIT, pero a un objeto con el
+//! código máquina del programa (no el bytecode, como `crate::aot`). El `main`
+//! emitido registra antes los shapes y los punteros de funciones y acts.
 
 use cranelift_codegen::ir::{types, AbiParam, InstBuilder};
 use cranelift_codegen::settings::{self, Configurable};

@@ -43,20 +43,11 @@ pub enum Expr {
     // Comprobación de tipo
     IsCheck { expr: Box<Expr>, shape: String },
 
-    // `...expr` — expande una lista en el sitio donde se escribe.
-    //
-    // Solo es válido dentro de un literal de lista o de los argumentos de una
-    // llamada; en cualquier otra posición el parser lo rechaza. No sobrevive a
-    // codegen: allí se convierte en concatenación de listas, así que ni la VM
-    // ni el JIT llegan a ver este nodo.
+    // `...expr`: expande una lista, solo en listas y argumentos. Codegen lo
+    // convierte en concatenación; la VM y el JIT no lo ven.
     Spread(Box<Expr>),
 
-    // Condicional como EXPRESIÓN: `cond ? si_si : si_no`.
-    //
-    // En Orion `if` es una declaración, no una expresión, así que hasta ahora
-    // elegir entre dos valores obligaba a declarar la variable antes y
-    // asignarla en las dos ramas. El ternario cubre ese hueco sin convertir
-    // `if` en expresión, que sería un cambio mucho mayor.
+    // Condicional como expresión: `cond ? si_si : si_no` (`if` es una sentencia).
     Ternary { cond: Box<Expr>, then_e: Box<Expr>, else_e: Box<Expr> },
 
     // Async
@@ -152,11 +143,8 @@ impl Param {
     }
 }
 
-/// Patrón de un brazo de `match`.
-///
-/// Antes un patrón era una `Expr` y el `match` se compilaba a `sujeto == patrón`:
-/// un `switch`, no un match. Con esto un brazo puede además ligar nombres,
-/// mirar dentro de listas, dicts e instancias, y filtrar con una guarda.
+/// Patrón de un brazo de `match`: puede ligar nombres, mirar dentro de listas,
+/// dicts e instancias, y llevar guarda.
 #[derive(Debug, Clone)]
 pub enum Pattern {
     /// `_` — casa con cualquier cosa y no liga nada.
@@ -208,31 +196,14 @@ pub struct ActDef {
     pub params: Vec<Param>,
     pub ret_type: Option<String>,
     pub body: Vec<Stmt>,
-    /// `static act` — pertenece al shape, no a una instancia, y por tanto no
-    /// recibe `me`. Se llama con `Shape::act(...)`. Sirve para constructores
-    /// alternativos y fábricas, que hasta ahora había que escribir como
-    /// funciones sueltas fuera del shape, sin relación visible con él.
+    /// `static act`: del shape, sin `me`. Se llama con `Shape::act(...)`.
     pub is_static: bool,
 }
 
 //   Desugar de `with`
 
-/// Reescribe `with var = modulo.abrir(...) { body }` en términos de nodos que
-/// codegen ya sabe compilar (el JIT hereda la semántica gratis porque compila
-/// desde bytecode):
-///
-/// ```text
-/// var = modulo.abrir(...)
-/// attempt { body } handle __with_err {
-///     modulo.free(var)
-///     error __with_err        -- re-lanza tras liberar
-/// }
-/// modulo.free(var)            -- camino sin error
-/// ```
-///
-/// `receiver` es el receptor del init (p. ej. `Ident("frame")` o un alias de
-/// `use`); se clona para la llamada a `free`, así la resolución de módulo es
-/// idéntica a la del init. El parser garantiza que init es `ident.fn(...)`.
+/// `with v = mod.abrir() { body }` → `v = …; attempt { body } handle e {
+/// mod.free(v); error e }; mod.free(v)`. El parser garantiza que init es `x.fn()`.
 pub fn desugar_with(var: &str, init: &Expr, receiver: &Expr, body: Vec<Stmt>, line: u32, col: u32) -> Vec<Stmt> {
     let free_call = |l: u32, c: u32| Stmt::Expr {
         expr: Expr::CallMethod {

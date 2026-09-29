@@ -1,36 +1,6 @@
-//! Formularios y tablas.
-//!
-//! Dos operaciones que en la práctica son la mitad de una automatización: meter
-//! datos y sacarlos de una rejilla. Las dos se resuelven con **una sola
-//! evaluación dentro de la página**, por el mismo motivo que la extracción: un
-//! formulario de seis campos por el camino largo son doce idas y vueltas, y una
-//! tabla de 300 filas leída celda a celda son miles.
-//!
-//! ## Por qué `fill` no sustituye a `type`
-//!
-//! Medido contra un sitio real, 51 caracteres tecla a tecla cuestan **221 ms** y
-//! la misma asignación en una llamada cuesta **1 ms**: `type` manda dos eventos
-//! CDP por carácter. Pero las teclas de verdad hacen falta cuando el sitio
-//! reacciona a ellas —autocompletados, máscaras de teléfono, buscadores que
-//! filtran mientras escribes—, así que las dos formas conviven y `fill` admite
-//! `{ keys: yes }` para pasarse a la lenta cuando el sitio lo exija.
-//!
-//! ## La trampa del `value`
-//!
-//! Asignar `el.value = x` y lanzar un evento **no llega a la aplicación** si el
-//! sitio usa React. React instala un rastreador sobre el descriptor `value` del
-//! elemento y, cuando llega el evento, compara con lo último que él anotó: si
-//! coincide, da el cambio por visto y no avisa a nadie. El campo se ve relleno
-//! en pantalla y el formulario se envía vacío.
-//!
-//! La salida es escribir por el **setter nativo del prototipo**, que el
-//! rastreador no intercepta. Comprobado sobre el mismo mecanismo que usa React:
-//!
-//! | Cómo se rellena                      | ¿Se entera la aplicación? |
-//! |--------------------------------------|---------------------------|
-//! | `el.value = x` + evento              | **No**                    |
-//! | setter nativo del prototipo + evento | Sí                        |
-//! | teclas reales                        | Sí                        |
+//! Formularios y tablas, cada uno en una sola evaluación. `fill` escribe por el
+//! setter nativo del prototipo (así React se entera del cambio); con
+//! `{ keys: yes }` usa teclas reales para autocompletados y máscaras.
 
 use std::time::Duration;
 
@@ -304,10 +274,8 @@ pub fn table(
     const nombres = [];
     const vistos = {{}};
     for (let j = 0; j < ancho; j++) {{
-      // Se colapsan los espacios: una cabecera con un <br> dentro —que en
-      // Wikipedia son casi todas— daría una clave con un salto de línea, y
-      // una clave así no hay quien la escriba para pedir la columna. Los
-      // valores NO se tocan: ahí el salto puede ser parte del dato.
+      // Espacios colapsados en las cabeceras (un <br> daría una clave con salto
+      // de línea); los valores no se tocan.
       let n = iCab >= 0
         ? String((rejilla[iCab] || [])[j] || '').replace(/\s+/g, ' ').trim()
         : '';

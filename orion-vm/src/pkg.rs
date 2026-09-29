@@ -1,28 +1,6 @@
-//! Package manager para Orion — `orion --add`, `--remove`, `--list`, `--search`,
-//! `--update`, `--install`, `--publish`.
-//!
-//! Dónde vive cada cosa lo decide `crate::paths`, no este archivo: el gestor, el
-//! `use` del runtime y el doctor comparten una única noción de "directorio de
-//! paquetes". Aquí solo se decide *qué* se instala y *de dónde* viene.
-//!
-//! Esquema registry.json:
-//!   { "_meta": { "registry": "<base_url>", ... },
-//!     "packages": { "<name>": {
-//!         "version", "description", "file", "type", "author", "tags",
-//!         "sha256"?,                       // integridad del .orx
-//!         "dependencies"? { "<pkg>": "<spec>" },
-//!         "assets"? { "<plataforma>": { "url", "sha256", "signature"? } }
-//!     } } }
-//!
-//! Esquema installed.json:
-//!   { "<name>": { "version", "description", "file", "source", "sha256"?, "native"? } }
-//!
-//! Esquema orion.json (manifiesto de proyecto y de publicación):
-//!   { "name", "version", "description", "author", "tags", "file", "license",
-//!     "dependencies"? { "<pkg>": "<spec>" }, "assets"? { ... } }
-//!
-//! Esquema orion.lock:
-//!   { "packages": { "<name>": { "version", "resolved", "sha256", "source" } } }
+//! Gestor de paquetes: `orion --add`, `--remove`, `--list`, `--search`, `--update`,
+//! `--install`, `--publish`. Dónde van lo decide `crate::paths`; los esquemas de
+//! registry.json, installed.json, orion.json y orion.lock están en docs/paquetes.md.
 
 use indexmap::IndexMap as HashMap;
 use std::fs;
@@ -35,11 +13,7 @@ use crate::paths;
 use crate::cli::banner;
 use banner::{BOLD, DIM, RESET, GREEN, RED, ORANGE, BCYAN, BWHITE};
 
-//    Presentación
-//
-// El gestor imprime bastante y conviene que se lea de un vistazo: una línea por
-// paquete, siempre con las columnas en el mismo sitio, y el detalle atenuado
-// para que el ojo salte de nombre a nombre.
+//    Presentación: una línea por paquete, columnas fijas y el detalle atenuado.
 
 /// Cabecera de una operación, con el destino debajo.
 fn encabezado(titulo: &str, destino: &Path) {
@@ -71,10 +45,7 @@ fn paso(n: usize, total: usize, texto: &str) {
     println!("  {DIM}{n}/{total}{RESET}  {BWHITE}{texto}{RESET}");
 }
 
-/// Resumen final: qué se hizo y en cuánto tiempo.
-///
-/// El destino no se repite aquí: ya lo dijo el encabezado, y estas rutas son
-/// largas — pintarlas dos veces convierte el resumen en ruido.
+/// Resumen final: qué se hizo y en cuánto tiempo (el destino ya salió arriba).
 fn resumen(instalados: usize, fallos: usize, inicio: std::time::Instant) {
     let secs = inicio.elapsed().as_secs_f64();
     let tiempo = if secs < 1.0 { format!("{:.0} ms", secs * 1000.0) } else { format!("{secs:.1} s") };
@@ -196,12 +167,8 @@ fn load_trusted_keys() -> Vec<(String, String)> {
     keys
 }
 
-/// Verifica una firma RSA PKCS#1 v1.5 sobre el SHA-256 del asset.
-///
-/// Sin claves de confianza instaladas no se puede afirmar nada: se avisa y se
-/// continúa, porque el sha256 ya garantiza que el binario es exactamente el que
-/// el registry declara. La firma añade *quién* lo declara, y eso solo tiene
-/// sentido si el usuario ha decidido en quién confía.
+/// Verifica una firma RSA PKCS#1 v1.5 sobre el SHA-256 del asset. Sin claves de
+/// confianza se avisa y se sigue: el sha256 ya garantiza el binario.
 fn verify_signature(pkg: &str, bytes: &[u8], sig_b64: &str) -> Result<bool, String> {
     use rsa::RsaPublicKey;
     use rsa::pkcs1v15::Pkcs1v15Sign;
@@ -391,12 +358,8 @@ fn save_installed_at(dir: &Path, installed: &HashMap<String, serde_json::Value>)
 
 //    Especificadores de versión
 
-/// ¿`version` satisface `spec`?
-///
-/// Se admite `*`/`latest` (cualquiera), exacta (`1.2.3`), caret (`^1.2.3`:
-/// mismo major), tilde (`~1.2.3`: mismo major.minor) y `>=`/`>`/`<=`/`<`.
-/// Es un subconjunto deliberado de semver: cubre lo que la gente escribe de
-/// verdad sin arrastrar un resolvedor completo.
+/// ¿`version` satisface `spec`? `*`, exacta, `^`, `~`, `>=`, `>`, `<=` y `<`: un
+/// subconjunto deliberado de semver.
 fn satisfies(version: &str, spec: &str) -> bool {
     let spec = spec.trim();
     if spec.is_empty() || spec == "*" || spec == "latest" { return true; }

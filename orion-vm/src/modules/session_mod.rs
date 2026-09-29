@@ -4,10 +4,8 @@ use std::collections::HashMap as StdHashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// Sesiones server-side: un store global (compartido entre los workers de serve)
-// mapea un session-id a un Dict de datos arbitrarios. Los valores se guardan
-// como JSON por el puente Send, igual que cache. La caducidad es perezosa:
-// se poda al acceder o vía session.sweep(max_edad).
+// Sesiones: un store global (compartido por los workers de serve) de session-id a
+// Dict, guardado como JSON. Caduca de forma perezosa, o con session.sweep(max_edad).
 
 struct Session {
     data:        IndexMap<String, serde_json::Value>,

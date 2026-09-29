@@ -1,32 +1,6 @@
-//! Intercepción de peticiones: decidir qué hace el navegador con cada una.
-//!
-//! Hasta aquí el módulo solo sabía **mirar** la red (`watch`/`capture`) y
-//! cortarla por dominio (`allow`). Eso deja fuera media automatización seria:
-//!
-//! - **Probar el camino de error.** Un carrito que falla cuando la API de
-//!   stock devuelve 500 no se puede probar sin provocar ese 500. Con un mock
-//!   se provoca en una línea; sin él hay que tocar el servidor de verdad.
-//! - **Trabajar sin backend.** El front está listo y la API todavía no.
-//! - **Ir rápido.** Un listado de 500 filas con imágenes, tipografías y tres
-//!   trazadores tarda más en pintarse que en leerse. Bloquear lo que no se
-//!   mira cambia el tiempo del trabajo entero, no el de una llamada.
-//! - **Autenticarse donde no hay formulario.** Añadir una cabecera a las
-//!   peticiones de la propia página evita tener que simular un login.
-//!
-//! ```orion
-//! web.route(p, "*/api/stock*", { mock: { status: 500, json: { error: "caido" } } })
-//! web.route(p, "*.png",        { block: yes })
-//! web.route(p, "*/api/*",      { headers: { Authorization: "Bearer " + token } })
-//! web.route(p, "*/lento*",     { fail: "timedout" })
-//! ```
-//!
-//! Las reglas se prueban **en orden** y manda la primera que casa, como en un
-//! cortafuegos: así una regla concreta puede ir delante de otra general sin
-//! que el orden de evaluación sea un misterio.
-//!
-//! La lista blanca de `open({ allow })` se comprueba ANTES que las rutas y no
-//! se puede levantar con una regla: es una medida de seguridad, y una regla de
-//! conveniencia no debe poder abrir un dominio que se cerró a propósito.
+//! Intercepción de peticiones: mock, block, headers o fail por patrón de URL. Las
+//! reglas se prueban en orden y manda la primera; la lista blanca de
+//! `open({ allow })` va antes y ninguna regla la levanta.
 
 use serde_json::Value;
 
@@ -109,10 +83,8 @@ pub fn elegir<'a>(rutas: &'a mut [Ruta], url: &str) -> Option<&'a mut Ruta> {
     rutas.iter_mut().find(|r| !r.agotada() && casa(url, &r.patron))
 }
 
-/// El mensaje CDP que responde a una petición pausada.
-///
-/// Devolver el mensaje en vez de mandarlo aquí deja la decisión probada sin
-/// necesidad de un navegador: la parte difícil es esta, no el envío.
+/// El mensaje CDP que responde a una petición pausada. Se devuelve en vez de
+/// enviarlo para poder probarlo sin navegador.
 pub fn respuesta_cdp(accion: &Accion, request_id: &str) -> (&'static str, Value) {
     match accion {
         Accion::Bloquear => (

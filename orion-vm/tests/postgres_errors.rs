@@ -1,16 +1,6 @@
-//! Los errores de Postgres tienen que llegar a Orion con su mensaje.
-//!
-//! `postgres::Error` imprime solo "db error" con `{}`; el mensaje del servidor
-//! va dentro. Así, un CHECK violado, una clave duplicada o una fila mala en un
-//! COPY llegaban como "db error" a secas. Y `db.insert` añadía "is 'RETURNING
-//! id' missing?" a CUALQUIER fallo, que casi nunca era el motivo.
-//!
-//! Necesita un Postgres real. Se salta si no hay uno en ORION_TEST_PG:
-//!
+//! Los errores de Postgres llegan con su mensaje y SQLSTATE. Necesita una base
+//! en ORION_TEST_PG; si no la hay, se salta:
 //!   ORION_TEST_PG=postgres://usuario:clave@127.0.0.1:5432/base cargo test --test postgres_errors
-//!
-//! No tener Postgres a mano no es un defecto de Orion; por eso se salta en vez
-//! de fallar.
 
 use orion_vm::{codegen, lexer, parser, vm};
 

@@ -1,13 +1,5 @@
-//! API pública del módulo JIT de Orion — Fase 5.
-//!
-//! Uso recomendado (programa completo):
-//! ```ignore
-//! match jit::run_program(&bc) {
-//!     Ok(true)  => { /* JIT ejecutó */ }
-//!     Ok(false) => { /* fallback al intérprete */ }
-//!     Err(e)    => { /* error de compilación JIT */ }
-//! }
-//! ```
+//! API pública del JIT. Uso: `jit::run_program(&bc)` → Ok(true) si lo ejecutó,
+//! Ok(false) para volver al intérprete, Err si falló la compilación.
 
 pub mod aot_backend;
 pub mod bridge;
@@ -19,11 +11,8 @@ pub use compiler::JitCompiler;
 
 use crate::bytecode::OrionBytecode;
 
-/// Compila y ejecuta un programa completo (main + funciones) con Cranelift JIT.
-///
-/// - `Ok(true)`  → JIT compiló y ejecutó con éxito.
-/// - `Ok(false)` → hay instrucciones no soportadas → usar intérprete.
-/// - `Err(msg)`  → error real de compilación JIT.
+/// Compila y ejecuta el programa con Cranelift. Ok(true): ejecutado; Ok(false):
+/// hay instrucciones no soportadas (usar el intérprete); Err: error de compilación.
 pub fn run_program(bc: &OrionBytecode) -> Result<bool, String> {
     let mut jit = JitCompiler::new()?;
     jit.run_program(bc)

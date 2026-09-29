@@ -1,30 +1,6 @@
-//! Emulación: decirle al navegador qué dispositivo, idioma y zona horaria es.
-//!
-//! Sin esto hay sitios que sencillamente no se pueden automatizar:
-//!
-//! - **Los que sirven otro HTML al móvil.** El menú que hay que pulsar no
-//!   existe en la versión de escritorio, así que el selector correcto "no
-//!   aparece" y no hay forma de que aparezca.
-//! - **Los que dependen de la zona horaria.** Un panel que muestra "hoy"
-//!   cambia de datos según dónde crea el navegador que está. Reproducir el
-//!   error de un compañero en Madrid desde una máquina en UTC es imposible sin
-//!   fijarla.
-//! - **Los que cambian con el idioma.** `text=Comprar` contra un sitio que
-//!   decidió servir inglés por el `Accept-Language` del contenedor de CI.
-//! - **Los que piden ubicación.** El diálogo del navegador bloquea el flujo, y
-//!   una posición fija lo resuelve sin que llegue a aparecer.
-//!
-//! ```orion
-//! web.emulate(p, { device: "iphone" })
-//! web.emulate(p, { width: 1920, height: 1080, locale: "es-ES", timezone: "Europe/Madrid" })
-//! web.emulate(p, { dark: yes, geo: { lat: 40.4168, lon: -3.7038 } })
-//! web.emulate(p, no)                 -- quita todo y vuelve a lo de open()
-//! ```
-//!
-//! Los presets son un atajo, no una lista cerrada: cualquiera de sus campos se
-//! puede sobrescribir en la misma llamada, y sin preset se configura a mano.
-//! Las medidas salen de los dispositivos reales, y están aquí y no incrustadas
-//! en el código de la llamada para poder mirarlas y corregirlas.
+//! Emulación de dispositivo, idioma, zona horaria, ubicación y modo oscuro. Los
+//! presets (`{ device: "iphone" }`) son un punto de partida y cualquier campo se
+//! puede sobrescribir en la misma llamada.
 
 /// Un dispositivo de referencia: lo justo para que el sitio sirva su versión.
 #[derive(Debug, Clone, Copy)]
@@ -148,12 +124,8 @@ impl Plan {
     }
 }
 
-/// Permisos que el navegador pregunta con un diálogo, con el nombre corto que
-/// se escribe en Orion.
-///
-/// El diálogo de permisos es un bloqueo de los de verdad: aparece encima de la
-/// página, no se puede clicar desde JavaScript y deja la automatización parada
-/// sin decir por qué. Concederlo por adelantado hace que no llegue a existir.
+/// Permisos que el navegador pide con un diálogo que bloquea la página;
+/// concederlos por adelantado evita que aparezca.
 pub const PERMISOS: &[(&str, &str)] = &[
     ("geolocation",  "geolocation"),
     ("notifications","notifications"),

@@ -146,12 +146,8 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
-    /// Si el token es una palabra clave, su texto original.
-    ///
-    /// Sirve para permitir keywords como nombres de miembro tras un punto
-    /// (`ai.ask`, `fs.read`, `net.error`…), igual que Python/JS: después de `.`
-    /// no hay ambigüedad sintáctica posible. Debe cubrir TODAS las keywords del
-    /// lexer — si se agrega una nueva allí, agregarla aquí también.
+    /// El texto de una keyword, para admitirla como nombre tras un punto
+    /// (`fs.read`). Al añadir una keyword al lexer, añadirla también aquí.
     pub fn keyword_text(&self) -> Option<&'static str> {
         use TokenKind::*;
         Some(match self {

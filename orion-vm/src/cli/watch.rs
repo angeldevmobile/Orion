@@ -41,10 +41,8 @@ pub fn run_watch(path: &str) {
     loop {
         thread::sleep(intervalo(ultimo_cambio.elapsed()));
         if huella(&lista) != huella_ant {
-            // La lista se rehace AQUÍ, no en cada vuelta: solo puede cambiar
-            // cuando cambia un archivo, y recalcularla exige leer y lexar cada
-            // uno. Hacerlo en cada sondeo costaba un 7% de núcleo; sondear
-            // stats no llega a medirse.
+            // La lista solo se rehace cuando cambia un archivo: recalcularla en
+            // cada sondeo costaba un 7 % de núcleo.
             lista = vigilados(path);
             huella_ant = huella(&lista);
             ultimo_cambio = Instant::now();
@@ -70,13 +68,8 @@ fn aviso_cambio() {
         DIM = banner::DIM, RESET = banner::RESET);
 }
 
-/// Los archivos que hay que vigilar: el de entrada y todo lo que importa,
-/// recursivamente.
-///
-/// Sin esto solo se miraba el archivo de entrada, así que tocar un módulo no
-/// recargaba nada: el desarrollador guardaba, no pasaba nada, y acababa
-/// dudando de si el watch funcionaba. La lista se recalcula en cada vuelta
-/// porque un `use` nuevo también tiene que empezar a vigilarse.
+/// Archivos a vigilar: el de entrada y, recursivamente, todo lo que importa
+/// (si no, tocar un módulo no recargaba nada).
 fn vigilados(entrada: &str) -> Vec<std::path::PathBuf> {
     use std::collections::HashSet;
 

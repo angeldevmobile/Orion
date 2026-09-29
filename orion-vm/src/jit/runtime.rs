@@ -1,7 +1,5 @@
-//! Runtime Orion JIT — Fase JIT-6: MakeClosure, CallAsync, Await
-//!
-//! OrionVal: valor boxeado en heap que representa cualquier valor Orion.
-//! Todas las funciones de runtime reciben y devuelven punteros como i64.
+//! Runtime del JIT: `OrionVal` es un valor boxeado en el heap y todas las
+//! funciones reciben y devuelven punteros como i64.
 
 use std::cell::RefCell;
 use indexmap::IndexMap as HashMap;

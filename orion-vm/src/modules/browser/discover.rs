@@ -1,46 +1,9 @@
-//! Descubrimiento de estructura: deducir el esquema de extracción solo.
-//!
-//! El problema real de un scraper no es leer datos, es **averiguar qué
-//! selector usar**. Uno abre las herramientas del navegador, va bajando por el
-//! árbol, prueba una clase, ve que también casa con el menú, prueba otra… y
-//! veinte minutos después tiene un esquema que se rompe en la página siguiente.
-//!
-//! `discover` mira la página y propone el esquema: el selector de la fila que se
-//! repite y un selector por cada campo con valor. No adivina la intención —no
-//! sabe que eso es un "precio"—, pero te deja a un paso de `extract` en vez de a
-//! veinte minutos.
-//!
-//! Nadie lo tiene de serie. En Python te pones a leer el HTML a mano; aquí es
-//! una llamada, y devuelve además una muestra ya extraída para que compruebes de
-//! un vistazo que la propuesta acierta.
-//!
-//! ```orion
-//! e = web.discover(p)
-//! show(e["row"])       -- ".quote"
-//! show(e["fields"])    -- {campo_1: ".text", author: ".author", url: "a@href"}
-//! show(e["sample"])    -- [{...}, {...}]  las primeras filas ya extraídas
-//! ```
-//!
-//! Cómo lo deduce, para que no sea magia:
-//!
-//! 1. **La fila** es el grupo de hermanos que más se repite con la misma
-//!    estructura interna. Se puntúa por cantidad y por riqueza —texto y número
-//!    de campos— para no confundir un listado de productos con el menú de
-//!    navegación, que también se repite pero está vacío.
-//! 2. **El selector de fila** es la clase común a todas las filas que además
-//!    selecciona exactamente esas y no más. Si ninguna clase sirve (sitios con
-//!    clases generadas tipo `x1i10hfl`), se cae a un selector estructural y se
-//!    avisa de que es frágil.
-//! 3. **Los campos** son los descendientes con valor —texto, enlaces,
-//!    imágenes—, cada uno con un selector relativo a la fila, y solo se
-//!    conservan los que aparecen en la mayoría de las filas (uno que solo esté
-//!    en una fila no es un campo, es una casualidad).
+//! `discover`: deduce el esquema de extracción. La fila es el grupo de hermanos
+//! con la misma estructura que más se repite; su selector, la clase común (o uno
+//! estructural, avisando); los campos, lo que tiene valor en la mayoría de filas.
 
-/// JavaScript que analiza la página y devuelve el esquema propuesto.
-///
-/// Todo ocurre dentro de la página en una sola evaluación. Las clases modernas
-/// son basura (`x1i10hfl`), así que la repetición se detecta por **estructura**
-/// —el tag y los tags de los hijos—, no por nombres de clase.
+/// JS que propone el esquema en una sola evaluación. La repetición se detecta por
+/// estructura (tags), no por clases, que en webs modernas son basura.
 pub const DISCOVER_JS: &str = r#"
 (() => {
   const MIN = __MIN__;
@@ -86,12 +49,8 @@ pub const DISCOVER_JS: &str = r#"
 
   // Una sola clase que seleccione EXACTAMENTE las filas.
   for (const c of comunes) {
-    // El selector va escapado TAMBIÉN al devolverlo, no solo al probarlo aquí.
-    // Las clases de Tailwind llevan dos puntos (`md:flex`, `hover:shadow-lg`) y
-    // `.md:flex` sin escapar no es un selector válido: la prueba de abajo
-    // acertaba y el esquema devuelto no casaba con nada. Y no fallaba a la
-    // vista, porque `sample` se calcula con los nodos ya encontrados: la
-    // muestra salía perfecta y `extract` devolvía una lista vacía.
+    // El selector se devuelve escapado: las clases de Tailwind (`md:flex`) sin
+    // escapar no son válidas y `extract` no casaría con nada.
     try { if (document.querySelectorAll('.' + esc(c)).length === rows.length) { rowSel = '.' + esc(c); break; } }
     catch (e) {}
   }
@@ -119,17 +78,8 @@ pub const DISCOVER_JS: &str = r#"
   //  3. Campos, con una fila representativa (la 2ª: la 1ª a veces es distinta).
   const rep = rows[Math.min(1, rows.length - 1)];
 
-  // Selector de un elemento relativo a su fila.
-  //
-  // Se prefiere SIEMPRE una clase propia que sea única dentro de la fila: es lo
-  // legible y lo estable. Solo si no hay se construye un camino estructural
-  // `padre > hijo` con `nth-of-type` en cada nivel.
-  //
-  // Y aquí está el detalle que hay que respetar: `nth-of-type` cuenta respecto
-  // al PADRE, no respecto a la fila. Un índice global dentro de la fila genera
-  // un `a:nth-of-type(2)` que en CSS significa otra cosa y no casa en cuanto la
-  // pagina tiene el enlace anidado —el fallo justo que se comio el titulo en
-  // Hacker News—.
+  // Selector de un elemento relativo a su fila: una clase propia única si la
+  // hay; si no, `padre > hijo` con nth-of-type, que cuenta respecto al padre.
   const relSel = (el, root) => {
     for (const c of Array.from(el.classList)) {
       try { if (root.querySelectorAll('.' + esc(c)).length === 1) return '.' + esc(c); } catch (e) {}
@@ -153,11 +103,8 @@ pub const DISCOVER_JS: &str = r#"
 
   const cands = [];
 
-  // Enlaces. Los que tienen una clase propia se conservan todos; los anónimos
-  // (que solo se pueden apuntar por posición, `nth-of-type`) suelen ser ruido
-  // —tags, iconos, la flecha de votar—, así que de esos se guarda solo el que
-  // MÁS texto tiene. En Hacker News eso descarta la flecha de voto (sin texto)
-  // y se queda con el titulo; en un listado de citas descarta los tags.
+  // Enlaces: los que tienen clase propia, todos; de los anónimos, solo el de
+  // más texto (el resto suelen ser iconos o tags).
   const conClase = [], anon = [];
   for (const a of rep.querySelectorAll('a[href]')) {
     const rel = relSel(a, rep);

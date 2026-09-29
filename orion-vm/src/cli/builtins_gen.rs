@@ -134,7 +134,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("process", "execute", "process.execute(command)", "{code, out, err}"));
     v.push(f("process", "execute_timed", "process.execute_timed(command)", "{code, out, err, elapsed}"));
     v.push(f("process", "background", "process.background(command)", "{pid}"));
-    v.push(f("process", "args", "process.args() -> list", "De argumentos pasados al script    orion run reporte.orx datos.xlsx 913916 — [\"datos.xlsx\", \"913916\"]  Se devuelve lo que va DESPUÉS del .orx, que es lo que el script pidió; los flags del propio Orion (no-typecheck…) se descartan porque son del intérprete y no del programa."));
+    v.push(f("process", "args", "process.args() -> list", "De argumentos pasados al script Lo que va después del .orx (`orion run r.orx a b` — [\"a\", \"b\"]), sin los flags del propio Orion."));
     v.push(f("process", "argumentos", "process.argumentos() -> list", "Alias de process.args."));
     v.push(f("process", "arg", "process.arg(n, default?)", "Argumento n-ésimo, o el default si no se pasó"));
     v.push(f("process", "argumento", "process.argumento(n, default?)", "Alias de process.arg."));
@@ -318,7 +318,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("timewarp", "until", "timewarp.until(timestamp_secs)", "Segundos hasta entonces"));
     // vision (vision_mod.rs)
     v.push(f("vision", "info", "vision.info(path)", "{width, height, format}"));
-    v.push(f("vision", "ocr", "vision.ocr(path, opts?) -> string", "Reconoce el texto de una imagen. Por defecto usa el motor `ocrs` (Rust puro, local, sin externos). opts = { \"engine\": \"ocrs\"|\"tesseract\", \"lang\": \"spa\" } — con \"tesseract\" llama al binario del sistema si el developer lo tiene instalado."));
+    v.push(f("vision", "ocr", "vision.ocr(path, opts?) -> string", "Reconoce el texto de una imagen. Motor `ocrs` (local, sin dependencias) u opts.engine = \"tesseract\" si está instalado; opts.lang = \"spa\"."));
     v.push(f("vision", "leer_texto", "vision.leer_texto(path, opts?) -> string", "Alias de vision.ocr."));
     v.push(f("vision", "read_text", "vision.read_text(path, opts?) -> string", "Alias de vision.ocr."));
     v.push(f("vision", "threshold", "vision.threshold(path, out?)", "Out  — binariza (blanco/negro) con Otsu automático. Ideal como pre-paso del OCR: limpia fondo y ruido."));
@@ -392,14 +392,14 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("excel", "write", "excel.write(path, list_of_dicts)", "Escribe .xlsx con cabeceras automáticas write(path, list_of_dicts, sheet_name) — con nombre de hoja"));
     v.push(f("excel", "write_multi", "excel.write_multi(path, dict { sheet_name", "List_of_dicts }) — xlsx con múltiples hojas"));
     v.push(f("excel", "info", "excel.info(path) -> dict", "{ sheets, rows, cols } info básica"));
-    v.push(f("excel", "write_styled", "excel.write_styled(path, datos, config?)", "Xlsx con formato avanzado por columna config: {   hoja, titulo, cabecera:{fondo,texto}, alternar, freeze, autofilter,   anchos:{col:n}, totales:[cols], formatos:{col:{numero,bold,fondo,texto,condicional:[...]}} }"));
+    v.push(f("excel", "write_styled", "excel.write_styled(path, datos, config?)", "Xlsx con formato por columna config: hoja, titulo, cabecera, alternar, freeze, autofilter, anchos, totales, formatos, formulas, charts"));
     v.push(f("excel", "filter", "excel.filter(datos, campo, op, valor) -> list", "Filtrada op: \">\" | \"<\" | \">=\" | \"<=\" | \"==\" | \"!=\" | \"contiene\" | \"empieza\" | \"termina\""));
     v.push(f("excel", "filtrar", "excel.filtrar(datos, campo, op, valor) -> list", "Alias de excel.filter."));
-    v.push(f("excel", "group", "excel.group(datos, campo, config?) -> list", "Agrupada config: {\"suma\": [\"col1\",\"col2\"], \"conteo\": yes, \"promedio\": [\"col1\"]} group(data, campo, spec) — multi-agg spec: { \"col\": [\"sum\",\"avg\",\"max\",\"min\",\"count\",\"first\",\"last\",\"std\",\"median\"],         \"count\": yes }"));
-    v.push(f("excel", "agrupar", "excel.agrupar(datos, campo, config?) -> list", "Alias de excel.group."));
-    v.push(f("excel", "sort", "excel.sort(data, \"col+\")", "Col asc   excel.sort(data, \"col-\") — col desc   excel.sort(data, \"region+\", \"sales-\") — multi-col shorthand   excel.sort(data, [{by:\"col\",dir:\"asc\"}, ...]) — explícito   excel.sort(data, \"col\", \"asc\"|\"desc\") — compat. 1-col anterior"));
-    v.push(f("excel", "ordenar", "excel.ordenar(data, \"col+\")", "Alias de excel.sort."));
-    v.push(f("excel", "sort_by", "excel.sort_by(data, \"col+\")", "Alias de excel.sort."));
+    v.push(f("excel", "group", "excel.group(datos, campo, spec?) -> list", "Agrupada spec: { \"col\": [\"sum\",\"avg\",\"max\",\"min\",\"count\",\"first\",\"last\",\"std\",\"median\"] }"));
+    v.push(f("excel", "agrupar", "excel.agrupar(datos, campo, spec?) -> list", "Alias de excel.group."));
+    v.push(f("excel", "sort", "excel.sort(datos, criterios...) -> list", "Ordenada \"col+\" / \"col-\", varios a la vez, [{by, dir}], o (col, \"asc\"|\"desc\")"));
+    v.push(f("excel", "ordenar", "excel.ordenar(datos, criterios...) -> list", "Alias de excel.sort."));
+    v.push(f("excel", "sort_by", "excel.sort_by(datos, criterios...) -> list", "Alias de excel.sort."));
     v.push(f("excel", "column", "excel.column(datos, campo) -> list", "De valores de esa columna"));
     v.push(f("excel", "columna", "excel.columna(datos, campo) -> list", "Alias de excel.column."));
     v.push(f("excel", "sum_col", "excel.sum_col(datos, campo) -> float", "Suma de columna numérica"));
@@ -428,7 +428,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("excel", "date_parts", "excel.date_parts(data, col, [partes])", "Agrega columnas col_year, col_month, etc. Partes: \"year\" | \"month\" | \"day\" | \"quarter\" | \"weekday\" | \"week\" | \"hour\""));
     v.push(f("excel", "sheet", "excel.sheet(path) | sheet(path, name)", "{ name, rows, cols, headers, data } Lectura completa de una hoja: metadata + datos en un solo dict."));
     v.push(f("excel", "f", "excel.f", "Retorna el sub-módulo formula builder (excel.f.pct, .ratio, .rank, ...)"));
-    v.push(f("excel", "chart", "excel.chart(path, datos, config)", "Genera xlsx con gráfico config: { type, x, y, title, x_title, y_title,           palette, colors, sheet, data_sheet,           stacked, smooth, show_values, goal,           width, height }"));
+    v.push(f("excel", "chart", "excel.chart(path, datos, config)", "Xlsx con gráfico config: type, x, y, title, x_title, y_title, palette, colors, sheet, data_sheet, stacked, smooth, show_values, goal, width, height"));
     // excel_f (excel_f_mod.rs)
     v.push(f("excel_f", "pct", "excel_f.pct(\"col\", percent)", "=COL_ROW * (percent/100) Ejemplo: f.pct(\"sales\", 5) — =B6*0.05"));
     v.push(f("excel_f", "ratio", "excel_f.ratio(\"col_num\", \"col_den\")", "=NUM_ROW / DEN_ROW Ejemplo: f.ratio(\"sales\", \"target\") — =B6/C6"));
@@ -442,7 +442,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("excel_f", "cumulative", "excel_f.cumulative(\"col\")", "=SUM($COL$start:COL_ROW)  — se expande por fila"));
     v.push(f("excel_f", "running", "excel_f.running(\"col\")", "Alias de excel_f.cumulative."));
     v.push(f("excel_f", "rank", "excel_f.rank(\"col\", \"desc\"|\"asc\")", "=RANK(COL_ROW, $COL$start:$COL$end, order) Ejemplo: f.rank(\"sales\", \"desc\") — =RANK(B6,$B$2:$B$10,0)"));
-    v.push(f("excel_f", "if_", "excel_f.if_(\"col\", op, val, then, else)", "=IF(COL_ROW op val, then, else) Ejemplo: f.if_(\"sales\", \">\", 80000, \"A\", \"B\") — =IF(B6>80000,\"A\",\"B\") Operadores: > < >= <= == !="));
+    v.push(f("excel_f", "if_", "excel_f.if_(\"col\", op, val, then, else)", "=IF(COL_ROW op val, then, else) Ej: f.if_(\"sales\", \">\", 80000, \"A\", \"B\"). Operadores: > < >= <= == !="));
     v.push(f("excel_f", "if", "excel_f.if(\"col\", op, val, then, else)", "Alias de excel_f.if_."));
     // regex (regex_mod.rs)
     v.push(f("regex", "is_match", "regex.is_match(text, pattern) -> bool", "Devuelve bool."));
@@ -472,19 +472,19 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("table", "drop", "table.drop(table, [\"col1\", \"col2\"])", "Table sin esas columnas"));
     v.push(f("table", "rename", "table.rename(table, \"viejo\", \"nuevo\")", "Table con columna renombrada"));
     v.push(f("table", "cast", "table.cast(table, \"col\", \"int\"|\"float\"|\"string\"|\"bool\"|\"date\")", "Tabla con columna convertida \"date\" normaliza a ISO \"YYYY-MM-DD\" (ordena/filtra cronológicamente); acepta 4º arg con formato chrono explícito: cast(t, \"f\", \"date\", \"%m/%d/%Y\")"));
-    v.push(f("table", "where", "table.where(table, condicion)", "Table filtrada Soporta: comparadores (== != > >= < <= contains starts_with ends_with), lógica (&& || !), paréntesis, aritmética, columna vs columna y funciones. Ej: \"(region == 'Norte' || region == 'Sur') && venta * 1.19 > meta\""));
+    v.push(f("table", "where", "table.where(table, condicion)", "Table filtrada Comparadores, && || !, paréntesis, aritmética y funciones. Ej: \"(region == 'Norte' || region == 'Sur') && venta * 1.19 > meta\""));
     v.push(f("table", "sort", "table.sort(table, \"col\") o sort(table, \"col\", \"desc\")", "Table ordenada"));
     v.push(f("table", "top", "table.top(table, \"col\", n)", "Las n filas con mayor valor en col"));
     v.push(f("table", "bottom", "table.bottom(table, \"col\", n)", "Las n filas con menor valor en col"));
     v.push(f("table", "sample", "table.sample(table, n)", "N filas aleatorias sin reemplazo"));
     v.push(f("table", "dedupe", "table.dedupe(table, \"col\")", "Sin duplicados por columna"));
-    v.push(f("table", "add", "table.add(table, \"nueva_col\", \"expresion\")", "Table con columna calculada Aritmética completa (+ - * / % con precedencia, paréntesis, negativos), concatenación de texto con +, comparadores (producen columna booleana) y funciones: upper lower trim len abs round floor ceil sqrt min max pow. Ej: \"round((venta - costo) / venta * 100, 2)\", \"upper(nombre) + ' (' + region + ')'\""));
+    v.push(f("table", "add", "table.add(table, \"nueva_col\", \"expresion\")", "Table con columna calculada Aritmética, concatenación, comparadores y funciones (upper, round, sqrt…). Ej: \"round((venta - costo) / venta * 100, 2)\""));
     v.push(f("table", "group", "table.group(table, \"por\" | [\"c1\",\"c2\"], \"valor\", \"sum\"|\"avg\"|\"count\"|\"min\"|\"max\")", "Tabla con las columnas clave (conservan su tipo original) + el agregado"));
     v.push(f("table", "agg", "table.agg(table, \"col\", \"sum\"|\"avg\"|\"count\"|\"min\"|\"max\")", "Número count cuenta valores no nulos de cualquier tipo; el resto opera sobre números."));
     v.push(f("table", "stats", "table.stats(table, \"col\") -> dict", "Completo: min/max/avg/std/p25/median/p75/count/nulls"));
     v.push(f("table", "column", "table.column(table, \"col\") -> list", "De valores de esa columna"));
     v.push(f("table", "count", "table.count(table) o count(table, \"condicion\") -> int", "Devuelve int."));
-    v.push(f("table", "join", "table.join(t1, t2, \"clave\" | [\"c1\",\"c2\"])", "Inner join (multi-clave soportada) join(..., \"left\") — conserva todas las filas de t1 y rellena con null. Colisión de nombre (columna no-clave en ambos lados): la derecha entra como col_2, col_3… — nada se pisa en silencio."));
+    v.push(f("table", "join", "table.join(t1, t2, \"clave\" | [\"c1\",\"c2\"], \"left\"?)", "Inner join, o left Si una columna no clave está en los dos lados, la derecha entra como col_2."));
     v.push(f("table", "concat", "table.concat(table1, table2)", "Apila las filas"));
     v.push(f("table", "forecast", "table.forecast(table, \"col\", n) -> list", "De n valores futuros (regresión lineal)"));
     v.push(f("table", "anomalies", "table.anomalies(table, \"col\") -> list", "De dicts de las filas anómalas (IQR)"));
@@ -615,7 +615,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("gui", "image", "gui.image(\"ruta\", ancho?, alto?)", "Png/jpg/bmp/gif. Mantiene aspecto si se da solo una dimensión."));
     v.push(f("gui", "img", "gui.img(\"ruta\", ancho?, alto?)", "Alias de gui.image."));
     v.push(f("gui", "modal", "gui.modal(\"título\") … gui.end()", "Diálogo centrado (contenedor)."));
-    v.push(f("gui", "card", "gui.card() / gui.row() / gui.col() / gui.zone()", "Abre el contenedor    gui.end() — cierra el último contenedor abierto gui.card({ width: N?, fill: bool? }) — config opcional. Por defecto la tarjeta llena el ancho de su celda; el dev puede fijar un width concreto o pedir fill:false para que se encoja al contenido."));
+    v.push(f("gui", "card", "gui.card({ width: N?, fill: bool? })", "Por defecto llena el ancho de su celda; `width` lo fija y `fill: no` la ajusta al contenido."));
     v.push(f("gui", "row", "gui.row(…)", "Función del módulo gui."));
     v.push(f("gui", "stats", "gui.stats([{label, value, caption?}, …], opts?)", "Fila de tarjetas. Cada item admite dict {label, value} o par [\"label\", \"value\"]. opts = { height, gap } y cualquier estilo de card."));
     v.push(f("gui", "metricas", "gui.metricas([{label, value, caption?}, …], opts?)", "Alias de gui.stats."));
@@ -623,7 +623,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("gui", "encabezado", "gui.encabezado(titulo, subtitulo?, accion?)", "Alias de gui.header."));
     v.push(f("gui", "section", "gui.section(titulo, accion?)", "Card con cabecera y acción opcional. Deja la card ABIERTA: el contenido va después y se cierra con `with` o con gui.end(), igual que gui.card()."));
     v.push(f("gui", "seccion", "gui.seccion(titulo, accion?)", "Alias de gui.section."));
-    v.push(f("gui", "chips", "gui.chips(lista, opts?)", "Fila de botones a partir de una lista. opts = { event: \"prefijo:\" , style… }. El evento de cada botón es el prefijo seguido del propio texto, que es el patrón con el que se manejan listas dinámicas (`gui.ev()` empieza por el prefijo)."));
+    v.push(f("gui", "chips", "gui.chips(lista, opts?)", "Fila de botones a partir de una lista; el evento de cada uno es opts.event + su texto (para `gui.ev()` con prefijo)."));
     v.push(f("gui", "opciones", "gui.opciones(lista, opts?)", "Alias de gui.chips."));
     v.push(f("gui", "fields", "gui.fields([[\"Etiqueta\", \"valor\"], …], opts?)", "Rejilla etiqueta/valor. opts = { cols: 3, gap: 6 }. Con cols=1 sale una lista vertical."));
     v.push(f("gui", "campos", "gui.campos([[\"Etiqueta\", \"valor\"], …], opts?)", "Alias de gui.fields."));
@@ -638,7 +638,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("gui", "text_at", "gui.text_at(x, y, texto, size?, color?) -> string", "Centrado en (x, y)"));
     v.push(f("gui", "sidebar", "gui.sidebar(ancho?) … gui.end()", "Barra lateral fija (SidePanel izquierdo). El ancho lo decide el dev; 220 es solo el fallback si no se indica."));
     v.push(f("gui", "zone", "gui.zone(…)", "Función del módulo gui."));
-    v.push(f("gui", "free", "gui.free(handle)", "Cierra el contenedor abierto; lo llama `with`.  `with c = gui.card() { … }` desugar a una llamada a `gui.free` al salir del bloque, también si el cuerpo lanza un error. La pila de contenedores es LIFO, así que el del tope es siempre el de este bloque y el handle en sí no hace falta para nada."));
+    v.push(f("gui", "free", "gui.free(handle)", "Cierra el contenedor abierto; lo llama `with` al salir, también si el cuerpo falla."));
     v.push(f("gui", "end", "gui.end(…)", "Función del módulo gui."));
     v.push(f("gui", "val", "gui.val(\"key\", default)", "Lee del state_store o devuelve default"));
     v.push(f("gui", "set", "gui.set(\"key\", value)", "Escribe en state_store"));
@@ -688,7 +688,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("db", "tablas", "db.tablas(path) -> list", "Alias de db.tables."));
     v.push(f("db", "copy", "db.copy(path, tabla, [columnas], [[fila],…]) -> int", "Carga masiva. En SQLite se hace con una transacción + sentencia preparada reusada (el equivalente rápido a COPY): una sola tx para miles de filas."));
     v.push(f("db", "copiar", "db.copiar(path, tabla, [columnas], [[fila],…]) -> int", "Alias de db.copy."));
-    v.push(f("db", "copy_file", "db.copy_file(path, tabla, [columnas], ruta_csv, opts?) -> int", "Carga en STREAMING con RAM constante: el crate csv lee fila a fila y se insertan en una transacción con sentencia preparada. No materializa el CSV en memoria — vale para archivos enormes."));
+    v.push(f("db", "copy_file", "db.copy_file(path, tabla, [columnas], ruta_csv, opts?) -> int", "En streaming, con RAM constante: vale para archivos enormes."));
     v.push(f("db", "copiar_archivo", "db.copiar_archivo(path, tabla, [columnas], ruta_csv, opts?) -> int", "Alias de db.copy_file."));
     v.push(f("db", "pool", "db.pool(path, n?) -> int", "En SQLite es no-op (una conexión persistente por archivo); existe para que el mismo código sirva en Postgres."));
     v.push(f("db", "close", "db.close(path) -> bool", "Descarta la conexión del pool (libera el archivo)."));
@@ -828,7 +828,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("chan", "delete", "chan.delete(id) -> bool", ". Libera el canal del registro."));
     v.push(f("chan", "eliminar", "chan.eliminar(id) -> bool", "Alias de chan.delete."));
     v.push(f("chan", "free", "chan.free(id) -> bool", "Alias de chan.delete."));
-    v.push(f("chan", "select", "chan.select([id1, id2, ...]) -> dict", "{canal, valor} | Null. Bloquea hasta que ALGÚN canal tenga un valor y lo devuelve junto con su handle. Devuelve Null si todos los canales están cerrados y vacíos. Es la base de la cancelación (canal \"done\") y del fan-in estructurado."));
+    v.push(f("chan", "select", "chan.select([id1, id2, ...]) -> dict", "{canal, valor} | Null. Bloquea hasta que un canal tenga valor; Null si todos están cerrados y vacíos."));
     v.push(f("chan", "seleccionar", "chan.seleccionar([id1, id2, ...]) -> dict", "Alias de chan.select."));
     v.push(f("chan", "list", "chan.list() -> list", "<Int> de handles de canales vivos"));
     v.push(f("chan", "lista", "chan.lista() -> list", "Alias de chan.list."));
@@ -885,7 +885,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("browser", "uncheck", "browser.uncheck(pestaña, selector)", "Desmarca una casilla; un radio no se puede desmarcar"));
     v.push(f("browser", "dialogs", "browser.dialogs(pestaña: handle, politica: string) -> nada", "Qué hacer con alert/confirm/prompt: \"accept\", \"dismiss\"… Se fija ANTES de provocarlos, o el diálogo bloquea la página"));
     v.push(f("browser", "click_opens", "browser.click_opens(pestaña: handle, selector: string) -> handle", "Clic que abre una pestaña nueva; devuelve el handle de la que se abrió"));
-    v.push(f("browser", "wait", "browser.wait(…)", "Lectura del DOM.  Las que devuelven contenido esperan a que lo haya; las que informan del estado responden sobre el instante actual y no esperan nunca."));
+    v.push(f("browser", "wait", "browser.wait(…)", "Lectura del DOM: las que devuelven contenido esperan a que lo haya; las de estado responden al instante."));
     v.push(f("browser", "text", "browser.text(pestaña: handle, selector: string) -> string", "El texto visible del primer elemento que case, sin espacios sobrantes. ESPERA a que aparezca"));
     v.push(f("browser", "html", "browser.html(pestaña: handle, selector: string) -> string", "El HTML de dentro del elemento. ESPERA a que aparezca"));
     v.push(f("browser", "texts", "browser.texts(pestaña: handle, selector: string) -> list", "El texto de TODOS los que casen. ESPERA a que haya alguno"));
@@ -970,13 +970,13 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     // pdf (pdf_mod.rs)
     v.push(f("pdf", "create", "pdf.create(path, texto, opts?) -> bool", "Texto corrido, partido al ancho y en tantas páginas como haga falta. opts: las de página y font_size."));
     v.push(f("pdf", "crear", "pdf.crear(path, texto, opts?) -> bool", "Alias de pdf.create."));
-    v.push(f("pdf", "build", "pdf.build(path, bloques, opts?) -> bool", "Documento libre por bloques: title, heading, text, table, fields, image, line, space, page_break. opts: size, orientation, margin, header, footer, page_numbers, page_format, title, author, subject."));
+    v.push(f("pdf", "build", "pdf.build(path, bloques, opts?) -> bool", "Documento libre por bloques."));
     v.push(f("pdf", "construir", "pdf.construir(path, bloques, opts?) -> bool", "Alias de pdf.build."));
     v.push(f("pdf", "pages", "pdf.pages(path) -> int", "Devuelve int."));
     v.push(f("pdf", "paginas", "pdf.paginas(path) -> int", "Alias de pdf.pages."));
     v.push(f("pdf", "template", "pdf.template(path, titulo, campos, opts?) -> bool", "Campos: Dict"));
     v.push(f("pdf", "plantilla", "pdf.plantilla(path, titulo, campos, opts?) -> bool", "Alias de pdf.template."));
-    v.push(f("pdf", "report", "pdf.report(path, titulo, filas, opts?) -> bool", "Filas: List<List> (la primera es la cabecera) o List<Dict>. opts: las de página, subtitle, columns ({ nombre: { width, align, format, bold, color, title, hidden } }), font_size, header_bg, header_color, zebra, borders, total, decimal, thousands."));
+    v.push(f("pdf", "report", "pdf.report(path, titulo, filas, opts?) -> bool", "Filas: List<List> (la primera es la cabecera) o List<Dict>."));
     v.push(f("pdf", "reporte", "pdf.reporte(path, titulo, filas, opts?) -> bool", "Alias de pdf.report."));
     v.push(f("pdf", "watermark", "pdf.watermark(path, salida, texto, opts?) -> bool", "Texto grande, girado y semitransparente en todas las páginas. opts: las de stamp."));
     v.push(f("pdf", "marca", "pdf.marca(path, salida, texto, opts?) -> bool", "Alias de pdf.watermark."));

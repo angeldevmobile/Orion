@@ -341,13 +341,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-//     Circuitos: registro de n qubits con puertas dirigidas a qubits concretos
-//
-//     Las puertas de 1 qubit se aplican en O(2^n) recorriendo pares de índices
-//     que difieren solo en el bit del qubit objetivo — nunca se construye la
-//     matriz 2^n × 2^n. Es el mismo esquema de los simuladores de verdad y
-//     permite ~24 qubits en un portátil. Convención: qubit 0 = bit más
-//     significativo (coincide con state_from_bits y las claves "010...").
+//     Circuitos de n qubits: cada puerta de 1 qubit se aplica en O(2^n) sobre pares
+//     de índices, sin construir la matriz (~24 qubits en un portátil). Qubit 0 = bit
+//     más significativo.
 
 struct Circuit {
     n:     usize,
@@ -391,10 +387,8 @@ fn theta_arg(args: &[EvalValue], pos: usize, fname: &str) -> Result<f64, String>
     }
 }
 
-// Aplica una puerta 2×2 al qubit `q`, opcionalmente condicionada a que TODOS
-// los bits de `controls` estén en 1. O(2^n), y en paralelo (rayon) a partir
-// de 2^16 amplitudes: cada k del subespacio comprimido mapea a un par (i, j)
-// disjunto, así que las escrituras nunca chocan.
+// Puerta 2×2 al qubit `q`, opcionalmente controlada por `controls`. En paralelo
+// (rayon) desde 2^16 amplitudes: cada par (i, j) es disjunto.
 const PAR_THRESHOLD: usize = 1 << 16;
 
 fn apply_1q(circ: &mut Circuit, q: usize, g: &[[C; 2]; 2], controls: &[usize]) {

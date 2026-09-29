@@ -1,20 +1,6 @@
-//! Puente JIT ↔ VM para módulos `.orx`.
-//!
-//! El JIT compila a nativo el programa principal, pero las funciones de un
-//! paquete `.orx` (`use "packages/math"`) no forman parte de esa unidad de
-//! compilación. En vez de dejarlas sin soporte, este puente:
-//!
-//! 1. Compila el módulo y ejecuta su cuerpo en una sub-VM para obtener sus
-//!    variables/constantes globales.
-//! 2. Construye un namespace (TAG_DICT del JIT) donde cada constante se
-//!    convierte a `OrionVal` y cada función queda como un marcador `TAG_VMFN`.
-//! 3. Cuando el código JIT invoca `mod.func(args)`, el marcador ejecuta la
-//!    función vía la VM, convirtiendo los argumentos y el resultado entre la
-//!    representación del JIT (`OrionVal`) y la de la VM (`Value`).
-//!
-//! Cada módulo corre en su propio contexto aislado (funciones y globales en
-//! nombres simples), así que recursión, helpers internos y `use` dentro del
-//! paquete resuelven sin prefijos.
+//! Puente JIT ↔ VM para módulos `.orx`: el módulo se ejecuta en una sub-VM, sus
+//! constantes pasan a `OrionVal` y sus funciones quedan como marcadores
+//! `TAG_VMFN` que se ejecutan en la VM al llamarlos.
 
 use std::cell::RefCell;
 use std::rc::Rc;

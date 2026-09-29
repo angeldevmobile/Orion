@@ -1,7 +1,4 @@
-/// error.rs — Sistema de errores estructurados de Orion
-///
-/// Reemplaza los errores tipo String dispersos por OrionError con span,
-/// que permite renderizar errores con contexto visual del código fuente.
+/// error.rs — errores de Orion con posición, para pintarlos con el código.
 
 use serde::Serialize;
 
@@ -98,20 +95,8 @@ impl OrionError {
         self
     }
 
-    /// Renderiza el error con contexto visual del código fuente.
-    ///
-    /// Produce output estilo Rust/Elm:
-    ///
-    /// ```text
-    ///   error sintáctico  →  main.orx:5:3
-    ///   Se esperaba '}' pero encontró 'else'
-    ///
-    ///    |
-    ///  5 │ if x > 0 {
-    ///    │           ^ aquí
-    ///
-    ///   = ayuda: cierra el bloque con '}'
-    /// ```
+    /// Pinta el error con la línea de código y una marca bajo el fallo, al estilo
+    /// de Rust o Elm.
     pub fn render(&self, source: &str) -> String {
         const RED:    &str = "\x1b[31;1m";
         const YELLOW: &str = "\x1b[33;1m";
@@ -220,14 +205,8 @@ impl From<crate::codegen::CodegenError> for OrionError {
 
 //     Parseo de errores del VM (que vienen como String)                        
 
-/// Convierte el string de error del VM en un OrionError estructurado.
-///
-/// El VM produce strings con formato:
-///   "Line 5 | mensaje del error\n    at foo (line 3)\n    at main (line 1)"
-///
-/// El prefijo es un contrato entre el VM y este renderizador, no texto suelto:
-/// de él salen el número de línea y el fragmento de código que se pinta debajo
-/// del error. `Linea ` se sigue aceptando por si queda algún productor viejo.
+/// Convierte el error en texto de la VM ("Line 5 | mensaje\n    at foo (line 3)")
+/// en un OrionError. El prefijo `Line N |` es un contrato con la VM.
 pub fn parse_vm_error(raw: &str, file: &str) -> OrionError {
     let mut lines = raw.lines();
     let first = lines.next().unwrap_or(raw);

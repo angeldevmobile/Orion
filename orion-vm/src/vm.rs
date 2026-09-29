@@ -192,12 +192,8 @@ impl VM {
         vm.call_value(Value::Str(fn_name.to_string()), args)
     }
 
-    //    Sesión interactiva (REPL)                                            
-    //
-    // El REPL reutiliza UNA sola VM entre entradas: crear una nueva por línea
-    // tiraba las variables (`x = 5` y luego `show x` daba "no está definida") y
-    // además el Drop del GC habría liberado las instancias que se llevaran de
-    // una entrada a la siguiente.
+    //    Sesión interactiva (REPL)
+    // Una sola VM para toda la sesión: así las variables sobreviven entre entradas.
 
     /// Carga otro fragmento de código principal conservando las variables ya
     /// definidas. Descarta el estado residual de la entrada anterior (frames y
@@ -883,11 +879,8 @@ impl VM {
                     }
 
                     //    Métodos de List
-                    // `list` es el backing compartido (Rc<RefCell<Vec>>). Los
-                    // métodos mutadores (push/append/reverse/sort) modifican el
-                    // Vec in-place y devuelven el MISMO Rc → el alias original ve
-                    // el cambio. Los transformadores (map/filter/reduce) producen
-                    // listas NUEVAS. Las lecturas usan borrow().
+                    // Los mutadores (push, sort…) cambian la lista en su sitio;
+                    // map, filter y reduce devuelven una nueva.
                     Value::List(list) => {
                         let result = match method_name.as_str() {
                             "len"      => Value::Int(list.borrow().len() as i64),
@@ -994,10 +987,8 @@ impl VM {
 
                     //    Métodos de Dict                                   
                     Value::Dict(map) => {
-                        // Una función definida en el dict (p.ej. un namespace de módulo:
-                        // list.contains, list.get, ...) tiene prioridad sobre los métodos
-                        // nativos de dict del mismo nombre. Así un paquete puede exponer
-                        // `contains`, `get`, `keys`, etc. sin que el método nativo lo eclipse.
+                        // Una función guardada en el dict (el namespace de un módulo)
+                        // gana a los métodos nativos de dict con el mismo nombre.
                         let user_fn = map.get(method_name.as_str()).cloned().filter(|v| match v {
                             Value::Closure { .. } => true,
                             Value::Str(s) => self.functions.contains_key(s),
@@ -1595,10 +1586,8 @@ impl VM {
             }
         }
 
-        // 3) Registrar las funciones del módulo con prefijo. Se reescriben:
-        //    - llamadas internas entre funciones del propio módulo (recursión/helpers)
-        //    - referencias a globales/constantes del módulo (salvo que un parámetro o
-        //      variable local las haga sombra)
+        // 3) Registrar las funciones del módulo con prefijo, reescribiendo sus
+        //    llamadas internas y las referencias a sus globales.
         let mut ns: IndexMap<String, Value> = IndexMap::new();
         for (fname, fdef) in &bc.functions {
             let prefixed = format!("{}{}", prefix, fname);
@@ -1632,14 +1621,8 @@ impl VM {
             ns.insert(k, v);
         }
 
-        // 5) Lo que el módulo importó a su vez. Esos módulos se cargaron en la
-        //    sub-VM, así que sus funciones (`cola__stats`) y sus globales
-        //    (`cola__LIMITE`) solo existían ahí: el namespace `cola` que este
-        //    módulo guarda apunta a nombres que la VM principal no conocía. Si
-        //    el programa no importaba `cola` por su cuenta, llamar a través
-        //    de este módulo fallaba con "Function 'cola__stats' not found".
-        //    Ya vienen con el prefijo de su propio archivo; si el programa
-        //    importó el mismo módulo antes, se queda la copia que ya tenía.
+        // 5) Traer también lo que importó el módulo: sus funciones y globales
+        //    solo existían en la sub-VM y no llegaban al programa ni a `serve`.
         for (fname, fdef) in &sub_vm.functions {
             if !own_fns.contains(fname) && !self.functions.contains_key(fname) {
                 self.functions.insert(fname.clone(), fdef.clone());
@@ -1957,11 +1940,8 @@ impl VM {
                 Some((other, line)) => {
                     if line > 0 { self.current_line = line; }
                     if let Err(e) = self.dispatch_instr(other) {
-                        // Igual que en `step`: si hay un `attempt` abierto
-                        // DENTRO de esta ejecución, el error va a su `handle`.
-                        // Antes el error subía directo, así que en los
-                        // handlers de `serve` (que corren por aquí) ningún
-                        // `attempt` del script capturaba nada.
+                        // Como en `step`: el error va al `attempt` abierto en
+                        // esta ejecución (así funciona en los handlers de serve).
                         let atrapable = self.error_handlers.last()
                             .map_or(false, |h| h.frame_depth >= target_depth);
                         if !atrapable {
@@ -2166,12 +2146,8 @@ impl VM {
             return Err(format!("serve: handler '{}' must take exactly 1 parameter (req)", fn_name));
         }
 
-        // Snapshot de las variables globales (frame <main>) para sembrar cada
-        // worker (config/datos de solo lectura). Los Value normales viajan como
-        // SendValue (thread-safe); los módulos importados con `use` se llevan
-        // aparte porque SendValue no tiene variante Module y se re-registran como
-        // Value::Module en el worker. Las mutaciones de estado compartido van por
-        // el módulo `state`.
+        // Globales del programa para sembrar cada worker. Los módulos van aparte
+        // (SendValue no tiene variante Module); el estado compartido va por `state`.
         let (globals, module_globals): (Vec<(String, SendValue)>, Vec<(String, String)>) = {
             let mut vals = Vec::new();
             let mut mods = Vec::new();
@@ -2247,12 +2223,8 @@ impl VM {
         }
     }
 
-    /// Construye el dict `req`, rutea (router activo primero, handler global
-    /// como fallback), ejecuta middlewares y responde. Un error del handler se
-    /// traduce a 500 y el worker sigue atendiendo (no tumba el server).
-    ///
-    /// El dict `req` expone: path, method, body, headers (claves en minúscula),
-    /// ip, query (URL-decoded) y params (query + parámetros de ruta `:id`).
+    /// Construye `req`, rutea (router y luego handler global), pasa los
+    /// middlewares y responde. Un error del handler es un 500, no tumba el servidor.
     fn handle_http_request(&mut self, mut request: tiny_http::Request, fn_name: &str) {
         use tiny_http::{Response, Header};
         use std::str::FromStr;
@@ -3308,14 +3280,8 @@ impl VM {
 // C FFI — utilidades
 // ---------------------------------------------------------------------------
 
-/// Resuelve el nombre de librería al path correcto para la plataforma.
-/// Resuelve el nombre de una librería para `extern ... from "<lib>"`.
-///
-/// Una ruta escrita a mano se respeta tal cual. Un nombre suelto se traduce al
-/// nombre de archivo de la plataforma y se busca primero entre las librerías
-/// que instaló el gestor de paquetes (`<packages>/native/<pkg>/`); si no está
-/// ahí, se deja el nombre pelado para que lo resuelva el cargador del sistema,
-/// que es el comportamiento de siempre.
+/// Librería de `extern ... from "<lib>"`: una ruta se respeta tal cual; un nombre
+/// suelto se busca en los paquetes instalados y, si no está, en el sistema.
 fn ffi_resolve_lib(name: &str) -> String {
     if name.contains('/') || name.contains('\\') {
         return name.to_string();
@@ -3534,16 +3500,8 @@ fn resolve_static(dir: &str, rest: &str) -> Option<(Vec<u8>, String)> {
 
 //     Percent-decoding para paths y query strings HTTP
 
-/// Operadores bit a bit sobre enteros.
-///
-/// Se rechaza todo lo que no sea `int` en vez de convertir: un `1.5 & 3` no
-/// tiene una respuesta que el programador quisiera, y truncar en silencio sería
-/// justo el tipo de resultado inventado que no queremos.
-///
-/// En los desplazamientos, una cuenta negativa es error y una cuenta de 64 o
-/// más da 0 (o -1 al desplazar a la derecha un negativo, que es lo que dice el
-/// signo). Rust entra en pánico si se desplaza más que el ancho del tipo, así
-/// que dejarlo pasar habría tumbado el proceso entero.
+/// Operadores bit a bit, solo sobre `int`. Un desplazamiento negativo es error y
+/// uno de 64 o más da 0 (-1 para un negativo), en vez de un pánico de Rust.
 fn bit_op(a: Value, b: Value, op: &str) -> Result<Value, String> {
     let (x, y) = match (&a, &b) {
         (Value::Int(x), Value::Int(y)) => (*x, *y),
@@ -3928,13 +3886,8 @@ mod tests {
 
     #[test]
     fn test_attempt_catch_error() {
-        // attempt { raise "boom" } handle e { "capturado" }
-        // 0: BeginAttempt(3) — si error, salta a 3
-        // 1: LoadStr("boom")
-        // 2: Raise            — error → salta a 3, push "boom" en stack
-        // 3: StoreVar("e")    — handler: guarda el error
-        // 4: LoadStr("capturado")
-        // 5: Halt
+        // attempt { raise "boom" } handle e { "capturado" }: BeginAttempt(3) salta
+        // al handler, que guarda el error en `e`.
         let r = run_top(vec![
             Instruction::BeginAttempt(3),
             Instruction::LoadStr("boom".into()),
@@ -3948,12 +3901,7 @@ mod tests {
 
     #[test]
     fn test_attempt_no_error() {
-        // attempt { 42 } handle e { "error" }
-        // 0: BeginAttempt(3)
-        // 1: LoadInt(42)
-        // 2: EndAttempt(4)  — sin error, salta a 4
-        // 3: StoreVar("e")  — handler (no se ejecuta)
-        // 4: Halt
+        // attempt { 42 } handle e { "error" }: sin error, EndAttempt(4) salta el handler.
         let r = run_top(vec![
             Instruction::BeginAttempt(3),
             Instruction::LoadInt(42),

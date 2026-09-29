@@ -1,15 +1,5 @@
-//! Regresiones del lenguaje encontradas construyendo la demo `comercio`:
-//!
-//!   1. `and` / `or` no cortocircuitaban: `has_key(d, "k") and d["k"] > 0`
-//!      evaluaba la derecha aunque la izquierda fuese falsa, y reventaba justo
-//!      en el caso que la izquierda existía para evitar.
-//!   2. Un `return` dentro de `attempt` dejaba su manejador vivo, y un error
-//!      posterior FUERA del `attempt` saltaba a ese `handle`.
-//!   3. Un módulo importado solo por otro módulo no llegaba a la VM principal:
-//!      "Function 'b__x' not found".
-//!
-//! Cada programa se autoverifica con `error`: si algo no cuadra, la VM
-//! devuelve Err y el test falla con el mensaje.
+//! Regresiones del lenguaje: cortocircuito de `and`/`or`, `return` dentro
+//! de `attempt` y módulos importados por otro módulo.
 
 use orion_vm::{codegen, jit, lexer, parser, vm};
 use std::fs;
@@ -132,6 +122,37 @@ fn and_or_siguen_compilando_con_el_jit() {
         if cuenta(30000) != 2001 { error("resultado distinto en JIT") }
     "##);
     match jit::run_program(&bc) {
+        Ok(true) => {}
+        Ok(false) => panic!("el JIT no compiló el programa y cayó al intérprete"),
+        Err(e) => panic!("el JIT falló: {e}"),
+    }
+}
+
+#[test]
+fn and_or_anidados_dan_lo_mismo_en_jit_que_en_el_interprete() {
+    // Cada `and`/`or` tiene su punto de llegada, al que el valor llega por dos
+    // caminos. Anidados, los puntos se encadenan: si el JIT confundiera uno
+    // con otro, la cuenta saldría distinta.
+    let src = r##"
+        fn cuenta(n) {
+            c = 0
+            i = 0
+            while i < n {
+                a = i % 2 == 0
+                b = i % 3 == 0
+                d = i % 5 == 0
+                if (a and b) or (d and not a) { c = c + 1 }
+                if a and (b or d) { c = c + 10 }
+                x = (a or b) and (b or d)
+                if x { c = c + 100 }
+                i = i + 1
+            }
+            return c
+        }
+        if cuenta(3000) != 127800 { error("cuenta distinta: " + str(cuenta(3000))) }
+    "##;
+    run_ok(src);
+    match jit::run_program(&compilar(src)) {
         Ok(true) => {}
         Ok(false) => panic!("el JIT no compiló el programa y cayó al intérprete"),
         Err(e) => panic!("el JIT falló: {e}"),

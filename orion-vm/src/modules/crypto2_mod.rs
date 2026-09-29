@@ -48,16 +48,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-// ── AES-256-GCM ──────────────────────────────────────────────────────────────
-//
-// La clave AES se deriva del password con Argon2id + salt aleatorio de 16 bytes
-// (memory-hard: resiste fuerza bruta en GPU). Un SHA-256 plano del password —el
-// esquema anterior— es rapidísimo de romper y sin salt permite rainbow tables
-// compartidas entre todos los usuarios. Formato versionado:
-//   v1 (actual):  base64( 0x01 ‖ salt[16] ‖ nonce[12] ‖ ciphertext )
-//   legacy:       base64(                    nonce[12] ‖ ciphertext )  (SHA-256)
-// Al descifrar se intenta v1 y, si el tag GCM no valida, se cae a legacy: el tag
-// autenticado desambigua sin riesgo de descifrar basura.
+// ── AES-256-GCM: clave con Argon2id + salt de 16 bytes. Formato v1: base64(0x01 ‖
+//    salt ‖ nonce[12] ‖ ct); legacy (SHA-256 sin salt): base64(nonce[12] ‖ ct).
+//    Al descifrar se prueba v1 y, si el tag GCM no valida, legacy.
 
 const AES_V1: u8 = 0x01;
 

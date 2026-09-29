@@ -1,25 +1,5 @@
-//! Rutas de proyecto y de paquetes — fuente ÚNICA de verdad.
-//!
-//! Antes cada componente resolvía por su cuenta dónde viven los paquetes y las
-//! tres respuestas no coincidían: el gestor instalaba junto al ejecutable o en
-//! `cwd/packages`, el `use` buscaba `packages/x.orx` relativo al directorio
-//! actual, y el doctor informaba de `~/.orion/packages`. El resultado era que
-//! `orion doctor` decía "ningún paquete instalado" con diez paquetes instalados.
-//! Todo eso pasa por aquí ahora.
-//!
-//! Modelo:
-//!
-//! - **Raíz de proyecto**: el ancestro más cercano al archivo que se ejecuta que
-//!   contenga `orion.json`. Sin manifiesto se acepta un ancestro con `packages/`,
-//!   y en último término el directorio actual. Esto es lo que convierte el
-//!   "por accidente" (dependía del cwd) en "por diseño" (depende del proyecto).
-//! - **Paquetes de proyecto**: `<raíz>/packages`, versionables con el repo.
-//! - **Paquetes globales**: `$ORION_PKGS`, `$ORION_HOME/packages` o
-//!   `~/.orion/packages`, compartidos entre proyectos.
-//!
-//! La búsqueda va de lo más específico a lo más general: proyecto, después
-//! global. Instalar escribe en el proyecto cuando hay manifiesto y en el global
-//! cuando no lo hay.
+//! Rutas de proyecto y de paquetes: la única fuente de verdad para el gestor,
+//! el `use` del runtime y el doctor. Modelo completo en docs/paquetes.md.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -29,10 +9,8 @@ pub const MANIFEST: &str = "orion.json";
 /// Nombre del archivo de bloqueo con las versiones resueltas.
 pub const LOCKFILE: &str = "orion.lock";
 
-/// Archivo `.orx` de entrada del proceso.
-///
-/// Es un global y no un parámetro porque el runtime del JIT resuelve módulos
-/// desde funciones `extern "C"` sin contexto: no hay dónde enhebrar un handle.
+/// Archivo `.orx` de entrada. Es global porque el runtime del JIT resuelve
+/// módulos desde funciones `extern "C"` sin contexto.
 static ENTRY_FILE: OnceLock<PathBuf> = OnceLock::new();
 
 /// Registra el archivo que se está ejecutando. Lo llama `main` antes de correr
@@ -74,12 +52,8 @@ fn find_up(start: &Path, pred: impl Fn(&Path) -> bool) -> Option<PathBuf> {
     None
 }
 
-/// Raíz del proyecto actual.
-///
-/// Busca hacia arriba desde el archivo de entrada y, si no hay ninguno
-/// registrado, desde el directorio actual. Prioriza el manifiesto sobre la
-/// heurística de `packages/`: un proyecto con `orion.json` manda aunque haya un
-/// `packages/` más cerca.
+/// Raíz del proyecto: hacia arriba desde el archivo de entrada (o el cwd). Un
+/// `orion.json` gana a un `packages/` más cercano.
 pub fn project_root() -> PathBuf {
     let starts: Vec<PathBuf> = match entry_dir() {
         Some(d) => vec![d, cwd()],
@@ -113,10 +87,7 @@ pub fn has_manifest() -> bool { manifest_path().is_file() }
 /// Paquetes propios del proyecto: `<raíz>/packages`.
 pub fn project_packages_dir() -> PathBuf { project_root().join("packages") }
 
-/// Paquetes compartidos entre proyectos.
-///
-/// `$ORION_PKGS` gana sobre `$ORION_HOME/packages`, y sin ninguna de las dos se
-/// usa `~/.orion/packages`.
+/// Paquetes compartidos: `$ORION_PKGS`, `$ORION_HOME/packages` o `~/.orion/packages`.
 pub fn global_packages_dir() -> PathBuf {
     if let Ok(p) = std::env::var("ORION_PKGS") {
         if !p.trim().is_empty() { return PathBuf::from(p); }
@@ -139,13 +110,8 @@ pub fn packages_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Directorio donde escribe `--add`.
-///
-/// Se instala dentro del proyecto cuando hay algo que lo identifique como tal:
-/// un manifiesto, o un `packages/` que ya existe. Lo segundo es lo que mantiene
-/// intacto el comportamiento de los repos anteriores al manifiesto, que
-/// instalaban justo ahí. Sin ninguna de las dos señales se usa el global, para
-/// no sembrar un `packages/` en cualquier directorio desde el que se invoque.
+/// Dónde escribe `--add`: en el proyecto si hay manifiesto o ya existe un
+/// `packages/`; si no, en el global.
 pub fn install_dir() -> PathBuf {
     let project = project_packages_dir();
     if has_manifest() || project.is_dir() { project } else { global_packages_dir() }
@@ -172,12 +138,8 @@ pub fn native_dirs() -> Vec<PathBuf> {
 
 //    Resolución de módulos
 
-/// Localiza el archivo `.orx` que corresponde a un `use "<path>"`.
-///
-/// `path` llega tal cual lo escribió el programa, con o sin `packages/` delante.
-/// Se prueban, en este orden, las raíces relevantes (proyecto, directorio del
-/// archivo de entrada, directorio actual) y dentro de cada una las formas
-/// habituales. Devuelve la primera coincidencia real en disco.
+/// El `.orx` de un `use "<path>"`: prueba proyecto, directorio del archivo de
+/// entrada y cwd, con y sin `packages/` delante.
 pub fn resolve_module_file(path: &str) -> Option<PathBuf> {
     // Ruta absoluta escrita a mano: se respeta sin más.
     let raw = Path::new(path);

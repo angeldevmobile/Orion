@@ -1,16 +1,5 @@
-//! Servidor Debug Adapter Protocol (DAP) sobre stdio.
-//!
-//! VS Code lanza este proceso con `orion --dap <archivo.orx>` y se comunica
-//! con él mediante el protocolo DAP: mensajes JSON precedidos de una cabecera
-//! `Content-Length: N\r\n\r\n`.
-//!
-//! Capacidades implementadas:
-//!   initialize, launch, setBreakpoints, configurationDone
-//!   threads, stackTrace, scopes, variables, evaluate
-//!   continue, next, stepIn, stepOut, pause, disconnect
-//!
-//! Eventos emitidos:
-//!   initialized, stopped, continued, exited, terminated, output
+//! Servidor Debug Adapter Protocol sobre stdio: VS Code lanza `orion --dap
+//! <archivo.orx>` y habla con él en JSON con cabecera `Content-Length`.
 
 use std::io::{self, BufRead, Write};
 use std::sync::mpsc::{self, Receiver, Sender};

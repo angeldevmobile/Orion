@@ -1,8 +1,5 @@
-//! Operaciones sobre PDF que ya existen: unir, quitar, reordenar y rotar
-//! páginas, estampar texto o imágenes encima, y leer o cambiar los metadatos.
-//!
-//! Todas leen un archivo y escriben otro (`salida`), que puede ser el mismo:
-//! el documento se carga entero en memoria antes de escribir.
+//! Operaciones sobre PDF existentes: páginas, estampados y metadatos.
+//! Todas leen un archivo y escriben otro, que puede ser el mismo.
 
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap;
@@ -271,10 +268,8 @@ fn num(opts: Option<&EvalValue>, claves: &[&str]) -> Option<f32> {
 
 const MM: f32 = 72.0 / 25.4;
 
-/// Dónde va algo de `w` × `h` puntos en una página de `pw` × `ph`: por
-/// `position` ("center", "top-right", "bottom-left"…, con `margin` en mm), o
-/// por `x`, `y` en mm contados desde la esquina SUPERIOR izquierda, que es
-/// como se mide en un papel.
+/// Dónde colocar una caja de `w`×`h` pt: por `position` ("top-right"…) o por
+/// `x`, `y` en mm desde la esquina superior izquierda.
 fn colocar(opts: Option<&EvalValue>, por_defecto: &str, pw: f32, ph: f32, w: f32, h: f32) -> (f32, f32) {
     if let (Some(x), Some(y)) = (num(opts, &["x"]), num(opts, &["y"])) {
         return (x * MM, ph - y * MM - h);
@@ -300,15 +295,8 @@ fn colocar(opts: Option<&EvalValue>, por_defecto: &str, pw: f32, ph: f32, w: f32
     (x, y)
 }
 
-/// Añade `nombre` → `id` a la categoría de recursos (Font, ExtGState,
-/// XObject) de una página, SIN perder lo que ya tuviera. Los recursos se
-/// escriben como diccionario propio de la página, así no se toca un objeto
-/// que quizá compartan otras.
-///
-/// Antes (en pdf.watermark), si /Font era una referencia a otro objeto, que
-/// es lo normal en los PDF que genera el propio Orion, se sustituía por uno
-/// que solo tenía la fuente nueva: la marca aparecía y el resto del texto de
-/// la página dejaba de verse.
+/// Añade recursos a una página sin perder los que ya tenía (antes la marca de
+/// agua borraba las fuentes y el texto de la página dejaba de verse).
 fn anadir_recursos(doc: &mut Document, pagina: ObjectId, nuevos: &[(&str, &str, ObjectId)]) {
     let mut recursos = match heredado(doc, pagina, b"Resources") {
         Some(Object::Dictionary(d)) => d,
@@ -368,11 +356,7 @@ fn fuente(doc: &mut Document, negrita: bool) -> ObjectId {
 }
 
 /// stamp(ruta, salida, texto, opts?): texto encima de páginas existentes.
-///
-/// opts: pages (todas), position ("top-right"), x / y (mm desde arriba a la
-/// izquierda), margin (10), size (12), bold, color ("#c0392b", "red"…),
-/// opacity (0-1), rotation (grados). En el texto, {page} y {pages} se
-/// cambian por el número de página y el total: sirve para numerar un PDF.
+/// {page} y {pages} se sustituyen, así sirve también para numerar.
 pub fn estampar(ruta: &str, salida: &str, texto: &str, opts: Option<&EvalValue>) -> Result<EvalValue, String> {
     let mut doc = cargar("stamp", ruta)?;
     estampar_en(&mut doc, "stamp", texto, opts, "top-right", 12.0, (0.0, 0.0, 0.0), 1.0, 0.0)?;
@@ -436,12 +420,8 @@ fn estampar_en(doc: &mut Document, funcion: &str, texto: &str, opts: Option<&Eva
     Ok(())
 }
 
-/// stamp_image(ruta, salida, imagen, opts?): una imagen (logo, firma, sello)
-/// encima de páginas existentes.
-///
-/// opts: pages (todas), position ("top-right"), x / y (mm desde arriba a la
-/// izquierda), margin (10), width (mm, 30 por defecto), height (por
-/// defecto, el de la proporción), opacity.
+/// stamp_image(ruta, salida, imagen, opts?): logo, firma o sello encima de
+/// páginas existentes.
 pub fn estampar_imagen(ruta: &str, salida: &str, imagen: &str, opts: Option<&EvalValue>) -> Result<EvalValue, String> {
     let mut doc = cargar("stamp_image", ruta)?;
     let (px_w, px_h, pixeles) = rgb_de(imagen).map_err(|e| format!("pdf.stamp_image: {e}"))?;

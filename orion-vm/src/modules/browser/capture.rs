@@ -1,40 +1,9 @@
-//! Captura de red: leer lo que la página le pide a su propia API.
-//!
-//! Casi todo sitio moderno pinta sus listados con JavaScript a partir de un
-//! JSON que él mismo se descarga. Un scraper clásico espera a que ese JSON se
-//! convierta en HTML y luego deshace el trabajo: busca `div`s, quita etiquetas,
-//! reconstruye números que ya venían siendo números. Y se rompe el día que el
-//! sitio cambia una clase de CSS.
-//!
-//! Aquí se lee la fuente. Los datos llegan **ya tipados**, sin nombres de clase
-//! de por medio, y suelen traer campos que la página no llega a mostrar.
-//!
-//! ```orion
-//! web.watch(p, "/api/productos")     -- arma la escucha
-//! web.click(p, "#cargar")            -- lo que provoque la petición
-//! r = web.capture(p)                 -- devuelve lo que pidió, ya parseado
-//! ```
-//!
-//! Dos llamadas y no una porque hay que armar **antes** de provocar: si se
-//! encendiera la escucha después del clic, la petición ya habría pasado. Es la
-//! misma razón por la que `click_opens` toma la marca de eventos antes de
-//! pulsar.
-//!
-//! Playwright tiene `page.on("response")`, que es un callback donde hay que
-//! filtrar a mano, pedir el cuerpo con otro `await` y acordarse de que el
-//! cuerpo puede no estar ya. Selenium no tiene nada equivalente sin un proxy
-//! delante.
+//! Captura de red: leer el JSON que la página pide a su API, ya tipado, en vez
+//! de deshacer el HTML. Se arma antes (`watch`) y se lee después (`capture`),
+//! porque la escucha tiene que estar puesta antes de provocar la petición.
 
-/// ¿Casa la URL con el patrón?
-///
-/// Sin `*` es "contiene", que es lo que casi siempre se quiere y lo que
-/// cualquiera escribe primero: `web.watch(p, "/api/")`. Con `*` es un comodín
-/// que cubre cualquier trozo, para cuando hace falta afinar
-/// (`"*/v2/pedidos?*"`).
-///
-/// No se usa una expresión regular a propósito: una URL lleva `?`, `.` y `+`,
-/// que en regex significan otra cosa, y el patrón obvio daría resultados
-/// sorprendentes.
+/// ¿Casa la URL con el patrón? Sin `*` es "contiene"; con `*`, comodín. Sin
+/// regex: `?`, `.` y `+` son normales en una URL.
 pub fn casa(url: &str, patron: &str) -> bool {
     let p = patron.trim();
     if p.is_empty() { return true; }

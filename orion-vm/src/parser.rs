@@ -122,12 +122,8 @@ impl Parser {
         }
     }
 
-    /// Como expect_ident pero también acepta CUALQUIER keyword como nombre de
-    /// atributo/método. Después de un `.` no hay ambigüedad sintáctica posible
-    /// (igual que en Python/JS), así que reservar palabras ahí solo rompe APIs
-    /// legítimas: `ai.ask()`, `fs.read()`, `random.int()`, `net.error`…
-    /// Antes era una whitelist y cualquier keyword olvidada volvía inusable a
-    /// la función del módulo.
+    /// Como expect_ident, pero tras un `.` acepta cualquier keyword como nombre
+    /// (`ai.ask()`, `fs.read()`): ahí no hay ambigüedad posible.
     fn expect_attr_name(&mut self) -> Result<String, ParseError> {
         use crate::token::TokenKind::Ident;
         let name = match self.peek().clone() {
@@ -309,17 +305,8 @@ impl Parser {
         Ok((args, kwargs))
     }
 
-    /// Un elemento que además admite `...expr` para expandir una lista.
-    ///
-    /// Solo se llama desde los dos sitios donde expandir significa algo: los
-    /// literales de lista y los argumentos de una llamada. En el resto de
-    /// posiciones se sigue parseando con `parse_expression`, así que un `...`
-    /// suelto sigue siendo un error, que es lo correcto.
-    ///
-    /// Aquí `...` está en posición de OPERANDO. El `...` infijo (rango
-    /// inclusivo) se resuelve en `parse_expression`, cuando ya hay una
-    /// expresión a la izquierda. Los dos usos del símbolo no se cruzan porque
-    /// se deciden en momentos distintos del parseo.
+    /// Un elemento que admite `...expr` (spread). Solo en listas y argumentos; el
+    /// `...` infijo (rango inclusivo) se resuelve en `parse_expression`.
     fn parse_spreadable(&mut self) -> Result<Expr, ParseError> {
         if matches!(self.peek(), TokenKind::DotDotDot) {
             self.pos += 1;
@@ -346,22 +333,8 @@ impl Parser {
 
         let mut expr = self.parse_or()?;
 
-        // Rangos. Tres formas, dos semánticas:
-        //
-        //   1..4    exclusivo   [1,2,3]     forma corta de siempre
-        //   1..<4   exclusivo   [1,2,3]     igual, pero dice en el símbolo dónde corta
-        //   1...4   INCLUSIVO   [1,2,3,4]
-        //
-        // `..` se queda exclusivo porque ya lo era —el bucle compara con `Lt`— y
-        // porque coincide con `range()`, que también excluye el extremo. Cambiarlo
-        // habría alterado en silencio los bucles ya escritos, que es justo lo que
-        // no se puede hacer. `..<` existe para quien prefiera no tener que
-        // acordarse, y `...` cubre el caso que hasta ahora obligaba a escribir
-        // `a..(b+1)`.
-        //
-        // Aquí `...` solo puede ser infijo: se llega con `expr` ya parseada. El
-        // `...` prefijo (spread) se resuelve donde empieza un operando, así que
-        // los dos usos del mismo símbolo no se cruzan nunca.
+        // Rangos: `1..4` y `1..<4` excluyen el extremo, `1...4` lo incluye. Aquí
+        // `...` solo es infijo; el spread se resuelve al empezar un operando.
         let range_op = match self.peek() {
             TokenKind::DotDot    => Some(".."),
             TokenKind::DotDotLt  => Some("..<"),
@@ -381,12 +354,8 @@ impl Parser {
             expr = Expr::IsCheck { expr: Box::new(expr), shape };
         }
 
-        // Ternario: cond ? si_si : si_no
-        //
-        // Va el último y asocia por la derecha, así que `a ? b : c ? d : e` se
-        // lee `a ? b : (c ? d : e)`, que es la cadena else-if de toda la vida.
-        // Las dos ramas se parsean con `parse_expression` completa: dentro de un
-        // ternario cabe otro, un `|>` o un rango sin tener que poner paréntesis.
+        // Ternario `cond ? a : b`: va el último y asocia por la derecha, así que
+        // `a ? b : c ? d : e` es una cadena else-if.
         if matches!(self.peek(), TokenKind::Question) {
             self.pos += 1;
             let then_e = self.parse_expression()?;
@@ -402,13 +371,8 @@ impl Parser {
         Ok(expr)
     }
 
-    /// Inserta `value` como primer argumento del destino de un `|>`.
-    ///
-    /// Se admiten las cuatro formas que tienen un sitio natural donde meterlo:
-    /// nombre suelto, llamada, método y lambda. Cualquier otra cosa —un número,
-    /// una lista, un `a + b`— no es invocable, y se rechaza aquí con el sitio
-    /// exacto en vez de dejar que el error salga mucho más abajo hablando de
-    /// `__call__`, que no es nada que el programador haya escrito.
+    /// Mete `value` como primer argumento del destino de un `|>`: nombre, llamada,
+    /// método o lambda. Lo demás no es invocable y se rechaza aquí.
     fn pipe_into(value: Expr, stage: Expr, line: u32, col: u32) -> Result<Expr, ParseError> {
         let prepend = |args: Vec<Expr>| {
             let mut v = Vec::with_capacity(args.len() + 1);
@@ -467,20 +431,8 @@ impl Parser {
         })
     }
 
-    /// Parsea el patrón de un brazo de `match`.
-    ///
-    /// La forma se decide por el primer token, sin retroceder:
-    ///
-    ///   `_`            comodín
-    ///   `[` ...        lista
-    ///   `{` ...        dict          (la llave del CUERPO viene después)
-    ///   `Ident` `(`    shape
-    ///   `Ident`        ligadura
-    ///   lo demás       valor, se compara por igualdad
-    ///
-    /// El shape va con paréntesis, `Forma(a, b)`, y no con llaves: `Forma {`
-    /// seguido de la llave del cuerpo no se podría distinguir de una ligadura
-    /// llamada `Forma` con su cuerpo detrás.
+    /// Patrón de un brazo de `match`, decidido por el primer token: `_`, `[`
+    /// (lista), `{` (dict), `Forma(` (shape), nombre (ligadura) o un valor.
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
         match self.peek().clone() {
             TokenKind::LBracket => {
@@ -521,11 +473,8 @@ impl Parser {
         }
     }
 
-    /// Campos de un patrón de dict o de shape, hasta `cierre`.
-    ///
-    /// Dos formas por campo: `clave: patrón` y la abreviatura `clave`, que
-    /// significa `clave: clave` — el caso corriente de "sácame ese campo con su
-    /// propio nombre" sin tener que escribirlo dos veces.
+    /// Campos de un patrón de dict o shape hasta `cierre`: `clave: patrón`, o
+    /// `clave` a secas como abreviatura de `clave: clave`.
     fn parse_pattern_fields(
         &mut self,
         cierre: &TokenKind,
@@ -656,12 +605,8 @@ impl Parser {
         Ok(left)
     }
 
-    // Bit a bit, en tres niveles: `|` más suelto que `^`, y `^` más que `&`.
-    //
-    // Van por DEBAJO de la comparación, no por encima como en C. En C
-    // `a & b == c` significa `a & (b == c)`, que sorprende a todo el mundo y es
-    // un error tan clásico que los compiladores avisan de él. Aquí se agrupa
-    // como se lee: `(a & b) == c`.
+    // Bit a bit: `|` más suelto que `^`, y `^` más que `&`. Van por debajo de la
+    // comparación, así que `a & b == c` es `(a & b) == c` (no como en C).
 
     fn parse_bit_or(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_bit_xor()?;
@@ -710,33 +655,16 @@ impl Parser {
         Ok(left)
     }
 
-    /// Pipe: `valor |> destino` mete el valor como PRIMER argumento del destino.
-    ///
-    ///   x |> f            =>  f(x)
-    ///   x |> f(a, b)      =>  f(x, a, b)
-    ///   x |> mod.act(a)   =>  mod.act(x, a)
-    ///
-    /// Es azúcar puro de parser: sale la misma `Call` que se habría escrito a
-    /// mano, así que VM, JIT, AOT y typechecker lo tratan sin enterarse.
-    ///
-    /// Vive entre la comparación y la aritmética, y esa posición es la que hace
-    /// que se lea como se espera en los dos casos que importan:
-    ///
-    ///   a + b |> f   =>  f(a + b)      (la suma entra entera)
-    ///   x |> len > 3 =>  (x |> len) > 3
-    ///
-    /// Si estuviera más abajo, la segunda intentaría invocar `len > 3`, que no
-    /// es invocable, y habría que poner paréntesis para algo que se lee solo.
+    /// Pipe: `x |> f(a)` es `f(x, a)`. Azúcar de parser, sale la misma `Call`.
+    /// Entre comparación y aritmética: `a + b |> f` es `f(a + b)`.
     fn parse_pipe(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.parse_arith()?;
         while matches!(self.peek(), TokenKind::PipeOp) {
             self.pos += 1;
             let line = self.current_line();
             let col  = self.tokens.get(self.pos).map(|t| t.col).unwrap_or(0);
-            // Una lambda como etapa (`x |> (n) => n * 2`) hay que reconocerla
-            // aquí: los niveles de precedencia no miran si viene una, eso solo
-            // se comprueba al entrar a una expresión, y sin esto el `=>`
-            // reventaba contra el paréntesis de los parámetros.
+            // Una lambda como etapa (`x |> (n) => n * 2`) se reconoce aquí; si no,
+            // el `=>` chocaba con el paréntesis de los parámetros.
             let stage = if self.is_lambda_ahead() {
                 self.parse_lambda()?
             } else {
@@ -848,15 +776,8 @@ impl Parser {
                         }
                     }
                 }
-                // Acceso estático: `Shape::act`.
-                //
-                // Se resuelve a un identificador con el nombre ya compuesto,
-                // "Shape::act", que es como codegen registra los acts estáticos.
-                // A partir de aquí es un nombre de función corriente: la llamada
-                // la monta el brazo de abajo y ni la VM ni el JIT necesitan
-                // saber que esto vino de un shape. El nombre no puede chocar con
-                // ninguno del usuario porque el lexer nunca mete `::` dentro de
-                // un identificador.
+                // `Shape::act`: se resuelve a un identificador "Shape::act", el
+                // nombre con que codegen registra los acts estáticos.
                 TokenKind::DoubleColon => {
                     self.pos += 1;
                     let member = self.expect_ident()?;
@@ -899,10 +820,8 @@ impl Parser {
             | TokenKind::TypeString | TokenKind::TypeList | TokenKind::TypeDict
             | TokenKind::TypeAny | TokenKind::TypeAuto => {
                 let name = self.parse_type_name()?;
-                // Si el nombre de tipo va seguido de `.` es acceso a miembro sobre una
-                // variable (p.ej. un namespace de módulo importado como `list`/`dict`),
-                // no un cast. Resolver como identificador en minúscula para no chocar
-                // con los nombres de tipo `List`/`Dict`.
+                // Nombre de tipo seguido de `.`: es acceso a miembro de una variable
+                // (un módulo como `list`), no un cast.
                 if matches!(self.peek(), TokenKind::Dot) {
                     Ok(Expr::Ident(name.to_lowercase()))
                 } else {
@@ -962,10 +881,8 @@ impl Parser {
                 Ok(Expr::Ident("super".to_string()))
             }
 
-            // await como expresión: result = await future
-            // Usamos parse_postfix (no parse_primary) para capturar la llamada
-            // completa: `await f(x)` = Await(Call f), no Await(Ident f) seguido
-            // de una llamada `(x)` sobre el resultado (que daba "__call__").
+            // `await f(x)` con parse_postfix, para que sea Await(Call f) y no una
+            // llamada sobre el resultado de Await(Ident f).
             TokenKind::Await => {
                 self.pos += 1;
                 let inner = self.parse_postfix()?;
@@ -998,10 +915,8 @@ impl Parser {
                 Ok(Stmt::Const { name, value, doc, line, col })
             }
 
-            //   show expr[, expr...]  |  show(expr, expr...)
-            // Multi-argumento estilo print de Python: se desugara a
-            // str(a) + " " + str(b) para no tocar VM/JIT (la instrucción
-            // Show sigue recibiendo UNA expresión).
+            // `show a, b` o `show(a, b)`: se convierte en str(a) + " " + str(b), y
+            // la instrucción Show sigue recibiendo una sola expresión.
             TokenKind::Show => {
                 self.pos += 1;
                 let mut values: Vec<Expr> = Vec::new();
@@ -1223,10 +1138,8 @@ impl Parser {
                     }),
                 }
                 let body = self.parse_block()?;
-                // La garantía de with es "el recurso SIEMPRE se libera al
-                // salir del bloque". return salta directo fuera de la función
-                // y break/continue fuera del bloque, saltándose el free — se
-                // rechazan en vez de fugar en silencio.
+                // `with` libera el recurso siempre: return, break y continue que
+                // saltarían el free se rechazan.
                 validate_with_body(&body, 0)?;
                 Ok(Stmt::With { var, init, body, line, col })
             }
@@ -1389,13 +1302,8 @@ impl Parser {
                             let body = self.parse_block()?;
                             on_error = Some((params, body));
                         }
-                        // `act` normal o `static act`. El único cambio es que el
-                        // estático no recibe instancia; el resto se parsea igual.
-                        //
-                        // `static` se reconoce AQUÍ, y solo si le sigue un `act`.
-                        // Fuera de esa posición sigue siendo un identificador
-                        // como cualquier otro, así que `router.static(...)` y
-                        // una variable llamada `static` siguen funcionando.
+                        // `act` o `static act` (este no recibe instancia). `static`
+                        // solo es especial si le sigue `act`: `router.static()` sigue valiendo.
                         TokenKind::Act | TokenKind::Ident(_)
                             if matches!(self.peek(), TokenKind::Act)
                                 || (matches!(self.peek(), TokenKind::Ident(n) if n == "static")
@@ -1424,12 +1332,8 @@ impl Parser {
                             let mut default = None;
                             if matches!(self.peek(), TokenKind::Colon) {
                                 self.pos += 1; // consume ':'
-                                // Distinción: tipo vs valor default.
-                                // El lexer no emite tokens de newline, así que después de un tipo
-                                // puede venir directamente el siguiente Ident (campo/act/using).
-                                // Primitivos (int, string, bool…) son siempre tipos.
-                                // Para Ident (shapes de usuario), verificamos que lo siguiente
-                                // sea inicio de nueva declaración o '='.
+                                // ¿Tipo o valor por defecto? Sin tokens de salto de línea, tras
+                                // un tipo puede venir ya el siguiente campo.
                                 let is_primitive_type = matches!(self.peek(),
                                     TokenKind::TypeInt | TokenKind::TypeFloat | TokenKind::TypeBool |
                                     TokenKind::TypeString | TokenKind::TypeList | TokenKind::TypeDict |
@@ -1559,12 +1463,8 @@ impl Parser {
 
 //   Validación del cuerpo de `with`
 
-/// La garantía de `with` es que el recurso se libera SIEMPRE al salir del
-/// bloque. `return` (sale de la función) y `break`/`continue` (salen del
-/// bloque hacia un loop exterior) esquivarían el free — se rechazan con un
-/// error claro en vez de fugar en silencio. Los loops DENTRO del cuerpo sí
-/// pueden usar break/continue (saltan dentro del bloque), y las funciones
-/// anidadas (fn/lambda/shape) son ámbitos nuevos: no se recorren.
+/// Rechaza en el cuerpo de un `with` lo que saltaría el free: return, y break o
+/// continue hacia un loop de fuera. Las funciones anidadas no se recorren.
 fn validate_with_body(body: &[Stmt], loop_depth: usize) -> Result<(), ParseError> {
     for s in body {
         match s {

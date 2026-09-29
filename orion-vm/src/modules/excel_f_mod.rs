@@ -1,20 +1,6 @@
-// excel.f — Builder de fórmulas vivas para excel.write_styled
-//
-// Uso:
-//   f = excel.f
-//   excel.write_styled("report.xlsx", data, {
-//       formulas: {
-//           "bonus":    f.pct("sales", 5),
-//           "ratio":    f.ratio("sales", "target"),
-//           "rank":     f.rank("sales", "desc"),
-//           "total":    f.sum("sales"),
-//           "acum":     f.cumulative("sales"),
-//           "tier":     f.if_("sales", ">", 80000, "A", "B"),
-//       }
-//   })
-//
-// Cada función retorna un Dict descriptor { _f, col, ... } que write_styled
-// convierte en fórmulas Excel vivas (se recalculan al abrir el archivo).
+// excel.f — fórmulas vivas para excel.write_styled: `formulas: { "bonus":
+// f.pct("sales", 5), "rank": f.rank("sales", "desc") }`. Cada función devuelve un
+// descriptor { _f, col, … } que write_styled convierte en fórmula de Excel.
 
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap as HashMap;
@@ -106,10 +92,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             d.insert("dir".into(), EvalValue::Str(dir));
         }
 
-        // f.if_("col", op, val, then, else)
-        // → =IF(COL_ROW op val, then, else)
-        // Ejemplo: f.if_("sales", ">", 80000, "A", "B") → =IF(B6>80000,"A","B")
-        // Operadores: > < >= <= == !=
+        // f.if_("col", op, val, then, else) → =IF(COL_ROW op val, then, else)
+        // Ej: f.if_("sales", ">", 80000, "A", "B"). Operadores: > < >= <= == !=
         "if_" | "if" => {
             let val    = args.get(2).cloned().unwrap_or(EvalValue::Null);
             let then_v = args.get(3).cloned().unwrap_or(EvalValue::Null);

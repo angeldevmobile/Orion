@@ -1,10 +1,5 @@
-/// frame_mod — motor de datos columnar nativo de Orion
-///
-/// Arquitectura:
-///   - Almacenamiento columnar: Vec<(String, Col)> en lugar de Vec<HashMap>
-///   - Lectura por chunks: nunca carga todo el archivo en RAM
-///   - Operaciones directas sobre Vec<f64> — sin hash lookups
-///   - Handle-based como vector_mod (lazy: open() solo lee el header)
+/// frame_mod — motor de datos columnar: columnas en Vec, lectura por bloques y
+/// handles (open() solo lee la cabecera).
 
 use crate::eval_value::EvalValue;
 use indexmap::IndexMap as HashMap;
@@ -88,11 +83,8 @@ fn new_handle() -> String {
     format!("frame_{}", COUNTER.fetch_add(1, Ordering::SeqCst))
 }
 
-//   barra de progreso (streaming)               ─
-//
-// Feedback honesto para operaciones largas: refleja trabajo REAL (filas y
-// archivos procesados), no un porcentaje falso. Solo se dibuja si stderr es una
-// terminal interactiva — nada de ruido en pipes, tests o CI.
+//   barra de progreso (streaming)
+// Refleja trabajo real (filas, archivos) y solo se pinta si stderr es una terminal.
 
 /// Formatea un conteo grande de forma legible: 1234567 → "1.23M".
 fn humaniza(n: usize) -> String {
@@ -127,12 +119,8 @@ impl Progress {
 
 //   parsing CSV
 
-/// Parseo column-major para cargas COMPLETAS (open/from_txt): las celdas van
-/// directo a un Vec por columna, sin un Vec por fila. Junto con
-/// `infer_columns_owned` (que MUEVE las columnas de texto en vez de
-/// clonarlas) reduce la RAM pico de la carga CSV a casi la mitad frente al
-/// camino row-major + infer_columns. El row-major sigue existiendo porque el
-/// streaming (txt_to_excel/txt_to_odf) escribe fila a fila.
+/// Parseo por columnas para cargas completas (open/from_txt): casi la mitad de RAM
+/// pico que fila a fila. El streaming (txt_to_excel/txt_to_odf) sigue fila a fila.
 fn parse_delim_columnar<R: BufRead>(reader: &mut R, sep: &str) -> (Vec<String>, Vec<Vec<String>>) {
     let mut headers: Vec<String> = Vec::new();
     let mut cols: Vec<Vec<String>> = Vec::new();
@@ -157,10 +145,8 @@ fn parse_delim_columnar<R: BufRead>(reader: &mut R, sep: &str) -> (Vec<String>, 
     (headers, cols)
 }
 
-/// Inferencia de tipos consumiendo las celdas crudas: las columnas numéricas
-/// liberan sus strings al convertirse y las de texto se MUEVEN a `Col::Str`
-/// sin re-alocar. Misma lógica de decisión que `infer_columns` (todo-o-nada
-/// por columna: float → int exacto → bool → string).
+/// Inferencia de tipos consumiendo las celdas: las columnas de texto se mueven sin
+/// copiar. Por columna: float → int exacto → bool → string.
 fn infer_columns_owned(headers: Vec<String>, cols_raw: Vec<Vec<String>>) -> Vec<(String, Col)> {
     headers.into_iter().zip(cols_raw).map(|(name, vals)| {
         // intentar float (corta al primer fallo: no paga el parseo completo
@@ -234,12 +220,8 @@ fn infer_columns(headers: &[String], rows: &[Vec<String>]) -> Vec<(String, Col)>
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // Las funciones que TRANSFORMAN (keep, drop, where_, head, sort…) no
-        // tocan el frame de origen: devuelven un handle NUEVO. Conviene saberlo
-        // porque cada uno ocupa memoria hasta que se libera con free(), y en una
-        // cadena larga se acumulan los intermedios.
-        //
-        // Carga
+        // Las funciones que transforman (keep, where_, sort…) devuelven un handle
+        // nuevo: cada uno ocupa memoria hasta free().
         // open(ruta: string) -> handle → carga CSV o .odf; el formato se detecta solo
         "open"       => fn_open(args),
         // from_txt(ruta: string, sep?: string) -> handle → texto delimitado indicando el separador
@@ -325,12 +307,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 //   carga                                    
 
-/// open(ruta) — carga un frame detectando el formato AUTOMÁTICAMENTE.
-///
-/// El usuario nunca elige el formato ni escribe `.odf`: `open` mira los primeros
-/// bytes y decide. Si es binario .odf → lo lee directo (rápido); si es texto →
-/// lo parsea como CSV. Una sola función para todo; el binario es un detalle
-/// interno, no algo que el usuario seleccione.
+/// open(ruta): mira los primeros bytes y lee .odf binario o CSV; el usuario no
+/// elige el formato.
 fn fn_open(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let path = match args.first() {
         Some(EvalValue::Str(s)) => s.clone(),
@@ -355,12 +333,7 @@ fn fn_open(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     Ok(EvalValue::Str(id))
 }
 
-/// from_txt(ruta)            → separador por defecto ","
-/// from_txt(ruta, sep)       → separador configurable (";", "\t", "|", ...)
-///
-/// Entrada del pipeline: un TXT delimitado se parsea a columnas tipadas. A
-/// diferencia de xlsx, partir texto por un separador es trivial y rápido — el
-/// cuello de botella nunca es la entrada.
+/// from_txt(ruta, sep = ",") → frame a partir de un TXT delimitado.
 fn fn_from_txt(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     let path = arg_str(&args, 0, "frame.from_txt")?;
     let sep = match args.get(1) {
@@ -378,12 +351,8 @@ fn fn_from_txt(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     Ok(EvalValue::Str(id))
 }
 
-/// to_excel(handle, ruta)              → una hoja (parte por el límite de Excel)
-/// to_excel(handle, ruta, split_por)   → tamaño máximo de filas por hoja
-///
-/// Salida del pipeline: escribe columnas → xlsx directamente (sin materializar
-/// dicts). Excel admite como máximo 1 048 576 filas por hoja; si el frame es
-/// mayor se reparte en hojas "parte_1", "parte_2", … dentro del mismo libro.
+/// to_excel(handle, ruta, split_por?) → xlsx; si pasa de 1 048 576 filas se
+/// reparte en hojas "parte_1", "parte_2"…
 fn fn_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     use rust_xlsxwriter::{Workbook, Format, Color};
 
@@ -447,16 +416,9 @@ fn fn_to_excel(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-//    Streaming TXT → Excel (memoria acotada)                                   
-//
-// txt_to_excel(txt, base, sep = ",", split_por = 1_048_575)
-//
-// A diferencia de `open`+`to_excel` (que carga TODO el frame en RAM), esto
-// transmite el TXT fila por fila y escribe archivos `base_1.xlsx`, `base_2.xlsx`,
-// … de a lo sumo `split_por` filas cada uno, LIBERANDO cada libro tras
-// guardarlo. La memoria queda acotada a ~un archivo, no al tamaño del TXT — así
-// se procesan archivos más grandes que la RAM. Cada archivo respeta el límite de
-// Excel (1 048 576 filas/hoja). Los tipos se infieren por celda.
+//    Streaming TXT → Excel (memoria acotada)
+// txt_to_excel(txt, base, sep = ",", split_por = 1_048_575): escribe base_1.xlsx,
+// base_2.xlsx… liberando cada uno, así caben archivos más grandes que la RAM.
 
 /// Escribe una fila de texto (delimitada por `sep`) en la hoja, tipando cada
 /// celda: entero → float → texto.
@@ -866,11 +828,8 @@ fn fn_sort(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 //   estadísticas columnar (directo sobre Vec<f64>)               
 
-/// A partir de cuántos elementos las agregaciones usan rayon. Por debajo,
-/// secuencial: repartir el trabajo entre hilos cuesta más de lo que ahorra,
-/// y además el resultado flotante queda bit a bit idéntico al histórico en
-/// datasets pequeños (la suma paralela reasocia y puede diferir en los
-/// últimos ulps).
+/// Elementos a partir de los que las agregaciones usan rayon; por debajo, en
+/// secuencial es más rápido y el resultado flotante no cambia.
 const PAR_UMBRAL: usize = 1_000_000;
 
 /// Estadística sobre un slice f64: data-parallel con rayon cuando el volumen
@@ -1037,13 +996,8 @@ fn fn_add_col(args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 //   chunked — grandes volúmenes sin cargar todo en RAM             
 
-/// frame.each_chunk(ruta, chunk_size = 10_000) → lista de handles
-/// Lee el CSV en bloques de chunk_size filas y devuelve un frame por bloque;
-/// el caller itera la lista. Durante la LECTURA nunca hay más de chunk_size
-/// filas crudas en RAM a la vez; los frames resultantes sí viven en el store,
-/// así que en procesos largos conviene soltarlos con frame.free al usarlos.
-/// (Se ignoran argumentos extra: la firma vieja exigía un fn que nunca se
-/// llamaba y los scripts pasaban un dummy.)
+/// frame.each_chunk(ruta, chunk_size = 10_000) → lista de handles, uno por bloque.
+/// La lectura nunca tiene más de chunk_size filas en RAM; suelta cada frame con free.
 fn fn_each_chunk(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.is_empty() { return Err("frame.each_chunk(ruta, chunk_size?)".into()); }
     let path       = arg_str(&args, 0, "frame.each_chunk")?;
@@ -1158,21 +1112,9 @@ fn fn_save(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-//   formato binario .odf                         
-//
-// Capa 1 del motor de datos: columnar en disco, en binario crudo.
-// Layout (little-endian):
-//   [4]  magic "ODF1"
-//   [8]  n_filas (u64)      [4]  n_columnas (u32)
-//   por columna (metadatos):  [1] tag (0=f64,1=i64,2=str,3=bool)
-//                             [4] len_nombre (u32) + nombre utf8
-//   por columna (datos, en orden de columnas):
-//     f64 → n_filas*8  |  i64 → n_filas*8  |  bool → n_filas*1
-//     str → por fila: [4] len (u32) + bytes utf8
-//
-// Ventaja vs CSV: cero parsing de texto; los números se leen como bytes crudos
-// (from_le_bytes en bloque), no se re-parsea "1200.5" carácter por carácter.
-// Es la base sobre la que luego se monta el mmap zero-copy.
+//   formato binario .odf (columnar, little-endian): "ODF1", n_filas u64,
+//   n_columnas u32, metadatos por columna (tag 0=f64 1=i64 2=str 3=bool + nombre)
+//   y luego los datos de cada columna. Los números se leen sin parsear texto.
 
 const ODF_MAGIC: &[u8; 4] = b"ODF1";
 
@@ -1206,12 +1148,8 @@ fn serialize_odf(cols: &[(String, Col)], rows: usize) -> Vec<u8> {
     buf
 }
 
-/// Escribe un bloque de filas de texto como `.odf`, infiriendo los tipos de
-/// columna del propio bloque.
-///
-/// Existe para que otros módulos escriban en el formato binario sin duplicar ni
-/// la inferencia de tipos ni el serializador. Lo usa `browser.extract_to`, que
-/// vuelca lo extraído por bloques para mantener la memoria acotada.
+/// Escribe un bloque de filas de texto como `.odf`, infiriendo los tipos. Lo usa
+/// `browser.extract_to` para volcar por bloques.
 pub(crate) fn escribir_odf_filas(
     ruta: &str, headers: &[String], filas: &[Vec<String>],
 ) -> Result<usize, String> {
@@ -1238,15 +1176,8 @@ fn fn_save_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     })
 }
 
-/// Streaming TXT → .odf binario, en varios archivos (memoria acotada).
-///
-/// txt_to_odf(txt, base, sep = ",", chunk = 500_000)
-///
-/// Transmite el TXT y escribe `base_1.odf`, `base_2.odf`, … de `chunk` filas
-/// cada uno, LIBERANDO cada bloque tras guardarlo. Combina lo mejor de las dos
-/// técnicas: memoria acotada (streaming) Y velocidad binaria (~8× más rápido que
-/// xlsx, sin impuesto XML/zip). Cada archivo infiere sus propios tipos de columna
-/// de su chunk. Contraparte rápida de `txt_to_excel` (que es para humanos/Office).
+/// txt_to_odf(txt, base, sep = ",", chunk = 500_000): streaming a base_1.odf,
+/// base_2.odf… con memoria acotada; ~8× más rápido que xlsx.
 fn fn_txt_to_odf(args: Vec<EvalValue>) -> Result<EvalValue, String> {
     if args.len() < 2 { return Err("frame.txt_to_odf(txt, base[, sep, chunk])".into()); }
     let txt_path = arg_str(&args, 0, "frame.txt_to_odf")?;

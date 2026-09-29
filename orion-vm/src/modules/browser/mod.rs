@@ -1,25 +1,6 @@
-//! Módulo `browser` — automatización web sobre CDP.
-//!
-//! API en inglés y de un solo nivel: funciones del módulo con el handle como
-//! primer argumento, igual que `db`, `frame` o `ws`. No hay builders, ni
-//! cadenas de acciones, ni contextos anidados.
-//!
-//! ```orion
-//! use "browser" as web
-//!
-//! with b = web.open() {
-//!     p = web.page(b)
-//!     web.goto(p, "https://ejemplo.dev")
-//!     show(web.title(p))
-//! }
-//! ```
-//!
-//! El `with` funciona sin nada extra: desugara a `web.free(b)` incluso si el
-//! cuerpo lanza un error, y `free` cierra en cascada las pestañas del navegador.
-//!
-//! Esta es la primera entrega: transporte, arranque y navegación. La extracción
-//! declarativa, la interacción (click/type) y las ventanas emergentes se apoyan
-//! sobre esto y llegan después.
+//! Módulo `browser`: automatización web sobre CDP, con funciones de un solo nivel
+//! y el handle como primer argumento (como `db` o `frame`). `with b = web.open()`
+//! cierra el navegador y sus pestañas aunque el cuerpo falle.
 
 pub mod capture;
 pub mod cdp;
@@ -132,9 +113,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // pages(navegador: handle) -> list → los handles de las pestañas abiertas
         "pages"   => pages(&args),
 
-        // Interacción. Todas esperan a que el elemento se pueda usar de verdad
-        // (que exista, se vea y nada lo tape) antes de tocarlo.
-        //
+        // Interacción: todas esperan a que el elemento exista, se vea y nada lo tape.
         // click(pestaña: handle, selector: string, opts?: dict) -> nada → clic real; `force` atraviesa lo que tape sin clicar a ciegas
         "click"      => do_click(&args, "left", 1),
         // dblclick(pestaña: handle, selector: string, opts?: dict) -> nada → doble clic
@@ -166,10 +145,8 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // click_opens(pestaña: handle, selector: string) -> handle → clic que abre una pestaña nueva; devuelve el handle de la que se abrió
         "click_opens" => do_click_opens(&args),
 
-        // Lectura del DOM.
-        //
-        // Las que devuelven contenido esperan a que lo haya; las que informan
-        // del estado responden sobre el instante actual y no esperan nunca.
+        // Lectura del DOM: las que devuelven contenido esperan a que lo haya; las de
+        // estado responden al instante.
         "wait"    => do_wait(&args),
         // text(pestaña: handle, selector: string) -> string → el texto visible del primer elemento que case, sin espacios sobrantes. ESPERA a que aparezca
         "text"    => query(&args, "browser.text", Espera::Si,
@@ -208,9 +185,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // crawl(navegador, opts) → recorre urls en paralelo con N pestañas, vuelca a disco y reanuda
         "crawl"      => do_crawl(&args),
 
-        // Archivos. Las tres ventanas del sistema operativo que el navegador
-        // abriría por su cuenta se interceptan antes de que existan.
-        //
+        // Archivos: las ventanas del sistema operativo se interceptan antes de abrirse.
         // upload(pestaña, selector, archivos) → adjunta sin que se abra la ventana del sistema; el selector puede ser el <input type=file> o el botón que lo abre
         "upload"   => do_upload(&args),
         // download(pestaña, selector, opts?) → pulsa y espera a que la descarga TERMINE; devuelve {path, name, bytes, url} y no hay diálogo "Guardar como"
@@ -218,9 +193,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // pdf(pestaña, ruta, opts?) → imprime la página a PDF sin abrir el diálogo de impresión
         "pdf"      => do_pdf(&args),
 
-        // Captura de red: leer el JSON que la página le pide a su propia API,
-        // en vez de deshacer el HTML que ese JSON produjo.
-        //
+        // Captura de red: leer el JSON que la página pide a su API, no el HTML.
         // emulate(page: handle, opts: dict|no) -> bool → device, viewport, user agent, language, timezone, geolocation and dark mode. { device: "iphone" } is a starting point, and any of its fields can be overridden in the same call; `no` clears it
         "emulate" => do_emulate(&args),
 
@@ -1478,10 +1451,8 @@ fn do_emulate(args: &[EvalValue]) -> Result<EvalValue, String> {
         plan.geo = Some((lat, lon, acc));
     }
 
-    // Permisos: los que pida, más `geolocation` si fijó una posición. Sin
-    // conceder, el navegador abre su diálogo, la página recibe
-    // PERMISSION_DENIED y la posición emulada no llega a usarse nunca — que es
-    // el fallo más difícil de entender de todo esto.
+    // Permisos pedidos, más `geolocation` si hay posición: sin concederlo, la página
+    // recibe PERMISSION_DENIED y la posición emulada no se usa.
     let mut permisos: Vec<String> = Vec::new();
     if let Some(EvalValue::List(ps)) = m.get("permissions") {
         for x in ps.iter() {
@@ -1592,10 +1563,8 @@ fn do_clear_cookies(args: &[EvalValue]) -> Result<EvalValue, String> {
 
 //    route(pestaña, patrón, acción) → intercepción de peticiones
 
-/// Traduce el diccionario de acción a la decisión que se aplicará.
-///
-/// Una acción por regla y no varias: `{ block: yes, mock: {...} }` no significa
-/// nada, y aceptarlo obligaría a inventar una precedencia que nadie recordaría.
+/// Traduce el dict de acción a una decisión: una sola acción por regla, sin
+/// precedencias que inventar.
 fn accion_de(v: Option<&EvalValue>) -> Result<route::Accion, String> {
     const USO: &str = "browser.route(page, pattern, action): the action is a dict — \
                        { block: yes } · { fail: \"timedout\" } · \

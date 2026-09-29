@@ -1,11 +1,5 @@
-//! Regresiones de `serve` encontradas construyendo la demo `comercio`:
-//!
-//!   1. Un `attempt` escrito en el script principal no capturaba nada dentro
-//!      de un handler: el error salía como 500. En un módulo sí funcionaba.
-//!   2. Un módulo importado solo por otro módulo no llegaba a los handlers.
-//!   3. Un middleware que fallaba respondía 200 con "error interno" de cuerpo.
-//!
-//! Levanta un servidor real con el binario de Orion y le hace peticiones HTTP.
+//! Regresiones de `serve`: `attempt` en handlers del script principal,
+//! módulos anidados y middleware que falla (500). Levanta un servidor real.
 
 use std::fs;
 use std::net::TcpStream;

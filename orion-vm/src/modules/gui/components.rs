@@ -85,9 +85,7 @@ pub enum Component {
     Slide { id: String, min: f32, max: f32, step: f32 },
 
     //    Layout (containers anidados, se cierran con gui.end())
-    /// Tarjeta. Por defecto (`fill: true`) ocupa el ancho de su celda; con
-    /// `width` el dev fija un ancho concreto; con `fill: false` se encoge al
-    /// contenido. Decidido por el dev vía `gui.card({ width: N, fill: bool })`.
+    /// Tarjeta: llena el ancho de su celda salvo `width` o `fill: false`.
     Card { children: Vec<Component>, width: Option<f32>, fill: bool },
     Row(Vec<Component>),
     Col(Vec<Component>),

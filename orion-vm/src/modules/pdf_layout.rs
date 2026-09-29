@@ -1,12 +1,6 @@
-//! Maquetación de los PDF que Orion genera: `pdf.build` y sus atajos
-//! `pdf.report`, `pdf.create` y `pdf.template`.
-//!
-//! Antes cada función colocaba el texto a coordenadas fijas: `report` pintaba
-//! cuatro columnas de 38 mm y, al llegar al pie de la primera página, dejaba
-//! de pintar sin avisar; `create` escribía una sola línea en tamaño Carta; y
-//! un texto más ancho que su columna se montaba encima de la siguiente. Aquí
-//! el texto se MIDE (con las métricas de Helvetica) antes de colocarlo, y lo
-//! que no cabe pasa a la página siguiente en vez de perderse.
+//! Maquetación de los PDF de Orion: `pdf.build` y sus atajos `report`,
+//! `create` y `template`. El texto se mide antes de colocarlo y lo que no
+//! cabe pasa a la página siguiente.
 
 use crate::eval_value::EvalValue;
 use printpdf::{
@@ -562,11 +556,8 @@ fn columnas_de(opts: Option<&EvalValue>, cabecera: &[String]) -> Vec<Columna> {
     }
 }
 
-/// Anchos: las columnas con `width` lo tienen fijo; el resto, lo que pide su
-/// texto más largo. Si no caben, ceden solo las de texto que piden más de lo
-/// que les tocaría a partes iguales; las cifras y las estrechas se quedan
-/// como están, porque recortar "1.335.052,50 €" a "1.335.0…" es peor que no
-/// poner nada. Si sobra sitio, se reparte para ocupar la página.
+/// Anchos de columna. Si no caben, solo ceden las columnas de texto largas:
+/// una cifra nunca se recorta.
 fn anchos(textos: &[Vec<String>], cfg: &[Columna], tam: f32, disponible: f32, numerica: &[bool]) -> Vec<f32> {
     const HUECO: f32 = 3.0;
     let n = cfg.len();
@@ -602,9 +593,6 @@ fn anchos(textos: &[Vec<String>], cfg: &[Columna], tam: f32, disponible: f32, nu
 
 /// Pinta una tabla desde la altura actual, partiéndola entre páginas y
 /// repitiendo la cabecera en cada una.
-///
-/// Opciones: columns, headers, font_size, header_bg, header_color, zebra
-/// (yes / no / color), borders, total, decimal, thousands.
 pub fn tabla(h: &mut Hojas, datos: &EvalValue, opts: Option<&EvalValue>) -> Result<(), String> {
     let (mut cabecera, filas) = filas_de(datos, opts)?;
     let n_total = cabecera.len().max(filas.iter().map(|f| f.len()).max().unwrap_or(0));
@@ -832,21 +820,8 @@ fn imagen(h: &mut Hojas, ruta: &str, opts: Option<&EvalValue>) -> Result<(), Str
     Ok(())
 }
 
-/// Un bloque de `pdf.build`. El tipo lo da la clave principal del dict:
-///
-///   { "title": "…" }                 título grande
-///   { "heading": "…" }               encabezado de sección
-///   { "text": "…" }                  párrafo (size, bold, color, align)
-///   { "table": filas, … }            tabla, con las opciones de tabla
-///   { "fields": { clave: valor } }   ficha etiqueta / valor
-///   { "image": "logo.png" }          imagen (width, height, align)
-///   { "line": yes }                  raya (color, thickness)
-///   { "space": 10 }                  hueco en mm
-///   { "page_break": yes }            página nueva
-///
-/// Cada uno admite también su nombre en español (titulo, seccion, texto,
-/// tabla, campos, imagen, linea, espacio, salto). Un texto suelto, en vez de
-/// un dict, es un párrafo.
+/// Un bloque de `pdf.build`: title, heading, text, table, fields, image,
+/// line, space o page_break (o su nombre en español).
 fn bloque(h: &mut Hojas, b: &EvalValue) -> Result<(), String> {
     let o = Some(b);
     let EvalValue::Dict(m) = b else {
