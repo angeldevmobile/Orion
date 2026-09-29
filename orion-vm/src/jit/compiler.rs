@@ -88,7 +88,8 @@ fn find_block_starts(instructions: &[Instruction]) -> HashSet<usize> {
     for (i, instr) in instructions.iter().enumerate() {
         match instr {
             Instruction::Jump(t) => { starts.insert(*t); starts.insert(i + 1); }
-            Instruction::JumpIfFalse(t) | Instruction::JumpIfTrue(t) => {
+            Instruction::JumpIfFalse(t) | Instruction::JumpIfTrue(t)
+            | Instruction::JumpIfFalseOrPop(t) | Instruction::JumpIfTrueOrPop(t) => {
                 starts.insert(*t); starts.insert(i + 1);
             }
             // JIT-3: el handler y el bloque post-attempt son targets de salto
@@ -140,6 +141,9 @@ fn is_eligible(instr: &Instruction) -> bool {
             | Instruction::Jump(_)
             | Instruction::JumpIfFalse(_)
             | Instruction::JumpIfTrue(_)
+            | Instruction::JumpIfFalseOrPop(_)
+            | Instruction::JumpIfTrueOrPop(_)
+            | Instruction::ToBool
             | Instruction::Show
             | Instruction::Pop
             | Instruction::Dup
@@ -798,6 +802,23 @@ impl<M: Module> CodeGen<M> {
             let v = Variable::from_u32(vid as u32);
             builder.declare_var(v, types::I64);
             var_table.insert(name.clone(), v);
+        }
+
+        // Puntos de llegada de `and` / `or`: el único caso en que un valor
+        // cruza de un bloque a otro. Llega por dos caminos (el salto que
+        // corta, o la derecha ya evaluada), así que no puede ir en la pila del
+        // compilador, que se vacía en cada bloque. Cada punto tiene su
+        // variable de Cranelift: los dos caminos la escriben, el bloque de
+        // llegada la lee, y Cranelift construye el SSA.
+        let mut cruces: HashMap<usize, Variable> = HashMap::new();
+        for instr in instructions {
+            if let Instruction::JumpIfFalseOrPop(t) | Instruction::JumpIfTrueOrPop(t) = instr {
+                if !cruces.contains_key(t) {
+                    let v = Variable::from_u32((var_names.len() + cruces.len()) as u32);
+                    builder.declare_var(v, types::I64);
+                    cruces.insert(*t, v);
+                }
+            }
         }
 
         // Bloque de entrada

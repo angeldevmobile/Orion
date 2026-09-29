@@ -533,6 +533,25 @@ impl VM {
                     self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
                 }
             }
+            // Cortocircuito: ver la definición en instruction.rs.
+            Instruction::JumpIfFalseOrPop(addr) => {
+                let cond = self.pop()?;
+                if !cond.is_truthy() {
+                    self.value_stack.push(Value::Bool(false));
+                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
+                }
+            }
+            Instruction::JumpIfTrueOrPop(addr) => {
+                let cond = self.pop()?;
+                if cond.is_truthy() {
+                    self.value_stack.push(Value::Bool(true));
+                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
+                }
+            }
+            Instruction::ToBool => {
+                let a = self.pop()?;
+                self.value_stack.push(Value::Bool(a.is_truthy()));
+            }
 
             //    Manejo de errores                                            
             Instruction::BeginAttempt(handler_addr) => {
