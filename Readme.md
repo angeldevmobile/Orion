@@ -1,6 +1,8 @@
 # Orion Language
 
-Orion is a programming language for backend work and automation.
+Orion is a general-purpose programming language focused on backend and automation.
+It compiles to bytecode and runs it three ways: interpreted, JIT-compiled, or compiled
+ahead of time to a native executable.
 Clean syntax, optional typing, native OOP, 58 built-in modules and a full pipeline written in Rust.
 
 > Built by **Angel Zapata** · 2025-2026
@@ -55,8 +57,11 @@ excel.write_multi("sales_report.xlsx", {
 
 ## Philosophy
 
-- **No boilerplate** - code reads like pseudocode. One task, five lines at most.
-- **Built for real work** - APIs, automation, data pipelines.
+- **No boilerplate** - code reads like pseudocode. Common tasks take a few lines, not a project scaffold.
+- **Built for real work** - APIs and services, automation, data pipelines, documents,
+  desktop and terminal apps, and native code through `extern` (FFI).
+- **Three ways to run** - a bytecode VM, a Cranelift JIT, and AOT compilation to a
+  standalone native binary, all from the same compiler.
 - **Modern** - OOP, type hints, string interpolation, async/await, regex, and AI as a language keyword.
 - **Fast** - the whole pipeline is Rust: lexer → parser → type checker → codegen → VM. Loading and aggregating 500k CSV rows is **2× faster than Python at the same memory** ([reproducible benchmark](bench/)).
 - **Safe** - parameterized queries, validation at the boundary, native crypto.
@@ -724,8 +729,8 @@ my-api/
 
 Orion is **not a tree-walking interpreter** - that legacy was removed. It is a
 bytecode compiler with **three execution backends** that share one frontend and
-produce identical results, verified by differential tests. Around 13,600 lines
-of core Rust plus 58 native modules.
+produce identical results, verified by differential tests. Around 55,000 lines
+of Rust, including the 58 native modules.
 
 ```
 file.orx

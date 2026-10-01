@@ -3,7 +3,7 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
-## Sin publicar
+## v0.1.6 - 2026-09-30
 
 ### Añadido
 - **`pdf.build(ruta, bloques, opts?)`: documentos libres a base de bloques.**
@@ -147,6 +147,9 @@ formato AAAA-MM-DD.
   codificaba las tildes ni el "€".
 - **La documentación de `compile_entry` estaba pegada a `compile_repl`**, así
   que el editor mostraba la descripción de una en la otra.
+- **`pdf` alineaba las fechas como cifras.** El detector de columnas numéricas
+  aceptaba guiones en cualquier posición, y "2026-09-27" salía alineada a la
+  derecha. Ahora el signo solo vale al principio.
 
 ### Tests
 - **25 tests nuevos**, de 799 a **824**:

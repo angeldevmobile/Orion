@@ -420,9 +420,10 @@ fn parece_numero(s: &str) -> bool {
     let t: String = s.chars()
         .filter(|c| !c.is_whitespace() && !matches!(c, '€' | '$' | '£' | '%'))
         .collect();
-    !t.is_empty()
-        && t.chars().any(|c| c.is_ascii_digit())
-        && t.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '+'))
+    // El signo solo al principio: "2026-09-27" es una fecha, no una cifra.
+    let sin_signo = t.strip_prefix(['-', '+']).unwrap_or(&t);
+    sin_signo.chars().any(|c| c.is_ascii_digit())
+        && sin_signo.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | ','))
 }
 
 /// Separadores de los formatos numéricos. Por defecto, los del español:
