@@ -3,35 +3,31 @@ use indexmap::IndexMap as HashMap;
 
 pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     match function {
-        // reach(url, headers?) → {status, body, ok}
+        // reach(url, headers?, opts?) → {status, body, ok, headers}
+        // opts: { timeout: segundos } (30 por defecto). Un 4xx/5xx no es error:
+        // vuelve con ok = no y su status, para que el script decida.
         "reach" | "get" => {
             if args.is_empty() { return Err("net.reach requires (url)".into()); }
-            let url     = to_str(&args[0]);
-            let headers = extract_headers(args.get(1));
-            http_get(&url, headers)
+            let url = to_str(&args[0]);
+            http_method("GET", &url, None, extract_headers(args.get(1)), timeout_de(args.get(2)))
         }
-        // transmit(url, body, headers?) → {status, body, ok}
+        // transmit(url, body, headers?, opts?) → {status, body, ok, headers}
         "transmit" | "post" => {
             if args.is_empty() { return Err("net.transmit requires (url, body?)".into()); }
-            let url     = to_str(&args[0]);
-            let body    = args.get(1).cloned();
-            let headers = extract_headers(args.get(2));
-            http_post(&url, body, headers)
+            let url = to_str(&args[0]);
+            http_method("POST", &url, args.get(1).cloned(), extract_headers(args.get(2)), timeout_de(args.get(3)))
         }
-        // put(url, body, headers?) → {status, body, ok}
+        // put(url, body, headers?, opts?) → {status, body, ok, headers}
         "put" => {
             if args.is_empty() { return Err("net.put requires (url, body?)".into()); }
-            let url     = to_str(&args[0]);
-            let body    = args.get(1).cloned();
-            let headers = extract_headers(args.get(2));
-            http_method("PUT", &url, body, headers)
+            let url = to_str(&args[0]);
+            http_method("PUT", &url, args.get(1).cloned(), extract_headers(args.get(2)), timeout_de(args.get(3)))
         }
-        // delete(url, headers?) → {status, body, ok}
+        // delete(url, headers?, opts?) → {status, body, ok, headers}
         "delete" => {
             if args.is_empty() { return Err("net.delete requires (url)".into()); }
-            let url     = to_str(&args[0]);
-            let headers = extract_headers(args.get(1));
-            http_method("DELETE", &url, None, headers)
+            let url = to_str(&args[0]);
+            http_method("DELETE", &url, None, extract_headers(args.get(1)), timeout_de(args.get(2)))
         }
         // status(url) → int código HTTP
         "status" => {
@@ -87,49 +83,43 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
     }
 }
 
-fn http_get(url: &str, headers: Vec<(String, String)>) -> Result<EvalValue, String> {
-    let mut req = ureq::get(url);
-    for (k, v) in &headers { req = req.set(k, v); }
-    match req.call() {
-        Ok(resp)  => pack_response(resp),
-        Err(ureq::Error::Status(code, resp)) => pack_error_response(code, resp),
-        Err(e)    => Err(format!("net.reach: {}", e)),
-    }
-}
+const TIMEOUT_POR_DEFECTO: f64 = 30.0;
 
-fn http_post(url: &str, body: Option<EvalValue>, headers: Vec<(String, String)>) -> Result<EvalValue, String> {
-    http_method("POST", url, body, headers)
-}
-
-fn http_method(method: &str, url: &str, body: Option<EvalValue>, headers: Vec<(String, String)>) -> Result<EvalValue, String> {
-    let mut req = match method {
-        "POST"   => ureq::post(url),
-        "PUT"    => ureq::put(url),
-        "DELETE" => ureq::delete(url),
-        _        => ureq::post(url),
+/// `{ timeout: segundos }`; sin él, 30 s. Sin tope, un servidor que no
+/// responde dejaría colgado al script (o a un hilo de `serve`) para siempre.
+fn timeout_de(opts: Option<&EvalValue>) -> std::time::Duration {
+    let s = match opts {
+        Some(EvalValue::Dict(m)) => match m.get("timeout") {
+            Some(EvalValue::Int(n))   => *n as f64,
+            Some(EvalValue::Float(f)) => *f,
+            _ => TIMEOUT_POR_DEFECTO,
+        },
+        _ => TIMEOUT_POR_DEFECTO,
     };
+    std::time::Duration::from_secs_f64(s.max(0.1))
+}
+
+fn http_method(
+    method: &str, url: &str, body: Option<EvalValue>,
+    headers: Vec<(String, String)>, timeout: std::time::Duration,
+) -> Result<EvalValue, String> {
+    let agente = ureq::AgentBuilder::new().timeout(timeout).build();
+    let mut req = agente.request(method, url);
     for (k, v) in &headers { req = req.set(k, v); }
 
     let result = match body {
-        None => req.call().map_err(|e| match e {
-            ureq::Error::Status(code, r) => format!("HTTP {}: {}", code, r.into_string().unwrap_or_default()),
-            other => format!("net.{}: {}", method.to_lowercase(), other),
-        }),
-        Some(EvalValue::Str(s)) => req.send_string(&s).map_err(|e| format!("net.{}: {}", method.to_lowercase(), e)),
-        Some(EvalValue::Dict(_)) | Some(EvalValue::List(_)) => {
-            // serializa como JSON automáticamente
-            let json_body = crate::modules::json_mod::eval_to_json(body.unwrap());
-            req.set("Content-Type", "application/json")
-               .send_string(&json_body.to_string())
-               .map_err(|e| format!("net.{}: {}", method.to_lowercase(), e))
+        None => req.call(),
+        Some(EvalValue::Str(s)) => req.send_string(&s),
+        Some(b @ (EvalValue::Dict(_) | EvalValue::List(_))) => {
+            let json_body = crate::modules::json_mod::eval_to_json(b);
+            req.set("Content-Type", "application/json").send_string(&json_body.to_string())
         }
-        Some(other) => req.send_string(&format!("{}", other))
-            .map_err(|e| format!("net.{}: {}", method.to_lowercase(), e)),
+        Some(other) => req.send_string(&format!("{}", other)),
     };
 
     match result {
-        Ok(resp)  => pack_response(resp),
-        Err(e)    => Err(e),
+        Ok(resp) | Err(ureq::Error::Status(_, resp)) => pack_response(resp),
+        Err(e) => Err(format!("net.{}: {}", method.to_lowercase(), e)),
     }
 }
 
@@ -157,15 +147,6 @@ fn pack_response(resp: ureq::Response) -> Result<EvalValue, String> {
     } else {
         m.insert("body".into(), EvalValue::Str(body));
     }
-    Ok(EvalValue::Dict(m))
-}
-
-fn pack_error_response(code: u16, resp: ureq::Response) -> Result<EvalValue, String> {
-    let body = resp.into_string().unwrap_or_default();
-    let mut m = HashMap::new();
-    m.insert("status".into(), EvalValue::Int(code as i64));
-    m.insert("ok".into(),     EvalValue::Bool(false));
-    m.insert("body".into(),   EvalValue::Str(body));
     Ok(EvalValue::Dict(m))
 }
 

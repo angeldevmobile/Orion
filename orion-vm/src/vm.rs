@@ -141,6 +141,30 @@ pub struct VM {
     /// `spawn`/`async fn`: el bucle de instrucciones lo consulta y aborta si se
     /// activa (via `tarea.cancelar` o un canal "done").
     cancel_token: Option<Arc<TaskHandle>>,
+    /// Archivo de origen de las funciones importadas (`bd__crear_esquema` →
+    /// `backend/bd.orx`), para que un error señale el módulo y no el programa.
+    fn_files: HashMap<String, String>,
+    /// El archivo donde ocurrió el último error, si fue dentro de un módulo.
+    error_file: Option<String>,
+    /// "archivo:línea" del último error de un handler de `serve` en un módulo.
+    lugar_handler: Option<String>,
+}
+
+/// La ruta como la escribiría el usuario: relativa al directorio de trabajo,
+/// sin el prefijo `\\?\` de Windows y con `/`. Si no cuelga de él, absoluta.
+fn ruta_visible(path: &str) -> String {
+    let limpia = |p: &str| p.trim_start_matches(r"\\?\").replace('\\', "/");
+    let ruta = limpia(path);
+    if let Ok(cwd) = std::env::current_dir() {
+        let base = limpia(&cwd.to_string_lossy());
+        let base = base.trim_end_matches('/');
+        if let Some(resto) = ruta.strip_prefix(base) {
+            if let Some(rel) = resto.strip_prefix('/') {
+                return rel.to_string();
+            }
+        }
+    }
+    ruta
 }
 
 impl Drop for VM {
@@ -173,7 +197,23 @@ impl VM {
             gc: Gc::new(),
             call_counts: HashMap::new(),
             cancel_token: None,
+            fn_files: HashMap::new(),
+            error_file: None,
+            lugar_handler: None,
         }
+    }
+
+    /// Archivo del módulo donde ocurrió el último error de `run()`; `None` si
+    /// fue en el programa principal.
+    pub fn error_file(&self) -> Option<&str> {
+        self.error_file.as_deref()
+    }
+
+    /// "backend/bd.orx:57" si el frame más interno es de un módulo importado.
+    fn ubicacion_modulo(&self) -> Option<String> {
+        let f = self.call_stack.last()?;
+        let file = self.fn_files.get(&f.name)?;
+        Some(format!("{}:{}", file, self.current_line))
     }
 
     pub fn call_named(
@@ -294,7 +334,9 @@ impl VM {
     pub fn stack_trace(&self) -> String {
         let frames: Vec<String> = self.call_stack.iter().rev().map(|f| {
             let line = f.current_line();
-            if line > 0 {
+            if let (Some(file), true) = (self.fn_files.get(&f.name), line > 0) {
+                format!("    at {} ({}:{})", f.name, file, line)
+            } else if line > 0 {
                 format!("    at {} (line {})", f.name, line)
             } else {
                 format!("    en {}", f.name)
@@ -312,6 +354,8 @@ impl VM {
             }
         };
         run_result.map_err(|e| {
+            self.error_file = self.call_stack.last()
+                .and_then(|f| self.fn_files.get(&f.name).cloned());
             let trace = self.stack_trace();
             let line_info = if self.current_line > 0 {
                 format!("Line {} | ", self.current_line)
@@ -1609,10 +1653,18 @@ impl VM {
                     {
                         *n = format!("{}{}", prefix, n);
                     }
+                    // Una función propia usada como valor (`router.get(r, "/x", hola)`):
+                    // sin esto se buscaba `hola` y no `pasa__hola`.
+                    Instruction::LoadVar(n)
+                        if own_fns.contains(n.as_str()) && !locals.contains(n.as_str()) =>
+                    {
+                        *n = format!("{}{}", prefix, n);
+                    }
                     _ => {}
                 }
             }
             ns.insert(fname.clone(), Value::Str(prefixed.clone()));
+            self.fn_files.insert(prefixed.clone(), ruta_visible(path));
             self.functions.insert(prefixed, fdef);
         }
 
@@ -1626,6 +1678,9 @@ impl VM {
         for (fname, fdef) in &sub_vm.functions {
             if !own_fns.contains(fname) && !self.functions.contains_key(fname) {
                 self.functions.insert(fname.clone(), fdef.clone());
+                if let Some(file) = sub_vm.fn_files.get(fname) {
+                    self.fn_files.insert(fname.clone(), file.clone());
+                }
             }
         }
         if let (Some(sub_frame), Some(main_frame)) =
@@ -2179,8 +2234,10 @@ impl VM {
             let globals     = globals.clone();
             let modules     = module_globals.clone();
             let fn_name     = fn_name.clone();
+            let fn_files    = self.fn_files.clone();
             handles.push(std::thread::spawn(move || {
                 let mut vm = VM::new(Vec::new(), Vec::new(), functions, shapes, extern_fns);
+                vm.fn_files = fn_files;
                 if let Some(main_frame) = vm.call_stack.first_mut() {
                     for (k, sv) in &globals {
                         main_frame.vars.insert(k.clone(), from_send(sv.clone()));
@@ -2214,6 +2271,7 @@ impl VM {
         match self.run_until_frame_done() {
             Ok(()) => Ok(self.value_stack.pop().unwrap_or(Value::Null)),
             Err(e) => {
+                self.lugar_handler = self.ubicacion_modulo();
                 // Restaurar el worker a un estado limpio tras un error de handler.
                 self.call_stack.truncate(1);
                 self.value_stack.clear();
@@ -2444,7 +2502,12 @@ impl VM {
             None => match self.run_handler(target_fn, req_val) {
                 Ok(v)  => v,
                 Err(e) => {
-                    log_req(500, &e.to_string());
+                    // El archivo va al log, no a la respuesta: no se enseña a
+                    // cualquier cliente cómo está organizado el servidor.
+                    match self.lugar_handler.take() {
+                        Some(donde) => log_req(500, &format!("{} ({})", e, donde)),
+                        None => log_req(500, &e.to_string()),
+                    }
                     let resp = Response::from_string(format!("error interno: {}", e))
                         .with_status_code(500);
                     let _ = request.respond(resp);

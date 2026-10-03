@@ -118,8 +118,23 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
             Ok(EvalValue::Null)
         }
 
-        // headers(list_of_dicts) → list of strings
+        // headers(filas_o_ruta, delimiter?) → list
+        // Con una ruta lee solo la cabecera del archivo, no el archivo entero.
         "headers" => {
+            if let Some(EvalValue::Str(path)) = args.first() {
+                let delimiter = match args.get(1) {
+                    Some(EvalValue::Str(d)) => d.chars().next().unwrap_or(',') as u8,
+                    _ => b',',
+                };
+                let mut rdr = csv::ReaderBuilder::new()
+                    .delimiter(delimiter)
+                    .from_path(path)
+                    .map_err(|e| format!("csv.headers: {}", e))?;
+                let cab = rdr.headers().map_err(|e| format!("csv.headers: {}", e))?;
+                return Ok(EvalValue::List(
+                    cab.iter().map(|h| EvalValue::Str(h.trim().to_string())).collect(),
+                ));
+            }
             let rows = list_arg("headers", &args, 0)?;
             match rows.first() {
                 Some(EvalValue::Dict(_)) => Ok(EvalValue::List(

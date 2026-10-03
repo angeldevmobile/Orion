@@ -222,3 +222,81 @@ fn modulo_importado_solo_por_otro_modulo_esta_disponible() {
     assert!(out.status.success(), "falló:\n{stdout}\n{stderr}");
     assert!(stdout.contains("hola desde b 7"), "salida inesperada:\n{stdout}\n{stderr}");
 }
+
+// Un módulo que pasa sus propias funciones como valor: lo que necesita para
+// montar sus rutas (`router.get(r, "/x", handler)`). Antes daba "Variable
+// 'doble' is not defined", porque se buscaba sin el prefijo del módulo.
+#[test]
+fn un_modulo_puede_usar_sus_funciones_como_valor() {
+    let dir = std::env::temp_dir().join("orion_tests_funcion_como_valor");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("lib")).unwrap();
+    fs::write(dir.join("lib/m.orx"),
+        "fn doble(x) {\n    return x * 2\n}\nfn todas(lista) {\n    return lista.map(doble)\n}\nfn cual() {\n    return doble\n}\n").unwrap();
+    fs::write(dir.join("main.orx"),
+        "use \"lib/m\" as m\nshow m.todas([1, 2, 3])\nf = m.cual()\nshow f(21)\n").unwrap();
+    let out = Command::new(orion_bin())
+        .args(["--run", "main.orx"])
+        .current_dir(&dir)
+        .output()
+        .expect("no se pudo ejecutar orion");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "falló:\n{stdout}\n{stderr}");
+    assert!(stdout.contains("[2, 4, 6]") && stdout.contains("42"), "salida inesperada:\n{stdout}");
+}
+
+// ── Errores dentro de un módulo importado ───────────────────────────────────
+
+// Antes el error decía `main.orx:4` y enseñaba la línea 4 del programa, que no
+// tenía nada que ver: el fallo estaba en la línea 4 del módulo.
+fn error_de_modulo(dir_nombre: &str, archivos: &[(&str, &str)]) -> String {
+    let dir = std::env::temp_dir().join(dir_nombre);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("lib")).unwrap();
+    for (ruta, src) in archivos {
+        fs::write(dir.join(ruta), src).unwrap();
+    }
+    let out = Command::new(orion_bin())
+        .args(["--run", "main.orx"])
+        .current_dir(&dir)
+        .output()
+        .expect("no se pudo ejecutar orion");
+    assert!(!out.status.success(), "tenía que fallar");
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+const MAIN_CUATRO_LINEAS: &str = "use \"lib/b\" as b\n-- linea dos del main\n-- linea tres del main\nb.falla()\n";
+
+#[test]
+fn un_error_en_un_modulo_senala_el_modulo() {
+    let err = error_de_modulo("orion_tests_error_modulo", &[
+        ("lib/b.orx", "fn falla() {\n    x = 1\n    -- linea tres de b\n    error(\"fallo en b\")\n}\n"),
+        ("main.orx", MAIN_CUATRO_LINEAS),
+    ]);
+    assert!(err.contains("b.orx"), "no nombra el módulo:\n{err}");
+    assert!(err.contains("error(\"fallo en b\")"), "no enseña la línea del módulo:\n{err}");
+    assert!(!err.contains("main.orx:4"), "sigue señalando al programa:\n{err}");
+}
+
+#[test]
+fn un_error_en_un_modulo_anidado_senala_el_anidado() {
+    let err = error_de_modulo("orion_tests_error_anidado", &[
+        ("lib/c.orx", "fn rompe() {\n    -- linea dos de c\n    return 1 / 0\n}\n"),
+        ("lib/b.orx", "use \"lib/c\" as c\nfn falla() {\n    return c.rompe()\n}\n"),
+        ("main.orx", MAIN_CUATRO_LINEAS),
+    ]);
+    assert!(err.contains("c.orx"), "no nombra el módulo anidado:\n{err}");
+    assert!(err.contains("return 1 / 0"), "no enseña la línea del anidado:\n{err}");
+    assert!(err.contains("b.orx:3"), "la pila no dice dónde se llamó:\n{err}");
+}
+
+#[test]
+fn un_error_en_el_programa_sigue_senalando_el_programa() {
+    let err = error_de_modulo("orion_tests_error_programa", &[
+        ("lib/b.orx", "fn bien() {\n    return 1\n}\n"),
+        ("main.orx", "use \"lib/b\" as b\nb.bien()\nerror(\"fallo en main\")\n"),
+    ]);
+    assert!(err.contains("main.orx"), "no nombra el programa:\n{err}");
+    assert!(err.contains("error(\"fallo en main\")"), "no enseña la línea del programa:\n{err}");
+}

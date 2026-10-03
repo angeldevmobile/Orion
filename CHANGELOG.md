@@ -3,6 +3,44 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## v0.1.8 - 2026-10-03
+
+### Añadido
+- **`csv.headers(ruta, delimitador?)` lee solo la cabecera de un archivo.**
+  Antes solo aceptaba filas ya cargadas, así que saber qué columnas trae un
+  CSV de cientos de MB obligaba a leerlo entero. Respeta comillas y el BOM de
+  UTF-8. Con una lista de filas funciona como siempre.
+- **`mail.send(opciones)`: adjuntos, varios destinatarios y cualquier SMTP.**
+  Con un dict: `servidor`, `puerto`, `seguridad` (`tls`, `starttls` o
+  `ninguna`), `usuario`/`clave` opcionales, `de`, `para` (texto o lista), `cc`,
+  `bcc`, `responder_a`, `asunto`, `texto` y `html` (los dos van como
+  alternativas), `adjuntos` (rutas o `{ruta | base64, nombre, tipo}`, con el
+  tipo deducido de la extensión) y `timeout` (30 s). Antes solo había TLS
+  implícito, con credenciales obligatorias, un destinatario y sin adjuntos: no
+  servía para mandar una factura ni para probar contra un buzón local. Cada
+  opción vale también en inglés. La forma de 7 argumentos sigue igual.
+
+### Cambiado
+- **`net` tiene timeout y trata igual todos los códigos HTTP.** `get`, `post`,
+  `put` y `delete` aceptan `opts` al final (`{ timeout: segundos }`, 30 por
+  defecto); antes no había tope y un servidor que no contestaba colgaba el
+  script o un hilo de `serve`. Un 4xx/5xx en `post`, `put` o `delete` vuelve
+  como `{status, body, ok: no, headers}`, igual que en `get`, en vez de lanzar
+  un error que perdía el código: un 409 y un 401 ya se pueden distinguir.
+
+### Corregido
+- **Un módulo puede usar sus propias funciones como valor.** `router.get(r,
+  "/x", handler)` o `lista.map(doble)` dentro de un módulo daban "Variable no
+  definida": la referencia se buscaba sin el prefijo del módulo. Ahora un
+  módulo puede montar sus propias rutas sin conocer su nombre interno.
+- **Un error dentro de un módulo importado señala el módulo.** Antes decía
+  `main.orx:57` y enseñaba la línea 57 del programa, que no tenía nada que ver;
+  ahora dice `backend/bd.orx:57` con su línea, también en módulos anidados, y la
+  pila nombra el archivo de cada llamada (`at bd__crear_esquema
+  (backend/bd.orx:57)`). En `serve`, el 500 de un handler lleva el archivo y la
+  línea en el log, pero no en la respuesta: el cliente no ve cómo está
+  organizado el servidor.
+
 ## v0.1.7 - 2026-10-02
 
 ### Añadido

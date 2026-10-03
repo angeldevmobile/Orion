@@ -723,7 +723,7 @@ mod pg {
                     Type::TEXT | Type::VARCHAR => b.to_string().to_sql(ty, out),
                     _             => b.to_sql(ty, out),
                 },
-                EvalValue::Str(s) => s.to_sql(ty, out),
+                EvalValue::Str(s) => texto_a_sql(s, ty, out),
                 other => crate::modules::json_mod::eval_to_json(other.clone()).to_sql(ty, out),
             }
         }
@@ -731,6 +731,50 @@ mod pg {
         fn accepts(_ty: &Type) -> bool { true }
 
         postgres::types::to_sql_checked!();
+    }
+
+    /// Un texto hacia una columna que no es de texto: se convierte a su tipo.
+    /// Mandarlo tal cual rompía el protocolo ("insufficient data left in
+    /// message") con NUMERIC, enteros, fechas, UUID o JSONB.
+    fn texto_a_sql(
+        s: &str, ty: &Type, out: &mut bytes::BytesMut,
+    ) -> Result<postgres::types::IsNull, Box<dyn std::error::Error + Sync + Send>> {
+        use std::str::FromStr;
+        let t = s.trim();
+        let malo = |que: &str| -> Box<dyn std::error::Error + Sync + Send> {
+            format!("'{}' no es {} (columna {})", s, que, ty.name()).into()
+        };
+        match *ty {
+            Type::NUMERIC => rust_decimal::Decimal::from_str(t).map_err(|_| malo("un número"))?.to_sql(ty, out),
+            Type::INT2 => t.parse::<i16>().map_err(|_| malo("un entero"))?.to_sql(ty, out),
+            Type::INT4 => t.parse::<i32>().map_err(|_| malo("un entero"))?.to_sql(ty, out),
+            Type::INT8 => t.parse::<i64>().map_err(|_| malo("un entero"))?.to_sql(ty, out),
+            Type::FLOAT4 => t.parse::<f32>().map_err(|_| malo("un número"))?.to_sql(ty, out),
+            Type::FLOAT8 => t.parse::<f64>().map_err(|_| malo("un número"))?.to_sql(ty, out),
+            Type::BOOL => match t.to_lowercase().as_str() {
+                "true" | "t" | "yes" | "1" => true.to_sql(ty, out),
+                "false" | "f" | "no" | "0" => false.to_sql(ty, out),
+                _ => Err(malo("un booleano")),
+            },
+            Type::UUID => uuid::Uuid::parse_str(t).map_err(|_| malo("un UUID"))?.to_sql(ty, out),
+            Type::DATE => chrono::NaiveDate::parse_from_str(t, "%Y-%m-%d")
+                .map_err(|_| malo("una fecha AAAA-MM-DD"))?.to_sql(ty, out),
+            Type::TIMESTAMP => fecha_hora(t).ok_or_else(|| malo("una fecha y hora"))?.to_sql(ty, out),
+            Type::TIMESTAMPTZ => match chrono::DateTime::parse_from_rfc3339(t) {
+                Ok(d) => d.with_timezone(&chrono::Utc).to_sql(ty, out),
+                Err(_) => fecha_hora(t).ok_or_else(|| malo("una fecha y hora"))?.and_utc().to_sql(ty, out),
+            },
+            Type::JSON | Type::JSONB => serde_json::from_str::<serde_json::Value>(t)
+                .unwrap_or_else(|_| serde_json::Value::String(s.to_string()))
+                .to_sql(ty, out),
+            _ => s.to_sql(ty, out),
+        }
+    }
+
+    fn fecha_hora(t: &str) -> Option<chrono::NaiveDateTime> {
+        ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"]
+            .iter()
+            .find_map(|f| chrono::NaiveDateTime::parse_from_str(t, f).ok())
     }
 
     fn box_params(params: &[EvalValue]) -> Vec<Param> {

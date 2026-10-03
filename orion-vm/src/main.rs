@@ -532,7 +532,7 @@ fn main() {
                     match machine.run() {
                         Ok(_) => {}
                         Err(e) => {
-                            eprint!("{}", error::parse_vm_error(&e, src_path).render(&src));
+                            eprint!("{}", render_runtime_error(&e, &machine, src_path, &src));
                             std::process::exit(1);
                         }
                     }
@@ -561,7 +561,7 @@ fn main() {
             match machine.run() {
                 Ok(_) => {}
                 Err(e) => {
-                    eprint!("{}", error::parse_vm_error(&e, src_path).render(&src));
+                    eprint!("{}", render_runtime_error(&e, &machine, src_path, &src));
                     std::process::exit(1);
                 }
             }
@@ -614,7 +614,7 @@ fn main() {
             match machine.run() {
                 Ok(_) => {}
                 Err(e) => {
-                    eprint!("{}", error::parse_vm_error(&e, path).render(&src));
+                    eprint!("{}", render_runtime_error(&e, &machine, path, &src));
                     std::process::exit(1);
                 }
             }
@@ -776,6 +776,17 @@ fn typecheck_gate(src: &str, path: &str, args: &[String]) {
         errors.len()
     ));
     std::process::exit(1);
+}
+
+/// Un error de ejecución con el extracto del archivo donde ocurrió: el del
+/// módulo importado si fue dentro de uno, si no el del programa.
+fn render_runtime_error(e: &str, machine: &vm::VM, path: &str, src: &str) -> String {
+    if let Some(file) = machine.error_file() {
+        if let Ok(modsrc) = fs::read_to_string(file) {
+            return error::parse_vm_error(e, file).render(&modsrc);
+        }
+    }
+    error::parse_vm_error(e, path).render(src)
 }
 
 /// Lex + parse + codegen → OrionBytecode, o un error estructurado con span.

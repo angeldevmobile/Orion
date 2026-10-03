@@ -157,12 +157,12 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("env", "has", "env.has(key) -> bool", "Devuelve bool."));
     v.push(f("env", "remove", "env.remove(key)", "Función del módulo env."));
     // net (net_mod.rs)
-    v.push(f("net", "reach", "net.reach(url, headers?)", "{status, body, ok}"));
-    v.push(f("net", "get", "net.get(url, headers?)", "Alias de net.reach."));
-    v.push(f("net", "transmit", "net.transmit(url, body, headers?)", "{status, body, ok}"));
-    v.push(f("net", "post", "net.post(url, body, headers?)", "Alias de net.transmit."));
-    v.push(f("net", "put", "net.put(url, body, headers?)", "{status, body, ok}"));
-    v.push(f("net", "delete", "net.delete(url, headers?)", "{status, body, ok}"));
+    v.push(f("net", "reach", "net.reach(url, headers?, opts?)", "{status, body, ok, headers} opts: { timeout: segundos } (30 por defecto). Un 4xx/5xx no es error: vuelve con ok = no y su status, para que el script decida."));
+    v.push(f("net", "get", "net.get(url, headers?, opts?)", "Alias de net.reach."));
+    v.push(f("net", "transmit", "net.transmit(url, body, headers?, opts?)", "{status, body, ok, headers}"));
+    v.push(f("net", "post", "net.post(url, body, headers?, opts?)", "Alias de net.transmit."));
+    v.push(f("net", "put", "net.put(url, body, headers?, opts?)", "{status, body, ok, headers}"));
+    v.push(f("net", "delete", "net.delete(url, headers?, opts?)", "{status, body, ok, headers}"));
     v.push(f("net", "status", "net.status(url) -> int", "Código HTTP"));
     v.push(f("net", "download", "net.download(url, path)", "Guarda archivo"));
     v.push(f("net", "resolve", "net.resolve(host)", "IP string"));
@@ -376,7 +376,7 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("csv", "read", "csv.read(path) -> list", "Of dicts read(path, delimiter) — list of dicts con delimitador custom"));
     v.push(f("csv", "read_raw", "csv.read_raw(path) -> list", "Of lists (sin cabeceras como dict)"));
     v.push(f("csv", "write", "csv.write(path, list_of_dicts) -> nada", "Write(path, list_of_dicts, delimiter) — null"));
-    v.push(f("csv", "headers", "csv.headers(list_of_dicts) -> list", "Of strings"));
+    v.push(f("csv", "headers", "csv.headers(filas_o_ruta, delimiter?) -> list", "Con una ruta lee solo la cabecera del archivo, no el archivo entero."));
     v.push(f("csv", "column", "csv.column(list_of_dicts, \"col_name\") -> list", "Of values"));
     v.push(f("csv", "filter", "csv.filter(list_of_dicts, \"col\", value) -> list", "Of dicts donde col == value"));
     v.push(f("csv", "select", "csv.select(list_of_dicts, [\"col1\", \"col2\"]) -> list", "Of dicts solo con esas columnas"));
@@ -772,8 +772,8 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("session", "sweep", "session.sweep(max_edad_secs) -> int", "Poda sesiones inactivas, devuelve cuántas"));
     v.push(f("session", "podar", "session.podar(max_edad_secs) -> int", "Alias de session.sweep."));
     // mail (mail_mod.rs)
-    v.push(f("mail", "send", "mail.send(smtp, usuario, clave, de, para, asunto, cuerpo) -> bool", "Devuelve bool."));
-    v.push(f("mail", "enviar", "mail.enviar(smtp, usuario, clave, de, para, asunto, cuerpo) -> bool", "Alias de mail.send."));
+    v.push(f("mail", "send", "mail.send(opciones) -> bool", "Con un dict: servidor, puerto, seguridad (\"tls\" | \"starttls\" | \"ninguna\"), usuario, clave, de, para (texto o lista), cc, bcc, asunto, texto, html, adjuntos (rutas o {ruta|base64, nombre, tipo}) y timeout en segundos. send(smtp, usuario, clave, de, para, asunto, cuerpo) — Bool (forma antigua)"));
+    v.push(f("mail", "enviar", "mail.enviar(opciones) -> bool", "Alias de mail.send."));
     v.push(f("mail", "send_html", "mail.send_html(smtp, usuario, clave, de, para, asunto, html) -> bool", "Devuelve bool."));
     v.push(f("mail", "enviar_html", "mail.enviar_html(smtp, usuario, clave, de, para, asunto, html) -> bool", "Alias de mail.send_html."));
     // task (tarea_mod.rs)

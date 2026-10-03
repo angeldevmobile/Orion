@@ -354,6 +354,23 @@ fn smoke_csv_roundtrip() {
 }
 
 #[test]
+fn smoke_csv_headers_de_un_archivo() {
+    // BOM, comillas y una fila rota más abajo: solo se lee la cabecera.
+    let mut p = std::env::temp_dir();
+    p.push(format!("orion_smoke_cab_{}.csv", std::process::id()));
+    let path = p.to_str().unwrap().to_string();
+    std::fs::write(&path, "\u{feff}sku,\"nombre, largo\", precio \nA,b,1\n\"rota,sin cerrar\n").unwrap();
+    let cab = match call("csv", "headers", vec![s(&path)]) {
+        EvalValue::List(l) => l.into_iter().map(as_str).collect::<Vec<_>>(),
+        o => panic!("{o:?}"),
+    };
+    assert_eq!(cab, vec!["sku", "nombre, largo", "precio"]);
+    std::fs::write(&path, "a;b\n1;2\n").unwrap();
+    assert_eq!(list_len(call("csv", "headers", vec![s(&path), s(";")])), 2);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn smoke_timewarp_tarea() {
     assert!(matches!(call("timewarp", "timestamp", vec![]), EvalValue::Int(_)));
     assert!(matches!(call("tarea", "now", vec![]), EvalValue::Int(_) | EvalValue::Str(_)));
@@ -816,4 +833,133 @@ fn smoke_gui_tick_and_canvas() {
     assert!(ok("gui", "arrow", vec![i(120), i(120), i(200), i(60), s("accent"), i(3)]));
     assert!(ok("gui", "text_at", vec![i(120), i(18), s("|0>")]));
     assert!(ok("gui", "end", vec![]), "end cierra el canvas");
+}
+
+// net: un 4xx con cuerpo vuelve como respuesta (no como error) y un servidor
+// que no contesta corta por el timeout en lugar de colgar al script.
+fn servidor_que_responde(respuesta: &'static str) -> String {
+    use std::io::{Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let dir = format!("http://{}", l.local_addr().unwrap());
+    std::thread::spawn(move || {
+        if let Ok((mut c, _)) = l.accept() {
+            let mut buf = [0u8; 4096];
+            let _ = c.read(&mut buf);
+            let _ = c.write_all(respuesta.as_bytes());
+        }
+    });
+    dir
+}
+
+#[test]
+fn smoke_net_post_con_409_devuelve_status_y_cuerpo() {
+    let url = servidor_que_responde(
+        "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: 17\r\nConnection: close\r\n\r\n{\"error\":\"ya va\"}");
+    match call("net", "post", vec![s(&url), s("{}")]) {
+        EvalValue::Dict(m) => {
+            assert_eq!(as_int(m.get("status").cloned().unwrap()), 409);
+            assert!(!as_bool(m.get("ok").cloned().unwrap()));
+            match m.get("body") {
+                Some(EvalValue::Dict(b)) => assert_eq!(as_str(b.get("error").cloned().unwrap()), "ya va"),
+                o => panic!("el cuerpo JSON no se parseó: {o:?}"),
+            }
+        }
+        o => panic!("{o:?}"),
+    }
+}
+
+#[test]
+fn smoke_net_timeout_corta_un_servidor_mudo() {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", l.local_addr().unwrap());
+    let t0 = std::time::Instant::now();
+    let mut opts = HashMap::new();
+    opts.insert("timeout".to_string(), EvalValue::Float(0.5));
+    let r = modules::call("net", "get", vec![s(&url), EvalValue::Dict(HashMap::new()), EvalValue::Dict(opts)]);
+    assert!(r.is_err(), "un servidor mudo tenía que dar error: {r:?}");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(5), "no respetó el timeout: {:?}", t0.elapsed());
+    drop(l);
+}
+
+// mail.send(opciones): un servidor SMTP mínimo en el propio test recibe el
+// mensaje, sin red ni cuentas, y se comprueba lo que llegó.
+fn smtp_falso() -> (u16, std::sync::mpsc::Receiver<String>) {
+    use std::io::{BufRead, BufReader, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let puerto = l.local_addr().unwrap().port();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (c, _) = l.accept().unwrap();
+        let mut w = c.try_clone().unwrap();
+        let mut r = BufReader::new(c);
+        let mut todo = String::new();
+        let _ = w.write_all(b"220 falso ESMTP\r\n");
+        let mut linea = String::new();
+        let mut en_datos = false;
+        while r.read_line(&mut linea).unwrap_or(0) > 0 {
+            todo.push_str(&linea);
+            let l = linea.trim_end().to_string();
+            linea.clear();
+            if en_datos {
+                if l == "." { en_datos = false; let _ = w.write_all(b"250 recibido\r\n"); }
+                continue;
+            }
+            let cmd = l.to_uppercase();
+            let resp: &[u8] = if cmd.starts_with("EHLO") { b"250 falso\r\n" }
+                else if cmd.starts_with("DATA") { en_datos = true; b"354 adelante\r\n" }
+                else if cmd.starts_with("QUIT") { let _ = w.write_all(b"221 adios\r\n"); break; }
+                else { b"250 ok\r\n" };
+            let _ = w.write_all(resp);
+        }
+        let _ = tx.send(todo);
+    });
+    (puerto, rx)
+}
+
+#[test]
+fn smoke_mail_send_con_adjunto_y_varios_destinatarios() {
+    let (puerto, rx) = smtp_falso();
+    let mut ruta = std::env::temp_dir();
+    ruta.push(format!("orion_smoke_factura_{}.pdf", std::process::id()));
+    // Bytes binarios, como un PDF de verdad: así el adjunto va en base64 (con
+    // texto ASCII puro, el cliente elige 7bit y no habría base64 que buscar).
+    const PDF: &[u8] = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n\x00\x01\xfe\xff factura";
+    std::fs::write(&ruta, PDF).unwrap();
+
+    let mut o = HashMap::new();
+    o.insert("servidor".to_string(), s("127.0.0.1"));
+    o.insert("puerto".to_string(), i(puerto as i64));
+    o.insert("seguridad".to_string(), s("ninguna"));
+    o.insert("de".to_string(), s("Tienda <tienda@ejemplo.test>"));
+    o.insert("para".to_string(), EvalValue::List(vec![s("ana@ejemplo.test"), s("luis@ejemplo.test")]));
+    o.insert("asunto".to_string(), s("Tu factura"));
+    o.insert("texto".to_string(), s("Adjunta va tu factura."));
+    o.insert("html".to_string(), s("<p>Adjunta va tu <b>factura</b>.</p>"));
+    o.insert("adjuntos".to_string(), EvalValue::List(vec![s(ruta.to_str().unwrap())]));
+    o.insert("timeout".to_string(), i(5));
+    assert!(as_bool(call("mail", "send", vec![EvalValue::Dict(o)])));
+
+    let recibido = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("el servidor no recibió nada");
+    let _ = std::fs::remove_file(&ruta);
+    assert!(recibido.contains("RCPT TO:<ana@ejemplo.test>") && recibido.contains("RCPT TO:<luis@ejemplo.test>"), "{recibido}");
+    assert!(recibido.contains("Subject: Tu factura"), "{recibido}");
+    assert!(recibido.contains("multipart/alternative"), "falta texto + html:\n{recibido}");
+    assert!(recibido.contains("Content-Type: application/pdf"), "{recibido}");
+    assert!(recibido.contains("attachment") && recibido.contains(".pdf"), "{recibido}");
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(PDF);
+    let cuerpo: String = recibido.split_whitespace().collect();
+    assert!(cuerpo.contains(&b64), "el contenido del PDF no llegó:\n{recibido}");
+}
+
+#[test]
+fn smoke_mail_send_explica_lo_que_falta() {
+    let mut o = HashMap::new();
+    o.insert("de".to_string(), s("a@b.test"));
+    let e = modules::call("mail", "send", vec![EvalValue::Dict(o.clone())]).unwrap_err();
+    assert!(e.contains("servidor"), "{e}");
+    o.insert("servidor".to_string(), s("127.0.0.1"));
+    o.insert("seguridad".to_string(), s("rara"));
+    let e = modules::call("mail", "send", vec![EvalValue::Dict(o)]).unwrap_err();
+    assert!(e.contains("tls, starttls o ninguna"), "{e}");
 }

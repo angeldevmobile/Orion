@@ -83,3 +83,37 @@ fn errores_de_postgres_con_mensaje_y_sqlstate() {
         db.exec(BD, "DROP TABLE {tabla}")
     "##));
 }
+
+// Un texto hacia NUMERIC, enteros, fechas, UUID o JSONB se convierte al tipo
+// de la columna. Antes rompía el protocolo: "insufficient data left in message".
+#[test]
+fn texto_hacia_columnas_tipadas() {
+    let Some(url) = url() else { return };
+    let tabla = format!("orion_test_tipos_{}", std::process::id());
+    run_ok(&format!(r##"
+        use "db" as db
+        BD = "{url}"
+        db.exec(BD, "DROP TABLE IF EXISTS {tabla}")
+        db.exec(BD, "CREATE TABLE {tabla} (importe NUMERIC(10,2), n INTEGER, grande BIGINT, x FLOAT8,
+                     ok BOOLEAN, dia DATE, cuando TIMESTAMPTZ, id UUID, doc JSONB)")
+        db.exec(BD, "INSERT INTO {tabla} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ["59.70", "42", "9000000000", "2.5", "true", "2026-10-02",
+                 "2026-10-02T21:30:00-05:00", "6f1c1f9e-1d1c-4b7e-9a3e-2b2f1f0c1a11", "{{\"a\": 1}}"])
+        f = db.first(BD, "SELECT importe = ?::numeric AS mismo_importe, n, grande, dia::text AS dia,
+                                 extract(hour FROM cuando AT TIME ZONE 'UTC')::int AS hora_utc, doc->>'a' AS a
+                          FROM {tabla}", ["59.7"])
+        db.exec(BD, "DROP TABLE {tabla}")
+        if not f["mismo_importe"] {{ error("el importe no casa: " + str(f)) }}
+        if f["n"] != 42 or f["grande"] != 9000000000 {{ error("enteros: " + str(f)) }}
+        if f["dia"] != "2026-10-02" {{ error("fecha: " + str(f)) }}
+        if f["hora_utc"] != 2 {{ error("zona horaria: " + str(f)) }}
+        if f["a"] != "1" {{ error("jsonb: " + str(f)) }}
+
+        attempt {{
+            db.first(BD, "SELECT ?::numeric AS x", ["doce"])
+            error("un texto que no es número tenía que fallar")
+        }} handle err {{
+            if not str(err).contains("no es un número") {{ error("mensaje inesperado: " + str(err)) }}
+        }}
+    "##));
+}

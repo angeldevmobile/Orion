@@ -151,7 +151,8 @@ que `write_styled`.
 
 En Java es habitual diseñar un PDF o un correo con HTML y CSS (Thymeleaf o
 FreeMarker para la plantilla, OpenHTMLtoPDF o Flying Saucer para el PDF,
-JavaMail para el envío). Orion tiene las tres piezas, pero a medias:
+JavaMail para el envío). Orion tiene las tres piezas; el correo ya está
+(`mail.send` con opciones, v0.1.8), las otras dos a medias:
 
 - **Plantillas (`template`).** Usa minijinja, así que tiene la sintaxis de
   Jinja (`{{ }}`, `{% for %}`, `{% if %}`, filtros). Pero cada plantilla se
@@ -165,19 +166,16 @@ JavaMail para el envío). Orion tiene las tres piezas, pero a medias:
   hace falta abrir un navegador, escribir el HTML a un archivo y navegar a
   él: no hay un `pdf.from_html(html, ruta, opts)` de un paso. Y exige Chrome
   instalado en el servidor, que en una imagen Docker mínima no está.
-- **Correo (`mail`).** `send_html` manda HTML, pero: un solo destinatario, sin
-  CC ni CCO, **sin adjuntos** (no se puede mandar la factura en PDF), sin
-  imágenes incrustadas (el logo de un correo), sin versión en texto plano
-  alternativa (sin ella, muchos filtros lo marcan como spam), y con siete
-  argumentos posicionales que incluyen la contraseña SMTP en cada llamada.
+- **Correo (`mail`).** Resuelto en `mail.send(opciones)`: varios
+  destinatarios, CC y CCO, adjuntos, texto y HTML alternativos y cualquier
+  SMTP. Falta solo **imágenes incrustadas** (`cid:`, el logo dentro del
+  cuerpo), que hoy obligan a enlazar la imagen desde fuera.
 
 Lo que hace falta, por orden:
 
 1. `template` con escape automático en HTML y una carpeta de plantillas
    (para `extends` / `include`).
-2. `mail.send` con un dict de opciones: `to` (lista), `cc`, `bcc`, `html`,
-   `text`, `attachments`, imágenes inline, y la configuración SMTP aparte
-   (una vez, por entorno) en vez de en cada llamada.
+2. Imágenes incrustadas en `mail.send` (`inline: [{ruta, cid}]`).
 3. `pdf.from_html(html, ruta, opts)`: de HTML a PDF en un paso. Primero sobre
    Chrome, que ya está. Un motor de HTML/CSS propio en Rust, sin navegador,
    es mucho más trabajo, y solo compensa si pesa no poder instalar Chrome en
