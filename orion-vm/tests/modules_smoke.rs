@@ -135,6 +135,24 @@ fn smoke_process_execute() {
 }
 
 #[test]
+fn smoke_process_version_uptime_memory() {
+    assert_eq!(as_str(call("process", "version", vec![])), env!("CARGO_PKG_VERSION"));
+    let a = match call("process", "uptime", vec![]) { EvalValue::Float(x) => x, o => panic!("{o:?}") };
+    let b = match call("process", "uptime", vec![]) { EvalValue::Float(x) => x, o => panic!("{o:?}") };
+    assert!(a >= 0.0 && b >= a, "uptime tiene que crecer: {a} → {b}");
+    // Linux y Windows dan la memoria; en el resto es null.
+    match call("process", "memory", vec![]) {
+        EvalValue::Dict(m) => {
+            let rss = match m.get("rss") { Some(EvalValue::Int(n)) => *n, o => panic!("rss: {o:?}") };
+            let pico = match m.get("peak") { Some(EvalValue::Int(n)) => *n, o => panic!("peak: {o:?}") };
+            assert!(rss > 0 && pico >= rss, "rss={rss} pico={pico}");
+        }
+        EvalValue::Null => assert!(!cfg!(any(target_os = "linux", windows))),
+        o => panic!("process.memory: {o:?}"),
+    }
+}
+
+#[test]
 fn smoke_env_set_get() {
     let key = format!("ORION_SMOKE_{}", std::process::id());
     assert!(!as_bool(call("env", "has", vec![s(&key)])), "la var no debería existir aún");

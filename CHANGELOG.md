@@ -3,6 +3,14 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## v0.1.7 - 2026-10-02
+
+### Añadido
+- **`process.version()`, `process.uptime()` y `process.memory()`.** La versión
+  de Orion que ejecuta el script, los segundos desde que arrancó el proceso y
+  su memoria (`{rss, peak}` en bytes; `null` fuera de Linux y Windows). Sirven
+  para que un servicio informe de sí mismo sin herramientas externas.
+
 ## v0.1.6 - 2026-09-30
 
 ### Añadido

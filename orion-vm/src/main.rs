@@ -162,6 +162,7 @@ fn extract_symbols(stmts: &[ast::Stmt]) -> Vec<SymbolInfo> {
 }
 
 fn main() {
+    modules::process_mod::inicio();
     // Forzar UTF-8 en la consola de Windows para que show/print muestre
     // correctamente tildes, eñes y caracteres especiales.
     #[cfg(windows)]

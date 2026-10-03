@@ -70,6 +70,26 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         "pid" => {
             Ok(EvalValue::Int(std::process::id() as i64))
         }
+        // version() → versión de Orion que ejecuta el script, p. ej. "0.1.7"
+        "version" => {
+            Ok(EvalValue::Str(env!("CARGO_PKG_VERSION").into()))
+        }
+        // uptime() → segundos desde que arrancó el proceso
+        "uptime" => {
+            Ok(EvalValue::Float(inicio().elapsed().as_secs_f64()))
+        }
+        // memory() → {rss, peak} en bytes, o null si el sistema no lo expone
+        "memory" => {
+            Ok(match memoria() {
+                Some((rss, pico)) => {
+                    let mut m = HashMap::new();
+                    m.insert("rss".into(), EvalValue::Int(rss as i64));
+                    m.insert("peak".into(), EvalValue::Int(pico as i64));
+                    EvalValue::Dict(m)
+                }
+                None => EvalValue::Null,
+            })
+        }
         // exit(code?) → termina el proceso
         "exit" => {
             let code = if args.is_empty() { 0 } else { to_i64(&args[0])? };
@@ -91,6 +111,50 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
         f => Err(format!("process.{}() does not exist", f)),
     }
+}
+
+static INICIO: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+/// Marca el arranque del proceso. main() la llama primero; si no, cuenta desde el primer uso.
+pub fn inicio() -> Instant {
+    *INICIO.get_or_init(Instant::now)
+}
+
+/// (rss, pico) en bytes.
+#[cfg(target_os = "linux")]
+fn memoria() -> Option<(u64, u64)> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let kb = |clave: &str| -> Option<u64> {
+        let linea = status.lines().find(|l| l.starts_with(clave))?;
+        linea.split_whitespace().nth(1)?.parse::<u64>().ok().map(|k| k * 1024)
+    };
+    let rss = kb("VmRSS:")?;
+    Some((rss, kb("VmHWM:").unwrap_or(rss)))
+}
+
+#[cfg(windows)]
+fn memoria() -> Option<(u64, u64)> {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Contadores {
+        cb: u32, page_fault_count: u32,
+        peak_working_set_size: usize, working_set_size: usize,
+        quota_peak_paged_pool_usage: usize, quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize, quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize, peak_pagefile_usage: usize,
+    }
+    extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32GetProcessMemoryInfo(proceso: isize, c: *mut Contadores, cb: u32) -> i32;
+    }
+    let mut c = Contadores { cb: std::mem::size_of::<Contadores>() as u32, ..Default::default() };
+    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
+    (ok != 0).then(|| (c.working_set_size as u64, c.peak_working_set_size as u64))
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn memoria() -> Option<(u64, u64)> {
+    None
 }
 
 fn run_shell(cmd: &str) -> Result<EvalValue, String> {

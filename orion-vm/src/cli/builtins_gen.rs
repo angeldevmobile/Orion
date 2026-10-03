@@ -140,6 +140,9 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("process", "argumento", "process.argumento(n, default?)", "Alias de process.arg."));
     v.push(f("process", "check_dependency", "process.check_dependency(cmd) -> bool", "Devuelve bool."));
     v.push(f("process", "pid", "process.pid()", "PID del proceso actual"));
+    v.push(f("process", "version", "process.version()", "Versión de Orion que ejecuta el script, p. ej. \"0.1.7\""));
+    v.push(f("process", "uptime", "process.uptime()", "Segundos desde que arrancó el proceso"));
+    v.push(f("process", "memory", "process.memory()", "{rss, peak} en bytes, o null si el sistema no lo expone"));
     v.push(f("process", "exit", "process.exit(code?)", "Termina el proceso"));
     v.push(f("process", "env_var", "process.env_var(key)", "Valor de variable de entorno"));
     v.push(f("process", "cwd", "process.cwd()", "Directorio actual"));
