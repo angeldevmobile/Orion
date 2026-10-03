@@ -781,6 +781,7 @@ fn typecheck_gate(src: &str, path: &str, args: &[String]) {
 /// Un error de ejecución con el extracto del archivo donde ocurrió: el del
 /// módulo importado si fue dentro de uno, si no el del programa.
 fn render_runtime_error(e: &str, machine: &vm::VM, path: &str, src: &str) -> String {
+    let e = &*modules::secret_mod::redact(e);
     if let Some(file) = machine.error_file() {
         if let Ok(modsrc) = fs::read_to_string(file) {
             return error::parse_vm_error(e, file).render(&modsrc);

@@ -12,6 +12,7 @@ use crate::bytecode::{ExternFnDef, FunctionDef, ShapeDef};
 use crate::gc::Gc;
 
 pub fn write_utf8_line(s: &str) {
+    let s = &*crate::modules::secret_mod::redact(s);
     #[cfg(windows)]
     {
         use std::ffi::c_void;
@@ -1611,7 +1612,20 @@ impl VM {
         // 1) Ejecutar el módulo en una sub-VM para obtener sus variables/constantes
         //    globales y los namespaces que haya importado (p.ej. `use "datetime"`).
         let mut sub_vm = VM::new(bc.main.clone(), bc.lines.clone(), bc.functions.clone(), bc.shapes.clone(), bc.extern_fns.clone());
-        sub_vm.run().ok(); // ignorar errores de side effects
+        // Un fallo al inicializar el módulo detiene el programa, como un import en
+        // Python: ignorarlo dejaba el módulo sin sus variables y un error confuso después.
+        if let Err(e) = sub_vm.run() {
+            // El mensaje completo (puede ocupar varias líneas), sin la pila de llamadas.
+            let mensaje: Vec<&str> = e.lines()
+                .take_while(|l| !l.starts_with("    at ") && !l.starts_with("    en "))
+                .collect();
+            let mensaje = mensaje.join("\n");
+            let (linea, texto) = match mensaje.strip_prefix("Line ").and_then(|r| r.split_once(" | ")) {
+                Some((n, t)) => (format!(":{}", n), t.to_string()),
+                None => (String::new(), mensaje.clone()),
+            };
+            return Err(format!("loading module '{}{}' failed: {}", ruta_visible(path), linea, texto));
+        }
         let mut module_globals: IndexMap<String, Value> = IndexMap::new();
         if let Some(frame) = sub_vm.call_stack.first() {
             for (k, v) in &frame.vars {
@@ -2295,6 +2309,7 @@ impl VM {
         let __log_m = method.clone();
         let __log_u = url.clone();
         let log_req = move |status: u16, note: &str| {
+            use crate::modules::secret_mod::redact;
             let ts = chrono::Local::now().format("%H:%M:%S").to_string();
             let color = match status {
                 200..=299 => "\x1b[32m", // verde
@@ -2306,7 +2321,7 @@ impl VM {
             let extra = if note.is_empty() { String::new() } else { format!(" ({})", note) };
             eprintln!(
                 "\x1b[2m[Orion]\x1b[0m \x1b[2m{}\x1b[0m  {:<7}{}  {}{}\x1b[0m \x1b[2m{}ms\x1b[0m{}",
-                ts, __log_m, __log_u, color, status, ms, extra
+                ts, __log_m, redact(&__log_u), color, status, ms, redact(&extra)
             );
         };
 
@@ -2488,7 +2503,7 @@ impl VM {
                 Err(e) => {
                     eprintln!("[Orion] middleware '{}' failed: {}", mw, e);
                     log_req(500, &e);
-                    let resp = Response::from_string(format!("error interno: {}", e))
+                    let resp = Response::from_string(crate::modules::secret_mod::redact(&format!("error interno: {}", e)).into_owned())
                         .with_status_code(500);
                     let _ = request.respond(resp);
                     return;
@@ -2508,7 +2523,7 @@ impl VM {
                         Some(donde) => log_req(500, &format!("{} ({})", e, donde)),
                         None => log_req(500, &e.to_string()),
                     }
-                    let resp = Response::from_string(format!("error interno: {}", e))
+                    let resp = Response::from_string(crate::modules::secret_mod::redact(&format!("error interno: {}", e)).into_owned())
                         .with_status_code(500);
                     let _ = request.respond(resp);
                     return;

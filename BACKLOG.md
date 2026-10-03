@@ -3,6 +3,16 @@
 Cosas encontradas y no arregladas todavía, con el motivo por el que importan.
 Lo que se arregla sale de aquí y entra en [`CHANGELOG.md`](CHANGELOG.md).
 
+## Los tests de `browser_e2e` fallan al azar con el equipo cargado
+
+Con la batería completa, 1 a 3 tests distintos en cada pasada fallan por tiempo
+(`Page.navigate: no response within 30000 ms`) y pasan al ejecutarlos solos.
+Pasó al validar la v0.1.9: la batería tardó 341 s en vez de 160.
+
+Un test que falla al azar acaba ignorándose y entonces oculta un fallo real.
+Camino: menos navegadores a la vez por defecto, y plazos de los tests ligados al
+tiempo que tarde en arrancar el primero, no fijos.
+
 ## `db.transaction` no deja decidir dentro de la transacción
 
 Recibe una **lista fija** de sentencias y las ejecuta todas: no hay forma de

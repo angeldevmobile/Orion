@@ -33,8 +33,9 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         }
         // reveal() → dict con todas las variables de entorno
         "reveal" | "all" => {
+            // Values already read as secrets come back as "***".
             let map: HashMap<String, EvalValue> = std::env::vars()
-                .map(|(k, v)| (k, EvalValue::Str(v)))
+                .map(|(k, v)| { let v = crate::modules::secret_mod::redact(&v).into_owned(); (k, EvalValue::Str(v)) })
                 .collect();
             Ok(EvalValue::Dict(map))
         }

@@ -92,6 +92,7 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
 
 fn write_log(level: &str, msg: &str, tag: Option<&str>) {
     if level_num(level) < LOG_LEVEL.load(Ordering::Relaxed) { return; }
+    let msg = &*crate::modules::secret_mod::redact(msg);
 
     let ts    = full_timestamp();
     let badge = level_badge(level);

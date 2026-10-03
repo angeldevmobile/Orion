@@ -963,3 +963,52 @@ fn smoke_mail_send_explica_lo_que_falta() {
     let e = modules::call("mail", "send", vec![EvalValue::Dict(o)]).unwrap_err();
     assert!(e.contains("tls, starttls o ninguna"), "{e}");
 }
+
+// secret: lectura, ocultación, máscara segura con UTF-8 y .env.
+#[test]
+fn smoke_secret_get_redact_mask() {
+    std::env::set_var("ORION_SMOKE_SECRET_A", "valor-secreto-smoke-123456");
+    assert_eq!(as_str(call("secret", "get", vec![s("ORION_SMOKE_SECRET_A")])), "valor-secreto-smoke-123456");
+    assert_eq!(as_str(call("secret", "redact", vec![s("Bearer valor-secreto-smoke-123456 ok")])), "Bearer *** ok");
+    assert_eq!(as_str(call("secret", "mask", vec![s("clave con ñandú")])), "cl***dú");
+    assert_eq!(as_str(call("secret", "mask", vec![s("corta")])), "***");
+    assert!(matches!(call("secret", "get", vec![s("ORION_SMOKE_NO_EXISTE")]), EvalValue::Null));
+    match call("secret", "all", vec![]) {
+        EvalValue::Dict(m) => assert_eq!(as_str(m.get("ORION_SMOKE_SECRET_A").cloned().unwrap()), "va***56"),
+        o => panic!("{o:?}"),
+    }
+}
+
+#[test]
+fn smoke_secret_require_lista_todos_los_problemas() {
+    std::env::set_var("ORION_SMOKE_CORTO", "abc");
+    let e = modules::call("secret", "require", vec![
+        EvalValue::List(vec![s("ORION_SMOKE_CORTO"), s("ORION_SMOKE_FALTA_1"), s("ORION_SMOKE_FALTA_2")]),
+        EvalValue::Dict([("min_length".to_string(), i(8))].into_iter().collect()),
+    ]).unwrap_err();
+    assert!(e.contains("ORION_SMOKE_CORTO: shorter than 8") && e.contains("ORION_SMOKE_FALTA_1: not set")
+        && e.contains("ORION_SMOKE_FALTA_2: not set"), "{e}");
+}
+
+#[test]
+fn smoke_secret_file_y_dotenv() {
+    let dir = std::env::temp_dir().join(format!("orion_smoke_secret_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let archivo = dir.join("clave.txt");
+    std::fs::write(&archivo, "desde-archivo-smoke-1\n").unwrap();
+    std::env::set_var("ORION_SMOKE_DESDE_FILE", archivo.to_str().unwrap());
+    assert_eq!(as_str(call("secret", "get", vec![s("ORION_SMOKE_DESDE")])), "desde-archivo-smoke-1");
+
+    let env = dir.join("prueba.env");
+    // E1 ocupa dos líneas (como una clave PEM); E5 lleva el \n escrito.
+    std::fs::write(&env, "# comentario\nexport ORION_SMOKE_E1=\"linea\nnueva\"\nORION_SMOKE_E5=\"con\\nescape\"\nORION_SMOKE_E2='literal # ñ'\nORION_SMOKE_E3=sin comillas # nota\nORION_SMOKE_E4=\n").unwrap();
+    assert_eq!(as_int(call("secret", "load", vec![s(env.to_str().unwrap())])), 5);
+    assert_eq!(as_str(call("secret", "get", vec![s("ORION_SMOKE_E5")])), "con\nescape");
+    assert_eq!(as_str(call("secret", "get", vec![s("ORION_SMOKE_E1")])), "linea\nnueva");
+    assert_eq!(as_str(call("secret", "get", vec![s("ORION_SMOKE_E2")])), "literal # ñ");
+    assert_eq!(as_str(call("secret", "get", vec![s("ORION_SMOKE_E3")])), "sin comillas");
+    assert!(matches!(call("secret", "get", vec![s("ORION_SMOKE_E4")]), EvalValue::Null), "vacía = no definida");
+    std::fs::write(&env, "1MAL=x\n").unwrap();
+    assert!(modules::call("secret", "load", vec![s(env.to_str().unwrap())]).unwrap_err().contains("invalid name"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

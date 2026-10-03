@@ -300,3 +300,50 @@ fn un_error_en_el_programa_sigue_senalando_el_programa() {
     assert!(err.contains("main.orx"), "no nombra el programa:\n{err}");
     assert!(err.contains("error(\"fallo en main\")"), "no enseña la línea del programa:\n{err}");
 }
+
+// ── Secretos ────────────────────────────────────────────────────────────────
+
+fn orion_con_env(dir_nombre: &str, src: &str, env: &[(&str, &str)]) -> (bool, String, String) {
+    let dir = std::env::temp_dir().join(dir_nombre);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("main.orx"), src).unwrap();
+    let mut cmd = Command::new(orion_bin());
+    cmd.args(["--run", "main.orx"]).current_dir(&dir).env_remove("ORION_ENV");
+    for (k, v) in env { cmd.env(k, v); }
+    let out = cmd.output().expect("no se pudo ejecutar orion");
+    (out.status.success(), String::from_utf8_lossy(&out.stdout).into_owned(),
+     String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+#[test]
+fn un_secreto_no_sale_en_show_ni_en_los_errores() {
+    let (ok, stdout, stderr) = orion_con_env("orion_tests_secreto_salida",
+        "use \"secret\" as secret\nt = secret.require(\"TOKEN_PRUEBA\")\nshow \"token: \" + t\nerror(\"fallo con \" + t)\n",
+        &[("TOKEN_PRUEBA", "tok_live_123456789abcdef")]);
+    assert!(!ok);
+    assert!(stdout.contains("token: ***") && !stdout.contains("tok_live"), "{stdout}");
+    assert!(stderr.contains("fallo con ***") && !stderr.contains("tok_live_123456789abcdef"), "{stderr}");
+}
+
+#[test]
+fn en_produccion_no_hay_valores_por_defecto_ni_env() {
+    let (ok, _, stderr) = orion_con_env("orion_tests_secreto_produccion",
+        "use \"secret\" as secret\nsecret.get(\"NO_DEFINIDO_EN_PRUEBA\", \"valor-dev\")\n",
+        &[("ORION_ENV", "production")]);
+    assert!(!ok && stderr.contains("defaults are not allowed"), "{stderr}");
+    let (ok, _, stderr) = orion_con_env("orion_tests_secreto_produccion_env",
+        "use \"secret\" as secret\nsecret.load()\n", &[("ORION_ENV", "production")]);
+    assert!(!ok && stderr.contains(".env files are not loaded"), "{stderr}");
+}
+
+// Un error al inicializar un módulo detiene el programa con su archivo y línea.
+// Antes se ignoraba y el programa seguía sin las variables del módulo.
+#[test]
+fn un_error_al_cargar_un_modulo_detiene_el_programa() {
+    let err = error_de_modulo("orion_tests_error_carga_modulo", &[
+        ("lib/conf.orx", "LISTO = 1\nerror(\"falta la configuración\")\nOTRO = 2\n"),
+        ("main.orx", "use \"lib/conf\" as conf\nshow \"no debería llegar\"\nshow conf.LISTO\n"),
+    ]);
+    assert!(err.contains("lib/conf.orx:2") && err.contains("falta la configuración"), "{err}");
+}

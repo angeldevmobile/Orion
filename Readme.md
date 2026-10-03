@@ -950,13 +950,16 @@ cfg  = config.load("orion.toml")
 port = config.get(cfg, "server.port")
 cfg2 = config.merge(cfg, "local.toml")   -- local.toml overrides
 
--- secret - safe secrets from .env
+-- secret - secrets from the environment, NAME_FILE or .env, never printed
 use "secret"
 
-secret.load(".env")
-db_url  = secret.require("DATABASE_URL")   -- clear error if missing
-api_key = secret.get("API_KEY", "dev")
-show secret.mask(api_key)                  -- "sk***y"
+if not secret.production() {              -- ORION_ENV=production refuses .env
+    secret.load()                          -- .env, only for development
+}
+cfg = secret.require(["DATABASE_URL", "JWT_KEY"])   -- lists every missing one at once
+key = secret.require("JWT_KEY", { "min_length": 32 })
+show "key: " + key                         -- "key: ***": show, log, errors and serve hide it
+show secret.mask(key)                      -- "k3***9a"
 
 -- zip - compress and extract
 use "zip"

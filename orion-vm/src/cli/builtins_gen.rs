@@ -1031,12 +1031,14 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("config", "merge", "config.merge(base_dict, path) -> dict", "Fusionado (extra sobreescribe base)"));
     v.push(f("config", "keys", "config.keys(dict) -> list", "De claves"));
     // secret (secret_mod.rs)
-    v.push(f("secret", "load", "secret.load(path?)", "Carga el .env y devuelve cantidad de variables cargadas"));
-    v.push(f("secret", "get", "secret.get(key, default?)", "Valor del secret o default/null"));
-    v.push(f("secret", "require", "secret.require(key)", "Valor o error claro"));
-    v.push(f("secret", "mask", "secret.mask(value)", "\"ab***cd\" (oculta parte central)"));
-    v.push(f("secret", "has", "secret.has(key) -> bool", "Devuelve bool."));
-    v.push(f("secret", "all", "secret.all() -> dict", "Con todos los secrets cargados"));
+    v.push(f("secret", "load", "secret.load(path?) -> int", "Reads a .env (default \".env\"); refused in production"));
+    v.push(f("secret", "get", "secret.get(name, default?) -> string", "Or null; the default is refused in production"));
+    v.push(f("secret", "require", "secret.require(name | [names], { min_length }?) -> string", "Or a dict for a list Checks everything first and reports every missing or weak secret at once."));
+    v.push(f("secret", "has", "secret.has(name) -> bool", "Devuelve bool."));
+    v.push(f("secret", "mask", "secret.mask(value)", "\"ab***yz\" (short values become \"***\")"));
+    v.push(f("secret", "redact", "secret.redact(text)", "Text with every known secret replaced by \"***\""));
+    v.push(f("secret", "all", "secret.all() -> dict", "Of the secrets read so far, masked"));
+    v.push(f("secret", "production", "secret.production() -> bool", "ORION_ENV is \"production\" or \"prod\""));
     // zip (zip_mod.rs)
     v.push(f("zip", "compress", "zip.compress(src, dest)", "Crea un .zip (archivo o carpeta)"));
     v.push(f("zip", "decompress", "zip.decompress(src, dest) / extract(src, dest)", "Función del módulo zip."));

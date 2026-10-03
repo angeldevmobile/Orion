@@ -143,7 +143,7 @@ pub extern "C" fn rt_make_str(ptr: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_show(val: i64) {
     unsafe {
-        println!("{}", val_to_display(val_ref(val)));
+        println!("{}", crate::modules::secret_mod::redact(&val_to_display(val_ref(val))));
     }
     let _ = io::stdout().flush();
 }

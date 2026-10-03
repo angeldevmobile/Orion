@@ -3,6 +3,31 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## v0.1.9 - 2026-10-03
+
+### Cambiado
+- **`secret`, reescrito para que un secreto no salga nunca en claro.** Todo
+  valor leído con `secret.get` o `secret.require` se sustituye por `***` en
+  `show`, `log`, los errores, el log de `serve` (también en la URL) y sus
+  respuestas 500, y `env.all()` lo devuelve oculto. Se lee del entorno, de
+  `NOMBRE_FILE` (secretos de Docker y Kubernetes) o de un `.env`.
+  `secret.require(lista, { min_length })` comprueba todos y lista juntos los
+  que faltan o son cortos. Con `ORION_ENV=production`, `secret.load()` rechaza
+  el `.env` y `secret.get(nombre, defecto)` rechaza el valor por defecto.
+  Nuevas: `secret.redact(texto)` y `secret.production()`. El `.env` admite
+  `export`, comillas con escapes, valores entre comillas dobles de varias
+  líneas (claves PEM) y comentarios al final de línea; un valor vacío cuenta
+  como no definido. Módulo, opciones y mensajes en inglés.
+
+### Corregido
+- **Un error al inicializar un módulo detiene el programa.** Antes se
+  ignoraba: el módulo quedaba sin sus variables y el fallo aparecía después
+  como un "Attribute not found" sin relación. Ahora dice `loading module
+  'backend/config.orx:11' failed: …` con el mensaje completo.
+- **`secret.mask` ya no rompe el programa con "ñ" o "é"**: cortaba el texto
+  por bytes.
+- **`secret.all()` devolvía todos los secretos en claro**; ahora, enmascarados.
+
 ## v0.1.8 - 2026-10-03
 
 ### Añadido
