@@ -1,0 +1,6 @@
+-- Fibonacci recursivo: coste de las llamadas a función.
+fn fib(n) {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+show fib(30)

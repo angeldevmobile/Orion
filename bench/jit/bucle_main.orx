@@ -1,0 +1,8 @@
+-- El mismo bucle que bucle_int, escrito en main en vez de en una función.
+acc = 0
+i = 0
+while i < 10000000 {
+    acc = acc + i
+    i = i + 1
+}
+show acc

@@ -75,6 +75,8 @@ memoria:
 - `gc_ciclos.orx` - estrés del GC
 - `medir.ps1` - tiempo de pared + pico de RAM muestreado
 - `run_all.ps1` - orquestador
+- `jit/` - intérprete contra JIT en micro-benchmarks (`jit/run_jit.ps1`):
+  tiempo, pico de RAM, si compiló a nativo y si la salida coincide
 
 Los artefactos generados (`data.csv`, `data.odf`, `out_*.txt`) están en el
 `.gitignore` - solo se versionan los scripts.

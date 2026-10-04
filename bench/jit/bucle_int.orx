@@ -1,0 +1,11 @@
+-- Suma de enteros en un bucle: aritmética y comparación entera pura.
+fn sumar(n) {
+    acc = 0
+    i = 0
+    while i < n {
+        acc = acc + i
+        i = i + 1
+    }
+    return acc
+}
+show sumar(10000000)

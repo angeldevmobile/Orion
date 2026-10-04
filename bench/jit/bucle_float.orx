@@ -1,0 +1,14 @@
+-- Acumulación de decimales: aritmética de coma flotante pura.
+fn integrar(n) {
+    paso = 1.0 / n
+    acc = 0.0
+    x = 0.0
+    i = 0
+    while i < n {
+        acc = acc + x * x * paso
+        x = x + paso
+        i = i + 1
+    }
+    return acc
+}
+show integrar(5000000)

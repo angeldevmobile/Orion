@@ -1,0 +1,11 @@
+-- Igual que bucle_int pero con un ternario: un valor vivo que cruza de bloque en el JIT.
+fn sumar(n) {
+    acc = 0
+    i = 0
+    while i < n {
+        acc = acc + (i % 2 == 0 ? i : 0)
+        i = i + 1
+    }
+    return acc
+}
+show sumar(10000000)

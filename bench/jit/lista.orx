@@ -1,0 +1,21 @@
+-- Llenar una lista y recorrerla por índice: objetos en el heap y GetIndex.
+fn llenar(n) {
+    xs = []
+    i = 0
+    while i < n {
+        push(xs, i)
+        i = i + 1
+    }
+    return xs
+}
+fn sumar(xs) {
+    acc = 0
+    i = 0
+    n = len(xs)
+    while i < n {
+        acc = acc + xs[i]
+        i = i + 1
+    }
+    return acc
+}
+show sumar(llenar(1000000))
