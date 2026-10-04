@@ -53,15 +53,13 @@ convertir entera reservando valores nuevos. `len`, `push`, `pop`, `first` y
 dejando memoria sin liberar. Camino: llevarlos a `builtin_directo` según
 aparezcan en bucles calientes, y no crear una VM por llamada.
 
-## Una tarea `spawn` que falla no avisa a nadie
+## Un canal no se entera de que su productor murió
 
-Si la función lanzada con `spawn` (sin `await`) termina en error, el error
-se pierde: no se imprime ni llega a nadie. Con canales es peor: si el
-productor falla antes de `chan.cerrar`, el consumidor espera en
-`chan.recibir` para siempre y el programa se cuelga sin mensaje (pasó el
-2026-10-04 al depurar el paso de globales a las tareas). Camino: imprimir
-en stderr el error de una tarea que nadie espera, y que un canal cuyo
-productor muere se cierre con ese error.
+El error de una tarea `spawn` ya se escribe en stderr (ver CHANGELOG), pero
+si el productor falla antes de `chan.cerrar`, el consumidor sigue esperando
+en `chan.recibir` para siempre: el programa queda colgado, ahora al menos
+con el error a la vista. Camino: que un canal cuyo productor muere se cierre
+con ese error y `chan.recibir` lo lance.
 
 ## `append(lista, x)` no se puede escribir
 

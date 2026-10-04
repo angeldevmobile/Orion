@@ -44,6 +44,11 @@ formato AAAA-MM-DD.
   depurador sigue avanzando de una instrucción en una.
 
 ### Corregido
+- **El error de una tarea `spawn` se escribe en stderr** (`error in spawned
+  task 'f': ...`), en el intérprete y en el JIT. Nadie puede hacer `await`
+  de `spawn f()` y su error se perdía; con canales, el programa se colgaba
+  sin decir por qué. Una tarea guardada (`t = f()`) sigue entregando su
+  error en el `await`, y una tarea cancelada no avisa.
 - **Una función `async` ve las variables globales en el intérprete.** La
   tarea corre en otra VM que no las recibía: `async fn f() { return x }`
   fallaba con "Variable 'x' is not defined" (el JIT sí las veía). Ahora

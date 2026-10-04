@@ -61,6 +61,7 @@ struct RuntimeIds {
     // JIT-6: Closures y Async
     make_closure:    FuncId,  // rt_make_closure(fn_name_ptr) -> i64
     call_async:      FuncId,  // rt_call_async(fn_name_ptr, n_args) -> i64
+    spawn:           FuncId,  // rt_spawn: igual, para una tarea que nadie espera
     rt_await:        FuncId,  // rt_await(task) -> i64
     // I/O y control
     show:            FuncId,
@@ -298,6 +299,7 @@ impl CodeGen<JITModule> {
         sym!("rt_call_builtin",            super::bridge::rt_call_builtin);
         sym!("rt_make_closure",            super::runtime::rt_make_closure);
         sym!("rt_call_async",              super::runtime::rt_call_async);
+        sym!("rt_spawn",                   super::runtime::rt_spawn);
         sym!("rt_await",                   super::runtime::rt_await);
         sym!("rt_show",                    super::runtime::rt_show);
         sym!("rt_is_truthy",       super::runtime::rt_is_truthy);
@@ -478,6 +480,7 @@ impl<M: Module> CodeGen<M> {
         let call_builtin       = decl!("rt_call_builtin",            [i, i],    [i]);
         let make_closure       = decl!("rt_make_closure",            [i],       [i]);
         let call_async         = decl!("rt_call_async",              [i, i],    [i]);
+        let spawn              = decl!("rt_spawn",                   [i, i],    [i]);
         let rt_await           = decl!("rt_await",                   [i],       [i]);
         let show               = decl!("rt_show",                    [i],       []);
         let is_truthy       = decl!("rt_is_truthy",       [i],         [i]);
@@ -507,7 +510,7 @@ impl<M: Module> CodeGen<M> {
             create_instance, get_attr, set_attr, is_instance,
             get_self, push_self, pop_self, get_self_field, set_self_field, call_method,
             call_builtin,
-            make_closure, call_async, rt_await,
+            make_closure, call_async, spawn, rt_await,
             show, is_truthy,
             add, sub, mul, div, rt_mod, pow, neg,
             eq, neq, lt, lteq, gt, gteq,
@@ -754,6 +757,7 @@ impl<M: Module> CodeGen<M> {
         let call_builtin_ref       = self.module.declare_func_in_func(rt.call_builtin,       &mut ctx.func);
         let make_closure_ref       = self.module.declare_func_in_func(rt.make_closure,       &mut ctx.func);
         let call_async_ref         = self.module.declare_func_in_func(rt.call_async,         &mut ctx.func);
+        let spawn_ref              = self.module.declare_func_in_func(rt.spawn,              &mut ctx.func);
         let await_ref              = self.module.declare_func_in_func(rt.rt_await,           &mut ctx.func);
         let show_ref               = self.module.declare_func_in_func(rt.show,               &mut ctx.func);
         let is_truthy_ref   = self.module.declare_func_in_func(rt.is_truthy,       &mut ctx.func);
@@ -1479,7 +1483,10 @@ impl<M: Module> CodeGen<M> {
                     }
                     let name_ptr = self.cstr_ptr(&mut builder, fname);
                     let n_val    = builder.ins().iconst(types::I64, n as i64);
-                    let call = builder.ins().call(call_async_ref, &[name_ptr, n_val]);
+                    // `spawn f()` es CallAsync + Pop: la tarea queda suelta.
+                    let suelta = matches!(instructions.get(i + 1), Some(Instruction::Pop));
+                    let lanzar = if suelta { spawn_ref } else { call_async_ref };
+                    let call = builder.ins().call(lanzar, &[name_ptr, n_val]);
                     stack.push(builder.inst_results(call)[0]);
                     check!(*stack.last().unwrap());
                 }

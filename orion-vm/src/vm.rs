@@ -1370,6 +1370,11 @@ impl VM {
                 let shapes_clone     = self.shapes.clone();
                 let extern_fns_clone = self.extern_fns.clone();
                 let fn_name_clone    = fn_name.clone();
+                // `spawn f()` descarta la tarea en el acto (CallAsync + Pop): nadie
+                // podrá hacerle `await`, así que su error se escribe en stderr.
+                let suelta = self.call_stack.last()
+                    .and_then(|f| f.instructions.get(f.ip))
+                    .map_or(false, |i| matches!(i, Instruction::Pop));
 
                 // Bindings de módulo (`use "chan" as chan`) visibles en la pila
                 // actual: se reinyectan en la sub-VM para que la función lanzada
@@ -1432,6 +1437,11 @@ impl VM {
                         }
                         Err(e) => Err(e),
                     };
+                    if let Err(e) = &result {
+                        if suelta && e != "tarea cancelada" {
+                            eprintln!("error in spawned task '{}': {}", fn_name_clone, e);
+                        }
+                    }
                     handle_worker.complete(result);
                 });
 

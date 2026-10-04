@@ -864,6 +864,17 @@ pub extern "C" fn rt_make_closure(fn_name_ptr: i64) -> i64 {
 /// Lanza la función JIT identificada por `fn_name_ptr` en un hilo nuevo.
 #[no_mangle]
 pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
+    lanzar(fn_name_ptr, n_args, false)
+}
+
+/// `spawn f()`: como `rt_call_async`, pero nadie podrá hacer `await` de la
+/// tarea, así que si falla su error se escribe en stderr.
+#[no_mangle]
+pub extern "C" fn rt_spawn(fn_name_ptr: i64, n_args: i64) -> i64 {
+    lanzar(fn_name_ptr, n_args, true)
+}
+
+fn lanzar(fn_name_ptr: i64, n_args: i64, suelta: bool) -> i64 {
     let fn_name = unsafe { cstr_to_str(fn_name_ptr).to_string() };
     let fn_ptr = {
         let table = jit_fn_table().lock().unwrap();
@@ -886,7 +897,11 @@ pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
     crate::task_pool::submit(move || {
         let result = unsafe { call_fn_n(fn_ptr, &args) };
         task_worker.complete(if result == 0 {
-            Err(unsafe { val_to_display(&decode_val(rt_take_error())) })
+            let e = unsafe { val_to_display(&decode_val(rt_take_error())) };
+            if suelta {
+                eprintln!("error in spawned task '{}': {}", fn_name, e);
+            }
+            Err(e)
         } else {
             Ok(result)
         });

@@ -1051,3 +1051,31 @@ show solo_main"#;
     assert_vm_jit_match(src);
     assert_jit_nativo(src);
 }
+
+#[test]
+fn el_error_de_una_tarea_spawn_se_escribe_en_stderr() {
+    // Nadie puede hacer `await` de `spawn f()`: su error se perdía y, con
+    // canales, el programa se colgaba sin decir por qué. La tarea guardada en
+    // `t` sí se espera, y su error va al `handle` sin imprimirse.
+    let src = r#"use "tarea"
+async fn falla(n) { return 10 / n }
+spawn falla(0)
+t = falla(0)
+attempt { r = await t } handle e { show "atrapado: " + e }
+tarea.sleep(300)
+show "fin""#;
+    assert_vm_jit_match(src);
+    for modo in [None, Some("--jit")] {
+        let path = write_temp(src);
+        let mut args: Vec<&str> = modo.into_iter().collect();
+        args.push(path.to_str().unwrap());
+        let out = Command::new(env!("CARGO_BIN_EXE_orion"))
+            .args(&args)
+            .output()
+            .expect("ejecutar binario orion");
+        let _ = fs::remove_file(&path);
+        let err = String::from_utf8_lossy(&out.stderr);
+        let aviso = "error in spawned task 'falla': División por cero";
+        assert_eq!(err.matches(aviso).count(), 1, "{modo:?}: stderr fue:\n{err}");
+    }
+}
