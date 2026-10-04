@@ -11,7 +11,7 @@ interpreted, JIT-compiled, or compiled to a native executable.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Written in Rust](https://img.shields.io/badge/written%20in-Rust-orange.svg)
 
-[Install](#installation) · [Examples](#a-taste-of-orion) · [Performance](#performance) · [CLI](#the-cli) · [Docs](#documentation)
+[Install](#installation) · [Examples](#a-taste-of-orion) · [Performance](#performance) · [CLI](#the-cli) · [Docs](#documentation) · [Roadmap](#where-it-is-going)
 
 </div>
 
@@ -339,6 +339,20 @@ small package ecosystem. Everything listed above works and is covered by
 tests, and the known gaps are written down in [BACKLOG.md](BACKLOG.md) rather
 than left for you to find - for example, the JIT does not yet free strings and
 lists that are no longer used, which matters for long-running processes.
+
+### Where it is going
+
+Orion is not a finished experiment; it is under active development, and the
+goal is for people to use it for real work. Releases come often (see
+[CHANGELOG.md](CHANGELOG.md)), and what gets built next is decided by what
+gets in the way of using it: the interpreter getting closer to the JIT,
+memory management in the JIT, more packages, and whatever users run into.
+
+If you try it, that is the most useful contribution there is. Use it for a
+script, a small service or a report, and
+[open an issue](https://github.com/angeldevmobile/Orion/issues) with what
+broke, what was missing or what felt wrong. Reports from real use shape the
+roadmap more than anything else.
 
 Orion is written in English. The Spanish names that came first still work as
 deprecated aliases for the rest of 0.1.x (`db.insertar` runs, `db.insert` is
