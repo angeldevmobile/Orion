@@ -1,4 +1,4 @@
-//! Todo bloque ```orion del README tiene que parsear.
+//! Todo bloque ```orion del README y de docs/ tiene que parsear.
 //!
 //! El README es lo primero que copia y pega quien llega al proyecto. Hasta
 //! ahora sus ejemplos no los verificaba nadie, y doce de cincuenta y uno no
@@ -152,27 +152,25 @@ fn readme_examples_parse() {
         .expect("orion-vm tiene padre")
         .to_path_buf();
 
-    // Se llamó `Readme.md` hasta 2026-10; se acepta el nombre viejo para
-    // poder probar una copia anterior.
-    let path = ["README.md", "Readme.md"]
-        .iter()
-        .map(|n| root.join(n))
-        .find(|p| p.exists())
-        .expect("no se encontró el README");
-
-    let src = std::fs::read_to_string(&path).expect("no se pudo leer el README");
-    let blocks = orion_blocks(&src);
+    // La referencia salió del README a docs/ en 2026-10: se revisa todo.
+    let archivos = ["README.md", "docs/language.md", "docs/stdlib.md", "docs/roadmap.md"];
+    let mut blocks = Vec::new();
+    for nombre in archivos {
+        let src = std::fs::read_to_string(root.join(nombre))
+            .unwrap_or_else(|e| panic!("no se pudo leer {nombre}: {e}"));
+        blocks.extend(orion_blocks(&src).into_iter().map(|b| (nombre, b)));
+    }
 
     assert!(
-        blocks.len() > 20,
-        "solo se extrajeron {} bloques ```orion del README; el extractor está roto",
+        blocks.len() > 40,
+        "solo se extrajeron {} bloques ```orion del README y docs/; el extractor está roto",
         blocks.len()
     );
 
     let mut parse_failures = Vec::new();
     let mut run_failures = Vec::new();
 
-    for block in &blocks {
+    for (nombre, block) in &blocks {
         let result = orion_vm::lexer::lex(&block.code)
             .map_err(|e| format!("error léxico: {:?}", e))
             .and_then(|tokens| {
@@ -188,7 +186,8 @@ fn readme_examples_parse() {
                 .find(|l| !l.trim().is_empty())
                 .unwrap_or("");
             parse_failures.push(format!(
-                "  README.md:{} (bloque #{})  {}\n      {}",
+                "  {}:{} (bloque #{})  {}\n      {}",
+                nombre,
                 block.start_line,
                 block.index,
                 head.trim(),
@@ -205,7 +204,8 @@ fn readme_examples_parse() {
                     .find(|l| !l.trim().is_empty())
                     .unwrap_or("");
                 run_failures.push(format!(
-                    "  README.md:{} (bloque #{})  {}\n      {}",
+                    "  {}:{} (bloque #{})  {}\n      {}",
+                    nombre,
                     block.start_line,
                     block.index,
                     head.trim(),
@@ -217,7 +217,7 @@ fn readme_examples_parse() {
 
     assert!(
         parse_failures.is_empty(),
-        "{} de {} bloques ```orion del README no parsean.\n\
+        "{} de {} bloques ```orion del README y docs/ no parsean.\n\
          Alguien los va a copiar y no le van a compilar:\n{}",
         parse_failures.len(),
         blocks.len(),
@@ -226,7 +226,7 @@ fn readme_examples_parse() {
 
     let selected = blocks
         .iter()
-        .filter(|b| is_executable_block(b))
+        .filter(|(_, b)| is_executable_block(b))
         .count();
     assert!(
         run_failures.is_empty(),
