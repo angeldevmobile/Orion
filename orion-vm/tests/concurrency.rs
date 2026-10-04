@@ -227,3 +227,16 @@ fn select_espera_a_una_tarea() {
         if res["valor"] != 99 { error "select no recibió el valor de la tarea" }
     "#);
 }
+
+#[test]
+fn una_tarea_async_lee_las_globales_tambien_a_traves_de_otra_funcion() {
+    // La tarea corre en otra VM: recibe una copia de las globales que lee ella
+    // o las funciones a las que llama.
+    run_ok(r#"
+        base = 100
+        fn sumar_base(n) { return n + base }
+        async fn tarea(n) { return sumar_base(n) * 2 }
+        r = await tarea(5)
+        if r != 210 { error "la tarea no vio la global: ${r}" }
+    "#);
+}

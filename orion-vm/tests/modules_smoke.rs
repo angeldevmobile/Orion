@@ -843,8 +843,24 @@ fn servidor_que_responde(respuesta: &'static str) -> String {
     let dir = format!("http://{}", l.local_addr().unwrap());
     std::thread::spawn(move || {
         if let Ok((mut c, _)) = l.accept() {
+            // Se lee la petición entera: cerrar con bytes sin leer hace que
+            // Windows mande un RST y el cliente pierda la respuesta.
+            let mut leido = Vec::new();
             let mut buf = [0u8; 4096];
-            let _ = c.read(&mut buf);
+            loop {
+                match c.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => leido.extend_from_slice(&buf[..n]),
+                }
+                let texto = String::from_utf8_lossy(&leido).to_string();
+                if let Some(fin) = texto.find("\r\n\r\n") {
+                    let largo = texto[..fin].lines()
+                        .find_map(|h| h.to_ascii_lowercase().strip_prefix("content-length:")
+                            .and_then(|v| v.trim().parse::<usize>().ok()))
+                        .unwrap_or(0);
+                    if leido.len() >= fin + 4 + largo { break; }
+                }
+            }
             let _ = c.write_all(respuesta.as_bytes());
         }
     });

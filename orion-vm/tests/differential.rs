@@ -50,6 +50,19 @@ fn assert_vm_jit_match(src: &str) {
     );
 }
 
+/// Exige que `--jit` haya compilado `src` a nativo: si cayera al intérprete,
+/// la salida coincidiría igual y `assert_vm_jit_match` no lo notaría.
+fn assert_jit_nativo(src: &str) {
+    let path = write_temp(src);
+    let out = Command::new(env!("CARGO_BIN_EXE_orion"))
+        .args(["--jit", path.to_str().unwrap()])
+        .output()
+        .expect("ejecutar binario orion");
+    let _ = fs::remove_file(&path);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("Cranelift nativo"), "no compiló a nativo:\n{err}");
+}
+
 /// Verifica que VM y JIT CONCUERDAN en el resultado, sea éxito o error:
 /// mismo estado de salida (ambos ok o ambos fallan) Y mismo stdout.
 ///
@@ -740,4 +753,301 @@ fn tipo() { return str(type(strings)) }
 show tipo()
 show type(strings)"#,
     );
+}
+
+#[test]
+fn builtins_de_lista_dan_lo_mismo_en_ambos_backends() {
+    // En el JIT van directos sobre la lista, sin pasar por la VM.
+    assert_vm_jit_match(
+        r#"xs = [1, 2]
+push(xs, 3)
+push(xs, 4)
+show xs
+show len(xs)
+show first(xs)
+show last(xs)
+show pop(xs)
+show xs
+show len("hola")
+show len({ a: 1, b: 2 })
+v = []
+show first(v)
+show last(v)
+show pop(v)"#,
+    );
+}
+
+#[test]
+fn push_devuelve_la_misma_lista_en_ambos_backends() {
+    // El JIT devolvía una copia: lo que se añadía después no llegaba a `xs`.
+    assert_vm_jit_match(
+        r#"xs = [1]
+ys = push(xs, 2)
+push(ys, 3)
+show xs
+show len(xs)"#,
+    );
+}
+
+#[test]
+fn push_en_bucle_no_es_cuadratico_en_el_jit() {
+    // Cada push copiaba la lista entera: 200k elementos tardaban minutos.
+    let t0 = std::time::Instant::now();
+    assert_vm_jit_match(
+        r#"fn llenar(n) {
+    xs = []
+    i = 0
+    while i < n {
+        push(xs, i)
+        i = i + 1
+    }
+    return len(xs)
+}
+show llenar(200000)"#,
+    );
+    assert!(t0.elapsed().as_secs() < 30, "tardó {:?}", t0.elapsed());
+}
+
+// ── Errores: el JIT los lleva al `handle`, también a través de llamadas ─────
+
+#[test]
+fn un_error_en_una_funcion_llega_al_attempt_de_quien_llama() {
+    // El JIT terminaba el proceso: `Raise` solo veía los attempt de su función.
+    assert_vm_jit_match(
+        r#"fn f() {
+    error "fallo en f"
+}
+fn g(x) {
+    return f()
+}
+attempt { g(1) } handle e { show "atrapado: " + e }
+show "sigue""#,
+    );
+}
+
+#[test]
+fn errores_del_runtime_van_al_handle_con_el_mismo_mensaje() {
+    assert_vm_jit_match(
+        r#"fn div(a, b) { return a / b }
+attempt { div(1, 0) } handle e { show e }
+attempt { x = 1 / 0.0 } handle e { show e }
+attempt { x = 7 % 0 } handle e { show e }
+attempt { x = 9223372036854775807 + 1 } handle e { show e }
+attempt { x = "a" - 1 } handle e { show e }
+attempt { x = [1, 2][5] } handle e { show e }
+attempt { x = { a: 1 }["b"] } handle e { show e }
+attempt { x = 1 < "b" } handle e { show e }
+show "fin""#,
+    );
+}
+
+#[test]
+fn un_error_a_mitad_de_un_bucle_no_corta_el_bucle() {
+    assert_vm_jit_match(
+        r#"fn contar(n) {
+    fallos = 0
+    vueltas = 0
+    i = 0
+    while i < n {
+        attempt {
+            x = 10 / (i - 700)
+        } handle e {
+            fallos = fallos + 1
+        }
+        vueltas = vueltas + 1
+        i = i + 1
+    }
+    show fallos
+    return vueltas
+}
+show contar(3000)"#,
+    );
+}
+
+#[test]
+fn un_error_en_un_act_llega_al_attempt() {
+    assert_vm_jit_match(
+        r#"shape Cuenta {
+    saldo
+    act retirar(n) {
+        if n > saldo { error "saldo insuficiente" }
+        saldo = saldo - n
+        return saldo
+    }
+}
+c = Cuenta(10)
+attempt { c.retirar(50) } handle e { show "atrapado: " + e }
+show c.retirar(3)"#,
+    );
+}
+
+#[test]
+fn un_error_sin_attempt_termina_igual_en_ambos_backends() {
+    // Lo impreso antes del error sale, y los dos terminan con fallo.
+    assert_vm_jit_agree(
+        r#"fn f(x) { return 10 / x }
+show "antes"
+show f(0)
+show "nunca""#,
+    );
+}
+
+#[test]
+fn un_error_en_una_tarea_async_llega_al_await() {
+    assert_vm_jit_match(
+        r#"async fn dividir(a, b) { return a / b }
+t = dividir(1, 0)
+attempt { r = await t } handle e { show "atrapado: " + e }
+show "sigue""#,
+    );
+}
+
+#[test]
+fn enteros_que_cruzan_los_48_bits_y_decimales_especiales() {
+    // El JIT guarda los enteros de 48 bits dentro del valor y los demás en el
+    // heap: las cuentas que cruzan esa frontera tienen que dar lo mismo.
+    assert_vm_jit_match(
+        r#"fn crecer(x, n) {
+    i = 0
+    while i < n {
+        x = x * 2
+        i = i + 1
+    }
+    return x
+}
+b = 140737488355327
+show b
+show b + 1
+show crecer(1, 50)
+show crecer(-1, 62)
+show 9223372036854775807
+show -9223372036854775807 - 1
+show crecer(1, 50) - crecer(1, 50) + 7
+show 140737488355328 == 140737488355327 + 1
+show -0.0
+show 1.0e308 * 10.0
+show 0.1 + 0.2"#,
+    );
+}
+
+#[test]
+fn las_rutas_rapidas_dan_lo_mismo_y_compilan_a_nativo() {
+    // Si Cranelift rechazara el código en línea, el JIT caería al intérprete
+    // y la salida coincidiría igual: por eso se exige también "nativo".
+    let src = r#"fn f(a, b) {
+    show a + b
+    show a - b
+    show a * b
+    attempt { show a / b } handle e { show e }
+    show a < b
+    show a <= b
+    show a > b
+    show a >= b
+    show a == b
+    show a != b
+}
+fn m(a, b) {
+    attempt { show a % b } handle e { show e }
+}
+f(7, 3)
+f(-7, 3)
+f(5, 0)
+f(2.5, 0.5)
+f(7, 2.5)
+f(2.5, 0.0)
+f(140737488355327, 1)
+f(-140737488355328, 1)
+f(100000000, 100000000)
+show "a" + "b"
+m(7, 3)
+m(-7, 3)
+m(7, 0)
+m(7.5, 2)
+show 1 == 1.0
+fn verdad(v) {
+    if v { return "si" }
+    return "no"
+}
+show verdad(yes)
+show verdad(no)
+show verdad(null)
+show verdad(0)
+show verdad(1)
+show verdad("")
+show verdad([1])
+i = 0
+s = 0.0
+while i < 1000 {
+    s = s + i * 0.5
+    i = i + 1
+}
+show s"#;
+    assert_vm_jit_match(src);
+    assert_jit_nativo(src);
+}
+
+#[test]
+fn el_ternario_compila_a_nativo_en_cualquier_posicion() {
+    // El ternario deja un valor vivo al cruzar de bloque; antes eso mandaba el
+    // programa entero al intérprete.
+    let src = r#"fn signo(n) {
+    return n > 0 ? "positivo" : (n < 0 ? "negativo" : "cero")
+}
+fn suma_pares(n) {
+    acc = 0
+    i = 0
+    while i < n {
+        acc = acc + (i % 2 == 0 ? i : 0)
+        i = i + 1
+    }
+    return acc
+}
+fn elige(a, b) { return a + b }
+show signo(5)
+show signo(-3)
+show signo(0)
+show suma_pares(100)
+show elige(1 > 0 ? 10 : 20, 2 > 3 ? 100 : 200)
+x = 7
+show 1 + (x > 5 ? x * 2 : x) * 3
+show (x > 5 and x < 10) ? "en rango" : "fuera"
+show [x > 0 ? "a" : "b", x > 100 ? "c" : "d"]
+attempt {
+    show x > 0 ? 10 / 0 : 1
+} handle e { show e }"#;
+    assert_vm_jit_match(src);
+    assert_jit_nativo(src);
+}
+
+#[test]
+fn las_variables_de_main_que_leen_las_funciones_siguen_visibles() {
+    // En el JIT, main solo copia a la tabla de globales lo que alguna función,
+    // act o tarea lee; lo demás queda en registros.
+    let src = r#"factor = 3
+total = 0
+fn escala(n) { return n * factor }
+async fn escala_async(n) { return n * factor }
+shape Caja {
+    v
+    act doble() { return v * factor }
+}
+i = 0
+while i < 5 {
+    total = total + escala(i)
+    factor = factor + 1
+    i = i + 1
+}
+show total
+show factor
+show await escala_async(2)
+show Caja(10).doble()
+solo_main = 0
+j = 0
+while j < 1000 {
+    solo_main = solo_main + j
+    j = j + 1
+}
+show solo_main"#;
+    assert_vm_jit_match(src);
+    assert_jit_nativo(src);
 }

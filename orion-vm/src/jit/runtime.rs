@@ -1,5 +1,6 @@
-//! Runtime del JIT: `OrionVal` es un valor boxeado en el heap y todas las
-//! funciones reciben y devuelven punteros como i64.
+//! Runtime del JIT. Un valor es un i64 con NaN-boxing (ver `alloc_val`): los
+//! enteros de 48 bits, los decimales, `null` y los booleanos van dentro del
+//! i64; lo demás es un puntero a un `OrionVal` en el heap.
 
 use std::cell::RefCell;
 use indexmap::IndexMap as HashMap;
@@ -36,6 +37,7 @@ thread_local! {
 
 //     OrionVal                                                                 
 
+#[derive(Clone, Copy)]
 pub struct OrionVal {
     pub tag:    u8,
     pub _pad:   [u8; 7],
@@ -45,12 +47,51 @@ pub struct OrionVal {
 
 //     Helpers internos                                                         
 
+/// Decimal: sus bits + 2^48. Entero de 48 bits: 0xFFFE en los 16 bits altos.
+/// Los punteros (< 2^48) y las constantes de abajo quedan por debajo, y el 0
+/// sigue libre para marcar un error pendiente.
+pub const DOUBLE_OFFSET: i64 = 1 << 48;
+pub const INT_TAG: i64 = 0xFFFE_0000_0000_0000_u64 as i64;
+pub const VAL_NULL:  i64 = 0x02;
+pub const VAL_FALSE: i64 = 0x06;
+pub const VAL_TRUE:  i64 = 0x07;
+const INT48_MIN: i64 = -(1 << 47);
+const INT48_MAX: i64 = (1 << 47) - 1;
+
+/// Codifica un valor. Solo reserva memoria si no cabe en el i64.
 pub(crate) fn alloc_val(tag: u8, data_i: i64, data_f: f64) -> i64 {
-    Box::into_raw(Box::new(OrionVal { tag, _pad: [0; 7], data_i, data_f })) as i64
+    match tag {
+        TAG_INT if (INT48_MIN..=INT48_MAX).contains(&data_i) =>
+            INT_TAG | (data_i & 0xFFFF_FFFF_FFFF),
+        TAG_FLOAT => encode_f64(data_f),
+        TAG_NULL  => VAL_NULL,
+        TAG_BOOL  => if data_i != 0 { VAL_TRUE } else { VAL_FALSE },
+        _ => Box::into_raw(Box::new(OrionVal { tag, _pad: [0; 7], data_i, data_f })) as i64,
+    }
 }
 
-pub(crate) unsafe fn val_ref(ptr: i64) -> &'static OrionVal {
-    &*(ptr as *const OrionVal)
+/// Un NaN se normaliza: con el signo puesto chocaría con los enteros.
+pub(crate) fn encode_f64(f: f64) -> i64 {
+    let bits = if f.is_nan() { 0x7FF8_0000_0000_0000 } else { f.to_bits() };
+    bits.wrapping_add(DOUBLE_OFFSET as u64) as i64
+}
+
+/// Decodifica un valor a su forma `OrionVal` (por copia).
+pub(crate) unsafe fn decode_val(v: i64) -> OrionVal {
+    let u = v as u64;
+    let (tag, data_i, data_f) = if u >= INT_TAG as u64 {
+        (TAG_INT, (v << 16) >> 16, 0.0)
+    } else if u >= DOUBLE_OFFSET as u64 {
+        (TAG_FLOAT, 0, f64::from_bits(u.wrapping_sub(DOUBLE_OFFSET as u64)))
+    } else {
+        match v {
+            VAL_NULL  => (TAG_NULL, 0, 0.0),
+            VAL_FALSE => (TAG_BOOL, 0, 0.0),
+            VAL_TRUE  => (TAG_BOOL, 1, 0.0),
+            _ => return *(v as *const OrionVal),
+        }
+    };
+    OrionVal { tag, _pad: [0; 7], data_i, data_f }
 }
 
 pub(crate) unsafe fn cstr_to_str(ptr: i64) -> &'static str {
@@ -78,13 +119,13 @@ pub(crate) fn val_to_display(v: &OrionVal) -> String {
         TAG_NULL  => "null".to_string(),
         TAG_LIST  => unsafe {
             let items = &*(v.data_i as *const Vec<i64>);
-            let parts: Vec<String> = items.iter().map(|&p| val_to_display(val_ref(p))).collect();
+            let parts: Vec<String> = items.iter().map(|&p| val_to_display(&decode_val(p))).collect();
             format!("[{}]", parts.join(", "))
         },
         TAG_DICT  => unsafe {
             let entries = &*(v.data_i as *const Vec<(String, i64)>);
             let parts: Vec<String> = entries.iter()
-                .map(|(k, p)| format!("{}: {}", k, val_to_display(val_ref(*p))))
+                .map(|(k, p)| format!("{}: {}", k, val_to_display(&decode_val(*p))))
                 .collect();
             format!("{{{}}}", parts.join(", "))
         },
@@ -120,18 +161,6 @@ pub extern "C" fn rt_make_int(v: i64) -> i64 {
     alloc_val(TAG_INT, v, 0.0)
 }
 
-/// Recibe los bits del f64 como i64 para evitar problemas de ABI con F64/I64 en Cranelift.
-#[no_mangle]
-pub extern "C" fn rt_make_float_bits(bits: i64) -> i64 {
-    let f = f64::from_bits(bits as u64);
-    alloc_val(TAG_FLOAT, 0, f)
-}
-
-#[no_mangle]
-pub extern "C" fn rt_make_bool(v: i64) -> i64 {
-    alloc_val(TAG_BOOL, if v != 0 { 1 } else { 0 }, 0.0)
-}
-
 /// `ptr` apunta a una cadena C (UTF-8, terminada en '\0') ya en el heap.
 #[no_mangle]
 pub extern "C" fn rt_make_str(ptr: i64) -> i64 {
@@ -143,7 +172,7 @@ pub extern "C" fn rt_make_str(ptr: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_show(val: i64) {
     unsafe {
-        println!("{}", crate::modules::secret_mod::redact(&val_to_display(val_ref(val))));
+        println!("{}", crate::modules::secret_mod::redact(&val_to_display(&decode_val(val))));
     }
     let _ = io::stdout().flush();
 }
@@ -152,7 +181,7 @@ pub extern "C" fn rt_show(val: i64) {
 /// Usado por JumpIfFalse / JumpIfTrue.
 #[no_mangle]
 pub extern "C" fn rt_is_truthy(val: i64) -> i64 {
-    unsafe { if is_truthy_val(val_ref(val)) { 1 } else { 0 } }
+    unsafe { if is_truthy_val(&decode_val(val)) { 1 } else { 0 } }
 }
 
 //     Aritmética                                                               
@@ -160,12 +189,12 @@ pub extern "C" fn rt_is_truthy(val: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_add(a: i64, b: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
-        let bv = val_ref(b);
+        let av = decode_val(a);
+        let bv = decode_val(b);
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => match av.data_i.checked_add(bv.data_i) {
                 Some(r) => alloc_val(TAG_INT, r, 0.0),
-                None => { eprintln!("[JIT] Error: Desbordamiento aritmético en suma de enteros"); std::process::exit(1) }
+                None => fallar("Desbordamiento aritmético en suma de enteros"),
             },
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f + bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 + bv.data_f),
@@ -173,10 +202,10 @@ pub extern "C" fn rt_add(a: i64, b: i64) -> i64 {
             // Concatenación: solo si al menos un operando es Str (igual que la VM).
             // bool/null/etc. en aritmética → error de tipo, NO coerción silenciosa.
             (TAG_STR, _) | (_, TAG_STR) => {
-                let result = format!("{}{}", val_to_display(av), val_to_display(bv));
+                let result = format!("{}{}", val_to_display(&av), val_to_display(&bv));
                 alloc_val(TAG_STR, string_to_cptr(result), 0.0)
             }
-            _ => { eprintln!("[JIT] Error: tipos incompatibles en +"); std::process::exit(1) }
+            _ => fallar(format!("Cannot add {} + {}", nombre_tipo(&av), nombre_tipo(&bv))),
         }
     }
 }
@@ -184,17 +213,17 @@ pub extern "C" fn rt_add(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_sub(a: i64, b: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
-        let bv = val_ref(b);
+        let av = decode_val(a);
+        let bv = decode_val(b);
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => match av.data_i.checked_sub(bv.data_i) {
                 Some(r) => alloc_val(TAG_INT, r, 0.0),
-                None => { eprintln!("[JIT] Error: integer subtraction overflow"); std::process::exit(1) }
+                None => fallar("Integer subtraction overflow"),
             },
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f - bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 - bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f - bv.data_i as f64),
-            _ => { eprintln!("[JIT] Error: tipos incompatibles en -"); std::process::exit(1) }
+            _ => fallar(format!("Cannot subtract {} - {}", nombre_tipo(&av), nombre_tipo(&bv))),
         }
     }
 }
@@ -202,17 +231,17 @@ pub extern "C" fn rt_sub(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_mul(a: i64, b: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
-        let bv = val_ref(b);
+        let av = decode_val(a);
+        let bv = decode_val(b);
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => match av.data_i.checked_mul(bv.data_i) {
                 Some(r) => alloc_val(TAG_INT, r, 0.0),
-                None => { eprintln!("[JIT] Error: Desbordamiento aritmético en multiplicación de enteros"); std::process::exit(1) }
+                None => fallar("Desbordamiento aritmético en multiplicación de enteros"),
             },
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f * bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 * bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f * bv.data_i as f64),
-            _ => { eprintln!("[JIT] Error: tipos incompatibles en *"); std::process::exit(1) }
+            _ => fallar(format!("Cannot multiply {} * {}", nombre_tipo(&av), nombre_tipo(&bv))),
         }
     }
 }
@@ -221,23 +250,17 @@ pub extern "C" fn rt_mul(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_div(a: i64, b: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
-        let bv = val_ref(b);
+        let av = decode_val(a);
+        let bv = decode_val(b);
+        if (bv.tag == TAG_INT && bv.data_i == 0) || (bv.tag == TAG_FLOAT && bv.data_f == 0.0) {
+            return fallar("División por cero");
+        }
         match (av.tag, bv.tag) {
-            (TAG_INT, TAG_INT) => {
-                if bv.data_i == 0 { eprintln!("[JIT] Error: división por cero"); std::process::exit(1); }
-                alloc_val(TAG_FLOAT, 0, av.data_i as f64 / bv.data_i as f64)
-            }
-            (TAG_FLOAT, TAG_FLOAT) => {
-                if bv.data_f == 0.0 { eprintln!("[JIT] Error: división por cero"); std::process::exit(1); }
-                alloc_val(TAG_FLOAT, 0, av.data_f / bv.data_f)
-            }
+            (TAG_INT, TAG_INT)     => alloc_val(TAG_FLOAT, 0, av.data_i as f64 / bv.data_i as f64),
+            (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f / bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 / bv.data_f),
-            (TAG_FLOAT, TAG_INT)   => {
-                if bv.data_i == 0 { eprintln!("[JIT] Error: división por cero"); std::process::exit(1); }
-                alloc_val(TAG_FLOAT, 0, av.data_f / bv.data_i as f64)
-            }
-            _ => { eprintln!("[JIT] tipos incompatibles en /"); std::process::exit(1) }
+            (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f / bv.data_i as f64),
+            _ => fallar(format!("Cannot divide {} / {}", nombre_tipo(&av), nombre_tipo(&bv))),
         }
     }
 }
@@ -245,17 +268,17 @@ pub extern "C" fn rt_div(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_mod(a: i64, b: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
-        let bv = val_ref(b);
+        let av = decode_val(a);
+        let bv = decode_val(b);
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => {
-                if bv.data_i == 0 { eprintln!("[JIT] Error: Módulo por cero"); std::process::exit(1); }
+                if bv.data_i == 0 { return fallar("Modulo by zero"); }
                 match av.data_i.checked_rem(bv.data_i) {
                     Some(r) => alloc_val(TAG_INT, r, 0.0),
-                    None => { eprintln!("[JIT] Error: Desbordamiento aritmético en módulo"); std::process::exit(1) }
+                    None => fallar("Desbordamiento aritmético en módulo"),
                 }
             }
-            _ => { eprintln!("[JIT] Error: Módulo solo soporta enteros"); std::process::exit(1) }
+            _ => fallar("Modulo only supports integers"),
         }
     }
 }
@@ -263,20 +286,20 @@ pub extern "C" fn rt_mod(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_pow(a: i64, b: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
-        let bv = val_ref(b);
+        let av = decode_val(a);
+        let bv = decode_val(b);
         match (av.tag, bv.tag) {
             (TAG_INT, TAG_INT) => {
-                if bv.data_i < 0 { eprintln!("[JIT] Error: negative exponent in an integer power (use floats)"); std::process::exit(1); }
+                if bv.data_i < 0 { return fallar("Negative exponent in integer power (use floats)"); }
                 match u32::try_from(bv.data_i).ok().and_then(|e| av.data_i.checked_pow(e)) {
                     Some(r) => alloc_val(TAG_INT, r, 0.0),
-                    None => { eprintln!("[JIT] Error: Desbordamiento aritmético en potencia"); std::process::exit(1) }
+                    None => fallar("Desbordamiento aritmético en potencia"),
                 }
             }
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f.powf(bv.data_f)),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, (av.data_i as f64).powf(bv.data_f)),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f.powi(bv.data_i as i32)),
-            _ => { eprintln!("[JIT] tipos incompatibles en **"); std::process::exit(1) }
+            _ => fallar("Power expects numbers"),
         }
     }
 }
@@ -284,14 +307,14 @@ pub extern "C" fn rt_pow(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_neg(a: i64) -> i64 {
     unsafe {
-        let av = val_ref(a);
+        let av = decode_val(a);
         match av.tag {
             TAG_INT   => match av.data_i.checked_neg() {
                 Some(r) => alloc_val(TAG_INT, r, 0.0),
-                None => { eprintln!("[JIT] Error: Desbordamiento aritmético en negación"); std::process::exit(1) }
+                None => fallar("Desbordamiento aritmético en negación"),
             },
             TAG_FLOAT => alloc_val(TAG_FLOAT, 0, -av.data_f),
-            _ => { eprintln!("[JIT] Error: - requires a number"); std::process::exit(1) }
+            _ => fallar("Negation only applies to numbers"),
         }
     }
 }
@@ -299,8 +322,8 @@ pub extern "C" fn rt_neg(a: i64) -> i64 {
 //     Comparación                                                              
 
 unsafe fn jit_vals_equal(a: i64, b: i64) -> bool {
-    let av = val_ref(a);
-    let bv = val_ref(b);
+    let av = decode_val(a);
+    let bv = decode_val(b);
     match (av.tag, bv.tag) {
         (TAG_NULL,  TAG_NULL)  => true,
         (TAG_INT,   TAG_INT)   => av.data_i == bv.data_i,
@@ -344,49 +367,62 @@ pub extern "C" fn rt_neq(a: i64, b: i64) -> i64 {
     }
 }
 
-fn numeric_cmp(av: &OrionVal, bv: &OrionVal) -> std::cmp::Ordering {
-    match (av.tag, bv.tag) {
+/// Compara dos números y aplica `pred`; otro tipo es error, como en la VM.
+fn numeric_cmp(av: &OrionVal, bv: &OrionVal, pred: fn(std::cmp::Ordering) -> bool) -> i64 {
+    use std::cmp::Ordering::Equal;
+    let ord = match (av.tag, bv.tag) {
         (TAG_INT,   TAG_INT)   => av.data_i.cmp(&bv.data_i),
-        (TAG_FLOAT, TAG_FLOAT) => av.data_f.partial_cmp(&bv.data_f).unwrap_or(std::cmp::Ordering::Equal),
-        (TAG_INT,   TAG_FLOAT) => (av.data_i as f64).partial_cmp(&bv.data_f).unwrap_or(std::cmp::Ordering::Equal),
-        (TAG_FLOAT, TAG_INT)   => av.data_f.partial_cmp(&(bv.data_i as f64)).unwrap_or(std::cmp::Ordering::Equal),
-        _ => { eprintln!("[JIT] comparación numérica inválida"); std::process::exit(1) }
-    }
+        (TAG_FLOAT, TAG_FLOAT) => av.data_f.partial_cmp(&bv.data_f).unwrap_or(Equal),
+        (TAG_INT,   TAG_FLOAT) => (av.data_i as f64).partial_cmp(&bv.data_f).unwrap_or(Equal),
+        (TAG_FLOAT, TAG_INT)   => av.data_f.partial_cmp(&(bv.data_i as f64)).unwrap_or(Equal),
+        _ => return fallar(format!("Cannot compare {} < {}", nombre_tipo(av), nombre_tipo(bv))),
+    };
+    alloc_val(TAG_BOOL, if pred(ord) { 1 } else { 0 }, 0.0)
 }
 
 #[no_mangle]
 pub extern "C" fn rt_lt(a: i64, b: i64) -> i64 {
-    unsafe {
-        let ord = numeric_cmp(val_ref(a), val_ref(b));
-        alloc_val(TAG_BOOL, if ord.is_lt() { 1 } else { 0 }, 0.0)
-    }
+    unsafe { numeric_cmp(&decode_val(a), &decode_val(b), std::cmp::Ordering::is_lt) }
 }
 
 #[no_mangle]
 pub extern "C" fn rt_lteq(a: i64, b: i64) -> i64 {
-    unsafe {
-        let ord = numeric_cmp(val_ref(a), val_ref(b));
-        alloc_val(TAG_BOOL, if ord.is_le() { 1 } else { 0 }, 0.0)
-    }
+    unsafe { numeric_cmp(&decode_val(a), &decode_val(b), std::cmp::Ordering::is_le) }
 }
 
 #[no_mangle]
 pub extern "C" fn rt_gt(a: i64, b: i64) -> i64 {
-    unsafe {
-        let ord = numeric_cmp(val_ref(a), val_ref(b));
-        alloc_val(TAG_BOOL, if ord.is_gt() { 1 } else { 0 }, 0.0)
-    }
+    unsafe { numeric_cmp(&decode_val(a), &decode_val(b), std::cmp::Ordering::is_gt) }
 }
 
 #[no_mangle]
 pub extern "C" fn rt_gteq(a: i64, b: i64) -> i64 {
-    unsafe {
-        let ord = numeric_cmp(val_ref(a), val_ref(b));
-        alloc_val(TAG_BOOL, if ord.is_ge() { 1 } else { 0 }, 0.0)
-    }
+    unsafe { numeric_cmp(&decode_val(a), &decode_val(b), std::cmp::Ordering::is_ge) }
 }
 
 //     Manejo de errores — JIT-3
+
+/// Deja `msg` como error de Orion pendiente y devuelve 0, que ningún valor real
+/// usa: el código nativo lo comprueba y salta al `handle` o retorna 0.
+pub(crate) fn fallar(msg: impl Into<String>) -> i64 {
+    let v = alloc_val(TAG_STR, string_to_cptr(msg.into()), 0.0);
+    ORION_ERROR.with(|e| *e.borrow_mut() = Some(v));
+    0
+}
+
+/// 1 si hay un error pendiente: para las llamadas que no devuelven valor.
+#[no_mangle]
+pub extern "C" fn rt_error_pending() -> i64 {
+    ORION_ERROR.with(|e| e.borrow().is_some() as i64)
+}
+
+pub(crate) fn nombre_tipo(v: &OrionVal) -> &'static str {
+    match v.tag {
+        TAG_INT => "int", TAG_FLOAT => "float", TAG_STR => "string", TAG_BOOL => "bool",
+        TAG_LIST => "list", TAG_DICT => "dict", TAG_NULL => "null", TAG_CLOSURE => "fn",
+        TAG_TASK => "task", _ => "instance",
+    }
+}
 
 /// Guarda el mensaje de error en TLS. Llamada por Raise antes de saltar al handler.
 #[no_mangle]
@@ -407,7 +443,7 @@ pub extern "C" fn rt_take_error() -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_raise_exit(msg: i64) {
     unsafe {
-        eprintln!("Error: {}", val_to_display(val_ref(msg)));
+        eprintln!("Error: {}", val_to_display(&decode_val(msg)));
     }
     std::process::exit(1);
 }
@@ -444,9 +480,9 @@ pub extern "C" fn rt_make_dict_n(n: i64) -> i64 {
             let val_ptr = flat[i * 2];
             let key_ptr = flat[i * 2 + 1];
             let key_str = unsafe {
-                let kv = val_ref(key_ptr);
+                let kv = decode_val(key_ptr);
                 if kv.tag == TAG_STR { cstr_to_str(kv.data_i).to_string() }
-                else { val_to_display(kv) }
+                else { val_to_display(&kv) }
             };
             entries.push((key_str, val_ptr));
         }
@@ -459,8 +495,8 @@ pub extern "C" fn rt_make_dict_n(n: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_get_index(obj: i64, idx: i64) -> i64 {
     unsafe {
-        let ov = val_ref(obj);
-        let iv = val_ref(idx);
+        let ov = decode_val(obj);
+        let iv = decode_val(idx);
         match ov.tag {
             TAG_LIST => {
                 let items = &*(ov.data_i as *const Vec<i64>);
@@ -468,18 +504,17 @@ pub extern "C" fn rt_get_index(obj: i64, idx: i64) -> i64 {
                 let i_usize = if i < 0 { (items.len() as i64 + i) as usize } else { i as usize };
                 match items.get(i_usize) {
                     Some(&p) => p,
-                    None => { eprintln!("[JIT] Índice {} fuera de rango", i); std::process::exit(1) }
+                    None => fallar(format!("Index {} out of range", i)),
                 }
             }
             TAG_DICT => {
                 let entries = &*(ov.data_i as *const Vec<(String, i64)>);
                 let key_str = if iv.tag == TAG_STR { cstr_to_str(iv.data_i).to_string() }
-                              else { val_to_display(iv) };
+                              else { val_to_display(&iv) };
                 for (k, p) in entries {
                     if k == &key_str { return *p; }
                 }
-                eprintln!("[JIT] Key '{}' not found", key_str);
-                std::process::exit(1)
+                fallar(format!("Key '{}' not found", key_str))
             }
             TAG_STR => {
                 let s = cstr_to_str(ov.data_i);
@@ -487,10 +522,10 @@ pub extern "C" fn rt_get_index(obj: i64, idx: i64) -> i64 {
                 let i_usize = if i < 0 { (s.len() as i64 + i) as usize } else { i as usize };
                 match s.chars().nth(i_usize) {
                     Some(ch) => alloc_val(TAG_STR, string_to_cptr(ch.to_string()), 0.0),
-                    None => { eprintln!("[JIT] Índice {} fuera de rango en string", i); std::process::exit(1) }
+                    None => fallar(format!("Index {} out of range in string", i)),
                 }
             }
-            _ => { eprintln!("[JIT] GetIndex: tipo no soportado (tag={})", ov.tag); std::process::exit(1) }
+            _ => fallar("GetIndex: unsupported type"),
         }
     }
 }
@@ -499,8 +534,8 @@ pub extern "C" fn rt_get_index(obj: i64, idx: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_set_index(obj: i64, idx: i64, val: i64) -> i64 {
     unsafe {
-        let ov = val_ref(obj);
-        let iv = val_ref(idx);
+        let ov = decode_val(obj);
+        let iv = decode_val(idx);
         match ov.tag {
             TAG_LIST => {
                 // Mutación in-place + mismo puntero → los alias ven el cambio
@@ -509,8 +544,7 @@ pub extern "C" fn rt_set_index(obj: i64, idx: i64, val: i64) -> i64 {
                 let i = iv.data_i;
                 let i_usize = if i < 0 { (items.len() as i64 + i) as usize } else { i as usize };
                 if i_usize >= items.len() {
-                    eprintln!("[JIT] Índice {} fuera de rango en SetIndex", i);
-                    std::process::exit(1);
+                    return fallar(format!("Index {} out of range in SetIndex", i));
                 }
                 items[i_usize] = val;
                 obj
@@ -519,7 +553,7 @@ pub extern "C" fn rt_set_index(obj: i64, idx: i64, val: i64) -> i64 {
                 let entries = &*(ov.data_i as *const Vec<(String, i64)>);
                 let mut new_entries = entries.clone();
                 let key_str = if iv.tag == TAG_STR { cstr_to_str(iv.data_i).to_string() }
-                              else { val_to_display(iv) };
+                              else { val_to_display(&iv) };
                 let mut found = false;
                 for entry in &mut new_entries {
                     if entry.0 == key_str { entry.1 = val; found = true; break; }
@@ -528,7 +562,7 @@ pub extern "C" fn rt_set_index(obj: i64, idx: i64, val: i64) -> i64 {
                 let raw = Box::into_raw(Box::new(new_entries)) as i64;
                 alloc_val(TAG_DICT, raw, 0.0)
             }
-            _ => { eprintln!("[JIT] SetIndex: tipo no soportado (tag={})", ov.tag); std::process::exit(1) }
+            _ => fallar("SetIndex: unsupported type"),
         }
     }
 }
@@ -538,7 +572,7 @@ pub extern "C" fn rt_set_index(obj: i64, idx: i64, val: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_and(a: i64, b: i64) -> i64 {
     unsafe {
-        let t = is_truthy_val(val_ref(a)) && is_truthy_val(val_ref(b));
+        let t = is_truthy_val(&decode_val(a)) && is_truthy_val(&decode_val(b));
         alloc_val(TAG_BOOL, if t { 1 } else { 0 }, 0.0)
     }
 }
@@ -546,7 +580,7 @@ pub extern "C" fn rt_and(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_or(a: i64, b: i64) -> i64 {
     unsafe {
-        let t = is_truthy_val(val_ref(a)) || is_truthy_val(val_ref(b));
+        let t = is_truthy_val(&decode_val(a)) || is_truthy_val(&decode_val(b));
         alloc_val(TAG_BOOL, if t { 1 } else { 0 }, 0.0)
     }
 }
@@ -554,7 +588,7 @@ pub extern "C" fn rt_or(a: i64, b: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_not(a: i64) -> i64 {
     unsafe {
-        let t = !is_truthy_val(val_ref(a));
+        let t = !is_truthy_val(&decode_val(a));
         alloc_val(TAG_BOOL, if t { 1 } else { 0 }, 0.0)
     }
 }
@@ -566,7 +600,7 @@ pub extern "C" fn rt_not(a: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_read_input(prompt: i64, cast_ptr: i64) -> i64 {
     unsafe {
-        let prompt_str = val_to_display(val_ref(prompt));
+        let prompt_str = val_to_display(&decode_val(prompt));
         print!("{} ", prompt_str);
         let _ = io::stdout().flush();
         let raw = {
@@ -584,14 +618,14 @@ pub extern "C" fn rt_read_input(prompt: i64, cast_ptr: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_read_input_choices(prompt: i64, choices: i64, cast_ptr: i64) -> i64 {
     unsafe {
-        let choices_val = val_ref(choices);
+        let choices_val = decode_val(choices);
         let choice_strings: Vec<String> = if choices_val.tag == TAG_LIST {
             let items = &*(choices_val.data_i as *const Vec<i64>);
-            items.iter().map(|&p| val_to_display(val_ref(p))).collect()
+            items.iter().map(|&p| val_to_display(&decode_val(p))).collect()
         } else {
             vec![]
         };
-        let prompt_str = val_to_display(val_ref(prompt));
+        let prompt_str = val_to_display(&decode_val(prompt));
         if !choice_strings.is_empty() {
             println!("{}", choice_strings.join(" / "));
         }
@@ -615,13 +649,10 @@ pub extern "C" fn rt_read_input_choices(prompt: i64, choices: i64, cast_ptr: i64
 #[no_mangle]
 pub extern "C" fn rt_read_file(path: i64, fmt_ptr: i64) -> i64 {
     unsafe {
-        let path_str = val_to_display(val_ref(path));
+        let path_str = val_to_display(&decode_val(path));
         let content = match std::fs::read_to_string(&path_str) {
             Ok(c) => c,
-            Err(e) => {
-                eprintln!("[JIT] read: could not read '{}': {}", path_str, e);
-                std::process::exit(1);
-            }
+            Err(e) => return fallar(format!("read: could not read '{}': {}", path_str, e)),
         };
         let fmt_str = cstr_to_str(fmt_ptr);
         match fmt_str {
@@ -642,20 +673,19 @@ pub extern "C" fn rt_read_file(path: i64, fmt_ptr: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_write_file(path: i64, data: i64, mode_ptr: i64) {
     unsafe {
-        let path_str = val_to_display(val_ref(path));
-        let data_str = val_to_display(val_ref(data));
+        let path_str = val_to_display(&decode_val(path));
+        let data_str = val_to_display(&decode_val(data));
         let mode_str = cstr_to_str(mode_ptr);
         match mode_str {
             "append" => {
                 match std::fs::OpenOptions::new().append(true).create(true).open(&path_str) {
                     Ok(mut f) => { let _ = writeln!(f, "{}", data_str); }
-                    Err(e) => { eprintln!("[JIT] write append '{}': {}", path_str, e); std::process::exit(1); }
+                    Err(e) => { fallar(format!("write append '{}': {}", path_str, e)); }
                 }
             }
             _ => {
                 if let Err(e) = std::fs::write(&path_str, format!("{}\n", data_str)) {
-                    eprintln!("[JIT] write '{}': {}", path_str, e);
-                    std::process::exit(1);
+                    fallar(format!("write '{}': {}", path_str, e));
                 }
             }
         }
@@ -666,7 +696,7 @@ pub extern "C" fn rt_write_file(path: i64, data: i64, mode_ptr: i64) {
 #[no_mangle]
 pub extern "C" fn rt_read_env(key: i64, cast_ptr: i64) -> i64 {
     unsafe {
-        let key_str = val_to_display(val_ref(key));
+        let key_str = val_to_display(&decode_val(key));
         let raw = std::env::var(&key_str).unwrap_or_default();
         let cast_str = cstr_to_str(cast_ptr);
         apply_cast(raw, cast_str)
@@ -716,10 +746,7 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
             _ => {
                 match &resolved {
                     Some(file) => super::bridge::load_orx_module_jit(file),
-                    None => {
-                        eprintln!("[JIT] Módulo '{}' no encontrado", path_str);
-                        std::process::exit(1)
-                    }
+                    None => fallar(format!("Module '{}' not found", path_str)),
                 }
             }
         }
@@ -771,22 +798,23 @@ pub extern "C" fn rt_register_fn(name_ptr: i64, fn_ptr: i64) {
 }
 
 pub struct JitTask {
-    result: Mutex<Option<i64>>,
+    /// `Err`: el mensaje del error que terminó la tarea en su hilo.
+    result: Mutex<Option<Result<i64, String>>>,
     done:   Condvar,
 }
 
 impl JitTask {
-    fn complete(&self, r: i64) {
+    fn complete(&self, r: Result<i64, String>) {
         let mut g = self.result.lock().unwrap();
         *g = Some(r);
         self.done.notify_all();
     }
-    fn wait(&self) -> i64 {
+    fn wait(&self) -> Result<i64, String> {
         let mut g = self.result.lock().unwrap();
         while g.is_none() {
             g = self.done.wait(g).unwrap();
         }
-        g.unwrap()
+        g.clone().unwrap()
     }
 }
 
@@ -817,7 +845,7 @@ unsafe fn call_fn_n(fn_ptr: i64, args: &[i64]) -> i64 {
                std::mem::transmute::<usize, F>(p)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]) }
         8 => { type F = extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64;
                std::mem::transmute::<usize, F>(p)(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]) }
-        n => { eprintln!("[JIT] CallAsync: aridad {} no soportada (máx 8)", n); std::process::exit(1) }
+        n => fallar(format!("JIT: calls with {} arguments are not supported (max 8)", n)),
     }
 }
 
@@ -841,10 +869,7 @@ pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
         let table = jit_fn_table().lock().unwrap();
         match table.get(&fn_name).copied() {
             Some(p) => p,
-            None => {
-                eprintln!("[JIT] función async '{}' no registrada en JIT_FN_TABLE", fn_name);
-                std::process::exit(1);
-            }
+            None => return fallar(format!("async function '{}' does not exist", fn_name)),
         }
     };
 
@@ -860,7 +885,11 @@ pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
     // Pool de hilos compartido (reutiliza workers) en vez de un hilo por spawn.
     crate::task_pool::submit(move || {
         let result = unsafe { call_fn_n(fn_ptr, &args) };
-        task_worker.complete(result);
+        task_worker.complete(if result == 0 {
+            Err(unsafe { val_to_display(&decode_val(rt_take_error())) })
+        } else {
+            Ok(result)
+        });
     });
 
     alloc_task(task)
@@ -870,11 +899,11 @@ pub extern "C" fn rt_call_async(fn_name_ptr: i64, n_args: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_await(task: i64) -> i64 {
     unsafe {
-        let v = val_ref(task);
+        let v = decode_val(task);
         if v.tag == TAG_TASK {
             // Parking real vía Condvar: sin espera activa.
             let arc = &*(v.data_i as *const Arc<JitTask>);
-            arc.wait()
+            arc.wait().unwrap_or_else(fallar)
         } else {
             task
         }
@@ -892,5 +921,54 @@ pub(crate) fn apply_cast(raw: String, cast: &str) -> i64 {
             alloc_val(TAG_BOOL, if v { 1 } else { 0 }, 0.0)
         }
         _       => alloc_val(TAG_STR, string_to_cptr(raw), 0.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ida_y_vuelta(tag: u8, i: i64, f: f64) -> OrionVal {
+        let v = alloc_val(tag, i, f);
+        assert_ne!(v, 0, "el 0 está reservado para el error pendiente");
+        unsafe { decode_val(v) }
+    }
+
+    #[test]
+    fn enteros_en_los_bordes_de_48_bits_y_fuera() {
+        for n in [0, 1, -1, INT48_MIN, INT48_MAX, INT48_MIN - 1, INT48_MAX + 1, i64::MIN, i64::MAX] {
+            let d = ida_y_vuelta(TAG_INT, n, 0.0);
+            assert_eq!((d.tag, d.data_i), (TAG_INT, n), "entero {n}");
+        }
+        // Dentro de 48 bits no reserva memoria; fuera, sí.
+        assert_eq!(alloc_val(TAG_INT, INT48_MAX, 0.0) & INT_TAG, INT_TAG);
+        assert!((alloc_val(TAG_INT, INT48_MAX + 1, 0.0) as u64) < DOUBLE_OFFSET as u64);
+    }
+
+    #[test]
+    fn decimales_especiales() {
+        for f in [0.0, -0.0, 1.5, -1.5, f64::MAX, f64::MIN, f64::MIN_POSITIVE,
+                  f64::INFINITY, f64::NEG_INFINITY] {
+            let d = ida_y_vuelta(TAG_FLOAT, 0, f);
+            assert_eq!(d.tag, TAG_FLOAT);
+            assert_eq!(d.data_f.to_bits(), f.to_bits(), "decimal {f}");
+        }
+        let d = ida_y_vuelta(TAG_FLOAT, 0, -f64::NAN);
+        assert!(d.tag == TAG_FLOAT && d.data_f.is_nan());
+    }
+
+    #[test]
+    fn null_y_booleanos() {
+        assert_eq!(ida_y_vuelta(TAG_NULL, 0, 0.0).tag, TAG_NULL);
+        let t = ida_y_vuelta(TAG_BOOL, 1, 0.0);
+        let f = ida_y_vuelta(TAG_BOOL, 0, 0.0);
+        assert_eq!((t.tag, t.data_i, f.tag, f.data_i), (TAG_BOOL, 1, TAG_BOOL, 0));
+    }
+
+    #[test]
+    fn un_string_sigue_en_el_heap() {
+        let d = ida_y_vuelta(TAG_STR, string_to_cptr("hola".into()), 0.0);
+        assert_eq!(d.tag, TAG_STR);
+        assert_eq!(unsafe { cstr_to_str(d.data_i) }, "hola");
     }
 }

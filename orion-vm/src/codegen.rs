@@ -285,7 +285,7 @@ impl Codegen {
         for (name, func) in fc.pending_lambdas.drain(..) {
             self.functions.insert(name, func);
         }
-        Ok(FunctionDef { params: param_names, body: fc.instrs, lines: fc.lines, param_defaults })
+        Ok(FunctionDef { params: param_names, body: fc.instrs.into(), lines: fc.lines.into(), param_defaults })
     }
 
     //    Shape                                                                  
@@ -325,7 +325,7 @@ impl Codegen {
             fc.emit(Instruction::LoadNull);
             fc.emit(Instruction::Return);
             let params = oc_params.iter().map(|p| p.name.clone()).collect();
-            Some(BcActDef { params, body: fc.instrs, lines: fc.lines })
+            Some(BcActDef { params, body: fc.instrs.into(), lines: fc.lines.into() })
         } else { None };
 
         // on_error — mismo esquema que on_create; recibe el mensaje del error
@@ -337,7 +337,7 @@ impl Codegen {
             fc.emit(Instruction::LoadNull);
             fc.emit(Instruction::Return);
             let params = oe_params.iter().map(|p| p.name.clone()).collect();
-            Some(BcActDef { params, body: fc.instrs, lines: fc.lines })
+            Some(BcActDef { params, body: fc.instrs.into(), lines: fc.lines.into() })
         } else { None };
 
         // acts
@@ -351,8 +351,8 @@ impl Codegen {
             fc.emit(Instruction::Return);
             bc_acts.insert(act.name.clone(), BcActDef {
                 params: act.params.iter().map(|p| p.name.clone()).collect(),
-                body: fc.instrs,
-                lines: fc.lines,
+                body: fc.instrs.into(),
+                lines: fc.lines.into(),
             });
         }
 
@@ -1185,8 +1185,8 @@ impl FnCompiler {
                 inner.emit(Instruction::Return);
                 self.pending_lambdas.push((fn_name.clone(), FunctionDef {
                     params: params.iter().map(|p| p.name.clone()).collect(),
-                    body: inner.instrs,
-                    lines: inner.lines,
+                    body: inner.instrs.into(),
+                    lines: inner.lines.into(),
                     param_defaults: Vec::new(),
                 }));
                 self.pending_lambdas.extend(inner.pending_lambdas);
@@ -1472,8 +1472,8 @@ fn compile_expr_into(
             fc.emit(Instruction::Return);
             extra_fns.push((name.clone(), FunctionDef {
                 params: params.clone(),
-                body: fc.instrs,
-                lines: fc.lines,
+                body: fc.instrs.into(),
+                lines: fc.lines.into(),
                 param_defaults: Vec::new(),
             }));
             extra_fns.extend(fc.pending_lambdas);

@@ -3,6 +3,87 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## Sin publicar
+
+### Cambiado
+- **En el JIT, un bucle escrito en el programa principal va tan rápido como
+  dentro de una función.** Cada asignación en `main` copiaba además el valor
+  a la tabla de globales del runtime (una llamada y un mutex); ahora solo se
+  copian las variables que alguna función, act o tarea lee.
+- **El JIT ya no reserva memoria por cada número: hasta 10× más rápido y
+  50× menos RAM.** Los valores usan NaN-boxing: enteros de 48 bits,
+  decimales, `null` y booleanos van dentro del propio valor (los enteros más
+  grandes siguen en el heap, el rango de `i64` no cambia). Antes cada
+  operación reservaba memoria que nunca se liberaba. Mejor de 3, misma
+  sesión, `bench/jit/run_jit.ps1`: bucle de enteros 2,06 s · 1241 MB →
+  0,21 s · 23 MB; de decimales 1,81 s · 1088 MB → 0,20 s · 23 MB; `fib(30)`
+  0,58 s · 384 MB → 0,10 s · 23 MB; lista de un millón 0,58 s · 234 MB →
+  0,19 s · 32 MB. También afecta a lo compilado con `--build`.
+- **La aritmética y las comparaciones del JIT van en línea.** Si los dos
+  operandos son enteros de 48 bits o decimales, `+ - * / %` y `< <= > >= ==
+  !=` se compilan a instrucciones de la CPU, y la condición de un salto se
+  decide sin llamar al runtime; con otros tipos, o si el resultado no cabe,
+  se llama al runtime como antes. Sobre el cambio anterior (mejor de 3, misma
+  sesión, tiempo de pared con el arranque incluido): bucle de enteros 280 →
+  129 ms, de decimales 222 → 123 ms, `fib(30)` 126 → 69 ms. Desde el inicio
+  de la sesión, el bucle de enteros pasó de 2,06 s y 1241 MB a 0,13 s y
+  12 MB.
+- **El intérprete es hasta 2× más rápido en llamadas a función.** Llamar a una
+  función ya no copia su cuerpo (ahora es `Arc<[Instruction]>`) y cada
+  instrucción se ejecuta por referencia en vez de clonarse. Medido con
+  `bench/jit/run_jit.ps1` (mejor de 3, misma sesión): `fib(30)` 5,83 s →
+  2,79 s; lista de un millón 2,42 s → 1,67 s y 131 → 81 MB; bucles de enteros
+  y decimales entre 16 % y 24 % más rápidos. El formato `.orbc` no cambia.
+- **El intérprete ejecuta las instrucciones simples por lotes.** Cargas,
+  variables, aritmética, comparaciones y saltos van por un despacho pequeño
+  (`exec_hot`), y la cancelación, el GC y el fin de frame se revisan una vez
+  cada hasta 1024 de ellas en vez de en cada una. Sobre el cambio anterior
+  (mejor de 3, misma sesión): bucle de enteros 8,68 s → 4,53 s, de decimales
+  8,06 s → 4,28 s, `fib(30)` 3,49 s → 2,39 s, ternario 11,6 s → 6,6 s. El
+  depurador sigue avanzando de una instrucción en una.
+
+### Corregido
+- **Una función `async` ve las variables globales en el intérprete.** La
+  tarea corre en otra VM que no las recibía: `async fn f() { return x }`
+  fallaba con "Variable 'x' is not defined" (el JIT sí las veía). Ahora
+  recibe una copia, al lanzarla, de las globales que leen ella, las
+  funciones a las que llama y los acts.
+- **Un ternario ya no apaga el JIT.** Un valor que cruzaba de un bloque a
+  otro (el ternario, o una suma con un operando ya calculado y el otro
+  condicional) mandaba **todo el programa** al intérprete, y `--build` lo
+  entregaba en modo bundle. Ahora esos valores viajan en variables de
+  Cranelift por posición de la pila. `bench/jit/ternario.orx`: 5,3 s → 0,16 s.
+- El test `smoke_net_post_con_409_devuelve_status_y_cuerpo` fallaba al azar:
+  su servidor falso respondía sin leer el cuerpo de la petición y Windows
+  cortaba la conexión.
+- **En el JIT (y en lo compilado con `--build`) los errores llegan al
+  `attempt`**, como en el intérprete. Antes el runtime terminaba el proceso
+  con cualquier error (división por cero, desbordamiento, índice fuera de
+  rango, tipos incompatibles, método inexistente...) y un `error "x"` dentro
+  de una función no llegaba al `attempt` de quien la llamaba. Ahora el error
+  queda pendiente, el código nativo salta al `handle` activo o sale de la
+  función hasta encontrarlo, y en una tarea `async` llega al `await`. Los
+  mensajes son los del intérprete. `1 / 0.0` también es "División por cero"
+  en el JIT (antes daba infinito).
+- **El JIT ya no se queda colgado al llenar una lista con `push`.** Los
+  builtins `len`, `push`, `pop`, `first` y `last` copiaban la lista entera a
+  la VM en cada llamada: llenar un millón de elementos no terminaba (más de
+  15 min y 8,7 GB). Ahora van directos y tardan 0,54 s, frente a 3,0 s en el
+  intérprete (`bench/jit/lista.orx`).
+- **En el JIT, `push` devuelve la misma lista**, como en el intérprete. Antes
+  devolvía una copia y lo añadido después no llegaba a la original.
+
+### Seguridad
+- Dependencias actualizadas por avisos de `cargo audit`: `rustls` 0.23.45,
+  `rustls-webpki` 0.103.15, `lettre` 0.11.23, `crossbeam-epoch` 0.9.21 y
+  `webbrowser` 1.2.4. Solo cambia `Cargo.lock`.
+- El README y `crypto2` avisan de que `rsa_decrypt` y `rsa_sign` no son de
+  tiempo constante (RUSTSEC-2023-0071, sin versión corregida).
+
+### Añadido
+- `bench/jit/`: intérprete contra JIT en micro-benchmarks, con tiempo, pico
+  de RAM y comprobación de que la salida coincide (`run_jit.ps1`).
+
 ## v0.1.9 - 2026-10-03
 
 ### Cambiado

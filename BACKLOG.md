@@ -3,11 +3,107 @@
 Cosas encontradas y no arregladas todavía, con el motivo por el que importan.
 Lo que se arregla sale de aquí y entra en [`CHANGELOG.md`](CHANGELOG.md).
 
+## Dependencias con avisos de seguridad (`cargo audit`, 2026-10-03)
+
+Quedan 7 avisos tras actualizar las compatibles (ver CHANGELOG). Ninguno
+alcanzable hoy, salvo `rsa`:
+
+- **`rsa` 0.9** (media, Marvin): canal lateral de tiempo al descifrar o
+  firmar. Sin versión corregida; avisado en el README y en `crypto2_mod.rs`.
+  Afecta a `crypto2.rsa_decrypt` / `rsa_sign` en un servidor expuesto.
+- **`lopdf` 0.31** (alta): desbordamiento de pila al **leer** un PDF muy
+  anidado. Llega por `printpdf` 0.6, que solo lo usa para escribir; Orion lee
+  con el `lopdf` 0.42 directo. Para quitarlo hay que pasar a `printpdf` 0.12,
+  cuya API es otra: reescribir `pdf_layout.rs` (936 líneas). Encaja con la
+  entrada "PDF: la fuente la tiene que elegir quien escribe el documento".
+- **`quick-xml` 0.30 y 0.39**: solo en las dependencias de GUI de Linux
+  (wayland, zbus) y en tiempo de compilación.
+- **`rkyv` 0.7**: dependencia opcional de `rust_decimal` que no se compila.
+
+Repasar `cargo audit` antes de cada release.
+
+## JIT: los objetos del heap no se liberan
+
+Los números ya no van al heap y la aritmética va en línea (ver CHANGELOG):
+`bucle_int` pasó de 2,06 s y 1241 MB a 0,13 s y 12 MB. Queda:
+
+- **Los strings, listas, dicts e instancias nunca se liberan.** Un bucle que
+  construye strings o listas temporales sigue perdiendo memoria.
+
+Plan (cada paso se mide con `bench/jit/run_jit.ps1` contra el binario
+anterior en `orion-vm/target/base/`):
+
+1. ~~Valores inmediatos~~ (hecho, 2026-10-03).
+2. ~~Ruta rápida en línea~~ (hecho, 2026-10-04).
+3. ~~Valores vivos entre bloques~~ (hecho, 2026-10-04; el ternario ya
+   compila).
+4. **Liberar objetos del heap** (strings, listas): conteo de referencias o un
+   arena por llamada.
+
+Afecta a `jit/compiler.rs`, `jit/runtime.rs`, `jit/runtime_oop.rs`,
+`jit/bridge.rs` y al backend AOT (`--build`), que comparte el generador.
+
+## JIT: los builtins menos usados copian la lista y crean una VM
+
+`rt_call_builtin` (`jit/bridge.rs`) convierte todos los argumentos a `Value`,
+crea un `VM::new` por llamada y, si el builtin muta la lista, la vuelve a
+convertir entera reservando valores nuevos. `len`, `push`, `pop`, `first` y
+`last` ya van directos (`builtin_directo`); el resto (`sort`, `reverse`,
+`contains`, `slice`, `join`, `sum`...) sigue costando O(n) por llamada y
+dejando memoria sin liberar. Camino: llevarlos a `builtin_directo` según
+aparezcan en bucles calientes, y no crear una VM por llamada.
+
+## Una tarea `spawn` que falla no avisa a nadie
+
+Si la función lanzada con `spawn` (sin `await`) termina en error, el error
+se pierde: no se imprime ni llega a nadie. Con canales es peor: si el
+productor falla antes de `chan.cerrar`, el consumidor espera en
+`chan.recibir` para siempre y el programa se cuelga sin mensaje (pasó el
+2026-10-04 al depurar el paso de globales a las tareas). Camino: imprimir
+en stderr el error de una tarea que nadie espera, y que un canal cuyo
+productor muere se cierre con ese error.
+
+## `append(lista, x)` no se puede escribir
+
+`append` es palabra reservada (`append "ruta" with texto`), así que el
+builtin `append(xs, v)` da error de sintaxis aunque la VM y el JIT lo
+implementan. Solo funciona `xs.append(v)`. O se quita el builtin, o el parser
+acepta `append(` como llamada.
+
+## El intérprete busca cada variable por nombre
+
+`orion archivo.orx` usa el intérprete. Un bucle de 10 millones de sumas tarda
+4,5 s (`bench/jit/bucle_int.orx`, unos 45 ns por instrucción), frente a 1,7 s
+del JIT; CPython hace el mismo bucle en torno a 1 s (estimación, falta
+medirlo junto a los demás). Lo que queda en `vm.rs`:
+
+- Las variables locales viven en un `IndexMap` por nombre: cada `LoadVar` y
+  `StoreVar` calcula un hash del nombre, y `LoadVar` clona el `Value`.
+- Cada llamada crea un `IndexMap` nuevo para las locales y copia el nombre de
+  la función y de cada parámetro.
+- `Value` guarda `Dict(IndexMap)` sin `Rc`, así que es grande y cada push y
+  pop de la pila mueve muchos bytes.
+
+Camino: resolver las locales a índices de slot en `codegen`
+(`LoadLocal(u16)` / `StoreLocal(u16)` sobre un `Vec<Value>` del frame), con
+cuidado con lo que hoy lee `vars` por nombre (closures, `act` y
+`sync_to_instance`, el depurador, el REPL). Medir con `bench/jit/run_jit.ps1`
+contra el binario anterior (`target/base/`).
+
+Ya hecho (2026-10-03, ver CHANGELOG): cuerpos como `Arc<[Instruction]>`,
+despacho por referencia y lotes de instrucciones calientes. Desde el inicio:
+bucle de enteros 9,8 s → 4,5 s y `fib(30)` 5,8 s → 2,4 s (sesiones
+distintas, orientativo).
+
 ## Los tests de `browser_e2e` fallan al azar con el equipo cargado
 
 Con la batería completa, 1 a 3 tests distintos en cada pasada fallan por tiempo
 (`Page.navigate: no response within 30000 ms`) y pasan al ejecutarlos solos.
 Pasó al validar la v0.1.9: la batería tardó 341 s en vez de 160.
+
+El 2026-10-03 pasó en las tres baterías completas seguidas (1 o 2 tests,
+cada vez distintos, siempre `Page.navigate` a los 30 s): ya no es ocasional.
+El 2026-10-04 llegaron a 5 en una sola batería (344 s en vez de unos 160).
 
 Un test que falla al azar acaba ignorándose y entonces oculta un fallo real.
 Camino: menos navegadores a la vez por defecto, y plazos de los tests ligados al
@@ -222,14 +318,6 @@ línea de órdenes.
 
 Camino razonable: para multipart, escribir cada parte al temporal según va
 llegando, y no construir `body` como texto cuando el cuerpo es binario.
-
-## El ternario no compila a nativo
-
-`cond ? a : b` deja un valor en la pila al cruzar de bloque, y el JIT vacía
-la pila en cada frontera de bloque: una función con ternario cae al
-intérprete. `and` y `or` tenían el mismo problema al hacerlos cortocircuitar,
-y se resolvió pasando el resultado por una variable oculta (ver
-`codegen.rs`). El ternario puede usar el mismo truco.
 
 ## Dos módulos con el mismo nombre de archivo se pisan
 

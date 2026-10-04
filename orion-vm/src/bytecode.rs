@@ -1,4 +1,5 @@
 use std::fs;
+use std::sync::Arc;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use crate::instruction::Instruction;
@@ -10,9 +11,10 @@ const MAGIC: &[u8] = b"ORBC";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionDef {
     pub params: Vec<String>,
-    pub body: Vec<Instruction>,
+    /// `Arc` para que cada llamada comparta el cuerpo en vez de copiarlo.
+    pub body: Arc<[Instruction]>,
     #[serde(default)]
-    pub lines: Vec<u32>,
+    pub lines: Arc<[u32]>,
     /// Default de cada parámetro como mini-bytecode; `None` = obligatorio. Si el Vec
     /// es más corto que `params`, los que faltan son obligatorios (.orbc viejos).
     #[serde(default)]
@@ -32,9 +34,9 @@ pub struct FieldDef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActDef {
     pub params: Vec<String>,
-    pub body: Vec<Instruction>,
+    pub body: Arc<[Instruction]>,
     #[serde(default)]
-    pub lines: Vec<u32>,
+    pub lines: Arc<[u32]>,
 }
 
 /// Definición completa de un shape

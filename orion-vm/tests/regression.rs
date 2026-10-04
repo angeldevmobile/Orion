@@ -1066,3 +1066,25 @@ fn un_modulo_importado_no_ejecuta_su_main() {
 fn sin_main_no_cambia_nada() {
     assert_eq!(llamadas_a_main("show 1", true), 0);
 }
+
+#[test]
+fn un_error_a_mitad_de_un_bucle_llega_a_su_attempt() {
+    // El intérprete encadena instrucciones simples por lotes: el error de la
+    // vuelta 700 tiene que ir al attempt de esa vuelta y el bucle, seguir.
+    run_ok(r#"fn contar(n) {
+    fallos = 0
+    vueltas = 0
+    i = 0
+    while i < n {
+        attempt {
+            x = 10 / (i - 700)
+        } handle e {
+            fallos = fallos + 1
+        }
+        vueltas = vueltas + 1
+        i = i + 1
+    }
+    if fallos != 1 or vueltas != n { error "fallos=${fallos} vueltas=${vueltas}" }
+}
+contar(3000)"#);
+}

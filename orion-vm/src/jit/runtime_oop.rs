@@ -5,7 +5,8 @@ use std::cell::RefCell;
 use indexmap::IndexMap as HashMap;
 
 use super::runtime::{
-    alloc_val, cstr_to_str, string_to_cptr, val_to_display, val_ref,
+    fallar, nombre_tipo,
+    alloc_val, cstr_to_str, string_to_cptr, val_to_display, decode_val,
     ARG_BUF, TAG_BOOL, TAG_DICT, TAG_FLOAT, TAG_INT, TAG_LIST, TAG_NULL, TAG_STR,
 };
 
@@ -36,12 +37,12 @@ thread_local! {
 //     Helpers internos
 
 unsafe fn get_inst(val_ptr: i64) -> &'static OrionInstance {
-    let oval = val_ref(val_ptr);
+    let oval = decode_val(val_ptr);
     &*(oval.data_i as *const OrionInstance)
 }
 
 unsafe fn get_inst_mut(val_ptr: i64) -> &'static mut OrionInstance {
-    let oval = val_ref(val_ptr);
+    let oval = decode_val(val_ptr);
     &mut *(oval.data_i as *mut OrionInstance)
 }
 
@@ -71,7 +72,7 @@ unsafe fn call_act_ptr(fn_ptr: i64, args: &[i64]) -> i64 {
         6 => std::mem::transmute::<i64, F6>(fn_ptr)(args[0], args[1], args[2], args[3], args[4], args[5]),
         7 => std::mem::transmute::<i64, F7>(fn_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6]),
         8 => std::mem::transmute::<i64, F8>(fn_ptr)(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]),
-        _ => { eprintln!("[JIT] CallMethod: demasiados argumentos (max 8)"); std::process::exit(1) }
+        _ => { return fallar(format!("CallMethod: demasiados argumentos (max 8)")) }
     }
 }
 
@@ -156,17 +157,14 @@ pub extern "C" fn rt_create_instance_and_init(shape_name_ptr: i64, n_args: i64) 
 
         if let Some(fp) = fn_ptr {
             SELF_STACK.with(|ss| ss.borrow_mut().push(inst_ptr));
-            call_act_ptr(fp, &args);
+            let r = call_act_ptr(fp, &args);
             SELF_STACK.with(|ss| ss.borrow_mut().pop());
+            if r == 0 { return 0; }
         } else if !args.is_empty() {
             // Sin on_create: P(5) rellena los campos declarados en orden.
             let inst = get_inst_mut(inst_ptr);
             if args.len() > inst.fields.len() {
-                eprintln!(
-                    "[JIT] '{}' tiene {} campo(s), recibió {} argumento(s)",
-                    shape_name, inst.fields.len(), args.len()
-                );
-                std::process::exit(1);
+                return fallar(format!("'{}' tiene {} campo(s), recibió {} argumento(s)", shape_name, inst.fields.len(), args.len()))
             }
             for (slot, val) in inst.fields.iter_mut().zip(args) {
                 slot.1 = val;
@@ -182,7 +180,7 @@ pub extern "C" fn rt_create_instance_and_init(shape_name_ptr: i64, n_args: i64) 
 #[no_mangle]
 pub extern "C" fn rt_get_attr(obj: i64, name_ptr: i64) -> i64 {
     unsafe {
-        let oval = val_ref(obj);
+        let oval = decode_val(obj);
         match oval.tag {
             TAG_INSTANCE => {
                 let inst = get_inst(obj);
@@ -190,8 +188,7 @@ pub extern "C" fn rt_get_attr(obj: i64, name_ptr: i64) -> i64 {
                 for (k, v) in &inst.fields {
                     if k == name { return *v; }
                 }
-                eprintln!("[JIT] GetAttr '{}': campo no encontrado en '{}'", name, inst.shape_name);
-                std::process::exit(1)
+                return fallar(format!("GetAttr '{}': campo no encontrado en '{}'", name, inst.shape_name))
             }
             TAG_DICT => {
                 let entries = &*(oval.data_i as *const Vec<(String, i64)>);
@@ -199,12 +196,10 @@ pub extern "C" fn rt_get_attr(obj: i64, name_ptr: i64) -> i64 {
                 for (k, v) in entries {
                     if k == name { return *v; }
                 }
-                eprintln!("[JIT] GetAttr '{}': key not found in dict/module", name);
-                std::process::exit(1)
+                return fallar(format!("GetAttr '{}': key not found in dict/module", name))
             }
             _ => {
-                eprintln!("[JIT] GetAttr: not an instance or a dict (tag={})", oval.tag);
-                std::process::exit(1)
+                return fallar(format!("GetAttr: not an instance or a dict (tag={})", oval.tag))
             }
         }
     }
@@ -214,10 +209,10 @@ pub extern "C" fn rt_get_attr(obj: i64, name_ptr: i64) -> i64 {
 #[no_mangle]
 pub extern "C" fn rt_set_attr(obj: i64, name_ptr: i64, val: i64) {
     unsafe {
-        let oval = val_ref(obj);
+        let oval = decode_val(obj);
         if oval.tag != TAG_INSTANCE {
-            eprintln!("[JIT] SetAttr: not an instance (tag={})", oval.tag);
-            std::process::exit(1);
+            fallar(format!("SetAttr: cannot set an attribute on a value of type {}", nombre_tipo(&oval)));
+            return;
         }
         let inst = get_inst_mut(obj);
         let name = cstr_to_str(name_ptr).to_string();
@@ -234,7 +229,7 @@ pub extern "C" fn rt_set_attr(obj: i64, name_ptr: i64, val: i64) {
 #[no_mangle]
 pub extern "C" fn rt_is_instance(obj: i64, shape_name_ptr: i64) -> i64 {
     unsafe {
-        let oval = val_ref(obj);
+        let oval = decode_val(obj);
         if oval.tag != TAG_INSTANCE {
             return alloc_val(TAG_BOOL, 0, 0.0);
         }
@@ -297,15 +292,14 @@ pub extern "C" fn rt_call_method(obj: i64, name_ptr: i64, n_args: i64) -> i64 {
             let take = n.min(buf.len());
             buf.drain(..take).collect()
         });
-        let oval = val_ref(obj);
+        let oval = decode_val(obj);
         match oval.tag {
             TAG_STR      => call_method_str(oval.data_i, name_ptr, &args),
             TAG_LIST     => call_method_list(oval.data_i, name_ptr, &args),
             TAG_DICT     => call_method_dict(oval.data_i, name_ptr, &args),
             TAG_INSTANCE => call_method_instance(obj, name_ptr, &args),
             _ => {
-                eprintln!("[JIT] CallMethod: tipo no soportado (tag={})", oval.tag);
-                std::process::exit(1)
+                return fallar(format!("CallMethod: tipo no soportado (tag={})", oval.tag))
             }
         }
     }
@@ -326,19 +320,19 @@ unsafe fn call_method_str(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         "upper"      => alloc_val(TAG_STR, string_to_cptr(s.to_uppercase()), 0.0),
         "reverse"    => alloc_val(TAG_STR, string_to_cptr(s.chars().rev().collect()), 0.0),
         "contains" => {
-            let needle = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
+            let needle = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
             alloc_val(TAG_BOOL, if s.contains(&needle as &str) { 1 } else { 0 }, 0.0)
         }
         "starts_with" => {
-            let prefix = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
+            let prefix = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
             alloc_val(TAG_BOOL, if s.starts_with(&prefix as &str) { 1 } else { 0 }, 0.0)
         }
         "ends_with" => {
-            let suffix = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
+            let suffix = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
             alloc_val(TAG_BOOL, if s.ends_with(&suffix as &str) { 1 } else { 0 }, 0.0)
         }
         "split" => {
-            let sep = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
+            let sep = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
             let parts: Vec<i64> = s.split(&sep as &str)
                 .map(|p| alloc_val(TAG_STR, string_to_cptr(p.to_string()), 0.0))
                 .collect();
@@ -346,22 +340,22 @@ unsafe fn call_method_str(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             alloc_val(TAG_LIST, raw, 0.0)
         }
         "replace" => {
-            let from = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
-            let to   = args.get(1).map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
+            let from = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
+            let to   = args.get(1).map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
             alloc_val(TAG_STR, string_to_cptr(s.replace(&from as &str, &to)), 0.0)
         }
         "repeat" => {
-            let n = args.first().map(|&p| { let v = val_ref(p); if v.tag == TAG_INT { v.data_i as usize } else { 1 } }).unwrap_or(1);
+            let n = args.first().map(|&p| { let v = decode_val(p); if v.tag == TAG_INT { v.data_i as usize } else { 1 } }).unwrap_or(1);
             alloc_val(TAG_STR, string_to_cptr(s.repeat(n)), 0.0)
         }
         "slice" => {
-            let start = args.first().map(|&p| { let v = val_ref(p); if v.tag == TAG_INT { v.data_i as usize } else { 0 } }).unwrap_or(0);
-            let end   = args.get(1).map(|&p| { let v = val_ref(p); if v.tag == TAG_INT { v.data_i as usize } else { s.chars().count() } }).unwrap_or(s.chars().count());
+            let start = args.first().map(|&p| { let v = decode_val(p); if v.tag == TAG_INT { v.data_i as usize } else { 0 } }).unwrap_or(0);
+            let end   = args.get(1).map(|&p| { let v = decode_val(p); if v.tag == TAG_INT { v.data_i as usize } else { s.chars().count() } }).unwrap_or(s.chars().count());
             let sliced: String = s.chars().skip(start).take(end.saturating_sub(start)).collect();
             alloc_val(TAG_STR, string_to_cptr(sliced), 0.0)
         }
         "index_of" | "find" => {
-            let needle = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
+            let needle = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
             let idx = s.find(&needle as &str).map(|i| i as i64).unwrap_or(-1);
             alloc_val(TAG_INT, idx, 0.0)
         }
@@ -372,8 +366,7 @@ unsafe fn call_method_str(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             alloc_val(TAG_FLOAT, 0, s.trim().parse::<f64>().unwrap_or(0.0))
         }
         _ => {
-            eprintln!("[JIT] String has no method '{}'", name);
-            std::process::exit(1)
+            return fallar(format!("String has no method '{}'", name))
         }
     }
 }
@@ -399,23 +392,23 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         }
         "contains" => {
             if let Some(&item_ptr) = args.first() {
-                let target = val_to_display(val_ref(item_ptr));
-                let found = items.iter().any(|&p| val_to_display(val_ref(p)) == target);
+                let target = val_to_display(&decode_val(item_ptr));
+                let found = items.iter().any(|&p| val_to_display(&decode_val(p)) == target);
                 alloc_val(TAG_BOOL, if found { 1 } else { 0 }, 0.0)
             } else {
                 alloc_val(TAG_BOOL, 0, 0.0)
             }
         }
         "join" => {
-            let sep = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
-            let joined = items.iter().map(|&p| val_to_display(val_ref(p))).collect::<Vec<_>>().join(&sep);
+            let sep = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
+            let joined = items.iter().map(|&p| val_to_display(&decode_val(p))).collect::<Vec<_>>().join(&sep);
             alloc_val(TAG_STR, string_to_cptr(joined), 0.0)
         }
         "sum" => {
             let mut total = 0.0f64;
             let mut is_int = true;
             for &p in items.iter() {
-                let v = val_ref(p);
+                let v = decode_val(p);
                 match v.tag {
                     TAG_INT   => total += v.data_i as f64,
                     TAG_FLOAT => { total += v.data_f; is_int = false; }
@@ -427,7 +420,7 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         }
         "sort" => {
             items.sort_by(|&a, &b| {
-                let av = val_ref(a); let bv = val_ref(b);
+                let av = decode_val(a); let bv = decode_val(b);
                 match (av.tag, bv.tag) {
                     (TAG_INT, TAG_INT)     => av.data_i.cmp(&bv.data_i),
                     (TAG_FLOAT, TAG_FLOAT) => av.data_f.partial_cmp(&bv.data_f).unwrap_or(std::cmp::Ordering::Equal),
@@ -439,7 +432,7 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         }
         "min" => {
             items.iter().copied().reduce(|a, b| {
-                let av = val_ref(a); let bv = val_ref(b);
+                let av = decode_val(a); let bv = decode_val(b);
                 match (av.tag, bv.tag) {
                     (TAG_INT, TAG_INT) => if av.data_i <= bv.data_i { a } else { b },
                     _ => a,
@@ -448,7 +441,7 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         }
         "max" => {
             items.iter().copied().reduce(|a, b| {
-                let av = val_ref(a); let bv = val_ref(b);
+                let av = decode_val(a); let bv = decode_val(b);
                 match (av.tag, bv.tag) {
                     (TAG_INT, TAG_INT) => if av.data_i >= bv.data_i { a } else { b },
                     _ => a,
@@ -458,7 +451,7 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
         "pop" => {
             items.pop().unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }
-        _ => { eprintln!("[JIT] List has no method '{}'", name); std::process::exit(1) }
+        _ => { return fallar(format!("List has no method '{}'", name)) }
     }
 }
 
@@ -470,21 +463,21 @@ unsafe fn call_method_dict(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
     let name    = cstr_to_str(name_ptr);
 
     if let Some((_, marker)) = entries.iter().find(|(k, _)| k == "__native_module__") {
-        let mod_name = val_to_display(val_ref(*marker));
+        let mod_name = val_to_display(&decode_val(*marker));
         let vm_args: Vec<crate::value::Value> = args.iter().map(|&p| orion_to_value(p)).collect();
         let eval_args: Vec<crate::eval_value::EvalValue> =
             vm_args.into_iter().map(crate::vm::value_to_eval).collect();
         return match crate::modules::call(&mod_name, name, eval_args) {
             Ok(ev) => value_to_orion(&crate::vm::eval_to_value(ev)),
-            Err(e) => { eprintln!("[JIT] {}.{}: {}", mod_name, name, e); std::process::exit(1) }
+            Err(e) => { return fallar(format!("{}.{}: {}", mod_name, name, e)) }
         };
     }
 
     // Una función definida en el dict (namespace de paquete `.orx`) tiene
     // prioridad sobre los métodos nativos de dict del mismo nombre.
     if let Some((_, v)) = entries.iter().find(|(k, _)| k == name) {
-        if val_ref(*v).tag == TAG_VMFN {
-            return call_vmfn(val_ref(*v).data_i, args);
+        if decode_val(*v).tag == TAG_VMFN {
+            return call_vmfn(decode_val(*v).data_i, args);
         }
     }
 
@@ -504,16 +497,16 @@ unsafe fn call_method_dict(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             alloc_val(TAG_LIST, raw, 0.0)
         }
         "contains" | "has_key" => {
-            let key = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
+            let key = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
             let found = entries.iter().any(|(k, _)| k == &key);
             alloc_val(TAG_BOOL, if found { 1 } else { 0 }, 0.0)
         }
         "get" => {
-            let key = args.first().map(|&p| val_to_display(val_ref(p))).unwrap_or_default();
+            let key = args.first().map(|&p| val_to_display(&decode_val(p))).unwrap_or_default();
             entries.iter().find(|(k, _)| k == &key).map(|(_, v)| *v)
                 .unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }
-        _ => { eprintln!("[JIT] Dict has no method '{}'", name); std::process::exit(1) }
+        _ => { return fallar(format!("Dict has no method '{}'", name)) }
     }
 }
 
@@ -532,8 +525,7 @@ unsafe fn call_method_instance(obj: i64, name_ptr: i64, args: &[i64]) -> i64 {
             result
         }
         None => {
-            eprintln!("[JIT] Método '{}' no encontrado en '{}'", method, inst.shape_name);
-            std::process::exit(1)
+            return fallar(format!("Método '{}' no encontrado en '{}'", method, inst.shape_name))
         }
     }
 }

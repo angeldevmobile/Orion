@@ -13,7 +13,7 @@ use crate::value::Value;
 use crate::vm::VM;
 
 use super::runtime::{
-    alloc_val, cstr_to_str, string_to_cptr, val_ref, OrionVal, TAG_BOOL, TAG_DICT, TAG_FLOAT,
+    alloc_val, fallar, cstr_to_str, string_to_cptr, decode_val, OrionVal, TAG_BOOL, TAG_DICT, TAG_FLOAT,
     TAG_INT, TAG_LIST, TAG_NULL, TAG_STR,
 };
 
@@ -38,16 +38,17 @@ pub fn load_orx_module_jit(path: &str) -> i64 {
     use crate::lexer::lex;
     use crate::parser::parse;
 
-    let fail = |msg: String| -> ! {
-        eprintln!("[JIT] {}", msg);
-        std::process::exit(1)
+    let src = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => return fallar(format!("Could not read '{}': {}", path, e)),
     };
-
-    let src = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| fail(format!("Could not read '{}': {}", path, e)));
-    let tokens = lex(&src).unwrap_or_else(|e| fail(format!("lex '{}': {:?}", path, e)));
-    let ast = parse(tokens).unwrap_or_else(|e| fail(format!("parse '{}': {:?}", path, e)));
-    let bc = compile(ast).unwrap_or_else(|e| fail(format!("compile '{}': {:?}", path, e)));
+    let bc = match lex(&src).map_err(|e| format!("lex '{}': {:?}", path, e))
+        .and_then(|t| parse(t).map_err(|e| format!("parse '{}': {:?}", path, e)))
+        .and_then(|a| compile(a).map_err(|e| format!("compile '{}': {:?}", path, e)))
+    {
+        Ok(bc) => bc,
+        Err(e) => return fallar(e),
+    };
 
     let sub_vm = VM::new(
         bc.main.clone(),
@@ -88,14 +89,10 @@ pub fn make_vmfn(ctx: &Rc<ModuleCtx>, fn_name: &str) -> i64 {
 /// Invoca una función de módulo (marcador TAG_VMFN) con los args dados (OrionVal*).
 /// Devuelve el resultado convertido a OrionVal.
 pub fn call_vmfn(idx: i64, args: &[i64]) -> i64 {
-    let (ctx, fn_name) = VM_FN_REFS.with(|r| {
-        let v = r.borrow();
-        v.get(idx as usize).cloned()
-    })
-    .unwrap_or_else(|| {
-        eprintln!("[JIT] referencia a función de módulo inválida ({})", idx);
-        std::process::exit(1)
-    });
+    let (ctx, fn_name) = match VM_FN_REFS.with(|r| r.borrow().get(idx as usize).cloned()) {
+        Some(r) => r,
+        None => return fallar(format!("JIT: invalid module function reference ({})", idx)),
+    };
 
     let vm_args: Vec<Value> = args.iter().map(|&p| orion_to_value(p)).collect();
 
@@ -107,10 +104,7 @@ pub fn call_vmfn(idx: i64, args: &[i64]) -> i64 {
         vm_args,
     ) {
         Ok(v) => value_to_orion(&v),
-        Err(e) => {
-            eprintln!("[JIT] error ejecutando '{}': {}", fn_name, e);
-            std::process::exit(1)
-        }
+        Err(e) => fallar(e),
     }
 }
 
@@ -118,7 +112,7 @@ pub fn call_vmfn(idx: i64, args: &[i64]) -> i64 {
 
 pub fn orion_to_value(ptr: i64) -> Value {
     unsafe {
-        let v: &OrionVal = val_ref(ptr);
+        let v: &OrionVal = &decode_val(ptr);
         match v.tag {
             TAG_NULL => Value::Null,
             TAG_INT => Value::Int(v.data_i),
@@ -133,13 +127,13 @@ pub fn orion_to_value(ptr: i64) -> Value {
                 let entries = &*(v.data_i as *const Vec<(String, i64)>);
 
                 if let Some((_, marca)) = entries.iter().find(|(k, _)| k == "__native_module__") {
-                    return Value::Module(crate::jit::runtime::val_to_display(val_ref(*marca)));
+                    return Value::Module(crate::jit::runtime::val_to_display(&decode_val(*marca)));
                 }
 
                 let mut map: IndexMap<String, Value> = IndexMap::new();
                 for (k, p) in entries {
                     // Las funciones de módulo (TAG_VMFN) no se convierten a Value.
-                    if val_ref(*p).tag == TAG_VMFN {
+                    if decode_val(*p).tag == TAG_VMFN {
                         continue;
                     }
                     map.insert(k.clone(), orion_to_value(*p));
@@ -201,11 +195,48 @@ fn mutates_first_arg(name: &str) -> bool {
     matches!(name, "push" | "append" | "pop" | "reverse" | "sort")
 }
 
+/// Builtins de lista sobre el `Vec` del JIT, sin copiarlo a la VM (eso hacía
+/// cada `push` O(n)). Misma semántica que `VM::call_builtin`.
+fn builtin_directo(name: &str, args: &[i64]) -> Option<i64> {
+    let primero = *args.first()?;
+    let v = unsafe { decode_val(primero) };
+    let null = || alloc_val(TAG_NULL, 0, 0.0);
+    match (v.tag, name, args.len()) {
+        (TAG_STR, "len", 1) => {
+            let n = unsafe { cstr_to_str(v.data_i) }.len();
+            Some(alloc_val(TAG_INT, n as i64, 0.0))
+        }
+        (TAG_DICT, "len", 1) => {
+            let n = unsafe { &*(v.data_i as *const Vec<(String, i64)>) }.len();
+            Some(alloc_val(TAG_INT, n as i64, 0.0))
+        }
+        (TAG_LIST, _, _) => {
+            let items = unsafe { &mut *(v.data_i as *mut Vec<i64>) };
+            match (name, args.len()) {
+                ("len", 1) => Some(alloc_val(TAG_INT, items.len() as i64, 0.0)),
+                ("push" | "append", 2) => { items.push(args[1]); Some(primero) }
+                // Como la VM: devuelve [elemento, lista].
+                ("pop", 1) => {
+                    let item = items.pop().unwrap_or_else(null);
+                    let par = Box::into_raw(Box::new(vec![item, primero])) as i64;
+                    Some(alloc_val(TAG_LIST, par, 0.0))
+                }
+                ("first", 1) => Some(items.first().copied().unwrap_or_else(null)),
+                ("last", 1) => Some(items.last().copied().unwrap_or_else(null)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn rt_call_builtin(name_ptr: i64, argc: i64) -> i64 {
-    let name = unsafe { cstr_to_str(name_ptr) }.to_string();
+    let name = unsafe { cstr_to_str(name_ptr) };
     let argc = argc as usize;
     let arg_ptrs = super::runtime::drain_arg_buf(argc);
+    if let Some(r) = builtin_directo(name, &arg_ptrs) { return r; }
+    let name = name.to_string();
     let vm_args: Vec<Value> = arg_ptrs.iter().map(|&p| orion_to_value(p)).collect();
 
     let list_handle: Option<Value> = if mutates_first_arg(&name) {
@@ -230,7 +261,7 @@ pub extern "C" fn rt_call_builtin(name_ptr: i64, argc: i64) -> i64 {
     if let Some(Value::List(rc)) = list_handle {
         let first_ptr = arg_ptrs[0];
         unsafe {
-            let ov = val_ref(first_ptr);
+            let ov = decode_val(first_ptr);
             if ov.tag == TAG_LIST {
                 let new_elems: Vec<i64> = rc.borrow().iter().map(value_to_orion).collect();
                 *(ov.data_i as *mut Vec<i64>) = new_elems;
@@ -241,9 +272,6 @@ pub extern "C" fn rt_call_builtin(name_ptr: i64, argc: i64) -> i64 {
     match result {
         Ok(Some(v)) => value_to_orion(&v),
         Ok(None) => alloc_val(TAG_NULL, 0, 0.0),
-        Err(e) => {
-            eprintln!("[JIT] builtin '{}': {}", name, e);
-            std::process::exit(1)
-        }
+        Err(e) => fallar(e),
     }
 }

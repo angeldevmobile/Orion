@@ -1,5 +1,6 @@
-//! Bytecode → Cranelift (JIT y AOT). Los valores son punteros a OrionVal (i64)
-//! y cada operación llama a una función del runtime (rt_add, rt_eq…).
+//! Bytecode → Cranelift (JIT y AOT). Los valores son i64 con la codificación de
+//! `runtime::alloc_val`: la aritmética y las comparaciones entre enteros o
+//! decimales van en línea (módulo `inline`); el resto llama al runtime.
 
 use std::collections::HashSet;
 use indexmap::IndexMap as HashMap;
@@ -21,8 +22,6 @@ struct RuntimeIds {
     // Constructores escalares
     make_null:       FuncId,
     make_int:        FuncId,
-    make_float_bits: FuncId,
-    make_bool:       FuncId,
     make_str:        FuncId,
     // Colecciones — JIT-2
     push_arg:        FuncId,
@@ -34,6 +33,7 @@ struct RuntimeIds {
     set_error:       FuncId,
     take_error:      FuncId,
     raise_exit:      FuncId,
+    error_pending:   FuncId,
     // I/O nativo — JIT-4
     read_input:         FuncId,
     read_input_choices: FuncId,
@@ -106,6 +106,30 @@ fn find_block_starts(instructions: &[Instruction]) -> HashSet<usize> {
 }
 
 //     Elegibilidad                                                             
+
+/// Nombres propios de un cuerpo: parámetros, campos (en un act) y lo que asigna.
+fn locales_de(instructions: &[Instruction], params: &[String], fields: &[String]) -> HashSet<String> {
+    instructions.iter()
+        .filter_map(|i| match i {
+            Instruction::StoreVar(n) | Instruction::StoreConst(n) => Some(n.clone()),
+            Instruction::UseModule(_, alias, _) => Some(alias.clone()),
+            _ => None,
+        })
+        .chain(params.iter().cloned())
+        .chain(fields.iter().cloned())
+        .collect()
+}
+
+/// Lo que un cuerpo lee sin ser suyo: lo busca en la tabla de globales.
+fn globales_leidas(instructions: &[Instruction], params: &[String], fields: &[String]) -> Vec<String> {
+    let locales = locales_de(instructions, params, fields);
+    instructions.iter()
+        .filter_map(|i| match i {
+            Instruction::LoadVar(n) if !locales.contains(n) => Some(n.clone()),
+            _ => None,
+        })
+        .collect()
+}
 
 fn is_eligible(instr: &Instruction) -> bool {
     matches!(
@@ -191,6 +215,9 @@ pub struct CodeGen<M: Module> {
     /// Si se emite a un objeto en vez de a memoria ejecutable.
     aot:            bool,
     rt:             Option<RuntimeIds>,
+    /// Variables de main que alguna función o act lee: solo esas se copian
+    /// a la tabla de globales; las demás viven en registros.
+    publicadas:     HashSet<String>,
 }
 
 /// El compilador JIT es el generador sobre el backend en memoria.
@@ -240,8 +267,6 @@ impl CodeGen<JITModule> {
         }
         sym!("rt_make_null",       super::runtime::rt_make_null);
         sym!("rt_make_int",        super::runtime::rt_make_int);
-        sym!("rt_make_float_bits", super::runtime::rt_make_float_bits);
-        sym!("rt_make_bool",       super::runtime::rt_make_bool);
         sym!("rt_make_str",        super::runtime::rt_make_str);
         sym!("rt_push_arg",        super::runtime::rt_push_arg);
         sym!("rt_make_list_n",     super::runtime::rt_make_list_n);
@@ -250,6 +275,7 @@ impl CodeGen<JITModule> {
         sym!("rt_set_index",       super::runtime::rt_set_index);
         sym!("rt_set_error",           super::runtime::rt_set_error);
         sym!("rt_take_error",          super::runtime::rt_take_error);
+        sym!("rt_error_pending",       super::runtime::rt_error_pending);
         sym!("rt_raise_exit",          super::runtime::rt_raise_exit);
         sym!("rt_read_input",              super::runtime::rt_read_input);
         sym!("rt_read_input_choices",      super::runtime::rt_read_input_choices);
@@ -296,7 +322,7 @@ impl CodeGen<JITModule> {
         Ok(CodeGen {
             module, fn_counter: 0, fn_cache: HashMap::new(),
             string_storage: Vec::new(), str_data: HashMap::new(),
-            aot: false, rt: None,
+            aot: false, rt: None, publicadas: HashSet::new(),
         })
     }
 
@@ -338,7 +364,7 @@ impl<M: Module> CodeGen<M> {
         CodeGen {
             module, fn_counter: 0, fn_cache: HashMap::new(),
             string_storage: Vec::new(), str_data: HashMap::new(),
-            aot: true, rt: None,
+            aot: true, rt: None, publicadas: HashSet::new(),
         }
     }
 
@@ -419,8 +445,6 @@ impl<M: Module> CodeGen<M> {
 
         let make_null       = decl!("rt_make_null",       [],          [i]);
         let make_int        = decl!("rt_make_int",        [i],         [i]);
-        let make_float_bits = decl!("rt_make_float_bits", [i],         [i]);
-        let make_bool       = decl!("rt_make_bool",       [i],         [i]);
         let make_str        = decl!("rt_make_str",        [i],         [i]);
         let push_arg        = decl!("rt_push_arg",        [i],         []);
         let make_list_n     = decl!("rt_make_list_n",     [i],         [i]);
@@ -430,6 +454,7 @@ impl<M: Module> CodeGen<M> {
         let set_error          = decl!("rt_set_error",          [i],         []);
         let take_error         = decl!("rt_take_error",         [],          [i]);
         let raise_exit         = decl!("rt_raise_exit",         [i],         []);
+        let error_pending      = decl!("rt_error_pending",      [],          [i]);
         let read_input         = decl!("rt_read_input",              [i, i],    [i]);
         let read_input_choices = decl!("rt_read_input_choices",      [i, i, i], [i]);
         let read_file          = decl!("rt_read_file",               [i, i],    [i]);
@@ -474,9 +499,9 @@ impl<M: Module> CodeGen<M> {
         let not             = decl!("rt_not",             [i],         [i]);
 
         self.rt = Some(RuntimeIds {
-            make_null, make_int, make_float_bits, make_bool, make_str,
+            make_null, make_int, make_str,
             push_arg, make_list_n, make_dict_n, get_index, set_index,
-            set_error, take_error, raise_exit,
+            set_error, take_error, raise_exit, error_pending,
             read_input, read_input_choices, read_file, write_file, read_env, use_module,
             store_global, load_global,
             create_instance, get_attr, set_attr, is_instance,
@@ -520,7 +545,7 @@ impl<M: Module> CodeGen<M> {
             if !eligible(instr) { return Ok(None); }
         }
         for fdef in bc.functions.values() {
-            for instr in &fdef.body {
+            for instr in fdef.body.iter() {
                 if !eligible(instr) { return Ok(None); }
             }
         }
@@ -575,7 +600,7 @@ impl<M: Module> CodeGen<M> {
                 self.fn_cache.insert(jit_name.clone(), fid);
                 act_entries.push(ActEntry {
                     jit_name, shape: sname.clone(), act: "on_create".to_string(),
-                    params: oc.params.clone(), body: oc.body.clone(),
+                    params: oc.params.clone(), body: oc.body.to_vec(),
                 });
             }
             // acts regulares
@@ -589,7 +614,7 @@ impl<M: Module> CodeGen<M> {
                 self.fn_cache.insert(jit_name.clone(), fid);
                 act_entries.push(ActEntry {
                     jit_name, shape: sname.clone(), act: aname.clone(),
-                    params: adef.params.clone(), body: adef.body.clone(),
+                    params: adef.params.clone(), body: adef.body.to_vec(),
                 });
             }
             let _ = field_names; // usado más abajo en fill_act_body
@@ -601,6 +626,15 @@ impl<M: Module> CodeGen<M> {
         let main_sig = self.module.make_signature();
         let main_id = self.module.declare_function(&main_name, Linkage::Local, &main_sig)
             .map_err(|e| e.to_string())?;
+
+        self.publicadas = bc.functions.values()
+            .flat_map(|f| globales_leidas(&f.body, &f.params, &[]))
+            .chain(act_entries.iter().flat_map(|e| {
+                let fields: Vec<String> = bc.shapes[&e.shape]
+                    .fields.iter().map(|f| f.name.clone()).collect();
+                globales_leidas(&e.body, &e.params, &fields)
+            }))
+            .collect();
 
         // 4. Definir cuerpos de funciones de usuario
         for name in &fn_names {
@@ -689,8 +723,6 @@ impl<M: Module> CodeGen<M> {
         // Declarar todas las func-refs ANTES de crear el builder
         let make_null_ref   = self.module.declare_func_in_func(rt.make_null,       &mut ctx.func);
         let make_int_ref    = self.module.declare_func_in_func(rt.make_int,        &mut ctx.func);
-        let make_fbits_ref  = self.module.declare_func_in_func(rt.make_float_bits, &mut ctx.func);
-        let make_bool_ref   = self.module.declare_func_in_func(rt.make_bool,       &mut ctx.func);
         let make_str_ref    = self.module.declare_func_in_func(rt.make_str,        &mut ctx.func);
         let push_arg_ref    = self.module.declare_func_in_func(rt.push_arg,        &mut ctx.func);
         let make_list_n_ref = self.module.declare_func_in_func(rt.make_list_n,     &mut ctx.func);
@@ -700,6 +732,7 @@ impl<M: Module> CodeGen<M> {
         let set_error_ref          = self.module.declare_func_in_func(rt.set_error,          &mut ctx.func);
         let take_error_ref         = self.module.declare_func_in_func(rt.take_error,         &mut ctx.func);
         let raise_exit_ref         = self.module.declare_func_in_func(rt.raise_exit,         &mut ctx.func);
+        let error_pending_ref      = self.module.declare_func_in_func(rt.error_pending,      &mut ctx.func);
         let read_input_ref         = self.module.declare_func_in_func(rt.read_input,         &mut ctx.func);
         let read_input_choices_ref = self.module.declare_func_in_func(rt.read_input_choices, &mut ctx.func);
         let read_file_ref          = self.module.declare_func_in_func(rt.read_file,          &mut ctx.func);
@@ -777,15 +810,7 @@ impl<M: Module> CodeGen<M> {
             if !var_names.contains(p) { var_names.push(p.clone()); }
         }
 
-        let locales: HashSet<String> = instructions.iter()
-            .filter_map(|i| match i {
-                Instruction::StoreVar(n) | Instruction::StoreConst(n) => Some(n.clone()),
-                Instruction::UseModule(_, alias, _) => Some(alias.clone()),
-                _ => None,
-            })
-            .chain(params.iter().cloned())
-            .chain(field_names.unwrap_or(&[]).iter().cloned())
-            .collect();
+        let locales = locales_de(instructions, params, field_names.unwrap_or(&[]));
 
         // Declarar variables Cranelift (todas i64 = puntero a OrionVal)
         let mut var_table: HashMap<String, Variable> = HashMap::new();
@@ -797,16 +822,13 @@ impl<M: Module> CodeGen<M> {
 
         // Puntos de llegada de `and`/`or`: el valor llega por dos caminos, así
         // que va en una variable de Cranelift por punto y no en la pila.
-        let mut cruces: HashMap<usize, Variable> = HashMap::new();
-        for instr in instructions {
-            if let Instruction::JumpIfFalseOrPop(t) | Instruction::JumpIfTrueOrPop(t) = instr {
-                if !cruces.contains_key(t) {
-                    let v = Variable::from_u32((var_names.len() + cruces.len()) as u32);
-                    builder.declare_var(v, types::I64);
-                    cruces.insert(*t, v);
-                }
-            }
-        }
+        // Valores vivos al cruzar de bloque (ternario, `and`/`or`, una suma con
+        // un operando ya en la pila...): una variable por posición de la pila,
+        // y Cranelift construye los phi. `profundidad` es la pila con que se
+        // llega a cada bloque.
+        let base_slots = var_names.len() as u32;
+        let mut slots_declarados: u32 = 0;
+        let mut profundidad: HashMap<usize, usize> = HashMap::new();
 
         // Bloque de entrada
         let entry_block = block_map[&0];
@@ -859,6 +881,33 @@ impl<M: Module> CodeGen<M> {
         // Stack de handlers en tiempo de compilación: bloque Cranelift del handler activo
         let mut handler_stack: Vec<cranelift_codegen::ir::Block> = Vec::new();
 
+        // Bloque al que salta un error sin `handle` en esta función: sale con 0
+        // (en main, lo imprime y termina). Se crea al primer uso.
+        let mut propagar: Option<cranelift_codegen::ir::Block> = None;
+
+        // Tras una llamada que puede fallar: el runtime devuelve 0 si dejó un
+        // error pendiente, y entonces se salta al `handle` activo o a `propagar`.
+        macro_rules! check {
+            ($v:expr) => {{
+                let destino = match handler_stack.last() {
+                    Some(&h) => h,
+                    None => *propagar.get_or_insert_with(|| builder.create_block()),
+                };
+                let sigue = builder.create_block();
+                builder.ins().brif($v, sigue, &[], destino, &[]);
+                builder.switch_to_block(sigue);
+            }};
+        }
+        // Lo mismo para las llamadas que no devuelven valor.
+        macro_rules! check_pending {
+            () => {{
+                let c = builder.ins().call(error_pending_ref, &[]);
+                let hay = builder.inst_results(c)[0];
+                let ok = builder.ins().icmp_imm(cranelift_codegen::ir::condcodes::IntCC::Equal, hay, 0);
+                check!(ok);
+            }};
+        }
+
         // Macro para llamadas binarias frecuentes
         macro_rules! binop {
             ($fref:expr) => {{
@@ -866,6 +915,72 @@ impl<M: Module> CodeGen<M> {
                 let a = stack.pop().ok_or(concat!(stringify!($fref), ": pila vacía"))?;
                 let call = builder.ins().call($fref, &[a, b]);
                 stack.push(builder.inst_results(call)[0]);
+            }};
+        }
+        macro_rules! binop_check {
+            ($fref:expr) => {{
+                binop!($fref);
+                let r = *stack.last().unwrap();
+                check!(r);
+            }};
+        }
+        // Operación binaria con ruta rápida: enteros de 48 bits, decimales, y si
+        // no aplica (otros tipos, desbordamiento, divisor 0) el runtime.
+        macro_rules! fast_binop {
+            ($slow:expr, $int:expr, $flt:expr) => {{
+                let (int_op, flt_op): (inline::Op, inline::Op) = ($int, $flt);
+                let b = stack.pop().ok_or("fast_binop: pila vacía")?;
+                let a = stack.pop().ok_or("fast_binop: pila vacía")?;
+                let merge = builder.create_block();
+                builder.append_block_param(merge, types::I64);
+                let int_blk = builder.create_block();
+                let no_int = builder.create_block();
+                let flt_blk = builder.create_block();
+                let slow = builder.create_block();
+
+                let c = inline::both_int(&mut builder, a, b);
+                builder.ins().brif(c, int_blk, &[], no_int, &[]);
+                builder.switch_to_block(int_blk);
+                let (r, ok) = int_op(&mut builder, a, b);
+                builder.ins().brif(ok, merge, &[r], slow, &[]);
+
+                builder.switch_to_block(no_int);
+                let c = inline::both_double(&mut builder, a, b);
+                builder.ins().brif(c, flt_blk, &[], slow, &[]);
+                builder.switch_to_block(flt_blk);
+                let (r, ok) = flt_op(&mut builder, a, b);
+                builder.ins().brif(ok, merge, &[r], slow, &[]);
+
+                builder.switch_to_block(slow);
+                let call = builder.ins().call($slow, &[a, b]);
+                let r = builder.inst_results(call)[0];
+                check!(r);
+                builder.ins().jump(merge, &[r]);
+
+                builder.switch_to_block(merge);
+                stack.push(builder.block_params(merge)[0]);
+            }};
+        }
+        // Condición de un salto: `true`/`false`/`null` se deciden en línea.
+        macro_rules! branch_on {
+            ($val:expr, $si:expr, $no:expr) => {{
+                let v = $val;
+                let resto = builder.create_block();
+                let lento = builder.create_block();
+                let es_true = builder.ins().icmp_imm(
+                    cranelift_codegen::ir::condcodes::IntCC::Equal, v, super::runtime::VAL_TRUE);
+                builder.ins().brif(es_true, $si, &[], resto, &[]);
+                builder.switch_to_block(resto);
+                let es_false = builder.ins().icmp_imm(
+                    cranelift_codegen::ir::condcodes::IntCC::Equal, v, super::runtime::VAL_FALSE);
+                let es_null = builder.ins().icmp_imm(
+                    cranelift_codegen::ir::condcodes::IntCC::Equal, v, super::runtime::VAL_NULL);
+                let falso = builder.ins().bor(es_false, es_null);
+                builder.ins().brif(falso, $no, &[], lento, &[]);
+                builder.switch_to_block(lento);
+                let cond_call = builder.ins().call(is_truthy_ref, &[v]);
+                let cond = builder.inst_results(cond_call)[0];
+                builder.ins().brif(cond, $si, &[], $no, &[]);
             }};
         }
         macro_rules! unop {
@@ -876,35 +991,57 @@ impl<M: Module> CodeGen<M> {
             }};
         }
 
+        macro_rules! slot {
+            ($k:expr) => {{
+                let k = $k as u32;
+                while slots_declarados <= k {
+                    builder.declare_var(Variable::from_u32(base_slots + slots_declarados), types::I64);
+                    slots_declarados += 1;
+                }
+                Variable::from_u32(base_slots + k)
+            }};
+        }
+        // Antes de saltar al bloque de la instrucción `$t`: deja la pila en las
+        // variables de posición. Dos llegadas con pilas distintas no se pueden
+        // unir: el programa va entero al intérprete.
+        macro_rules! salir {
+            ($t:expr) => {{
+                let t: usize = $t;
+                let d = stack.len();
+                match profundidad.get(&t) {
+                    Some(&e) if e != d => return Err(format!(
+                        "JIT: el bloque {t} recibe pilas de {e} y de {d} valores")),
+                    Some(_) => {}
+                    None => { profundidad.insert(t, d); }
+                }
+                for k in 0..d {
+                    let v = stack[k];
+                    let var = slot!(k);
+                    builder.def_var(var, v);
+                }
+            }};
+        }
+
         for (i, instr) in instructions.iter().enumerate() {
             // Cambio de bloque básico
             if i > 0 && block_starts.contains(&i) {
-                if !terminated && !stack.is_empty() {
-                    // La derecha de un `and`/`or` llega a su punto de llegada
-                    // con su resultado: va por la variable de ese punto.
-                    match cruces.get(&i) {
-                        Some(&var) if stack.len() == 1 => {
-                            let v = stack.pop().unwrap();
-                            builder.def_var(var, v);
-                        }
-                        _ => return Err(format!(
-                            "valores vivos al cruzar el bloque en la instrucción {i}: \
-                             el JIT no emite parámetros de bloque todavía"
-                        )),
-                    }
+                if !terminated {
+                    salir!(i);
+                    builder.ins().jump(block_map[&i], &[]);
                 }
-                let next_block = block_map[&i];
-                if !terminated { builder.ins().jump(next_block, &[]); }
-                builder.switch_to_block(next_block);
+                builder.switch_to_block(block_map[&i]);
                 terminated = false;
                 stack.clear();
-                if let Some(&var) = cruces.get(&i) {
-                    stack.push(builder.use_var(var));
-                }
-                // JIT-3: si este bloque es el inicio del handler, poner el error en el stack
                 if handler_block_addrs.contains(&i) {
+                    // Inicio de un `handle`: la pila es solo el error.
                     let call = builder.ins().call(take_error_ref, &[]);
                     stack.push(builder.inst_results(call)[0]);
+                } else {
+                    let d = *profundidad.entry(i).or_insert(0);
+                    for k in 0..d {
+                        let var = slot!(k);
+                        stack.push(builder.use_var(var));
+                    }
                 }
             }
 
@@ -915,24 +1052,27 @@ impl<M: Module> CodeGen<M> {
 
             match instr {
                 //    Literales                                                 
+                // Las constantes que caben en el i64 se emiten ya codificadas.
                 Instruction::LoadNull => {
-                    let call = builder.ins().call(make_null_ref, &[]);
-                    stack.push(builder.inst_results(call)[0]);
+                    stack.push(builder.ins().iconst(types::I64, super::runtime::VAL_NULL));
                 }
                 Instruction::LoadInt(n) => {
-                    let nv = builder.ins().iconst(types::I64, *n);
-                    let call = builder.ins().call(make_int_ref, &[nv]);
-                    stack.push(builder.inst_results(call)[0]);
+                    let v = super::runtime::alloc_val(super::runtime::TAG_INT, *n, 0.0);
+                    if v & super::runtime::INT_TAG == super::runtime::INT_TAG {
+                        stack.push(builder.ins().iconst(types::I64, v));
+                    } else {
+                        // No cabe en 48 bits: va al heap en cada ejecución.
+                        let nv = builder.ins().iconst(types::I64, *n);
+                        let call = builder.ins().call(make_int_ref, &[nv]);
+                        stack.push(builder.inst_results(call)[0]);
+                    }
                 }
                 Instruction::LoadFloat(f) => {
-                    let bits = builder.ins().iconst(types::I64, f.to_bits() as i64);
-                    let call = builder.ins().call(make_fbits_ref, &[bits]);
-                    stack.push(builder.inst_results(call)[0]);
+                    stack.push(builder.ins().iconst(types::I64, super::runtime::encode_f64(*f)));
                 }
                 Instruction::LoadBool(b) => {
-                    let bv = builder.ins().iconst(types::I64, if *b { 1 } else { 0 });
-                    let call = builder.ins().call(make_bool_ref, &[bv]);
-                    stack.push(builder.inst_results(call)[0]);
+                    let v = if *b { super::runtime::VAL_TRUE } else { super::runtime::VAL_FALSE };
+                    stack.push(builder.ins().iconst(types::I64, v));
                 }
                 Instruction::LoadStr(s) => {
                     let ptr = self.cstr_ptr(&mut builder, s);
@@ -958,7 +1098,7 @@ impl<M: Module> CodeGen<M> {
                         builder.def_var(var, val);
                     }
 
-                    if is_main {
+                    if is_main && self.publicadas.contains(name) {
                         let name_ptr = self.cstr_ptr(&mut builder, name);
                         builder.ins().call(store_global_ref, &[name_ptr, val]);
                     }
@@ -972,21 +1112,25 @@ impl<M: Module> CodeGen<M> {
                 }
 
                 //    Aritmética                                                
-                Instruction::Add => { binop!(add_ref); }
-                Instruction::Sub => { binop!(sub_ref); }
-                Instruction::Mul => { binop!(mul_ref); }
-                Instruction::Div => { binop!(div_ref); }
-                Instruction::Mod => { binop!(mod_ref); }
-                Instruction::Pow => { binop!(pow_ref); }
-                Instruction::Neg => { unop!(neg_ref); }
+                Instruction::Add => { fast_binop!(add_ref, inline::int_add, inline::flt_add); }
+                Instruction::Sub => { fast_binop!(sub_ref, inline::int_sub, inline::flt_sub); }
+                Instruction::Mul => { fast_binop!(mul_ref, inline::int_mul, inline::flt_mul); }
+                Instruction::Div => { fast_binop!(div_ref, inline::int_div, inline::flt_div); }
+                Instruction::Mod => { fast_binop!(mod_ref, inline::int_mod, inline::flt_none); }
+                Instruction::Pow => { binop_check!(pow_ref); }
+                Instruction::Neg => {
+                    unop!(neg_ref);
+                    let r = *stack.last().unwrap();
+                    check!(r);
+                }
 
                 //    Comparación                                               
-                Instruction::Eq    => { binop!(eq_ref);   }
-                Instruction::NotEq => { binop!(neq_ref);  }
-                Instruction::Lt    => { binop!(lt_ref);   }
-                Instruction::LtEq  => { binop!(lteq_ref); }
-                Instruction::Gt    => { binop!(gt_ref);   }
-                Instruction::GtEq  => { binop!(gteq_ref); }
+                Instruction::Eq    => { fast_binop!(eq_ref,   inline::int_eq, inline::flt_eq); }
+                Instruction::NotEq => { fast_binop!(neq_ref,  inline::int_ne, inline::flt_ne); }
+                Instruction::Lt    => { fast_binop!(lt_ref,   inline::int_lt, inline::flt_lt); }
+                Instruction::LtEq  => { fast_binop!(lteq_ref, inline::int_le, inline::flt_le); }
+                Instruction::Gt    => { fast_binop!(gt_ref,   inline::int_gt, inline::flt_gt); }
+                Instruction::GtEq  => { fast_binop!(gteq_ref, inline::int_ge, inline::flt_ge); }
 
                 //    Lógica                                                    
                 Instruction::And => { binop!(and_ref); }
@@ -997,18 +1141,19 @@ impl<M: Module> CodeGen<M> {
                 Instruction::Jump(target) => {
                     let tb = *block_map.get(target)
                         .ok_or_else(|| format!("Jump: bloque {target} no encontrado"))?;
+                    salir!(*target);
                     builder.ins().jump(tb, &[]);
                     terminated = true;
                 }
                 Instruction::JumpIfFalse(target) => {
                     let val = stack.pop().ok_or("JumpIfFalse: pila vacía")?;
-                    let cond_call = builder.ins().call(is_truthy_ref, &[val]);
-                    let cond = builder.inst_results(cond_call)[0];
                     let false_block = *block_map.get(target)
                         .ok_or_else(|| format!("JumpIfFalse: {target} no encontrado"))?;
                     let true_block  = *block_map.get(&(i + 1))
                         .ok_or_else(|| format!("JumpIfFalse: {} no encontrado", i + 1))?;
-                    builder.ins().brif(cond, true_block, &[], false_block, &[]);
+                    salir!(*target);
+                    salir!(i + 1);
+                    branch_on!(val, true_block, false_block);
                     terminated = true;
                 }
                 // `and` / `or`: si el valor ya decide, llega convertido a
@@ -1022,9 +1167,12 @@ impl<M: Module> CodeGen<M> {
                     let n1 = builder.inst_results(n1)[0];
                     let como_bool = builder.ins().call(not_ref, &[n1]);
                     let como_bool = builder.inst_results(como_bool)[0];
-                    let var = *cruces.get(target)
-                        .ok_or_else(|| format!("JumpIfOrPop: sin punto de llegada {target}"))?;
-                    builder.def_var(var, como_bool);
+                    // La derecha sigue con la pila de antes; la llegada recibe
+                    // además el valor ya convertido a booleano.
+                    salir!(i + 1);
+                    stack.push(como_bool);
+                    salir!(*target);
+                    stack.pop();
                     let llegada = *block_map.get(target)
                         .ok_or_else(|| format!("JumpIfOrPop: {target} no encontrado"))?;
                     let derecha = *block_map.get(&(i + 1))
@@ -1042,13 +1190,13 @@ impl<M: Module> CodeGen<M> {
                 }
                 Instruction::JumpIfTrue(target) => {
                     let val = stack.pop().ok_or("JumpIfTrue: pila vacía")?;
-                    let cond_call = builder.ins().call(is_truthy_ref, &[val]);
-                    let cond = builder.inst_results(cond_call)[0];
                     let true_block  = *block_map.get(target)
                         .ok_or_else(|| format!("JumpIfTrue: {target} no encontrado"))?;
                     let false_block = *block_map.get(&(i + 1))
                         .ok_or_else(|| format!("JumpIfTrue: {} no encontrado", i + 1))?;
-                    builder.ins().brif(cond, true_block, &[], false_block, &[]);
+                    salir!(*target);
+                    salir!(i + 1);
+                    branch_on!(val, true_block, false_block);
                     terminated = true;
                 }
 
@@ -1070,6 +1218,7 @@ impl<M: Module> CodeGen<M> {
                         let n_args_v  = builder.ins().iconst(types::I64, n as i64);
                         let call = builder.ins().call(create_instance_ref, &[name_ptr, n_args_v]);
                         stack.push(builder.inst_results(call)[0]);
+                        check!(*stack.last().unwrap());
                     } else if let Some(&fref) = user_fn_refs.get(fname) {
                         let mut args: Vec<cranelift_codegen::ir::Value> = (0..n)
                             .map(|_| stack.pop().ok_or("Call: pila vacía"))
@@ -1077,6 +1226,7 @@ impl<M: Module> CodeGen<M> {
                         args.reverse();
                         let call = builder.ins().call(fref, &args);
                         stack.push(builder.inst_results(call)[0]);
+                        check!(*stack.last().unwrap());
                     } else {
                         // Builtin (str, len, push, range, ...): se despacha vía la VM.
                         // Args al ARG_BUF en orden (elem_0 primero), luego rt_call_builtin.
@@ -1091,6 +1241,7 @@ impl<M: Module> CodeGen<M> {
                         let n_args_v = builder.ins().iconst(types::I64, n as i64);
                         let call = builder.ins().call(call_builtin_ref, &[name_ptr, n_args_v]);
                         stack.push(builder.inst_results(call)[0]);
+                        check!(*stack.last().unwrap());
                     }
                 }
                 Instruction::Return => {
@@ -1144,6 +1295,7 @@ impl<M: Module> CodeGen<M> {
                     handler_stack.pop();
                     let end_block = *block_map.get(end_addr)
                         .ok_or_else(|| format!("EndAttempt: bloque {end_addr} no encontrado"))?;
+                    salir!(*end_addr);
                     builder.ins().jump(end_block, &[]);
                     terminated = true;
                 }
@@ -1152,15 +1304,13 @@ impl<M: Module> CodeGen<M> {
                     if let Some(&handler_block) = handler_stack.last() {
                         builder.ins().call(set_error_ref, &[msg]);
                         builder.ins().jump(handler_block, &[]);
-                    } else {
+                    } else if is_main {
                         builder.ins().call(raise_exit_ref, &[msg]);
-                        if is_main {
-                            builder.ins().return_(&[]);
-                        } else {
-                            let c = builder.ins().call(make_null_ref, &[]);
-                            let nv = builder.inst_results(c)[0];
-                            builder.ins().return_(&[nv]);
-                        }
+                        builder.ins().return_(&[]);
+                    } else {
+                        builder.ins().call(set_error_ref, &[msg]);
+                        let cero = builder.ins().iconst(types::I64, 0);
+                        builder.ins().return_(&[cero]);
                     }
                     terminated = true;
                 }
@@ -1201,6 +1351,7 @@ impl<M: Module> CodeGen<M> {
                     let obj = stack.pop().ok_or("GetIndex: pila vacía")?;
                     let call = builder.ins().call(get_index_ref, &[obj, idx]);
                     stack.push(builder.inst_results(call)[0]);
+                    check!(*stack.last().unwrap());
                 }
                 Instruction::SetIndex => {
                     let val = stack.pop().ok_or("SetIndex: pila vacía")?;
@@ -1208,6 +1359,7 @@ impl<M: Module> CodeGen<M> {
                     let obj = stack.pop().ok_or("SetIndex: pila vacía")?;
                     let call = builder.ins().call(set_index_ref, &[obj, idx, val]);
                     stack.push(builder.inst_results(call)[0]);
+                    check!(*stack.last().unwrap());
                 }
 
                 //    OOP — JIT-5                                              
@@ -1218,12 +1370,14 @@ impl<M: Module> CodeGen<M> {
                     let name_ptr = self.cstr_ptr(&mut builder, attr);
                     let call = builder.ins().call(get_attr_ref, &[obj, name_ptr]);
                     stack.push(builder.inst_results(call)[0]);
+                    check!(*stack.last().unwrap());
                 }
                 Instruction::SetAttr(attr) => {
                     let val = stack.pop().ok_or("SetAttr: pila vacía (val)")?;
                     let obj = stack.pop().ok_or("SetAttr: pila vacía (obj)")?;
                     let name_ptr = self.cstr_ptr(&mut builder, attr);
                     builder.ins().call(set_attr_ref, &[obj, name_ptr, val]);
+                    check_pending!();
                 }
                 Instruction::IsInstance(shape_name) => {
                     let obj = stack.pop().ok_or("IsInstance: pila vacía")?;
@@ -1250,6 +1404,7 @@ impl<M: Module> CodeGen<M> {
                     let n_val    = builder.ins().iconst(types::I64, n as i64);
                     let call = builder.ins().call(call_method_ref, &[obj, name_ptr, n_val]);
                     stack.push(builder.inst_results(call)[0]);
+                    check!(*stack.last().unwrap());
                 }
 
                 //    I/O nativo — JIT-4                                       
@@ -1275,12 +1430,14 @@ impl<M: Module> CodeGen<M> {
                     let path = stack.pop().ok_or("ReadFile: pila vacía")?;
                     let call = builder.ins().call(read_file_ref, &[path, fmt_ptr]);
                     stack.push(builder.inst_results(call)[0]);
+                    check!(*stack.last().unwrap());
                 }
                 Instruction::WriteFile(mode) => {
                     let mode_ptr = self.cstr_ptr(&mut builder, mode);
                     let data = stack.pop().ok_or("WriteFile: pila vacía (data)")?;
                     let path = stack.pop().ok_or("WriteFile: pila vacía (path)")?;
                     builder.ins().call(write_file_ref, &[path, data, mode_ptr]);
+                    check_pending!();
                 }
                 Instruction::ReadEnv(cast) => {
                     let cast_ptr = self.cstr_ptr(&mut builder, cast);
@@ -1292,6 +1449,7 @@ impl<M: Module> CodeGen<M> {
                     let path_ptr = self.cstr_ptr(&mut builder, path);
                     let call = builder.ins().call(use_module_ref, &[path_ptr]);
                     let module_val = builder.inst_results(call)[0];
+                    check!(module_val);
                     if is_main {
                         let alias_ptr = self.cstr_ptr(&mut builder, alias);
                         builder.ins().call(store_global_ref, &[alias_ptr, module_val]);
@@ -1323,11 +1481,13 @@ impl<M: Module> CodeGen<M> {
                     let n_val    = builder.ins().iconst(types::I64, n as i64);
                     let call = builder.ins().call(call_async_ref, &[name_ptr, n_val]);
                     stack.push(builder.inst_results(call)[0]);
+                    check!(*stack.last().unwrap());
                 }
                 Instruction::Await => {
                     let val = stack.pop().ok_or("Await: pila vacía")?;
                     let call = builder.ins().call(await_ref, &[val]);
                     stack.push(builder.inst_results(call)[0]);
+                    check!(*stack.last().unwrap());
                 }
 
                 other => {
@@ -1347,8 +1507,217 @@ impl<M: Module> CodeGen<M> {
             }
         }
 
+        if let Some(b) = propagar {
+            builder.switch_to_block(b);
+            if is_main {
+                let c = builder.ins().call(take_error_ref, &[]);
+                let e = builder.inst_results(c)[0];
+                builder.ins().call(raise_exit_ref, &[e]);
+                builder.ins().return_(&[]);
+            } else {
+                let cero = builder.ins().iconst(types::I64, 0);
+                builder.ins().return_(&[cero]);
+            }
+        }
+
         builder.seal_all_blocks();
         builder.finalize();
         Ok(())
     }
+}
+
+//     Rutas rápidas en línea
+
+/// IR sobre la codificación de `runtime::alloc_val`. Cada operación devuelve
+/// (resultado codificado, vale): si `vale` es 0, se llama al runtime.
+mod inline {
+    use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
+    use cranelift_codegen::ir::{types, InstBuilder, MemFlags, Value};
+    use cranelift_frontend::FunctionBuilder;
+
+    use crate::jit::runtime::{DOUBLE_OFFSET, INT_TAG, VAL_FALSE, VAL_TRUE};
+
+    pub type Op = fn(&mut FunctionBuilder, Value, Value) -> (Value, Value);
+
+    pub fn both_int(b: &mut FunctionBuilder, x: Value, y: Value) -> Value {
+        let both = b.ins().band(x, y);
+        let top = b.ins().ushr_imm(both, 48);
+        b.ins().icmp_imm(IntCC::Equal, top, (INT_TAG as u64 >> 48) as i64)
+    }
+
+    fn is_double(b: &mut FunctionBuilder, v: Value) -> Value {
+        let lo = b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, v, DOUBLE_OFFSET);
+        let hi = b.ins().icmp_imm(IntCC::UnsignedLessThan, v, INT_TAG);
+        b.ins().band(lo, hi)
+    }
+
+    pub fn both_double(b: &mut FunctionBuilder, x: Value, y: Value) -> Value {
+        let dx = is_double(b, x);
+        let dy = is_double(b, y);
+        b.ins().band(dx, dy)
+    }
+
+    fn int_of(b: &mut FunctionBuilder, v: Value) -> Value {
+        let s = b.ins().ishl_imm(v, 16);
+        b.ins().sshr_imm(s, 16)
+    }
+
+    fn fits48(b: &mut FunctionBuilder, r: Value) -> Value {
+        let back = int_of(b, r);
+        b.ins().icmp(IntCC::Equal, back, r)
+    }
+
+    fn enc_int(b: &mut FunctionBuilder, r: Value) -> Value {
+        let low = b.ins().band_imm(r, 0xFFFF_FFFF_FFFF);
+        b.ins().bor_imm(low, INT_TAG)
+    }
+
+    fn f64_of(b: &mut FunctionBuilder, v: Value) -> Value {
+        let bits = b.ins().iadd_imm(v, -DOUBLE_OFFSET);
+        b.ins().bitcast(types::F64, MemFlags::new(), bits)
+    }
+
+    fn enc_f64(b: &mut FunctionBuilder, f: Value) -> Value {
+        let bits = b.ins().bitcast(types::I64, MemFlags::new(), f);
+        let nan = b.ins().fcmp(FloatCC::Unordered, f, f);
+        let canon = b.ins().iconst(types::I64, 0x7FF8_0000_0000_0000);
+        let bits = b.ins().select(nan, canon, bits);
+        b.ins().iadd_imm(bits, DOUBLE_OFFSET)
+    }
+
+    fn enc_bool(b: &mut FunctionBuilder, c: Value) -> Value {
+        let t = b.ins().iconst(types::I64, VAL_TRUE);
+        let f = b.ins().iconst(types::I64, VAL_FALSE);
+        b.ins().select(c, t, f)
+    }
+
+    fn yes(b: &mut FunctionBuilder) -> Value {
+        b.ins().iconst(types::I8, 1)
+    }
+
+    fn no(b: &mut FunctionBuilder) -> Value {
+        b.ins().iconst(types::I8, 0)
+    }
+
+    fn ints(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        (int_of(b, x), int_of(b, y))
+    }
+
+    fn flts(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        (f64_of(b, x), f64_of(b, y))
+    }
+
+    // Enteros: los operandos tienen 48 bits, así que suma y resta no
+    // desbordan el i64; basta ver si el resultado cabe en 48.
+    pub fn int_add(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = ints(b, x, y);
+        let r = b.ins().iadd(a, c);
+        (enc_int(b, r), fits48(b, r))
+    }
+
+    pub fn int_sub(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = ints(b, x, y);
+        let r = b.ins().isub(a, c);
+        (enc_int(b, r), fits48(b, r))
+    }
+
+    pub fn int_mul(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = ints(b, x, y);
+        let lo = b.ins().imul(a, c);
+        let hi = b.ins().smulhi(a, c);
+        let sign = b.ins().sshr_imm(lo, 63);
+        let no_ovf = b.ins().icmp(IntCC::Equal, hi, sign);
+        let fits = fits48(b, lo);
+        (enc_int(b, lo), b.ins().band(no_ovf, fits))
+    }
+
+    /// int / int es decimal, como en la VM; un divisor 0 va al runtime (error).
+    pub fn int_div(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = ints(b, x, y);
+        let ok = b.ins().icmp_imm(IntCC::NotEqual, c, 0);
+        let fa = b.ins().fcvt_from_sint(types::F64, a);
+        let fc = b.ins().fcvt_from_sint(types::F64, c);
+        let q = b.ins().fdiv(fa, fc);
+        (enc_f64(b, q), ok)
+    }
+
+    /// `srem` con divisor 0 detiene el proceso: se divide por 1 y se descarta.
+    pub fn int_mod(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = ints(b, x, y);
+        let ok = b.ins().icmp_imm(IntCC::NotEqual, c, 0);
+        let one = b.ins().iconst(types::I64, 1);
+        let d = b.ins().select(ok, c, one);
+        let r = b.ins().srem(a, d);
+        (enc_int(b, r), ok)
+    }
+
+    fn int_cmp(b: &mut FunctionBuilder, x: Value, y: Value, cc: IntCC) -> (Value, Value) {
+        let (a, c) = ints(b, x, y);
+        let r = b.ins().icmp(cc, a, c);
+        (enc_bool(b, r), yes(b))
+    }
+
+    pub fn int_lt(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { int_cmp(b, x, y, IntCC::SignedLessThan) }
+    pub fn int_le(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { int_cmp(b, x, y, IntCC::SignedLessThanOrEqual) }
+    pub fn int_gt(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { int_cmp(b, x, y, IntCC::SignedGreaterThan) }
+    pub fn int_ge(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { int_cmp(b, x, y, IntCC::SignedGreaterThanOrEqual) }
+
+    /// Dos enteros en línea son iguales si su codificación lo es.
+    pub fn int_eq(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let r = b.ins().icmp(IntCC::Equal, x, y);
+        (enc_bool(b, r), yes(b))
+    }
+
+    pub fn int_ne(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let r = b.ins().icmp(IntCC::NotEqual, x, y);
+        (enc_bool(b, r), yes(b))
+    }
+
+    // Decimales.
+    pub fn flt_add(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = flts(b, x, y);
+        let r = b.ins().fadd(a, c);
+        (enc_f64(b, r), yes(b))
+    }
+
+    pub fn flt_sub(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = flts(b, x, y);
+        let r = b.ins().fsub(a, c);
+        (enc_f64(b, r), yes(b))
+    }
+
+    pub fn flt_mul(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = flts(b, x, y);
+        let r = b.ins().fmul(a, c);
+        (enc_f64(b, r), yes(b))
+    }
+
+    /// Un divisor 0.0 va al runtime (error "División por cero", como en la VM).
+    pub fn flt_div(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) {
+        let (a, c) = flts(b, x, y);
+        let zero = b.ins().f64const(0.0);
+        let ok = b.ins().fcmp(FloatCC::NotEqual, c, zero);
+        let r = b.ins().fdiv(a, c);
+        (enc_f64(b, r), ok)
+    }
+
+    /// `%` solo admite enteros: con decimales decide el runtime.
+    pub fn flt_none(b: &mut FunctionBuilder, x: Value, _y: Value) -> (Value, Value) {
+        (x, no(b))
+    }
+
+    fn flt_cmp(b: &mut FunctionBuilder, x: Value, y: Value, cc: FloatCC) -> (Value, Value) {
+        let (a, c) = flts(b, x, y);
+        let r = b.ins().fcmp(cc, a, c);
+        (enc_bool(b, r), yes(b))
+    }
+
+    // Igual que la VM: `>` es "ni < ni ==" y `>=` es "no <", así que con NaN
+    // dan verdadero.
+    pub fn flt_lt(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { flt_cmp(b, x, y, FloatCC::LessThan) }
+    pub fn flt_le(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { flt_cmp(b, x, y, FloatCC::LessThanOrEqual) }
+    pub fn flt_gt(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { flt_cmp(b, x, y, FloatCC::UnorderedOrGreaterThan) }
+    pub fn flt_ge(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { flt_cmp(b, x, y, FloatCC::UnorderedOrGreaterThanOrEqual) }
+    pub fn flt_eq(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { flt_cmp(b, x, y, FloatCC::Equal) }
+    pub fn flt_ne(b: &mut FunctionBuilder, x: Value, y: Value) -> (Value, Value) { flt_cmp(b, x, y, FloatCC::NotEqual) }
 }

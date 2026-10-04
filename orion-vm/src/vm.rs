@@ -47,9 +47,44 @@ pub fn write_utf8_line(s: &str) {
     let _ = io::stdout().lock().flush();
 }
 
+/// Las instrucciones de `VM::exec_hot`.
+macro_rules! hot_instr {
+    () => {
+        Instruction::LoadInt(_)
+            | Instruction::LoadFloat(_)
+            | Instruction::LoadStr(_)
+            | Instruction::LoadBool(_)
+            | Instruction::LoadNull
+            | Instruction::LoadVar(_)
+            | Instruction::StoreVar(_)
+            | Instruction::Add
+            | Instruction::Sub
+            | Instruction::Mul
+            | Instruction::Div
+            | Instruction::Mod
+            | Instruction::Eq
+            | Instruction::NotEq
+            | Instruction::Lt
+            | Instruction::LtEq
+            | Instruction::Gt
+            | Instruction::GtEq
+            | Instruction::And
+            | Instruction::Or
+            | Instruction::Not
+            | Instruction::Jump(_)
+            | Instruction::JumpIfFalse(_)
+            | Instruction::JumpIfTrue(_)
+            | Instruction::JumpIfFalseOrPop(_)
+            | Instruction::JumpIfTrueOrPop(_)
+            | Instruction::ToBool
+            | Instruction::Pop
+            | Instruction::Dup
+    };
+}
+
 struct CallFrame {
-    instructions: Vec<Instruction>,
-    lines: Vec<u32>,
+    instructions: Arc<[Instruction]>,
+    lines: Arc<[u32]>,
     ip: usize,
     vars: IndexMap<String, Value>,
     consts: HashSet<String>,
@@ -66,9 +101,9 @@ struct CallFrame {
 }
 
 impl CallFrame {
-    fn new(instructions: Vec<Instruction>, lines: Vec<u32>) -> Self {
+    fn new(instructions: impl Into<Arc<[Instruction]>>, lines: impl Into<Arc<[u32]>>) -> Self {
         CallFrame {
-            instructions, lines, ip: 0,
+            instructions: instructions.into(), lines: lines.into(), ip: 0,
             vars: IndexMap::new(),
             consts: HashSet::new(),
             self_instance: None,
@@ -78,7 +113,7 @@ impl CallFrame {
         }
     }
 
-    fn with_args(instructions: Vec<Instruction>, lines: Vec<u32>, params: &[String], args: Vec<Value>) -> Self {
+    fn with_args(instructions: impl Into<Arc<[Instruction]>>, lines: impl Into<Arc<[u32]>>, params: &[String], args: Vec<Value>) -> Self {
         let mut frame = Self::new(instructions, lines);
         for (param, val) in params.iter().zip(args.into_iter()) {
             frame.vars.insert(param.clone(), val);
@@ -86,7 +121,7 @@ impl CallFrame {
         frame
     }
 
-    fn with_args_named(instructions: Vec<Instruction>, lines: Vec<u32>, name: &str, params: &[String], args: Vec<Value>) -> Self {
+    fn with_args_named(instructions: impl Into<Arc<[Instruction]>>, lines: impl Into<Arc<[u32]>>, name: &str, params: &[String], args: Vec<Value>) -> Self {
         let mut frame = Self::with_args(instructions, lines, params, args);
         frame.name = name.to_string();
         frame
@@ -245,8 +280,8 @@ impl VM {
         self.error_handlers.clear();
         self.current_line = 0;
         if let Some(frame) = self.call_stack.first_mut() {
-            frame.instructions = main;
-            frame.lines = main_lines;
+            frame.instructions = main.into();
+            frame.lines = main_lines.into();
             frame.ip = 0;
             frame.name = String::from("<main>");
         }
@@ -348,7 +383,7 @@ impl VM {
 
     pub fn run(&mut self) -> Result<(), String> {
         let run_result: Result<(), String> = loop {
-            match self.step() {
+            match self.step_batch() {
                 Ok(true) => break Ok(()),
                 Ok(false) => {}
                 Err(e) => break Err(e),
@@ -374,7 +409,7 @@ impl VM {
     /// Ejecuta sin formatear errores — usar en subtareas async para evitar doble-prefijo
     pub fn run_raw(&mut self) -> Result<(), String> {
         loop {
-            let done = self.step()?;
+            let done = self.step_batch()?;
             if done { break; }
         }
         Ok(())
@@ -382,6 +417,17 @@ impl VM {
 
     /// Ejecuta un solo ciclo del loop principal. Retorna Ok(true) si el programa terminó.
     fn step(&mut self) -> Result<bool, String> {
+        self.step_n(1)
+    }
+
+    /// Como `step`, pero encadena hasta `LOTE` instrucciones calientes del mismo
+    /// frame: la cancelación, el GC y el fin de frame se miran una vez por lote.
+    fn step_batch(&mut self) -> Result<bool, String> {
+        const LOTE: usize = 1024;
+        self.step_n(LOTE)
+    }
+
+    fn step_n(&mut self, max: usize) -> Result<bool, String> {
         if let Some(tok) = &self.cancel_token {
             if tok.is_cancelled() {
                 return Err("tarea cancelada".to_string());
@@ -393,7 +439,7 @@ impl VM {
         }
 
         // Fin de frame
-        {
+        let code = {
             let frame = match self.call_stack.last_mut() {
                 Some(f) => f,
                 None => return Ok(true),
@@ -404,62 +450,78 @@ impl VM {
                 self.error_handlers.retain(|h| h.frame_depth <= self.call_stack.len());
                 return Ok(false);
             }
-        }
-
-        let instr = {
-            let frame = self.call_stack.last_mut().unwrap();
-            let line = frame.lines.get(frame.ip).copied().unwrap_or(0);
-            let instr = frame.instructions[frame.ip].clone();
-            frame.ip += 1;
-            if line > 0 { self.current_line = line; }
-            instr
+            // Compartido y no prestado: un `Return` puede soltar el frame.
+            Arc::clone(&frame.instructions)
         };
 
-        match self.dispatch_instr(instr) {
-            Ok(done) => Ok(done),
-            Err(e) => {
-                if let Some(handler) = self.error_handlers.pop() {
-                    while self.call_stack.len() > handler.frame_depth {
-                        let f = self.call_stack.pop().unwrap();
-                        f.sync_to_instance();
-                    }
-                    self.value_stack.push(Value::Str(e));
-                    let frame = self.call_stack.last_mut()
-                        .ok_or("Sin frame activo para handle")?;
-                    frame.ip = handler.handler_addr;
-                    Ok(false)
-                } else {
-                    Err(e)
-                }
+        for _ in 0..max {
+            let ip = {
+                let frame = self.call_stack.last_mut().unwrap();
+                let ip = frame.ip;
+                if ip >= code.len() { return Ok(false); }
+                let line = frame.lines.get(ip).copied().unwrap_or(0);
+                frame.ip += 1;
+                if line > 0 { self.current_line = line; }
+                ip
+            };
+            let instr = &code[ip];
+            if !Self::is_hot(instr) {
+                return match self.dispatch_instr(instr) {
+                    Ok(done) => Ok(done),
+                    Err(e) => self.recover(e),
+                };
             }
+            if let Err(e) = self.exec_hot(instr) {
+                return self.recover(e);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Lleva el error al `attempt` abierto más cercano, si lo hay.
+    fn recover(&mut self, e: String) -> Result<bool, String> {
+        if let Some(handler) = self.error_handlers.pop() {
+            while self.call_stack.len() > handler.frame_depth {
+                let f = self.call_stack.pop().unwrap();
+                f.sync_to_instance();
+            }
+            self.value_stack.push(Value::Str(e));
+            let frame = self.call_stack.last_mut()
+                .ok_or("Sin frame activo para handle")?;
+            frame.ip = handler.handler_addr;
+            Ok(false)
+        } else {
+            Err(e)
         }
     }
 
+    /// Instrucciones que no crean ni cierran frames ni reservan objetos del GC:
+    /// `step_batch` las encadena sin volver a hacer las comprobaciones de `step`.
+    fn is_hot(instr: &Instruction) -> bool {
+        matches!(instr, hot_instr!())
+    }
 
-    /// Ejecuta una sola instrucción. Devuelve Ok(true) para Halt/Return-en-main.
-    fn dispatch_instr(&mut self, instr: Instruction) -> Result<bool, String> {
+    #[inline(always)]
+    fn exec_hot(&mut self, instr: &Instruction) -> Result<(), String> {
         match instr {
-            //    Constantes                                                   
-            Instruction::LoadInt(n)   => self.value_stack.push(Value::Int(n)),
-            Instruction::LoadFloat(f) => self.value_stack.push(Value::Float(f)),
-            Instruction::LoadStr(s)   => self.value_stack.push(Value::Str(s)),
-            Instruction::LoadBool(b)  => self.value_stack.push(Value::Bool(b)),
+            &Instruction::LoadInt(n)   => self.value_stack.push(Value::Int(n)),
+            &Instruction::LoadFloat(f) => self.value_stack.push(Value::Float(f)),
+            Instruction::LoadStr(s)   => self.value_stack.push(Value::Str(s.clone())),
+            &Instruction::LoadBool(b)  => self.value_stack.push(Value::Bool(b)),
             Instruction::LoadNull     => self.value_stack.push(Value::Null),
-
-            //    Variables                                                    
             Instruction::LoadVar(name) => {
                 // 1. Frame local
                 let val = self.call_stack.last()
-                    .and_then(|f| f.vars.get(&name).cloned());
+                    .and_then(|f| f.vars.get(name).cloned());
                 // 2. Main (global) frame
                 let val = val.or_else(|| {
                     if self.call_stack.len() > 1 {
-                        self.call_stack.first().and_then(|f| f.vars.get(&name).cloned())
+                        self.call_stack.first().and_then(|f| f.vars.get(name).cloned())
                     } else { None }
                 });
                 // 3. Nombre de función registrada → push Str(name)
                 let val = val.or_else(|| {
-                    if self.functions.contains_key(&name) {
+                    if self.functions.contains_key(name) {
                         Some(Value::Str(name.clone()))
                     } else {
                         None
@@ -467,7 +529,7 @@ impl VM {
                 });
                 // 4. Nombre de shape registrado → push Str(name)
                 let val = val.or_else(|| {
-                    if self.shapes.contains_key(&name) {
+                    if self.shapes.contains_key(name) {
                         Some(Value::Str(name.clone()))
                     } else {
                         None
@@ -479,19 +541,11 @@ impl VM {
             Instruction::StoreVar(name) => {
                 let val = self.pop()?;
                 let frame = self.call_stack.last_mut().ok_or("Sin frame activo")?;
-                if frame.consts.contains(&name) {
+                if frame.consts.contains(name) {
                     return Err(format!("Cannot reassign '{}': it is a constant", name));
                 }
-                frame.vars.insert(name, val);
+                match frame.vars.get_mut(name) { Some(v) => *v = val, None => { frame.vars.insert(name.clone(), val); } }
             }
-            Instruction::StoreConst(name) => {
-                let val = self.pop()?;
-                let frame = self.call_stack.last_mut().ok_or("Sin frame activo")?;
-                frame.consts.insert(name.clone());
-                frame.vars.insert(name, val);
-            }
-
-            //    Aritmética                                                   
             Instruction::Add => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(a.add(&b)?); }
             Instruction::Sub => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(a.sub(&b)?); }
             Instruction::Mul => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(a.mul(&b)?); }
@@ -508,6 +562,82 @@ impl VM {
                     _ => return Err("Modulo only supports integers".to_string()),
                 }
             }
+            Instruction::Eq    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_eq(&b))); }
+            Instruction::NotEq => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_eq(&b))); }
+            Instruction::Lt    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_lt(&b)?)); }
+            Instruction::LtEq  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_lt(&b)? || a.compare_eq(&b))); }
+            Instruction::Gt    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_lt(&b)? && !a.compare_eq(&b))); }
+            Instruction::GtEq  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_lt(&b)?)); }
+
+            //    Lógica                                                       
+            Instruction::And => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.is_truthy() && b.is_truthy())); }
+            Instruction::Or  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.is_truthy() || b.is_truthy())); }
+            Instruction::Not => { let a = self.pop()?; self.value_stack.push(Value::Bool(!a.is_truthy())); }
+
+            //    Control de flujo                                             
+            &Instruction::Jump(addr) => {
+                self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
+            }
+            &Instruction::JumpIfFalse(addr) => {
+                let cond = self.pop()?;
+                if !cond.is_truthy() {
+                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
+                }
+            }
+            &Instruction::JumpIfTrue(addr) => {
+                let cond = self.pop()?;
+                if cond.is_truthy() {
+                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
+                }
+            }
+            // Cortocircuito: ver la definición en instruction.rs.
+            &Instruction::JumpIfFalseOrPop(addr) => {
+                let cond = self.pop()?;
+                if !cond.is_truthy() {
+                    self.value_stack.push(Value::Bool(false));
+                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
+                }
+            }
+            &Instruction::JumpIfTrueOrPop(addr) => {
+                let cond = self.pop()?;
+                if cond.is_truthy() {
+                    self.value_stack.push(Value::Bool(true));
+                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
+                }
+            }
+            Instruction::ToBool => {
+                let a = self.pop()?;
+                self.value_stack.push(Value::Bool(a.is_truthy()));
+            }
+
+            Instruction::Pop => { self.pop()?; }
+            Instruction::Dup => {
+                let top = self.value_stack.last().cloned().ok_or("Stack vacío en Dup")?;
+                self.value_stack.push(top);
+            }
+            _ => unreachable!("exec_hot con una instrucción no caliente"),
+        }
+        Ok(())
+    }
+
+    /// Ejecuta una sola instrucción. Devuelve Ok(true) para Halt/Return-en-main.
+    fn dispatch_instr(&mut self, instr: &Instruction) -> Result<bool, String> {
+        if Self::is_hot(instr) {
+            return self.exec_hot(instr).map(|()| false);
+        }
+        match instr {
+            hot_instr!() => unreachable!("instrucción caliente fuera de exec_hot"),
+            //    Constantes                                                   
+
+            //    Variables                                                    
+            Instruction::StoreConst(name) => {
+                let val = self.pop()?;
+                let frame = self.call_stack.last_mut().ok_or("Sin frame activo")?;
+                frame.consts.insert(name.clone());
+                frame.vars.insert(name.clone(), val);
+            }
+
+            //    Aritmética                                                   
             Instruction::BitAnd => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "&")?); }
             Instruction::BitOr  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "|")?); }
             Instruction::BitXor => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(bit_op(a, b, "^")?); }
@@ -546,62 +676,14 @@ impl VM {
             }
 
             //    Comparación                                                  
-            Instruction::Eq    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_eq(&b))); }
-            Instruction::NotEq => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_eq(&b))); }
-            Instruction::Lt    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_lt(&b)?)); }
-            Instruction::LtEq  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_lt(&b)? || a.compare_eq(&b))); }
-            Instruction::Gt    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_lt(&b)? && !a.compare_eq(&b))); }
-            Instruction::GtEq  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(!a.compare_lt(&b)?)); }
-
-            //    Lógica                                                       
-            Instruction::And => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.is_truthy() && b.is_truthy())); }
-            Instruction::Or  => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.is_truthy() || b.is_truthy())); }
-            Instruction::Not => { let a = self.pop()?; self.value_stack.push(Value::Bool(!a.is_truthy())); }
-
-            //    Control de flujo                                             
-            Instruction::Jump(addr) => {
-                self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
-            }
-            Instruction::JumpIfFalse(addr) => {
-                let cond = self.pop()?;
-                if !cond.is_truthy() {
-                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
-                }
-            }
-            Instruction::JumpIfTrue(addr) => {
-                let cond = self.pop()?;
-                if cond.is_truthy() {
-                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
-                }
-            }
-            // Cortocircuito: ver la definición en instruction.rs.
-            Instruction::JumpIfFalseOrPop(addr) => {
-                let cond = self.pop()?;
-                if !cond.is_truthy() {
-                    self.value_stack.push(Value::Bool(false));
-                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
-                }
-            }
-            Instruction::JumpIfTrueOrPop(addr) => {
-                let cond = self.pop()?;
-                if cond.is_truthy() {
-                    self.value_stack.push(Value::Bool(true));
-                    self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = addr;
-                }
-            }
-            Instruction::ToBool => {
-                let a = self.pop()?;
-                self.value_stack.push(Value::Bool(a.is_truthy()));
-            }
-
             //    Manejo de errores                                            
-            Instruction::BeginAttempt(handler_addr) => {
+            &Instruction::BeginAttempt(handler_addr) => {
                 self.error_handlers.push(ErrorHandler {
                     handler_addr,
                     frame_depth: self.call_stack.len(),
                 });
             }
-            Instruction::EndAttempt(end_addr) => {
+            &Instruction::EndAttempt(end_addr) => {
                 // Attempt completado sin error — quitar handler y saltar al fin
                 self.error_handlers.pop();
                 self.call_stack.last_mut().ok_or("Sin frame activo")?.ip = end_addr;
@@ -613,7 +695,7 @@ impl VM {
             }
 
             //    Funciones                                                    
-            Instruction::Call(name, argc) => {
+            &Instruction::Call(ref name, argc) => {
                 let mut args: Vec<Value> = (0..argc)
                     .map(|_| self.pop())
                     .collect::<Result<Vec<_>, _>>()?;
@@ -672,7 +754,7 @@ impl VM {
                 // scope actual sin cualificar, además de exponer el namespace.
                 if !selective.is_empty() {
                     if let Value::Dict(ns) = &module_val {
-                        for name in &selective {
+                        for name in selective.iter() {
                             match ns.get(name) {
                                 Some(v) => {
                                     let v = v.clone();
@@ -691,7 +773,7 @@ impl VM {
                     }
                 }
                 let frame = self.call_stack.last_mut().unwrap();
-                frame.vars.insert(alias, module_val);
+                frame.vars.insert(alias.clone(), module_val);
             }
 
             //    OOP                                                          
@@ -702,12 +784,12 @@ impl VM {
                 match obj {
                     Value::Instance(inst_rc) => {
                         let inst = inst_rc.borrow();
-                        let val = inst.fields.get(&attr).cloned()
+                        let val = inst.fields.get(attr).cloned()
                             .ok_or_else(|| format!("Attribute '{}' not found on '{}'", attr, inst.shape_name))?;
                         self.value_stack.push(val);
                     }
                     Value::Dict(map) => {
-                        let val = map.get(&attr).cloned()
+                        let val = map.get(attr).cloned()
                             .ok_or_else(|| format!("Attribute '{}' not found on dict/module", attr))?;
                         self.value_stack.push(val);
                     }
@@ -731,7 +813,7 @@ impl VM {
                                 .map(|r| Rc::ptr_eq(r, &inst_rc))
                                 .unwrap_or(false)
                             {
-                                frame.vars.insert(attr, val);
+                                frame.vars.insert(attr.clone(), val);
                             }
                         }
                         // Devolver el objeto para el write-back de AssignAttr (StoreVar).
@@ -740,7 +822,7 @@ impl VM {
                     // Dicts son por valor: insertamos y devolvemos el dict modificado;
                     // AssignAttr lo re-asigna a la variable (igual que v["k"] = val).
                     Value::Dict(mut map) => {
-                        map.insert(attr, val);
+                        map.insert(attr.clone(), val);
                         self.value_stack.push(Value::Dict(map));
                     }
                     _ => return Err(format!(
@@ -767,20 +849,20 @@ impl VM {
                 // Un env puede ciclarse (closure recursiva que se captura a sí
                 // misma vía write-back); registrarlo permite al GC romperlo.
                 self.gc.register_env(&env_rc);
-                self.value_stack.push(Value::Closure { fn_name, env: env_rc });
+                self.value_stack.push(Value::Closure { fn_name: fn_name.clone(), env: env_rc });
             }
             Instruction::IsInstance(shape_name) => {
                 let obj = self.pop()?;
                 let result = match &obj {
                     Value::Instance(inst_rc) => {
                         let actual = inst_rc.borrow().shape_name.clone();
-                        actual == shape_name || self.shape_uses(&actual, &shape_name)
+                        actual == *shape_name || self.shape_uses(&actual, &shape_name)
                     }
                     _ => false,
                 };
                 self.value_stack.push(Value::Bool(result));
             }
-            Instruction::CallSuper(method_name, argc) => {
+            &Instruction::CallSuper(ref method_name, argc) => {
                 let mut args: Vec<Value> = (0..argc)
                     .map(|_| self.pop())
                     .collect::<Result<Vec<_>, _>>()?;
@@ -823,7 +905,7 @@ impl VM {
                 frame.instance_fields = field_names;
                 self.call_stack.push(frame);
             }
-            Instruction::CallMethod(method_name, argc) => {
+            &Instruction::CallMethod(ref method_name, argc) => {
                 let mut args: Vec<Value> = (0..argc)
                     .map(|_| self.pop())
                     .collect::<Result<Vec<_>, _>>()?;
@@ -1161,12 +1243,12 @@ impl VM {
             }
 
             //    Colecciones                                                  
-            Instruction::MakeList(n) => {
+            &Instruction::MakeList(n) => {
                 let mut items: Vec<Value> = (0..n).map(|_| self.pop()).collect::<Result<Vec<_>, _>>()?;
                 items.reverse();
                 self.value_stack.push(Value::list(items));
             }
-            Instruction::MakeDict(n) => {
+            &Instruction::MakeDict(n) => {
                 // los pares salen de la pila en orden inverso al del literal;
                 // se voltean para que el dict conserve el orden escrito por el dev
                 let mut pairs = Vec::with_capacity(n as usize);
@@ -1255,21 +1337,16 @@ impl VM {
             }
 
             //    Stack                                                         
-            Instruction::Pop => { self.pop()?; }
-            Instruction::Dup => {
-                let top = self.value_stack.last().cloned().ok_or("Stack vacío en Dup")?;
-                self.value_stack.push(top);
-            }
 
             //    Async                                                         
-            Instruction::CallAsync(fn_name, argc) => {
+            &Instruction::CallAsync(ref fn_name, argc) => {
                 let argc = argc as usize;
                 let mut args: Vec<Value> = (0..argc)
                     .map(|_| self.pop())
                     .collect::<Result<Vec<_>, _>>()?;
                 args.reverse();
 
-                let func = self.functions.get(&fn_name).cloned()
+                let func = self.functions.get(fn_name).cloned()
                     .ok_or_else(|| format!("async function '{}' does not exist", fn_name))?;
 
                 // Convertir args a SendValue (thread-safe)
@@ -1277,6 +1354,17 @@ impl VM {
                     .map(|v| v.to_send())
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|e| format!("Error en argumentos async '{}': {}", fn_name, e))?;
+
+                // Globales que la tarea puede leer, copiadas al lanzarla (como en
+                // `serve`); solo esas, para no copiar el programa entero. Los
+                // módulos van aparte: `to_send` los volvería un string.
+                let usadas = self.globales_usadas(fn_name);
+                let send_globals: Vec<(String, SendValue)> = self.call_stack.first()
+                    .map(|f| f.vars.iter()
+                        .filter(|(k, v)| usadas.contains(k.as_str()) && !matches!(v, Value::Module(_)))
+                        .filter_map(|(k, v)| v.to_send().ok().map(|sv| (k.clone(), sv)))
+                        .collect())
+                    .unwrap_or_default();
 
                 let functions_clone  = self.functions.clone();
                 let shapes_clone     = self.shapes.clone();
@@ -1304,14 +1392,19 @@ impl VM {
                         return;
                     }
                     let mut sub_vm = VM::new(
-                        func.body.clone(),
-                        func.lines.clone(),
+                        func.body.to_vec(),
+                        func.lines.to_vec(),
                         functions_clone,
                         shapes_clone,
                         extern_fns_clone,
                     );
                     // La sub-VM consulta este token en su bucle para abortar limpiamente.
                     sub_vm.cancel_token = Some(Arc::clone(&handle_worker));
+                    if let Some(frame) = sub_vm.call_stack.first_mut() {
+                        for (k, v) in send_globals {
+                            frame.vars.insert(k, from_send(v));
+                        }
+                    }
                     // Reinyectar módulos visibles (para chan/state/etc. dentro de la tarea)
                     for (k, m) in &module_bindings {
                         if let Some(frame) = sub_vm.call_stack.first_mut() {
@@ -1374,7 +1467,7 @@ impl VM {
                 let prompt = self.pop()?;
 
                 // Si hay choices, están en el stack debajo del prompt (ya extraímos prompt)
-                let choices_list: Option<Vec<Value>> = if choices {
+                let choices_list: Option<Vec<Value>> = if *choices {
                     let c = self.pop()?;
                     if let Value::List(v) = c { Some(v.borrow().0.clone()) } else { None }
                 } else {
@@ -1491,7 +1584,7 @@ impl VM {
                     Value::Int(n) => n as u16,
                     _ => return Err("serve: the port must be an integer".to_string()),
                 };
-                self.serve_http(port, fn_name)?;
+                self.serve_http(port, fn_name.clone())?;
             }
 
             Instruction::MakeFunction(_, _, _) => {
@@ -1528,18 +1621,18 @@ impl VM {
         &mut self,
         name: String,
         closure_env: Option<Rc<RefCell<HashMap<String, Value>>>>,
-        mut args: Vec<Value>,
+        args: Vec<Value>,
     ) -> Result<(), String> {
         if self.shapes.contains_key(&name) {
             let inst_rc = self.instantiate_shape(&name, args)?;
             self.value_stack.push(Value::Instance(inst_rc));
-        } else if let Some(func) = self.functions.get(&name).cloned() {
+        } else if self.functions.contains_key(&name) {
             // Hotspot counter: registra cuántas veces se llama cada función
-            *self.call_counts.entry(name.clone()).or_insert(0) += 1;
-            args = self.bind_args_with_defaults(&func, args, &name)?;
-            let mut frame = CallFrame::with_args_named(
-                func.body, func.lines, &name, &func.params, args
-            );
+            match self.call_counts.get_mut(&name) {
+                Some(n) => *n += 1,
+                None => { self.call_counts.insert(name.clone(), 1); }
+            }
+            let mut frame = self.call_frame(&name, args)?;
             // Inyectar env capturado (los params tienen prioridad) y
             // guardar la referencia compartida para el write-back al retornar.
             if let Some(env_rc) = closure_env {
@@ -1653,11 +1746,12 @@ impl VM {
 
             // Nombres locales de la función: parámetros + destinos de StoreVar
             let mut locals: HashSet<String> = fdef.params.iter().cloned().collect();
-            for instr in &fdef.body {
+            for instr in fdef.body.iter() {
                 if let Instruction::StoreVar(n) = instr { locals.insert(n.clone()); }
             }
 
-            for instr in &mut fdef.body {
+            let mut body = fdef.body.to_vec();
+            for instr in &mut body {
                 match instr {
                     Instruction::Call(callee, _) if own_fns.contains(callee.as_str()) => {
                         *callee = format!("{}{}", prefix, callee);
@@ -1677,6 +1771,7 @@ impl VM {
                     _ => {}
                 }
             }
+            fdef.body = body.into();
             ns.insert(fname.clone(), Value::Str(prefixed.clone()));
             self.fn_files.insert(prefixed.clone(), ruta_visible(path));
             self.functions.insert(prefixed, fdef);
@@ -1773,14 +1868,11 @@ impl VM {
             return self.call_math_builtin(&fn_name[8..], args);
         }
 
-        let func_def = self.functions.get(&fn_name)
-            .ok_or_else(|| format!("Function '{}' not found", fn_name))?
-            .clone();
-        let args = self.bind_args_with_defaults(&func_def, args, &fn_name)?;
+        if !self.functions.contains_key(&fn_name) {
+            return Err(format!("Function '{}' not found", fn_name));
+        }
         let stack_depth = self.call_stack.len();
-        let mut frame = CallFrame::with_args_named(
-            func_def.body, func_def.lines, &fn_name, &func_def.params, args
-        );
+        let mut frame = self.call_frame(&fn_name, args)?;
         if let Some(env_rc) = closure_env {
             for (k, v) in env_rc.borrow().iter() {
                 frame.vars.entry(k.clone()).or_insert_with(|| v.clone());
@@ -1790,7 +1882,7 @@ impl VM {
         self.call_stack.push(frame);
         loop {
             if self.call_stack.len() <= stack_depth { break; }
-            let done = self.step()?;
+            let done = self.step_batch()?;
             if done { break; }
         }
         Ok(self.value_stack.pop().unwrap_or(Value::Null))
@@ -1987,13 +2079,13 @@ impl VM {
                     None
                 } else {
                     let line = frame.lines.get(frame.ip).copied().unwrap_or(0);
-                    let instr = frame.instructions[frame.ip].clone();
+                    let ip = frame.ip;
                     frame.ip += 1;
-                    Some((instr, line))
+                    Some((Arc::clone(&frame.instructions), ip, line))
                 }
             };
 
-            match instr_opt {
+            match instr_opt.as_ref().map(|(code, ip, line)| (&code[*ip], *line)) {
                 None => {
                     let frame = self.call_stack.pop().unwrap();
                     frame.sync_to_instance();
@@ -2030,6 +2122,61 @@ impl VM {
             }
         }
         Ok(())
+    }
+
+    /// Nombres que `raiz` puede leer como globales: los suyos, los de las
+    /// funciones a las que llama (transitivamente) y los de los acts.
+    fn globales_usadas(&self, raiz: &str) -> HashSet<String> {
+        fn ajenas(body: &[Instruction], params: &[String], fields: &[String], out: &mut HashSet<String>) {
+            let propias: HashSet<&str> = body.iter()
+                .filter_map(|i| match i {
+                    Instruction::StoreVar(n) | Instruction::StoreConst(n) => Some(n.as_str()),
+                    _ => None,
+                })
+                .chain(params.iter().map(|p| p.as_str()))
+                .chain(fields.iter().map(|f| f.as_str()))
+                .collect();
+            for i in body {
+                if let Instruction::LoadVar(n) = i {
+                    if !propias.contains(n.as_str()) { out.insert(n.clone()); }
+                }
+            }
+        }
+        let mut usadas = HashSet::new();
+        for shape in self.shapes.values() {
+            let fields: Vec<String> = shape.fields.iter().map(|f| f.name.clone()).collect();
+            for act in shape.acts.values().chain(shape.on_create.iter()) {
+                ajenas(&act.body, &act.params, &fields, &mut usadas);
+            }
+        }
+        let mut vistas = HashSet::new();
+        let mut pendientes = vec![raiz.to_string()];
+        while let Some(f) = pendientes.pop() {
+            if !vistas.insert(f.clone()) { continue; }
+            let Some(def) = self.functions.get(&f) else { continue };
+            ajenas(&def.body, &def.params, &[], &mut usadas);
+            for i in def.body.iter() {
+                match i {
+                    Instruction::Call(n, _) | Instruction::CallAsync(n, _) => pendientes.push(n.clone()),
+                    Instruction::LoadVar(n) if self.functions.contains_key(n) => pendientes.push(n.clone()),
+                    _ => {}
+                }
+            }
+        }
+        usadas
+    }
+
+    /// Frame para llamar a la función `name` (que debe existir). Comparte el
+    /// cuerpo; solo clona la definición si hay que evaluar defaults.
+    fn call_frame(&mut self, name: &str, mut args: Vec<Value>) -> Result<CallFrame, String> {
+        if args.len() != self.functions[name].params.len() {
+            let func = self.functions[name].clone();
+            args = self.bind_args_with_defaults(&func, args, name)?;
+        }
+        let func = &self.functions[name];
+        Ok(CallFrame::with_args_named(
+            Arc::clone(&func.body), Arc::clone(&func.lines), name, &func.params, args,
+        ))
     }
 
     fn bind_args_with_defaults(
@@ -2155,7 +2302,7 @@ impl VM {
 
         let mut err: Option<String> = None;
         while self.call_stack.len() > call_base {
-            match self.step() {
+            match self.step_batch() {
                 Ok(true)  => break,          // Halt (no debería ocurrir en un act)
                 Ok(false) => {}
                 Err(e)    => { err = Some(e); break; }
