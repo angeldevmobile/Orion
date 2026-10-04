@@ -752,9 +752,11 @@ codegen.rs      ← AST → bytecode
     │
     ├──►  vm.rs               ← bytecode VM (default). Native Rust, no GIL.
     │
-    ├──►  jit/  (--jit)       ← JIT to machine code via Cranelift.
-    │                            Falls back to the VM automatically when an
-    │                            instruction is not yet supported in the JIT.
+    ├──►  jit/  (--jit)       ← JIT to machine code via Cranelift. Numbers live
+    │                            inside the value (NaN-boxing) and arithmetic is
+    │                            compiled inline. Falls back to the VM
+    │                            automatically when an instruction is not yet
+    │                            supported in the JIT.
     │
     └──►  aot.rs  (--build)   ← AOT compilation to a standalone native binary.
 ```
@@ -796,6 +798,28 @@ doubles as a cross-language correctness test.
   rayon (`sum/std/min/max` use every core from 1M elements up).
 - **And in 3× fewer lines**: Python's ~15 lines of manual loop and typing become
   5 lines of Orion, since `frame.open` infers types and layout on its own.
+
+### Interpreter vs JIT
+
+`orion file.orx` runs the bytecode interpreter. For number crunching, run the
+same file with `orion --jit file.orx`: integers, floats and booleans stay inside
+the value (no allocation), and arithmetic, comparisons and branches compile to
+plain machine instructions. Reproducible with `bench\jit\run_jit.ps1` (best of
+3, wall time including process start-up):
+
+| Program                               | Interpreter | JIT      | Peak RAM (JIT) |
+|---------------------------------------|------------:|---------:|---------------:|
+| 10M integer additions in a function   | 3.87 s      | **0.10 s** | 12 MB |
+| The same loop at the top level        | 3.63 s      | **0.10 s** | 12 MB |
+| 5M float operations                   | 3.55 s      | **0.13 s** | 12 MB |
+| `fib(30)`, recursive                  | 2.20 s      | **0.07 s** | 12 MB |
+| Fill and sum a 1M-element list        | 1.27 s      | **0.16 s** | 20 MB |
+| Loop with a ternary                   | 5.08 s      | **0.13 s** | 12 MB |
+
+Both engines print the same result for every program; the differential tests
+check that on every change. Still pending in the JIT: freeing strings and lists
+that are no longer used (long-running processes that build many temporary ones
+keep their memory). See [`BACKLOG.md`](BACKLOG.md).
 
 Beyond throughput, the runtime is hardened for large data: structures nested
 200k+ levels deep and reference cycles (`push(a, a)`) neither crash nor leak.

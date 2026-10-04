@@ -152,8 +152,8 @@ fn readme_examples_parse() {
         .expect("orion-vm tiene padre")
         .to_path_buf();
 
-    // El archivo está trackeado como `Readme.md`; en sistemas sensibles a
-    // mayúsculas hay que probar las dos formas.
+    // Se llamó `Readme.md` hasta 2026-10; se acepta el nombre viejo para
+    // poder probar una copia anterior.
     let path = ["README.md", "Readme.md"]
         .iter()
         .map(|n| root.join(n))
