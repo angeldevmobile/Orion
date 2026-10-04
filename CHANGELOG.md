@@ -10,6 +10,7 @@ formato AAAA-MM-DD.
   dentro de una función.** Cada asignación en `main` copiaba además el valor
   a la tabla de globales del runtime (una llamada y un mutex); ahora solo se
   copian las variables que alguna función, act o tarea lee.
+  `bench/jit/bucle_main.orx` (10 millones de sumas en main): 2,10 s → 0,10 s.
 - **El JIT ya no reserva memoria por cada número: hasta 10× más rápido y
   50× menos RAM.** Los valores usan NaN-boxing: enteros de 48 bits,
   decimales, `null` y booleanos van dentro del propio valor (los enteros más
