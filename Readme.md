@@ -999,6 +999,11 @@ signature = crypto2.rsa_sign("contract", keys.private_key)
 valid     = crypto2.rsa_verify("contract", signature, keys.public_key)  -- yes
 ```
 
+> **Security note:** the `rsa` crate behind `rsa_decrypt` and `rsa_sign` is not
+> constant-time (Marvin attack, RUSTSEC-2023-0071, no fixed version yet). Avoid
+> decrypting or signing with RSA in a server where an attacker can send many
+> requests and time the answers; `aes_encrypt` and `rsa_verify` are not affected.
+
 ---
 
 ### Block B - Modern web ✅

@@ -156,6 +156,8 @@ fn rsa_encrypt(plaintext: &str, pub_pem: &str) -> Result<EvalValue, String> {
     Ok(EvalValue::Str(B64.encode(&cipher)))
 }
 
+// `rsa` no es de tiempo constante (Marvin, RUSTSEC-2023-0071, sin versión
+// corregida): descifrar o firmar aquí en un servidor expuesto filtra tiempos.
 fn rsa_decrypt(encoded: &str, priv_pem: &str) -> Result<EvalValue, String> {
     let priv_key = RsaPrivateKey::from_pkcs8_pem(priv_pem)
         .map_err(|e| format!("crypto2.rsa_decrypt (key): {}", e))?;
