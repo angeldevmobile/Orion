@@ -59,6 +59,12 @@ formato AAAA-MM-DD.
   condicional) mandaba **todo el programa** al intérprete, y `--build` lo
   entregaba en modo bundle. Ahora esos valores viajan en variables de
   Cranelift por posición de la pila. `bench/jit/ternario.orx`: 5,3 s → 0,16 s.
+- **Los tests de `browser_e2e` ya no fallan al azar.** En cada batería
+  completa caían de 1 a 5 (`Page.navigate: no response within 30000 ms`),
+  también en serie. Los servidores de prueba atendían las conexiones de una
+  en una y Chrome abre a veces una conexión especulativa sin mandar nada: el
+  servidor se quedaba esperando en ella. Ahora todos usan `servir`, un hilo
+  por conexión. Tres pasadas seguidas: 98/98.
 - El test `smoke_net_post_con_409_devuelve_status_y_cuerpo` fallaba al azar:
   su servidor falso respondía sin leer el cuerpo de la petición y Windows
   cortaba la conexión.

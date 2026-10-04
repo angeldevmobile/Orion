@@ -93,20 +93,6 @@ despacho por referencia y lotes de instrucciones calientes. Desde el inicio:
 bucle de enteros 9,8 s → 4,5 s y `fib(30)` 5,8 s → 2,4 s (sesiones
 distintas, orientativo).
 
-## Los tests de `browser_e2e` fallan al azar con el equipo cargado
-
-Con la batería completa, 1 a 3 tests distintos en cada pasada fallan por tiempo
-(`Page.navigate: no response within 30000 ms`) y pasan al ejecutarlos solos.
-Pasó al validar la v0.1.9: la batería tardó 341 s en vez de 160.
-
-El 2026-10-03 pasó en las tres baterías completas seguidas (1 o 2 tests,
-cada vez distintos, siempre `Page.navigate` a los 30 s): ya no es ocasional.
-El 2026-10-04 llegaron a 5 en una sola batería (344 s en vez de unos 160).
-
-Un test que falla al azar acaba ignorándose y entonces oculta un fallo real.
-Camino: menos navegadores a la vez por defecto, y plazos de los tests ligados al
-tiempo que tarde en arrancar el primero, no fijos.
-
 ## `db.transaction` no deja decidir dentro de la transacción
 
 Recibe una **lista fija** de sentencias y las ejecuta todas: no hay forma de

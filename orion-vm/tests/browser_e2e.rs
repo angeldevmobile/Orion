@@ -9,18 +9,11 @@
 //!
 //! Ejecutar EN SERIE: `cargo test --test browser_e2e -- --test-threads=1`.
 //!
-//! Estos tests son INESTABLES bajo carga, y conviene saberlo antes de perder una
-//! tarde persiguiendo un fallo que no existe:
-//!
-//! - En paralelo caen ~2 al azar por pasada, en ~195 s.
-//! - En serie caen menos y va más rápido (~145 s), pero **también caen**: se ha
-//!   visto una pasada limpia de 74/74 y otra con 2 fallos.
-//! - Los que caen NUNCA son los mismos, y cada uno aislado pasa en 1-3 s.
-//!
-//! Que cambien de una pasada a otra es la prueba de que es contención de
-//! recursos —cada test levanta un navegador de verdad y un servidor local— y no
-//! un defecto del módulo. La regla práctica: ante un rojo aquí, repetir el test
-//! solo; si pasa, era esto. No des por bueno un verde en serie como garantía.
+//! Fallaban al azar (`Page.navigate: no response within 30000 ms`, 1 a 5 por
+//! pasada, cada vez otros, también en serie): los servidores de prueba
+//! atendían las conexiones de una en una y Chrome abre a veces una conexión
+//! especulativa sin mandar nada. Ahora todos usan `servir`, un hilo por
+//! conexión. Si vuelve a pasar, no es contención: mirar primero el servidor.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -42,25 +35,71 @@ fn tmp_dir(name: &str) -> PathBuf {
     d
 }
 
-/// Sirve un HTML fijo en un puerto libre y devuelve su URL.
-fn serve_html(html: &'static str) -> String {
+/// Servidor HTTP de los tests: cada conexión en su propio hilo. Chrome abre a
+/// veces conexiones especulativas sin mandar nada; uno que atiende de una en
+/// una se queda esperando en esa y la página real no llega (`Page.navigate`
+/// agotaba sus 30 s al azar). `responder` recibe la petición entera.
+fn servir<F>(responder: F) -> u16
+where
+    F: Fn(&str) -> Vec<u8> + Send + Sync + 'static,
+{
     let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
     let port = listener.local_addr().unwrap().port();
-
+    let responder = std::sync::Arc::new(responder);
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut s) = stream else { continue };
-            let mut buf = [0u8; 2048];
-            let _ = s.read(&mut buf);
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                html.len(), html
-            );
-            let _ = s.write_all(resp.as_bytes());
-            let _ = s.flush();
+            let responder = std::sync::Arc::clone(&responder);
+            std::thread::spawn(move || {
+                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                let peticion = leer_peticion(&mut s);
+                if peticion.is_empty() { return; }
+                let _ = s.write_all(&responder(&peticion));
+                let _ = s.flush();
+            });
         }
     });
+    port
+}
 
+/// Lee cabeceras y cuerpo: cerrar con bytes sin leer hace que Windows mande
+/// un RST y el navegador pierda la respuesta.
+fn leer_peticion(s: &mut std::net::TcpStream) -> String {
+    let mut leido = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        match s.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => leido.extend_from_slice(&buf[..n]),
+        }
+        let texto = String::from_utf8_lossy(&leido);
+        if let Some(fin) = texto.find("\r\n\r\n") {
+            let largo = texto[..fin].lines()
+                .find_map(|h| h.to_ascii_lowercase().strip_prefix("content-length:")
+                    .and_then(|v| v.trim().parse::<usize>().ok()))
+                .unwrap_or(0);
+            if leido.len() >= fin + 4 + largo { break; }
+        }
+    }
+    String::from_utf8_lossy(&leido).to_string()
+}
+
+fn ruta_de(peticion: &str) -> String {
+    peticion.split_whitespace().nth(1).unwrap_or("/").to_string()
+}
+
+fn respuesta(estado: &str, tipo: &str, cabeceras: &str, cuerpo: &[u8]) -> Vec<u8> {
+    let mut r = format!(
+        "HTTP/1.1 {estado}\r\nContent-Type: {tipo}\r\n{cabeceras}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        cuerpo.len()
+    ).into_bytes();
+    r.extend_from_slice(cuerpo);
+    r
+}
+
+/// Sirve un HTML fijo en un puerto libre y devuelve su URL.
+fn serve_html(html: &'static str) -> String {
+    let port = servir(move |_| respuesta("200 OK", "text/html; charset=utf-8", "", html.as_bytes()));
     format!("http://127.0.0.1:{port}/")
 }
 
@@ -71,38 +110,14 @@ fn serve_html(html: &'static str) -> String {
 /// attachment`, que es lo que hace que el navegador descargue en vez de mostrar.
 /// Sin esa cabecera no se prueba nada de lo que se quiere probar.
 fn serve_rutas(pagina: &'static str, archivo: &'static [u8], nombre: &'static str) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
-    let port = listener.local_addr().unwrap().port();
-
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut s) = stream else { continue };
-            let mut buf = [0u8; 4096];
-            let n = s.read(&mut buf).unwrap_or(0);
-            let peticion = String::from_utf8_lossy(&buf[..n]).to_string();
-            let ruta = peticion.split_whitespace().nth(1).unwrap_or("/").to_string();
-
-            if ruta.starts_with("/descarga") {
-                let cab = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n\
-                     Content-Disposition: attachment; filename=\"{nombre}\"\r\n\
-                     Content-Length: {}\r\nConnection: close\r\n\r\n",
-                    archivo.len()
-                );
-                let _ = s.write_all(cab.as_bytes());
-                let _ = s.write_all(archivo);
-            } else {
-                let resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
-                     Content-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    pagina.len(), pagina
-                );
-                let _ = s.write_all(resp.as_bytes());
-            }
-            let _ = s.flush();
+    let port = servir(move |peticion| {
+        if ruta_de(peticion).starts_with("/descarga") {
+            let cab = format!("Content-Disposition: attachment; filename=\"{nombre}\"\r\n");
+            respuesta("200 OK", "application/octet-stream", &cab, archivo)
+        } else {
+            respuesta("200 OK", "text/html; charset=utf-8", "", pagina.as_bytes())
         }
     });
-
     format!("http://127.0.0.1:{port}/")
 }
 
@@ -1009,31 +1024,16 @@ with b = web.open() {{
 
 /// Sirve varias páginas distintas en el mismo puerto, para probar recorridos.
 fn serve_paginas(paginas: Vec<(String, String)>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
-    let port = listener.local_addr().unwrap().port();
-
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut s) = stream else { continue };
-            let mut buf = [0u8; 2048];
-            let _ = s.read(&mut buf);
-            let req = String::from_utf8_lossy(&buf).to_string();
-            let ruta = req.split_whitespace().nth(1).unwrap_or("/").to_string();
-
-            let cuerpo = paginas.iter().find(|(p, _)| *p == ruta).map(|(_, h)| h.clone());
-            let resp = match cuerpo {
-                Some(h) => format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    h.len(), h),
-                // Un 404 con plantilla HTML: carga bien y simplemente no tiene
-                // filas, que es justo el caso que no debe pasar desapercibido.
-                None => {
-                    let h = "<!doctype html><html><head><title>404</title></head><body><h1>No existe</h1></body></html>";
-                    format!("HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", h.len(), h)
-                }
-            };
-            let _ = s.write_all(resp.as_bytes());
-            let _ = s.flush();
+    let port = servir(move |peticion| {
+        let ruta = ruta_de(peticion);
+        match paginas.iter().find(|(p, _)| *p == ruta) {
+            Some((_, h)) => respuesta("200 OK", "text/html; charset=utf-8", "", h.as_bytes()),
+            // Un 404 con plantilla HTML: carga bien y simplemente no tiene
+            // filas, que es justo el caso que no debe pasar desapercibido.
+            None => {
+                let h = "<!doctype html><html><head><title>404</title></head><body><h1>No existe</h1></body></html>";
+                respuesta("404 Not Found", "text/html", "", h.as_bytes())
+            }
         }
     });
     format!("http://127.0.0.1:{port}")
@@ -2123,32 +2123,13 @@ with b = web.open() {{
 /// El JSON trae campos que la página **no** llega a pintar (`stock`), que es
 /// justo lo que hace útil capturar la fuente en vez de deshacer el HTML.
 fn serve_api(pagina: &'static str, json: &'static str) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
-    let port = listener.local_addr().unwrap().port();
-
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut s) = stream else { continue };
-            let mut buf = [0u8; 4096];
-            let n = s.read(&mut buf).unwrap_or(0);
-            let peticion = String::from_utf8_lossy(&buf[..n]).to_string();
-            let ruta = peticion.split_whitespace().nth(1).unwrap_or("/").to_string();
-
-            let (tipo, cuerpo) = if ruta.starts_with("/api/") {
-                ("application/json", json)
-            } else {
-                ("text/html; charset=utf-8", pagina)
-            };
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\
-                 Connection: close\r\n\r\n{}",
-                tipo, cuerpo.len(), cuerpo
-            );
-            let _ = s.write_all(resp.as_bytes());
-            let _ = s.flush();
+    let port = servir(move |peticion| {
+        if ruta_de(peticion).starts_with("/api/") {
+            respuesta("200 OK", "application/json", "", json.as_bytes())
+        } else {
+            respuesta("200 OK", "text/html; charset=utf-8", "", pagina.as_bytes())
         }
     });
-
     format!("http://127.0.0.1:{port}/")
 }
 
@@ -2583,35 +2564,18 @@ with b = web.open() {{
 /// El retraso y la concurrencia del servidor son lo que hace que el paralelismo
 /// se note: en serie el recorrido tarda N×retraso, en paralelo mucho menos.
 fn serve_catalogo(paginas: usize, retraso_ms: u64) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
-    let port = listener.local_addr().unwrap().port();
-
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut s) = stream else { continue };
-            // Un hilo por conexion: el servidor tiene que poder atender varias a
-            // la vez o mediria su propia serializacion, no la del crawler.
-            std::thread::spawn(move || {
-                let mut buf = [0u8; 2048];
-                let n = s.read(&mut buf).unwrap_or(0);
-                let req = String::from_utf8_lossy(&buf[..n]).to_string();
-                let ruta = req.split_whitespace().nth(1).unwrap_or("/");
-                let pag: usize = ruta.rsplit("page=").next()
-                    .and_then(|x| x.parse().ok()).unwrap_or(0);
-                std::thread::sleep(std::time::Duration::from_millis(retraso_ms));
-                let filas: String = (0..5).map(|i| format!(
-                    "<div class=\"card\"><span class=\"t\">Item {pag}-{i}</span>\
-                     <span class=\"p\">{}.50</span></div>", pag * 10 + i
-                )).collect();
-                let html = format!("<!doctype html><html><head><title>P{pag}</title></head>\
-                    <body><div id=l>{filas}</div></body></html>");
-                let resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
-                     Content-Length: {}\r\nConnection: close\r\n\r\n{}", html.len(), html);
-                let _ = s.write_all(resp.as_bytes());
-                let _ = s.flush();
-            });
-        }
+    let port = servir(move |peticion| {
+        let ruta = ruta_de(peticion);
+        let pag: usize = ruta.rsplit("page=").next()
+            .and_then(|x| x.parse().ok()).unwrap_or(0);
+        std::thread::sleep(std::time::Duration::from_millis(retraso_ms));
+        let filas: String = (0..5).map(|i| format!(
+            "<div class=\"card\"><span class=\"t\">Item {pag}-{i}</span>\
+             <span class=\"p\">{}.50</span></div>", pag * 10 + i
+        )).collect();
+        let html = format!("<!doctype html><html><head><title>P{pag}</title></head>\
+            <body><div id=l>{filas}</div></body></html>");
+        respuesta("200 OK", "text/html; charset=utf-8", "", html.as_bytes())
     });
     let _ = paginas;
     format!("http://127.0.0.1:{port}/")
@@ -2998,37 +2962,19 @@ with b = web.open({{ shadow: no }}) {{
 /// recibió**: así se comprueba que la reescritura llegó al servidor de verdad,
 /// y no solo que Orion creyó haberla mandado.
 fn serve_eco(pagina: &'static str) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("no se pudo abrir puerto");
-    let port = listener.local_addr().unwrap().port();
-
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let Ok(mut s) = stream else { continue };
-            let mut buf = [0u8; 4096];
-            let n = s.read(&mut buf).unwrap_or(0);
-            let peticion = String::from_utf8_lossy(&buf[..n]).to_string();
-            let ruta = peticion.split_whitespace().nth(1).unwrap_or("/").to_string();
-            let auth = peticion.lines()
-                .find_map(|l| l.strip_prefix("Authorization: "))
-                .unwrap_or("sin-cabecera")
-                .trim()
-                .to_string();
-
-            let (tipo, cuerpo) = if ruta.starts_with("/api/") {
-                ("application/json".to_string(),
-                 format!("{{\"origen\":\"real\",\"auth\":\"{auth}\",\"items\":[{{\"nombre\":\"Real 1\"}},{{\"nombre\":\"Real 2\"}}]}}"))
-            } else {
-                ("text/html; charset=utf-8".to_string(), pagina.to_string())
-            };
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                tipo, cuerpo.len(), cuerpo
-            );
-            let _ = s.write_all(resp.as_bytes());
-            let _ = s.flush();
+    let port = servir(move |peticion| {
+        let auth = peticion.lines()
+            .find_map(|l| l.strip_prefix("Authorization: "))
+            .unwrap_or("sin-cabecera")
+            .trim()
+            .to_string();
+        if ruta_de(peticion).starts_with("/api/") {
+            let cuerpo = format!("{{\"origen\":\"real\",\"auth\":\"{auth}\",\"items\":[{{\"nombre\":\"Real 1\"}},{{\"nombre\":\"Real 2\"}}]}}");
+            respuesta("200 OK", "application/json", "", cuerpo.as_bytes())
+        } else {
+            respuesta("200 OK", "text/html; charset=utf-8", "", pagina.as_bytes())
         }
     });
-
     format!("http://127.0.0.1:{port}/")
 }
 
