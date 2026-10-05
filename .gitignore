@@ -29,3 +29,7 @@ Page-Orion-Doumentation/
 /dbg.txt
 /test_io_out.txt
 /test_log.txt
+
+# Salidas de bench/jit/run_jit.ps1
+antes.txt
+despues.txt

@@ -3,6 +3,25 @@
 Cosas encontradas y no arregladas todavía, con el motivo por el que importan.
 Lo que se arregla sale de aquí y entra en [`CHANGELOG.md`](CHANGELOG.md).
 
+## Prioridades: los trabajos grandes pendientes
+
+Acordado el 2026-10-04: primero publicar lo hecho (v0.1.10) y las tareas
+pequeñas; después, estos, en este orden. Cada uno tiene su entrada abajo.
+
+1. **Rendimiento del intérprete** ("El intérprete va unas 30 veces por detrás
+   del JIT"). Empezar **perfilando** con `samply` sobre `bench/jit/bucle_int.orx`
+   (perfil `profiling` = release con símbolos) y atacar lo que salga: reducir
+   `Value` de 72 a ~32 bytes, locales por índice, o el bucle de `step`. No
+   cambiar nada a ciegas: FxHash se esperaba mayor y dio un 10-20 %.
+2. **JIT por niveles** (más adelante, y solo si el punto 1 no basta):
+   interpretar al arrancar y compilar con Cranelift las funciones calientes.
+   Usar `--jit` por defecto tal cual no vale: los errores pierden la línea y
+   la traza, y compilar todo el programa antes de ejecutarlo cuesta más que
+   ejecutar un script corto.
+3. **Liberar strings y listas en el JIT** (fase 4 de "JIT: los objetos del
+   heap no se liberan"): conteo de referencias o un arena. Importa en
+   servidores y procesos de horas.
+
 ## Dependencias con avisos de seguridad (`cargo audit`, 2026-10-03)
 
 Quedan 7 avisos tras actualizar las compatibles (ver CHANGELOG). Ninguno
@@ -68,30 +87,27 @@ builtin `append(xs, v)` da error de sintaxis aunque la VM y el JIT lo
 implementan. Solo funciona `xs.append(v)`. O se quita el builtin, o el parser
 acepta `append(` como llamada.
 
-## El intérprete busca cada variable por nombre
+## El intérprete va unas 30 veces por detrás del JIT
 
-`orion archivo.orx` usa el intérprete. Un bucle de 10 millones de sumas tarda
-4,5 s (`bench/jit/bucle_int.orx`, unos 45 ns por instrucción), frente a 1,7 s
-del JIT; CPython hace el mismo bucle en torno a 1 s (estimación, falta
-medirlo junto a los demás). Lo que queda en `vm.rs`:
+`orion archivo.orx` usa el intérprete: un bucle de 10 millones de sumas tarda
+unos 3,5 s (unos 27 ns por instrucción) frente a 0,08 s con `--jit`. Ya hecho
+(ver CHANGELOG): cuerpos `Arc`, despacho por referencia, lotes de
+instrucciones calientes y FxHash para las variables.
 
-- Las variables locales viven en un `IndexMap` por nombre: cada `LoadVar` y
-  `StoreVar` calcula un hash del nombre, y `LoadVar` clona el `Value`.
-- Cada llamada crea un `IndexMap` nuevo para las locales y copia el nombre de
-  la función y de cada parámetro.
-- `Value` guarda `Dict(IndexMap)` sin `Rc`, así que es grande y cada push y
-  pop de la pila mueve muchos bytes.
+Pasar de SipHash a FxHash solo dio un 10-20 %, así que buscar la variable no
+es lo que más cuesta. Sospechosos, sin medir todavía:
 
-Camino: resolver las locales a índices de slot en `codegen`
-(`LoadLocal(u16)` / `StoreLocal(u16)` sobre un `Vec<Value>` del frame), con
-cuidado con lo que hoy lee `vars` por nombre (closures, `act` y
-`sync_to_instance`, el depurador, el REPL). Medir con `bench/jit/run_jit.ps1`
-contra el binario anterior (`target/base/`).
+- **`Value` ocupa 72 bytes** (medido): `Dict` guarda el `IndexMap` dentro, sin
+  `Box`. Cada `push`, `pop` y `LoadVar` mueve 72 bytes aunque sea un entero.
+  Con `Dict(Box<IndexMap>)` bajaría a unos 32. Son 419 sitios que tocan
+  `Value::Dict(`.
+- Cada operación devuelve `Result<Value, String>`, también de 72+ bytes.
+- `LoadVar` clona el valor; el bucle de `step` vuelve a pedir el frame, la
+  línea y el código en cada instrucción.
 
-Ya hecho (2026-10-03, ver CHANGELOG): cuerpos como `Arc<[Instruction]>`,
-despacho por referencia y lotes de instrucciones calientes. Desde el inicio:
-bucle de enteros 9,8 s → 4,5 s y `fib(30)` 5,8 s → 2,4 s (sesiones
-distintas, orientativo).
+Antes del siguiente cambio grande, perfilar (por ejemplo con `samply`) para
+saber cuál de estos pesa. A más largo plazo: locales por índice, o un JIT por
+niveles que compile solo las funciones calientes.
 
 ## `db.transaction` no deja decidir dentro de la transacción
 

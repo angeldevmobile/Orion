@@ -4740,7 +4740,7 @@ dependencies = [
 
 [[package]]
 name = "orion-vm"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -4795,6 +4795,7 @@ dependencies = [
  "rusqlite",
  "rust_decimal",
  "rust_xlsxwriter",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "sha2 0.10.9",

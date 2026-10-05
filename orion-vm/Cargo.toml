@@ -2,7 +2,7 @@
 name = "orion-vm"
 # Única fuente de la versión: banner, doctor, REPL y `--version` la leen con
 # env!("CARGO_PKG_VERSION"). Al publicar, el tag vX.Y.Z debe coincidir.
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 description = "Orion Language Virtual Machine"
 build = "build.rs"
@@ -22,6 +22,7 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 ureq = { version = "2", features = ["json"] }
 tiny_http = "0.12"
 indexmap = { version = "2", features = ["serde"] }
+rustc-hash = "2"                                    # hash rápido para las variables de cada frame
 rand = "0.8"
 chrono = "0.4"
 regex = "1"

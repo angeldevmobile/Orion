@@ -82,12 +82,18 @@ macro_rules! hot_instr {
     };
 }
 
+/// Variables y constantes de un frame. Hash Fx en vez de SipHash: cada
+/// `LoadVar` y `StoreVar` calcula el hash del nombre, y los nombres los pone
+/// el programa, no un atacante.
+type Vars = IndexMap<String, Value, rustc_hash::FxBuildHasher>;
+type Consts = HashSet<String, rustc_hash::FxBuildHasher>;
+
 struct CallFrame {
     instructions: Arc<[Instruction]>,
     lines: Arc<[u32]>,
     ip: usize,
-    vars: IndexMap<String, Value>,
-    consts: HashSet<String>,
+    vars: Vars,
+    consts: Consts,
     /// Si es un frame de act/on_create, referencia a la instancia actual
     self_instance: Option<Rc<RefCell<InstanceData>>>,
     /// Nombres de los campos de la instancia (para sincronizar al salir del frame)
@@ -104,8 +110,8 @@ impl CallFrame {
     fn new(instructions: impl Into<Arc<[Instruction]>>, lines: impl Into<Arc<[u32]>>) -> Self {
         CallFrame {
             instructions: instructions.into(), lines: lines.into(), ip: 0,
-            vars: IndexMap::new(),
-            consts: HashSet::new(),
+            vars: Vars::default(),
+            consts: Consts::default(),
             self_instance: None,
             instance_fields: Vec::new(),
             name: String::from("<main>"),
@@ -842,8 +848,8 @@ impl VM {
             Instruction::MakeClosure(fn_name) => {
                 // Captura el scope actual como entorno compartido de la closure.
                 // Rc<RefCell> permite que las mutaciones persistan entre llamadas.
-                let env = self.call_stack.last()
-                    .map(|f| f.vars.clone())
+                let env: IndexMap<String, Value> = self.call_stack.last()
+                    .map(|f| f.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                     .unwrap_or_default();
                 let env_rc = Rc::new(RefCell::new(env));
                 // Un env puede ciclarse (closure recursiva que se captura a sí

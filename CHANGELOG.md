@@ -3,9 +3,13 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
-## Sin publicar
+## v0.1.10 - 2026-10-04
 
 ### Cambiado
+- **El intérprete busca las variables con FxHash en vez de SipHash**: cada
+  `LoadVar` y `StoreVar` calcula el hash del nombre. Los bucles van entre un
+  10 % y un 21 % más rápido (`bucle_main` 3,65 s → 2,87 s, mejor de 3, misma
+  sesión); `fib` y las listas, igual.
 - **En el JIT, un bucle escrito en el programa principal va tan rápido como
   dentro de una función.** Cada asignación en `main` copiaba además el valor
   a la tabla de globales del runtime (una llamada y un mutex); ahora solo se
