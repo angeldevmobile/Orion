@@ -3,7 +3,7 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
-## Sin publicar
+## v0.1.11 - 2026-10-04
 
 ### Corregido
 - **`max` y `min` devolvían el primer argumento.** `max(3, 7)` daba `3` y
