@@ -943,10 +943,28 @@ pub(crate) fn apply_cast(raw: String, cast: &str) -> i64 {
 mod tests {
     use super::*;
 
+    /// Libera lo que `alloc_val` dejó en el heap. El runtime todavía no libera
+    /// nada (fase 4) y LeakSanitizer, en CI, lo cuenta como fuga del test.
+    unsafe fn liberar(v: i64) {
+        let u = v as u64;
+        if u >= DOUBLE_OFFSET as u64 || matches!(v, VAL_NULL | VAL_FALSE | VAL_TRUE) {
+            return;
+        }
+        let b = Box::from_raw(v as *mut OrionVal);
+        if b.tag == TAG_STR {
+            let len = cstr_to_str(b.data_i).len() + 1;
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(b.data_i as *mut u8, len)));
+        }
+    }
+
+    /// Codifica, decodifica y libera: devuelve lo decodificado.
     fn ida_y_vuelta(tag: u8, i: i64, f: f64) -> OrionVal {
         let v = alloc_val(tag, i, f);
         assert_ne!(v, 0, "el 0 está reservado para el error pendiente");
-        unsafe { decode_val(v) }
+        let d = unsafe { decode_val(v) };
+        // El string se lee antes de liberar: después su texto ya no existe.
+        unsafe { liberar(v) };
+        d
     }
 
     #[test]
@@ -957,7 +975,9 @@ mod tests {
         }
         // Dentro de 48 bits no reserva memoria; fuera, sí.
         assert_eq!(alloc_val(TAG_INT, INT48_MAX, 0.0) & INT_TAG, INT_TAG);
-        assert!((alloc_val(TAG_INT, INT48_MAX + 1, 0.0) as u64) < DOUBLE_OFFSET as u64);
+        let grande = alloc_val(TAG_INT, INT48_MAX + 1, 0.0);
+        assert!((grande as u64) < DOUBLE_OFFSET as u64);
+        unsafe { liberar(grande) };
     }
 
     #[test]
@@ -982,8 +1002,10 @@ mod tests {
 
     #[test]
     fn un_string_sigue_en_el_heap() {
-        let d = ida_y_vuelta(TAG_STR, string_to_cptr("hola".into()), 0.0);
+        let v = alloc_val(TAG_STR, string_to_cptr("hola".into()), 0.0);
+        let d = unsafe { decode_val(v) };
         assert_eq!(d.tag, TAG_STR);
         assert_eq!(unsafe { cstr_to_str(d.data_i) }, "hola");
+        unsafe { liberar(v) };
     }
 }
