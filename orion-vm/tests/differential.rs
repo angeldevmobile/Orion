@@ -1079,3 +1079,29 @@ show "fin""#;
         assert_eq!(err.matches(aviso).count(), 1, "{modo:?}: stderr fue:\n{err}");
     }
 }
+
+#[test]
+fn min_max_y_sort_comparan_de_verdad_y_mezclan_int_y_float() {
+    // max(3, 7) devolvía 3: el builtin se quedaba con el primero. Los métodos
+    // de lista ignoraban int contra float, y sort los trataba como iguales.
+    let src = r#"show max(3, 7)
+show min(9, 2)
+show max([1, 5, 2])
+show min([1299, 24.99, 349.5])
+show [1299, 24.99, 349.5].min()
+show [1, 2.5, 2].max()
+a = [3, 2.5, 10, 1]
+a.sort()
+show a
+show sort([3, 2.5, 1])
+show sort(["pear", "apple"])
+b = ["pear", "apple", "fig"]
+b.sort()
+show b
+show [].min()
+attempt { show [1, "x"].max() } handle e { show e }
+attempt { c = [2, "x"]
+c.sort() } handle e { show e }"#;
+    assert_vm_jit_match(src);
+    assert_jit_nativo(src);
+}

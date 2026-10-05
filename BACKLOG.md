@@ -80,6 +80,18 @@ en `chan.recibir` para siempre: el programa queda colgado, ahora al menos
 con el error a la vista. Camino: que un canal cuyo productor muere se cierre
 con ese error y `chan.recibir` lo lance.
 
+## Los mensajes de error mezclan español e inglés
+
+El SPEC fija el inglés como idioma canónico, pero el runtime dice
+"División por cero" y "Desbordamiento aritmético en suma de enteros" junto a
+"Index 5 out of range" y "Modulo by zero" (`value.rs`, `vm.rs`, y sus copias
+en `jit/runtime.rs`, que repiten el texto para que los dos motores coincidan).
+Se nota en la documentación, que es en inglés: un `show e` en un `handle`
+imprime el mensaje tal cual. Encontrado el 2026-10-04 al escribir Learn
+Orion. Camino: pasar todos a inglés en un solo cambio (intérprete y JIT a la
+vez, con los tests diferenciales que comparan los mensajes) y anotarlo en el
+CHANGELOG, porque quien compare el texto de un error lo notará.
+
 ## `append(lista, x)` no se puede escribir
 
 `append` es palabra reservada (`append "ruta" with texto`), así que el

@@ -321,3 +321,16 @@ fn tc_no_false_undefined_on_read_binding() {
         "no definida",
     );
 }
+
+#[test]
+fn las_anotaciones_list_y_dict_aceptan_listas_y_dicts() {
+    // `x: list` se guardaba como "List" y un literal se deducía "list": el
+    // verificador rechazaba cualquier lista pasada a un parámetro anotado.
+    let src = "fn media(xs: list) -> float { return xs.sum() / len(xs) }\n\
+               fn nombre(d: dict) -> string { return d[\"n\"] }\n\
+               show media([7, 8, 10])\n\
+               show nombre({n: \"Ana\"})\n\
+               ys: list = [1, 2]\n\
+               z: dict = {a: 1}\n";
+    assert_ok(src);
+}

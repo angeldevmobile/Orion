@@ -1083,12 +1083,7 @@ impl VM {
                                 acc
                             }
                             "sort" => {
-                                list.borrow_mut().sort_by(|a, b| match (a, b) {
-                                    (Value::Int(x), Value::Int(y))     => x.cmp(y),
-                                    (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
-                                    (Value::Str(x), Value::Str(y))     => x.cmp(y),
-                                    _ => std::cmp::Ordering::Equal,
-                                });
+                                crate::value::ordenar(&mut list.borrow_mut())?;
                                 Value::List(list)
                             }
                             "sum" => {
@@ -1103,16 +1098,8 @@ impl VM {
                                 }
                                 if is_int { Value::Int(total as i64) } else { Value::Float(total) }
                             }
-                            "min" => list.borrow().iter().cloned().reduce(|a, b| match (&a, &b) {
-                                (Value::Int(x), Value::Int(y))     => if x <= y { a } else { b },
-                                (Value::Float(x), Value::Float(y)) => if x <= y { a } else { b },
-                                _ => a,
-                            }).unwrap_or(Value::Null),
-                            "max" => list.borrow().iter().cloned().reduce(|a, b| match (&a, &b) {
-                                (Value::Int(x), Value::Int(y))     => if x >= y { a } else { b },
-                                (Value::Float(x), Value::Float(y)) => if x >= y { a } else { b },
-                                _ => a,
-                            }).unwrap_or(Value::Null),
+                            "min" => crate::value::extremo(list.borrow().iter().cloned(), false, "min")?,
+                            "max" => crate::value::extremo(list.borrow().iter().cloned(), true, "max")?,
                             _ => return Err(format!("List has no method '{}'", method_name)),
                         };
                         self.value_stack.push(result);
@@ -3102,8 +3089,7 @@ impl VM {
                         other => vec![other],
                     }
                 } else { args };
-                let best = items.into_iter().next().unwrap();
-                Ok(Some(best))
+                Ok(Some(crate::value::extremo(items, true, "max")?))
             }
             "min" => {
                 if args.is_empty() { return Err("min() expects arguments".to_string()); }
@@ -3113,8 +3099,7 @@ impl VM {
                         other => vec![other],
                     }
                 } else { args };
-                let best = items.into_iter().next().unwrap();
-                Ok(Some(best))
+                Ok(Some(crate::value::extremo(items, false, "min")?))
             }
             "floor" => {
                 let val = args.into_iter().next().ok_or("floor() expects one argument")?;
@@ -3190,11 +3175,7 @@ impl VM {
                 let val = args.into_iter().next().ok_or("sort() expects a list")?;
                 match val {
                     Value::List(v) => {
-                        v.borrow_mut().sort_by(|a, b| {
-                            let fa = match a { Value::Int(n) => *n as f64, Value::Float(f) => *f, _ => 0.0 };
-                            let fb = match b { Value::Int(n) => *n as f64, Value::Float(f) => *f, _ => 0.0 };
-                            fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
-                        });
+                        crate::value::ordenar(&mut v.borrow_mut())?;
                         Ok(Some(Value::List(v)))
                     }
                     _ => Err("sort(): expects a list".to_string()),

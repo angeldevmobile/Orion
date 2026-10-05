@@ -373,6 +373,40 @@ unsafe fn call_method_str(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
 
 //     Métodos builtin de List
 
+/// El orden de `Value::order` (value.rs) sobre valores del JIT: números entre
+/// sí, int y float mezclados, y strings entre sí.
+unsafe fn orden(a: i64, b: i64) -> Option<std::cmp::Ordering> {
+    let (x, y) = (decode_val(a), decode_val(b));
+    match (x.tag, y.tag) {
+        (TAG_INT, TAG_INT)     => Some(x.data_i.cmp(&y.data_i)),
+        (TAG_INT, TAG_FLOAT)   => (x.data_i as f64).partial_cmp(&y.data_f),
+        (TAG_FLOAT, TAG_INT)   => x.data_f.partial_cmp(&(y.data_i as f64)),
+        (TAG_FLOAT, TAG_FLOAT) => x.data_f.partial_cmp(&y.data_f),
+        (TAG_STR, TAG_STR)     => Some(cstr_to_str(x.data_i).cmp(cstr_to_str(y.data_i))),
+        _ => None,
+    }
+}
+
+unsafe fn comparables(a: i64, b: i64) -> bool {
+    let num = |t: u8| t == TAG_INT || t == TAG_FLOAT;
+    let (x, y) = (decode_val(a).tag, decode_val(b).tag);
+    (num(x) && num(y)) || (x == TAG_STR && y == TAG_STR)
+}
+
+/// Como `value::extremo`: el menor o el mayor; lista vacía, null.
+unsafe fn extremo(items: &[i64], mayor: bool, nombre: &str) -> i64 {
+    let mut best: Option<i64> = None;
+    for &x in items {
+        let Some(b) = best else { best = Some(x); continue };
+        let Some(ord) = orden(x, b) else {
+            return fallar(format!("{}(): cannot compare {} and {}",
+                nombre, nombre_tipo(&decode_val(x)), nombre_tipo(&decode_val(b))));
+        };
+        if (mayor && ord.is_gt()) || (!mayor && ord.is_lt()) { best = Some(x); }
+    }
+    best.unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
+}
+
 unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
     let items = &mut *(data_i as *mut Vec<i64>);
     let name  = cstr_to_str(name_ptr);
@@ -419,35 +453,17 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             else      { alloc_val(TAG_FLOAT, 0, total) }
         }
         "sort" => {
-            items.sort_by(|&a, &b| {
-                let av = decode_val(a); let bv = decode_val(b);
-                match (av.tag, bv.tag) {
-                    (TAG_INT, TAG_INT)     => av.data_i.cmp(&bv.data_i),
-                    (TAG_FLOAT, TAG_FLOAT) => av.data_f.partial_cmp(&bv.data_f).unwrap_or(std::cmp::Ordering::Equal),
-                    (TAG_STR, TAG_STR)     => cstr_to_str(av.data_i).cmp(cstr_to_str(bv.data_i)),
-                    _                      => std::cmp::Ordering::Equal,
+            for w in items.windows(2) {
+                if !comparables(w[0], w[1]) {
+                    return fallar(format!("sort(): cannot compare {} and {}",
+                        nombre_tipo(&decode_val(w[0])), nombre_tipo(&decode_val(w[1]))));
                 }
-            });
+            }
+            items.sort_by(|&a, &b| orden(a, b).unwrap_or(std::cmp::Ordering::Equal));
             alloc_val(TAG_LIST, data_i, 0.0)
         }
-        "min" => {
-            items.iter().copied().reduce(|a, b| {
-                let av = decode_val(a); let bv = decode_val(b);
-                match (av.tag, bv.tag) {
-                    (TAG_INT, TAG_INT) => if av.data_i <= bv.data_i { a } else { b },
-                    _ => a,
-                }
-            }).unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
-        }
-        "max" => {
-            items.iter().copied().reduce(|a, b| {
-                let av = decode_val(a); let bv = decode_val(b);
-                match (av.tag, bv.tag) {
-                    (TAG_INT, TAG_INT) => if av.data_i >= bv.data_i { a } else { b },
-                    _ => a,
-                }
-            }).unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
-        }
+        "min" => extremo(items, false, "min"),
+        "max" => extremo(items, true, "max"),
         "pop" => {
             items.pop().unwrap_or_else(|| alloc_val(TAG_NULL, 0, 0.0))
         }

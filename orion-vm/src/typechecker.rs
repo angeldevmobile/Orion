@@ -1129,6 +1129,14 @@ fn is_builtin(name: &str) -> bool {
 }
 
 fn normalize(t: &str) -> String {
+    // El parser escribe la anotación `list` como "List" (y "List[T]" con
+    // genéricos), pero un literal se deduce como "list": sin esto nunca coinciden.
+    let base = t.split('[').next().unwrap_or(t);
+    match base {
+        "List" => return "list".to_string(),
+        "Dict" => return "dict".to_string(),
+        _ => {}
+    }
     match t {
         "str"     => "string",
         "integer" => "int",

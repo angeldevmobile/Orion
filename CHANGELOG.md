@@ -3,6 +3,25 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## Sin publicar
+
+### Corregido
+- **`max` y `min` devolvían el primer argumento.** `max(3, 7)` daba `3` y
+  `min(9, 2)` daba `9`, en el intérprete y en el JIT. Los métodos de lista
+  (`lista.min()`, `lista.max()`) ignoraban la comparación entre enteros y
+  decimales: `[1299, 24.99].min()` daba `1299`. Y `sort` trataba un entero y
+  un decimal como iguales (`[3, 2.5, 10, 1]` quedaba `[3, 2.5, 1, 10]`), y el
+  builtin `sort` no ordenaba strings. Ahora todos usan un mismo orden
+  (`Value::order`): números entre sí, enteros y decimales mezclados, y strings
+  entre sí; mezclar números y strings es un error con mensaje, no un
+  resultado equivocado. Encontrado al verificar los ejemplos de la web.
+- **Anotar un parámetro o una variable como `list` o `dict` ya no es un
+  error de tipos.** El parser guardaba la anotación como `List`/`Dict` y el
+  verificador deducía `list`/`dict` de los literales, así que
+  `fn media(xs: list)` rechazaba cualquier lista ("expects 'List', got
+  'list'") y el programa no llegaba a ejecutarse. También encontrado al
+  verificar los ejemplos de la web.
+
 ## v0.1.10 - 2026-10-04
 
 ### Cambiado

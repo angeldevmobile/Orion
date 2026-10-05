@@ -355,6 +355,19 @@ impl Value {
         }
     }
 
+    /// Orden de `sort`, `min` y `max`: números entre sí (int y float
+    /// mezclados) y strings entre sí. `None` si no se pueden comparar.
+    pub fn order(&self, other: &Value) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b))     => Some(a.cmp(b)),
+            (Value::Int(a), Value::Float(b))   => (*a as f64).partial_cmp(b),
+            (Value::Float(a), Value::Int(b))   => a.partial_cmp(&(*b as f64)),
+            (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
+            (Value::Str(a), Value::Str(b))     => Some(a.cmp(b)),
+            _ => None,
+        }
+    }
+
     pub fn compare_lt(&self, other: &Value) -> Result<bool, String> {
         match (self, other) {
             (Value::Int(a), Value::Int(b))     => Ok(a < b),
@@ -364,4 +377,39 @@ impl Value {
             _ => Err(format!("Cannot compare {} < {}", self.type_name(), other.type_name())),
         }
     }
+}
+
+/// El menor (`mayor == false`) o el mayor elemento, con el orden de `Value::order`.
+/// Una lista vacía da `null`; dos elementos que no se comparan, un error.
+pub fn extremo(items: impl IntoIterator<Item = Value>, mayor: bool, nombre: &str) -> Result<Value, String> {
+    let mut best: Option<Value> = None;
+    for x in items {
+        best = Some(match best {
+            None => x,
+            Some(b) => {
+                let ord = x.order(&b).ok_or_else(|| {
+                    format!("{}(): cannot compare {} and {}", nombre, x.type_name(), b.type_name())
+                })?;
+                let gana = if mayor { ord.is_gt() } else { ord.is_lt() };
+                if gana { x } else { b }
+            }
+        });
+    }
+    Ok(best.unwrap_or(Value::Null))
+}
+
+/// Ordena con `Value::order`. Antes de mover nada comprueba que todo se pueda
+/// comparar: mezclar, por ejemplo, números y strings es un error.
+pub fn ordenar(items: &mut [Value]) -> Result<(), String> {
+    for w in items.windows(2) {
+        let comparable = matches!(
+            (&w[0], &w[1]),
+            (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) | (Value::Str(_), Value::Str(_))
+        );
+        if !comparable {
+            return Err(format!("sort(): cannot compare {} and {}", w[0].type_name(), w[1].type_name()));
+        }
+    }
+    items.sort_by(|a, b| a.order(b).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(())
 }
