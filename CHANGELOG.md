@@ -5,6 +5,13 @@ formato AAAA-MM-DD.
 
 ## Unreleased
 
+### Performance
+- **`orion` starts and exits ~60 ms faster on Windows.** A one-line script
+  took 83 ms and now takes 22 ms (`--jit`: 25 ms). The GUI's `opengl32.dll`
+  was loaded at every start and its unload alone cost ~70 ms at exit, GUI or
+  not. It is now delay-loaded (with `uiautomationcore.dll`): only scripts
+  that use `gui` load it.
+
 ### Fixed
 - **`x.field = v` broke the JIT.** Any attribute assignment on a variable
   (`d.total = 0`, `p.x = 5`, or `v.state = ...` inside a `for`) made the

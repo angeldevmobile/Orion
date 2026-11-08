@@ -5,7 +5,18 @@ fn main() {
     #[cfg(target_os = "windows")]
     embed_resource::compile("orion.rc", embed_resource::NONE);
 
+    delay_load_gui_dlls();
     regen_builtins();
+}
+
+/// The GUI (eframe) imports opengl32.dll, whose unload alone added ~70 ms to
+/// every `orion` run, GUI or not. Delay-loading defers it to the first GUI call.
+fn delay_load_gui_dlls() {
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") { return; }
+    for dll in ["opengl32.dll", "uiautomationcore.dll"] {
+        println!("cargo:rustc-link-arg-bins=/DELAYLOAD:{dll}");
+    }
+    println!("cargo:rustc-link-arg-bins=delayimp.lib");
 }
 
 /// Regenera la typeshed (src/cli/builtins_gen.rs) en cada build para que el
