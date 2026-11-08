@@ -334,3 +334,15 @@ fn las_anotaciones_list_y_dict_aceptan_listas_y_dicts() {
                z: dict = {a: 1}\n";
     assert_ok(src);
 }
+
+#[test]
+fn decimal_annotations_and_int_mixing_are_fine() {
+    assert_ok("x: decimal = 19.99d\ny = x + 1\nshow y");
+    assert_ok("fn price(x: decimal) { return x * 2 }\nshow price(5)");
+}
+
+#[test]
+fn decimal_plus_float_is_caught_before_running() {
+    assert_has_error("show 19.99d + 0.5");
+    assert_has_error("total = 1.5 * 2.00d");
+}

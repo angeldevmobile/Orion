@@ -5,6 +5,7 @@ pub enum TokenKind {
     // Literals
     Int(i64),
     Float(f64),
+    Decimal(String),
     Str(String),
     Bool(bool),
     Null,

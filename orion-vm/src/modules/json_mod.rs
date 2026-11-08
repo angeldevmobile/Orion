@@ -125,6 +125,11 @@ pub fn eval_to_json(v: EvalValue) -> serde_json::Value {
         EvalValue::Bool(b)     => serde_json::Value::Bool(b),
         EvalValue::Int(n)      => serde_json::json!(n),
         EvalValue::Float(f)    => serde_json::json!(f),
+        // JSON numbers are doubles; the shortest form keeps 19.99 as 19.99.
+        EvalValue::Decimal(d)  => rust_decimal::prelude::ToPrimitive::to_f64(&d)
+            .and_then(serde_json::Number::from_f64)
+            .map(serde_json::Value::Number)
+            .unwrap_or_else(|| serde_json::Value::String(d.to_string())),
         EvalValue::Str(s)      => serde_json::Value::String(s),
         EvalValue::List(arr)   => serde_json::Value::Array(arr.into_iter().map(eval_to_json).collect()),
         EvalValue::Dict(m)     => {
@@ -170,6 +175,7 @@ fn validate(obj: &EvalValue, schema: &EvalValue) -> bool {
             "str"   => matches!(val, EvalValue::Str(_)),
             "int"   => matches!(val, EvalValue::Int(_)),
             "float" => matches!(val, EvalValue::Float(_)),
+            "decimal" => matches!(val, EvalValue::Decimal(_)),
             "bool"  => matches!(val, EvalValue::Bool(_)),
             "list"  => matches!(val, EvalValue::List(_)),
             "dict"  => matches!(val, EvalValue::Dict(_)),

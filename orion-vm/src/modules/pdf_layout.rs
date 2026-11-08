@@ -410,6 +410,7 @@ fn numero_de(v: &EvalValue) -> Option<f64> {
     match v {
         EvalValue::Int(n) => Some(*n as f64),
         EvalValue::Float(f) => Some(*f),
+        EvalValue::Decimal(d) => rust_decimal::prelude::ToPrimitive::to_f64(d),
         EvalValue::Str(s) => s.trim().parse().ok(),
         _ => None,
     }
@@ -475,14 +476,23 @@ fn formatear(v: &EvalValue, formato: &str, sep: &Separadores) -> String {
         None => (formato.trim().to_lowercase(), None),
     };
     let decimales = |por_defecto: usize| arg.as_deref().and_then(|a| a.parse().ok()).unwrap_or(por_defecto);
+    // A decimal is rounded exactly first, so 2.675 gives 2.68 and not 2.67.
+    // checked_mul: `*` panics when a huge decimal times 100 doesn't fit.
+    let exacto = |escala: i64, dec: usize| match v {
+        EvalValue::Decimal(d) => d.checked_mul(rust_decimal::Decimal::from(escala))
+            .and_then(|x| rust_decimal::prelude::ToPrimitive::to_f64(&x.round_dp_with_strategy(
+                dec.min(28) as u32, rust_decimal::RoundingStrategy::MidpointAwayFromZero)))
+            .unwrap_or(n * escala as f64),
+        _ => n * escala as f64,
+    };
     match tipo.as_str() {
-        "integer" | "entero" => con_separadores(n, 0, sep),
-        "decimal" | "number" | "numero" => con_separadores(n, decimales(2), sep),
+        "integer" | "entero" => con_separadores(exacto(1, 0), 0, sep),
+        "decimal" | "number" | "numero" => con_separadores(exacto(1, decimales(2)), decimales(2), sep),
         "money" | "moneda" | "currency" => {
             let simbolo = arg.clone().filter(|a| a.parse::<usize>().is_err()).unwrap_or_else(|| "€".into());
-            format!("{} {simbolo}", con_separadores(n, 2, sep))
+            format!("{} {simbolo}", con_separadores(exacto(1, 2), 2, sep))
         }
-        "percent" | "porcentaje" => format!("{} %", con_separadores(n * 100.0, decimales(0), sep)),
+        "percent" | "porcentaje" => format!("{} %", con_separadores(exacto(100, decimales(0)), decimales(0), sep)),
         _ => celda(v),
     }
 }

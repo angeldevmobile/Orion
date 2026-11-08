@@ -1234,6 +1234,10 @@ fn compile_expr_into(
     match expr {
         Expr::Int(n)   => emit!(Instruction::LoadInt(*n)),
         Expr::Float(f) => emit!(Instruction::LoadFloat(*f)),
+        Expr::Decimal(d) => emit!(Instruction::LoadDecimal(
+            crate::value::parse_decimal(d)
+                .map_err(|message| CodegenError { message, line: current_line })?
+                .serialize())),
         Expr::Str(s)   => {
             // interpolación básica: si contiene ${ ... }
             if s.contains("${") {

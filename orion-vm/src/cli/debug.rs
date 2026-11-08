@@ -309,6 +309,7 @@ fn dbg_val(v: &Value) -> String {
         Value::Bool(b)         => format!("{}{}{}", CYN, b, RST),
         Value::Int(n)          => n.to_string(),
         Value::Float(f)        => format!("{}", f),
+        Value::Decimal(d)      => format!("{}d", d),
         Value::Str(s)          => format!("{}\"{}\"{}",  GRN, s, RST),
         Value::List(items)     => {
             let items = items.borrow();

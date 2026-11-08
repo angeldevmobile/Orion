@@ -10,6 +10,7 @@ use serde_json::Value as Json;
 pub enum EvalValue {
     Int(i64),
     Float(f64),
+    Decimal(rust_decimal::Decimal),
     Str(String),
     Bool(bool),
     List(Vec<EvalValue>),
@@ -49,6 +50,7 @@ impl fmt::Display for EvalValue {
                 if n.fract() == 0.0 { write!(f, "{}", *n as i64) }
                 else { write!(f, "{}", n) }
             }
+            EvalValue::Decimal(d) => write!(f, "{}", d),
             EvalValue::Str(s)   => write!(f, "{}", s),
             EvalValue::Bool(b)  => write!(f, "{}", if *b { "yes" } else { "no" }),
             EvalValue::Null     => write!(f, "null"),
@@ -93,6 +95,7 @@ impl EvalValue {
         match self {
             EvalValue::Int(_)       => "number",
             EvalValue::Float(_)     => "number",
+            EvalValue::Decimal(_)   => "number",
             EvalValue::Str(_)       => "string",
             EvalValue::Bool(_)      => "bool",
             EvalValue::List(_)      => "list",
@@ -112,6 +115,7 @@ impl EvalValue {
             EvalValue::Null         => false,
             EvalValue::Int(n)       => *n != 0,
             EvalValue::Float(f)     => *f != 0.0,
+            EvalValue::Decimal(d)   => !d.is_zero(),
             EvalValue::Str(s)       => !s.is_empty(),
             EvalValue::List(v)      => !v.is_empty(),
             EvalValue::Dict(m)      => !m.is_empty(),
@@ -127,6 +131,8 @@ impl EvalValue {
         match self {
             EvalValue::Int(n)   => Ok(*n),
             EvalValue::Float(f) => Ok(*f as i64),
+            EvalValue::Decimal(d) => rust_decimal::prelude::ToPrimitive::to_i64(&d.trunc())
+                .ok_or_else(|| format!("{} is out of range for int", d)),
             EvalValue::Str(s)   => s.trim().parse::<i64>()
                 .map_err(|_| format!("Cannot convert '{}' to int", s)),
             EvalValue::Bool(b)  => Ok(if *b { 1 } else { 0 }),
@@ -138,6 +144,7 @@ impl EvalValue {
         match self {
             EvalValue::Float(f) => Ok(*f),
             EvalValue::Int(n)   => Ok(*n as f64),
+            EvalValue::Decimal(d) => Ok(rust_decimal::prelude::ToPrimitive::to_f64(d).unwrap_or(f64::NAN)),
             EvalValue::Str(s)   => s.trim().parse::<f64>()
                 .map_err(|_| format!("Cannot convert '{}' to float", s)),
             other => Err(format!("Cannot convert {} to float", other.type_name())),

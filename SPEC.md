@@ -64,6 +64,7 @@ The receiver inside a method is `me`, not `self` or `this`.
 |---|---|
 | Integer | Decimal (`42`), hexadecimal (`0x2A`), binary (`0b101010`) |
 | Float | `3.14` - a digit is required on both sides of the dot. Exponent notation is supported: `1e3` is 1000, `1.5e2` is 150, `E` also works |
+| Decimal | A number with a `d` suffix: `19.99d`, `3d`, `1.5e3d`. Exact base-10, up to 28 significant digits. A `d` followed by a letter, digit or `_` is not a suffix (`3 do` is `3` then `do`) |
 | Boolean | `yes`, `no` |
 | Null | `null`, `undefined` |
 | String | `"..."`, and triple-quoted `"""..."""` for multi-line |
@@ -216,6 +217,14 @@ z = {x: c(), y: d()}   -- c runs, then d
 - `**` with an integer base and a negative integer exponent is an error
   ("Exponente negativo en potencia de enteros (usa flotantes)"). Use a float
   base: `2.0 ** -1` is `0.5`.
+- `decimal` is exact: `0.1d + 0.2d == 0.3d` is `yes`. Mixing `decimal` and
+  `int` yields `decimal`; `/` between them is decimal division (28
+  significant digits). Mixing `decimal` and `float` in `+ - * / %` is an
+  **error** that says to convert one side with `decimal(x)` or `float(x)`;
+  the type checker reports it before running when it knows both types.
+  Comparisons (`== < >`…) between `decimal` and `float` are allowed.
+- `decimal ** int` is a decimal; any other power with a decimal is an error.
+  Overflow (beyond 79228162514264337593543950335) is an error.
 
 ### 9.3 Null
 

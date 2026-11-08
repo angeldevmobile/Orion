@@ -339,6 +339,26 @@ fn smoke_template() {
 }
 
 #[test]
+fn template_includes_stay_in_their_folder() {
+    // `include "../x"` or an absolute path read files outside the folder.
+    let root = std::env::temp_dir().join(format!("orion_tpl_{}", std::process::id()));
+    let dir = root.join("tpl");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("parcial.txt"), "dentro").unwrap();
+    std::fs::write(root.join("secreto.txt"), "fuera").unwrap();
+    let opts = || dict(&[("dir", s(dir.to_str().unwrap())), ("escape", s("none"))]);
+    let render = |src: &str| modules::call("template", "render", vec![s(src), dict(&[]), opts()]);
+
+    assert_eq!(as_str(render("{% include 'parcial.txt' %}").unwrap()), "dentro");
+    let outside = root.join("secreto.txt");
+    for name in ["../secreto.txt".to_string(), outside.to_string_lossy().replace('\\', "/")] {
+        let err = render(&format!("{{% include '{name}' %}}")).expect_err("must not read outside");
+        assert!(err.contains("outside the templates folder"), "{name}: {err}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn smoke_csv_roundtrip() {
     let mut p = std::env::temp_dir();
     p.push(format!("orion_smoke_csv_{}.csv", std::process::id()));

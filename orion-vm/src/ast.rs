@@ -9,6 +9,7 @@ pub enum Expr {
     // Literales
     Int(i64),
     Float(f64),
+    Decimal(String),
     Str(String),
     Bool(bool),
     Null,

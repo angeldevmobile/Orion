@@ -226,6 +226,7 @@ fn globals(v: &mut Vec<BuiltinDoc>) {
     v.push(g("str", "str(val) → string", "Convierte un valor a string.", "str(42)  -- \"42\""));
     v.push(g("int", "int(val) → int", "Convierte a entero.", "int(\"42\")  -- 42"));
     v.push(g("float", "float(val) → float", "Convierte a flotante.", "float(\"3.14\")"));
+    v.push(g("decimal", "decimal(val) → decimal", "Exact base-10 number, for money. Literal: 19.99d.", "decimal(\"19.99\")  -- 19.99"));
     v.push(g("bool", "bool(val) → bool", "Convierte a booleano.", "bool(0)  -- no"));
     v.push(g("type", "type(val) → string", "Nombre del tipo de un valor.", "type([1,2])  -- \"list\""));
     v.push(g("range", "range(n) | range(ini, fin, paso?) → list", "Genera una lista de enteros.", "range(3)  -- [0,1,2]"));

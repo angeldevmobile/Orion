@@ -480,6 +480,7 @@ pub fn fmt_expr(expr: &Expr) -> String {
     match expr {
         Expr::Int(n)        => n.to_string(),
         Expr::Float(f)      => fmt_float(*f),
+        Expr::Decimal(d)    => format!("{}d", d),
         Expr::Str(s)        => format!("\"{}\"", s),
         Expr::Bool(true)    => "true".into(),
         Expr::Bool(false)   => "false".into(),

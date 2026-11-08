@@ -14,7 +14,7 @@ use crate::vm::VM;
 
 use super::runtime::{
     alloc_val, fallar, cstr_to_str, string_to_cptr, decode_val, OrionVal, TAG_BOOL, TAG_DICT, TAG_FLOAT,
-    TAG_INT, TAG_LIST, TAG_NULL, TAG_STR,
+    TAG_INT, TAG_LIST, TAG_NULL, TAG_STR, TAG_DECIMAL, alloc_decimal, decimal_of,
 };
 
 /// Marcador de una función de módulo `.orx` ejecutable vía VM.
@@ -117,6 +117,7 @@ pub fn orion_to_value(ptr: i64) -> Value {
             TAG_NULL => Value::Null,
             TAG_INT => Value::Int(v.data_i),
             TAG_FLOAT => Value::Float(v.data_f),
+            TAG_DECIMAL => Value::Decimal(decimal_of(v)),
             TAG_BOOL => Value::Bool(v.data_i != 0),
             TAG_STR => Value::Str(cstr_to_str(v.data_i).to_string()),
             TAG_LIST => {
@@ -152,6 +153,7 @@ pub fn value_to_orion(v: &Value) -> i64 {
         Value::Null => alloc_val(TAG_NULL, 0, 0.0),
         Value::Int(n) => alloc_val(TAG_INT, *n, 0.0),
         Value::Float(f) => alloc_val(TAG_FLOAT, 0, *f),
+        Value::Decimal(d) => alloc_decimal(*d),
         Value::Bool(b) => alloc_val(TAG_BOOL, if *b { 1 } else { 0 }, 0.0),
         Value::Str(s) => alloc_val(TAG_STR, string_to_cptr(s.clone()), 0.0),
         Value::List(items) => {
@@ -165,7 +167,9 @@ pub fn value_to_orion(v: &Value) -> i64 {
             let raw = Box::into_raw(Box::new(entries)) as i64;
             alloc_val(TAG_DICT, raw, 0.0)
         }
-        // Cierres, módulos nativos, instancias, etc. no se puentean.
+        // A module returned by a module (`excel.f`) stays usable as a module.
+        Value::Module(name) => crate::jit::runtime::native_module_val(name),
+        // Cierres, instancias, etc. no se puentean.
         _ => alloc_val(TAG_NULL, 0, 0.0),
     }
 }
@@ -175,7 +179,7 @@ pub fn value_to_orion(v: &Value) -> i64 {
 pub fn is_jit_builtin(name: &str) -> bool {
     matches!(name,
         // conversión / tipos
-        "str" | "int" | "float" | "bool" | "type" |
+        "str" | "int" | "float" | "decimal" | "bool" | "type" |
         // numéricos
         "abs" | "sqrt" | "floor" | "ceil" | "round" | "pow" | "factorial" |
         "min" | "max" | "sum" |
@@ -186,8 +190,30 @@ pub fn is_jit_builtin(name: &str) -> bool {
         "push" | "append" | "pop" | "reverse" | "sort" |
         // strings
         "upper" | "lower" | "trim" | "replace" | "split" | "lines" |
-        "starts_with" | "ends_with"
+        "starts_with" | "ends_with" |
+        // tests: fail through the bridge's error path, like any builtin
+        "assert" | "assert_eq" | "assert_ne"
     )
+}
+
+/// assert_eq / assert_ne on the JIT's own values: converting them to `Value`
+/// turned instances into null, so two different instances compared equal.
+/// Same strict equality and messages as the VM.
+fn assert_jit(name: &str, args: &[i64]) -> i64 {
+    use super::runtime::{fallar, jit_vals_strict_eq, val_to_display};
+    if args.len() < 2 {
+        return fallar(format!("{name}() expects 2 arguments"));
+    }
+    let show = |p: i64| val_to_display(&unsafe { decode_val(p) });
+    let eq = unsafe { jit_vals_strict_eq(args[0], args[1]) };
+    if name == "assert_eq" && !eq {
+        let header = args.get(2).map(|&m| format!("{} — ", show(m))).unwrap_or_default();
+        return fallar(format!("assert_eq: {}esperado: {}\n  obtenido: {}", header, show(args[1]), show(args[0])));
+    }
+    if name == "assert_ne" && eq {
+        return fallar(format!("assert_ne: expected different values, both are: {}", show(args[0])));
+    }
+    alloc_val(TAG_NULL, 0, 0.0)
 }
 
 /// True si el builtin muta in-place su primer argumento (una lista).
@@ -235,6 +261,7 @@ pub extern "C" fn rt_call_builtin(name_ptr: i64, argc: i64) -> i64 {
     let name = unsafe { cstr_to_str(name_ptr) };
     let argc = argc as usize;
     let arg_ptrs = super::runtime::drain_arg_buf(argc);
+    if name == "assert_eq" || name == "assert_ne" { return assert_jit(name, &arg_ptrs); }
     if let Some(r) = builtin_directo(name, &arg_ptrs) { return r; }
     let name = name.to_string();
     let vm_args: Vec<Value> = arg_ptrs.iter().map(|&p| orion_to_value(p)).collect();

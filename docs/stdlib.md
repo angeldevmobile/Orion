@@ -18,7 +18,7 @@ package manager needed for any of them. Import one with `use "name"` (or
 `log` `config` `secret` `zip` `stream` `crypto2` `state`
 
 ### Network and web
-`net` `ws` `router` `middleware` `sse` `proto` `browser` (and `serve`, a statement)
+`net` `ws` `router` `middleware` `sse` `proto` `template` `browser` (and `serve`, a statement)
 
 ### Backend
 `db` `auth` `cache` `session` `mail` `validate`
@@ -138,6 +138,21 @@ port = env.pull("PORT", 8080)
 mode = env.pull("MODE", "production")
 config = env.load(".env")
 ```
+
+#### `template` - HTML, email and text templates
+Jinja syntax (`{{ }}`, `{% for %}`, `{% if %}`, filters). Values are
+**HTML-escaped by default**, so user data can't inject markup.
+```orion
+html = template.render("<p>Hello {{ name }}</p>", {"name": user["name"]})
+html = template.from_file("mail/invoice.html", {"order": order})  -- extends/include from mail/
+text = template.from_file("mail/invoice.txt", {"order": order})   -- .txt is not escaped
+safe = template.escape(name)                                       -- for HTML built by hand
+```
+`from_file` picks the escaping by extension: `.html`/`.xml` and unknown
+ones escape HTML, `.json`/`.js` escape JSON, `.txt`/`.md`/`.csv` don't
+escape. Options (third argument): `escape` (`"html"`, `"json"`, `"none"`),
+`dir` (folder for `extends`/`include`) and `strict` (an undefined variable is
+an error instead of empty). Mark trusted HTML with `{{ x|safe }}`.
 
 ### Utilities
 

@@ -22,6 +22,92 @@ pequeñas; después, estos, en este orden. Cada uno tiene su entrada abajo.
    heap no se liberan"): conteo de referencias o un arena. Importa en
    servidores y procesos de horas.
 
+## Priorities: a serious web stack that scales
+
+Agreed on 2026-10-24 after reviewing the `comercio` demo: half of its code
+exists to make up for things the language lacks. Work order:
+
+1. ~~**Autoescape in `template`** and `template.escape`~~ (done, see
+   CHANGELOG).
+2. ~~**A `decimal` type**~~ (done, see CHANGELOG). What's left: "JSON: a
+   decimal goes out as a double".
+3. **Errors with fields** ("Errors are plain text").
+4. **A router without boilerplate** ("What every web app rewrites on top of
+   `router`").
+5. **Interactive transactions** ("`db.transaction` no deja decidir...").
+6. **Migrations** and **API tests from Orion**.
+7. **`serve` at scale** (threads, SSE/WebSocket, sessions, JIT in handlers):
+   goes together with the big performance items above.
+
+## JSON: a decimal goes out as a double
+
+`json.forge` (and every JSON response) writes a `decimal` as a JSON number
+through `f64`. For money that is exact (`19.99` stays `19.99`), but beyond
+about 15 significant digits the last ones are lost, and the scale is not kept
+(`19.90` goes out as `19.9`). `serde_json` can only write exact numbers with
+its `arbitrary_precision` feature, which changes number handling for the
+whole crate graph. Path: write decimals with our own serializer in
+`json.forge`, or an option to emit them as strings.
+
+## Errors are plain text
+
+The whole runtime propagates `Result<_, String>` and `handle err` receives a
+string. To know what failed you have to search inside the message: the demo
+does `str(err).contains("SQLSTATE 23514")` in three places. Rewording a
+message silently breaks that code.
+
+Path: an error value with fields (`err.message`, `err.kind`, `err.code`,
+`err.detail`, `err.line`) that still prints as the message in `show` and
+`str(err)`, so existing code keeps working. `db` fills `code` with the
+SQLSTATE, `net` with the status, and Orion code raises with `error("...")`
+or `error({ ... })`.
+
+## What every web app rewrites on top of `router`
+
+All of `comercio/backend/base/http.orx` is code any API repeats: reading the
+JSON body without crashing (`cuerpo`), typed fields and parameters with a
+default (`campo`, `campo_entero`, `texto`, `entero`, `id_ruta`) and building
+the JSON response (`json_resp`). Also:
+
+- **No route groups with their own middleware.** `solo_admin` has to check
+  `req["path"].starts_with("/api/admin")` by hand, because middlewares are
+  global.
+- **Handlers are passed as strings** (`router.get(r, "/x", "api_x")`). The
+  function itself also works (`pasarela/main.orx` does it), but with a string
+  a typo only fails when a request arrives. Document the function as the
+  canonical form and warn at startup when a name doesn't exist.
+- **`session` stores data in process memory**: with several instances behind
+  a load balancer it doesn't work. It needs a shared backend (Postgres or
+  Redis).
+
+Path: `req.json()`, `req.param("id", int)`, `req.query("limit", 0)`,
+`router.json(status, value)`, `router.group(r, "/api/admin", [middlewares])`.
+
+## No schema migrations
+
+Each demo creates its schema with a growing list of `CREATE ... IF NOT
+EXISTS` and `ALTER ... ADD COLUMN IF NOT EXISTS`. There is no version: a
+change that can't be written idempotently (renaming a column, moving data)
+has nowhere to go. Path: `db.migrate(url, "migrations/")` with numbered
+files, a version table and an advisory lock so several instances don't
+migrate at once.
+
+## An API can't be tested from Orion
+
+The `comercio` concurrency test is bash with `curl` and `python`. It needs an
+`orion test` that finds `test_*` functions, an `assert` that shows both
+values, and a client that calls the router without opening a port.
+
+## `serve`: fixed threads and handlers without the JIT
+
+`serve_http` starts as many threads as CPUs (between 2 and 16) and each one
+handles a request from start to finish. An SSE or WebSocket connection holds
+a whole thread while it lasts: with 16 live clients the server stops
+answering. And handlers run in the interpreter (`VM::new` per thread), about
+30 times slower than the JIT. Path: a configurable thread count now; later,
+long connections that don't hold a thread (async I/O) and compiling hot
+handlers with the tiered JIT.
+
 ## Dependencias con avisos de seguridad (`cargo audit`, 2026-10-03)
 
 Quedan 7 avisos tras actualizar las compatibles (ver CHANGELOG). Ninguno
@@ -61,6 +147,109 @@ anterior en `orion-vm/target/base/`):
 
 Afecta a `jit/compiler.rs`, `jit/runtime.rs`, `jit/runtime_oop.rs`,
 `jit/bridge.rs` y al backend AOT (`--build`), que comparte el generador.
+
+## AOT: `--build` is only ahead-of-time when the JIT can compile everything
+
+`--build` has two paths. If the whole program is JIT-eligible,
+`jit/aot_backend.rs` emits the native code into the object file (real AOT).
+If a single instruction is not (`jit::first_unsupported` says which), it
+embeds the bytecode as JSON and, at start-up, `orion_rt_exec` (`lib.rs`)
+deserializes it and JIT-compiles it: a packaged JIT that pays parsing plus a
+full compile on every run. The thesis compares interpreter, JIT and AOT, so
+its programs must take the first path.
+
+Coverage survey (2026-11-07, `--jit` over the repo's tests, benches and
+demos without network or GUI): 15 of 35 compiled natively. After fixing list
+`+` list, `x.field = v`, bitwise operators, `assert*`, decimals in
+`min`/`max`/`sort`, `list.sum()` and submodules (see CHANGELOG): 32 of 35
+(the `demo/` scripts run from the repo root). The other three:
+`reporte_cli` (see "`exit()` does not exist"), and dynamic calls through a
+variable, which the JIT does not compile yet: `s = "greet"` then `s(2)` in
+`spec_examples`, and `x |> f` (emitted as `__call__`) in `test_sintaxis_nueva`. Still pending:
+
+- ~~Confirm the native path end to end~~ (done, 2026-11-07): `hola.orx` and
+  `bench/jit/fib.orx` build with `Code: native (Cranelift)`. Median of 10
+  runs, wall time: `hola` 83 ms interpreter, 83 ms JIT, 12.5 ms AOT; `fib`
+  2050 / 97 / 25 ms. JIT and AOT compute at the same speed; the gap is
+  start-up (see "`orion` takes ~80 ms to start").
+- **Unsupported instructions**: `CallSuper`, `AiAsk`/`AiLearn`/`AiSense`,
+  `ServeHTTP`, `Breakpoint`. Only `CallSuper` matters for backend scripts.
+- **Builtins outside the JIT list** (`bridge::is_jit_builtin`) still force the
+  fallback; check new ones with the survey.
+- **Memory**: needs "JIT: los objetos del heap no se liberan" (above) so the
+  three modes compare fairly.
+
+## `orion` takes ~80 ms to start, the AOT executable 12.5 ms
+
+Running a one-line program costs about 83 ms with `orion file.orx` and with
+`--jit`, while `--jit` itself reports 1.5 ms from the start of its handler to
+the end (compile + run). The AOT executable links the same runtime and starts
+in 12.5 ms. So ~70 ms go before the handler or at process exit, not into
+running the program: loading the 65 MB binary, global initialization, the
+CLI dispatch, process teardown, or the antivirus scanning the binary.
+
+It matters because automation scripts are short: for them this cost is most
+of the run, and the thesis would measure it as part of the interpreter and
+JIT start-up. Path: time a `fn main` that returns at once, then each step up
+to the handler (`ORION_TRACE`-style timestamps or `samply`), and fix what
+shows up before comparing modes.
+
+## `>` and `>=` say yes when one side is NaN
+
+`n = float("nan")`: `n > 1.0`, `1.0 > n`, `n >= 1.0` and `1.0 >= n` all give
+`yes`; IEEE says every ordering with NaN is false (`<=` already gives `no`).
+Both engines agree, so the differential fuzzer can't see it. The VM builds
+`>` as `!(a < b) && !(a == b)` and `>=` as `!(a < b)` (`vm.rs`, `Gt`/`GtEq`),
+and the JIT was aligned to match, including its inline float path.
+
+Path: `a > b` as `b < a` and `a >= b` as `b < a || a == b` in the VM, the
+same in `numeric_cmp` and the inline path of the JIT; keep the error text of
+mixed-type comparisons (`Cannot compare str < int`) as it is today. Measure
+`bench/jit` before and after, since comparisons are on the hot path.
+
+## The differential fuzzer: what it covers
+
+`tests/differential_fuzz.rs` (2026-11-07): ints, floats, strings, bools,
+decimals, bitwise operators, lists, dicts (`d.k = v`, copies by value),
+instances, and error messages inside `attempt`. It fails if the JIT falls
+back to the interpreter. 2000 programs: no divergence, 71% ran to the end.
+Not covered yet: closures and dynamic calls (the JIT doesn't compile them),
+string methods, module calls, nested collections, errors raised inside
+functions, NaN and infinities.
+
+## A method that calls another method of `me` loses or misses field writes
+
+```orion
+shape C {
+    x
+    act poner(n) { x = n }
+    act via_metodo(n) { me.poner(n)  return x }
+}
+c = C(1)
+show c.via_metodo(7)   -- 1 in both engines; should be 7
+show c.x               -- interpreter 1 (the write is lost), JIT 7
+```
+
+Both engines copy the fields of `me` into locals when an act starts. The
+interpreter writes its copy back when the outer act returns, overwriting what
+the inner act stored; the JIT keeps reading its stale copy. Found while
+checking the PR #10 review. Path: one source of truth for fields (read and
+write the instance, or reload the copies after every call on `me`), the same
+in both engines, with a differential test; measure acts in `bench/jit`.
+
+## PDF: thousands separators go through `f64`
+
+`pdf_layout.rs` rounds a decimal exactly but then formats it from an `f64`
+(`con_separadores`), so amounts with more than ~15 significant digits lose
+their last digits in money and number columns. Path: group the digits of the
+decimal's own text, like `format_number` in `formato_mod.rs`.
+
+## `exit()` does not exist as a global function
+
+`demo/reporte_cli.orx` calls `exit(1)`, but Orion only has `process.exit`, so
+both engines fail with "Function 'exit' is not defined" when that branch
+runs. Decide whether a global `exit(code)` belongs in the language (most
+scripting languages have one) or fix the demo to use `process.exit`.
 
 ## JIT: los builtins menos usados copian la lista y crean una VM
 
@@ -131,6 +320,12 @@ En la demo `comercio` se resolvió apoyándose en un `CHECK (stock >= 0)` que
 aborta la sentencia, lo cual además es mejor diseño. Pero no todo caso se deja
 expresar en SQL puro: por ejemplo, cobrar a una pasarela externa entre dos
 escrituras.
+
+It doesn't return what the statements produce either: after checkout,
+`comercio` queries "the user's latest order" again instead of using the
+`RETURNING id`, and with two simultaneous checkouts by the same user it can
+return the other one. For the same reason `pagos.aplicar` and
+`admin.cancelar` are huge CTEs.
 
 Camino razonable: una transacción interactiva con `db.begin(url)` que devuelva
 un handle y permita `query`/`exec`/`commit`/`rollback` sobre esa misma
@@ -269,17 +464,10 @@ que `write_styled`.
 
 En Java es habitual diseñar un PDF o un correo con HTML y CSS (Thymeleaf o
 FreeMarker para la plantilla, OpenHTMLtoPDF o Flying Saucer para el PDF,
-JavaMail para el envío). Orion tiene las tres piezas; el correo ya está
-(`mail.send` con opciones, v0.1.8), las otras dos a medias:
+JavaMail para el envío). Orion tiene las tres piezas; las plantillas (con
+autoescape, `extends` e `include`) y el correo (`mail.send`, v0.1.8) ya
+están; falta:
 
-- **Plantillas (`template`).** Usa minijinja, así que tiene la sintaxis de
-  Jinja (`{{ }}`, `{% for %}`, `{% if %}`, filtros). Pero cada plantilla se
-  registra con el nombre `"t"`, sin extensión, y minijinja decide el escape
-  automático por la extensión: **no se escapa nada**. Un nombre de cliente
-  con `<script>` acaba tal cual dentro del HTML de un correo o de un PDF.
-  Además, al ser una plantilla suelta, `{% extends %}` e `{% include %}` no
-  encuentran a las demás, así que no hay layout común (cabecera y pie de
-  todos los correos, por ejemplo).
 - **HTML a PDF.** Existe `browser.pdf`, que usa la impresión de Chrome, pero
   hace falta abrir un navegador, escribir el HTML a un archivo y navegar a
   él: no hay un `pdf.from_html(html, ruta, opts)` de un paso. Y exige Chrome
@@ -291,10 +479,8 @@ JavaMail para el envío). Orion tiene las tres piezas; el correo ya está
 
 Lo que hace falta, por orden:
 
-1. `template` con escape automático en HTML y una carpeta de plantillas
-   (para `extends` / `include`).
-2. Imágenes incrustadas en `mail.send` (`inline: [{ruta, cid}]`).
-3. `pdf.from_html(html, ruta, opts)`: de HTML a PDF en un paso. Primero sobre
+1. Imágenes incrustadas en `mail.send` (`inline: [{ruta, cid}]`).
+2. `pdf.from_html(html, ruta, opts)`: de HTML a PDF en un paso. Primero sobre
    Chrome, que ya está. Un motor de HTML/CSS propio en Rust, sin navegador,
    es mucho más trabajo, y solo compensa si pesa no poder instalar Chrome en
    el servidor.

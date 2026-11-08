@@ -7,9 +7,10 @@ use std::io::{self, Write};
 use std::sync::Arc;
 use libloading;
 use crate::instruction::Instruction;
-use crate::value::{Value, InstanceData, SendValue, TaskHandle, from_send};
+use crate::value::{Value, InstanceData, SendValue, TaskHandle, from_send, decimal_pow};
 use crate::bytecode::{ExternFnDef, FunctionDef, ShapeDef};
 use crate::gc::Gc;
+use rust_decimal::prelude::ToPrimitive;
 
 pub fn write_utf8_line(s: &str) {
     let s = &*crate::modules::secret_mod::redact(s);
@@ -565,7 +566,7 @@ impl VM {
                             .ok_or("Desbordamiento aritmético en módulo")?;
                         self.value_stack.push(Value::Int(r));
                     }
-                    _ => return Err("Modulo only supports integers".to_string()),
+                    (a, b) => self.value_stack.push(crate::value::decimal_rem(&a, &b)?),
                 }
             }
             Instruction::Eq    => { let b = self.pop()?; let a = self.pop()?; self.value_stack.push(Value::Bool(a.compare_eq(&b))); }
@@ -634,6 +635,8 @@ impl VM {
         match instr {
             hot_instr!() => unreachable!("instrucción caliente fuera de exec_hot"),
             //    Constantes                                                   
+            Instruction::LoadDecimal(b) =>
+                self.value_stack.push(Value::Decimal(rust_decimal::Decimal::deserialize(*b))),
 
             //    Variables                                                    
             Instruction::StoreConst(name) => {
@@ -665,6 +668,9 @@ impl VM {
                     (Value::Int(x), Value::Float(y))   => self.value_stack.push(Value::Float((x as f64).powf(y))),
                     // Mismo cast `as i32` que el runtime JIT (rt_pow) para coincidir bit a bit.
                     (Value::Float(x), Value::Int(y))   => self.value_stack.push(Value::Float(x.powi(y as i32))),
+                    (Value::Decimal(x), Value::Int(y)) => self.value_stack.push(Value::Decimal(decimal_pow(x, y)?)),
+                    (Value::Decimal(_), _) | (_, Value::Decimal(_)) =>
+                        return Err("A decimal can only be raised to an int power".to_string()),
                     _ => return Err("Power expects numbers".to_string()),
                 }
             }
@@ -677,6 +683,7 @@ impl VM {
                         self.value_stack.push(Value::Int(r));
                     }
                     Value::Float(f) => self.value_stack.push(Value::Float(-f)),
+                    Value::Decimal(d) => self.value_stack.push(Value::Decimal(-d)),
                     _ => return Err("Negation only applies to numbers".to_string()),
                 }
             }
@@ -1087,16 +1094,14 @@ impl VM {
                                 Value::List(list)
                             }
                             "sum" => {
-                                let mut total = 0.0f64;
-                                let mut is_int = true;
+                                // Exact for int and decimal; non-numbers are skipped.
+                                let mut total = Value::Int(0);
                                 for v in list.borrow().iter() {
-                                    match v {
-                                        Value::Int(n)   => total += *n as f64,
-                                        Value::Float(n) => { total += n; is_int = false; }
-                                        _ => {}
+                                    if matches!(v, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
+                                        total = total.add(v).map_err(|e| format!("sum(): {}", e))?;
                                     }
                                 }
-                                if is_int { Value::Int(total as i64) } else { Value::Float(total) }
+                                total
                             }
                             "min" => crate::value::extremo(list.borrow().iter().cloned(), false, "min")?,
                             "max" => crate::value::extremo(list.borrow().iter().cloned(), true, "max")?,
@@ -1934,6 +1939,7 @@ impl VM {
             match v {
                 Value::Float(f) => Ok(*f),
                 Value::Int(i) => Ok(*i as f64),
+                Value::Decimal(d) => Ok(d.to_f64().unwrap_or(f64::NAN)),
                 _ => Err(format!("Expected a number, found {:?}", v)),
             }
         }
@@ -1942,6 +1948,7 @@ impl VM {
             "abs"       => match &args[0] {
                 Value::Int(i)   => Ok(Value::Int(i.abs())),
                 Value::Float(f) => Ok(Value::Float(f.abs())),
+                Value::Decimal(d) => Ok(Value::Decimal(d.abs())),
                 _ => Err("abs() expects a number".into()),
             },
             "floor"     => Ok(Value::Int(to_f64(&args[0])?.floor() as i64)),
@@ -2213,6 +2220,7 @@ impl VM {
             match instr {
                 Instruction::LoadInt(n)   => self.value_stack.push(Value::Int(*n)),
                 Instruction::LoadFloat(f) => self.value_stack.push(Value::Float(*f)),
+                Instruction::LoadDecimal(b) => self.value_stack.push(Value::Decimal(rust_decimal::Decimal::deserialize(*b))),
                 Instruction::LoadStr(s)   => self.value_stack.push(Value::Str(s.clone())),
                 Instruction::LoadBool(b)  => self.value_stack.push(Value::Bool(*b)),
                 Instruction::LoadNull     => self.value_stack.push(Value::Null),
@@ -2854,6 +2862,8 @@ impl VM {
                 match val {
                     Value::Int(n)   => Ok(Some(Value::Int(n))),
                     Value::Float(f) => Ok(Some(Value::Int(f as i64))),
+                    Value::Decimal(d) => d.trunc().to_i64().map(|n| Some(Value::Int(n)))
+                        .ok_or_else(|| format!("int(): {} is out of range", d)),
                     Value::Str(s)   => s.parse::<i64>()
                         .map(|n| Some(Value::Int(n)))
                         .map_err(|_| format!("Cannot convert '{}' to int", s)),
@@ -2865,11 +2875,23 @@ impl VM {
                 match val {
                     Value::Float(f) => Ok(Some(Value::Float(f))),
                     Value::Int(n)   => Ok(Some(Value::Float(n as f64))),
+                    Value::Decimal(d) => Ok(Some(Value::Float(d.to_f64().unwrap_or(f64::NAN)))),
                     Value::Str(s)   => s.parse::<f64>()
                         .map(|f| Some(Value::Float(f)))
                         .map_err(|_| format!("Cannot convert '{}' to float", s)),
                     _ => Err("float(): type cannot be converted".to_string()),
                 }
+            }
+            "decimal" => {
+                let val = args.into_iter().next().ok_or("decimal() expects one argument")?;
+                let d = match val {
+                    Value::Decimal(d) => d,
+                    Value::Int(n)     => n.into(),
+                    Value::Float(f)   => crate::value::decimal_from_f64(f)?,
+                    Value::Str(s)     => crate::value::parse_decimal(&s)?,
+                    other => return Err(format!("decimal(): cannot convert {}", other.type_name())),
+                };
+                Ok(Some(Value::Decimal(d)))
             }
             "len" => {
                 let val = args.into_iter().next().ok_or("len() expects one argument")?;
@@ -3077,6 +3099,7 @@ impl VM {
                 match val {
                     Value::Int(n)   => Ok(Some(Value::Int(n.abs()))),
                     Value::Float(f) => Ok(Some(Value::Float(f.abs()))),
+                    Value::Decimal(d) => Ok(Some(Value::Decimal(d.abs()))),
                     _ => Err("abs(): expects a number".to_string()),
                 }
             }
@@ -3105,6 +3128,8 @@ impl VM {
                 let val = args.into_iter().next().ok_or("floor() expects one argument")?;
                 match val {
                     Value::Float(f) => Ok(Some(Value::Int(f.floor() as i64))),
+                    Value::Decimal(d) => d.floor().to_i64().map(|n| Some(Value::Int(n)))
+                        .ok_or_else(|| format!("floor(): {} is out of range", d)),
                     Value::Int(n)   => Ok(Some(Value::Int(n))),
                     _ => Err("floor(): expects a number".to_string()),
                 }
@@ -3113,6 +3138,8 @@ impl VM {
                 let val = args.into_iter().next().ok_or("ceil() expects one argument")?;
                 match val {
                     Value::Float(f) => Ok(Some(Value::Int(f.ceil() as i64))),
+                    Value::Decimal(d) => d.ceil().to_i64().map(|n| Some(Value::Int(n)))
+                        .ok_or_else(|| format!("ceil(): {} is out of range", d)),
                     Value::Int(n)   => Ok(Some(Value::Int(n))),
                     _ => Err("ceil(): expects a number".to_string()),
                 }
@@ -3122,12 +3149,25 @@ impl VM {
                 match val {
                     Value::Float(f) => Ok(Some(Value::Float(f.sqrt()))),
                     Value::Int(n)   => Ok(Some(Value::Float((n as f64).sqrt()))),
+                    Value::Decimal(d) => Ok(Some(Value::Float(d.to_f64().unwrap_or(f64::NAN).sqrt()))),
                     _ => Err("sqrt(): expects a number".to_string()),
                 }
             }
             "round" => {
                 let mut it = args.into_iter();
                 let val = it.next().ok_or("round() expects at least one argument")?;
+                // Decimal: half away from zero, like float; with digits it stays decimal.
+                if let Value::Decimal(d) = val {
+                    use rust_decimal::RoundingStrategy::MidpointAwayFromZero;
+                    return match it.next() {
+                        Some(Value::Int(n)) if n >= 0 => Ok(Some(Value::Decimal(
+                            d.round_dp_with_strategy(n.min(28) as u32, MidpointAwayFromZero)))),
+                        Some(_) => Err("round(): digits must be a non-negative int".to_string()),
+                        None => d.round_dp_with_strategy(0, MidpointAwayFromZero).to_i64()
+                            .map(|n| Some(Value::Int(n)))
+                            .ok_or_else(|| format!("round(): {} is out of range", d)),
+                    };
+                }
                 let f = match val {
                     Value::Float(f) => f,
                     Value::Int(n)   => n as f64,
@@ -3155,17 +3195,15 @@ impl VM {
                     Value::List(v) => v.borrow().0.clone(),
                     other => vec![other],
                 };
-                let mut total = 0.0_f64;
-                let mut all_int = true;
+                // Same addition as `+`: exact for int and decimal, error on overflow.
+                let mut total = Value::Int(0);
                 for item in &items {
-                    match item {
-                        Value::Int(n)   => total += *n as f64,
-                        Value::Float(f) => { total += f; all_int = false; }
-                        _ => return Err("sum(): the list must contain numbers".to_string()),
+                    if !matches!(item, Value::Int(_) | Value::Float(_) | Value::Decimal(_)) {
+                        return Err("sum(): the list must contain numbers".to_string());
                     }
+                    total = total.add(item).map_err(|e| format!("sum(): {}", e))?;
                 }
-                if all_int { Ok(Some(Value::Int(total as i64))) }
-                else       { Ok(Some(Value::Float(total))) }
+                Ok(Some(total))
             }
             "bool" => {
                 let val = args.into_iter().next().ok_or("bool() expects one argument")?;
@@ -3724,7 +3762,7 @@ fn resolve_static(dir: &str, rest: &str) -> Option<(Vec<u8>, String)> {
 
 /// Operadores bit a bit, solo sobre `int`. Un desplazamiento negativo es error y
 /// uno de 64 o más da 0 (-1 para un negativo), en vez de un pánico de Rust.
-fn bit_op(a: Value, b: Value, op: &str) -> Result<Value, String> {
+pub(crate) fn bit_op(a: Value, b: Value, op: &str) -> Result<Value, String> {
     let (x, y) = match (&a, &b) {
         (Value::Int(x), Value::Int(y)) => (*x, *y),
         _ => return Err(format!(
@@ -3796,6 +3834,7 @@ pub fn value_to_eval(v: Value) -> crate::eval_value::EvalValue {
     match v {
         Value::Int(n)    => E::Int(n),
         Value::Float(f)  => E::Float(f),
+        Value::Decimal(d) => E::Decimal(d),
         Value::Str(s)    => E::Str(s),
         Value::Bool(b)   => E::Bool(b),
         Value::Null      => E::Null,
@@ -3817,6 +3856,7 @@ pub fn eval_to_value(e: crate::eval_value::EvalValue) -> Value {
     match e {
         E::Int(n)    => Value::Int(n),
         E::Float(f)  => Value::Float(f),
+        E::Decimal(d) => Value::Decimal(d),
         E::Str(s)    => Value::Str(s),
         E::Bool(b)   => Value::Bool(b),
         E::Null      => Value::Null,

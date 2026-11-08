@@ -7,7 +7,7 @@ pub mod compiler;
 pub mod runtime;
 pub mod runtime_oop;
 
-pub use compiler::JitCompiler;
+pub use compiler::{first_unsupported, JitCompiler};
 
 use crate::bytecode::OrionBytecode;
 
