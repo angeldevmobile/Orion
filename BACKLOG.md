@@ -161,8 +161,8 @@ its programs must take the first path.
 Coverage survey (2026-11-07, `--jit` over the repo's tests, benches and
 demos without network or GUI): 15 of 35 compiled natively. After fixing list
 `+` list, `x.field = v`, bitwise operators, `assert*`, decimals in
-`min`/`max`/`sort`, `list.sum()` and submodules (see CHANGELOG): 31 of 35,
-plus `demo_ventas_full` once the submodule fix is built. The other three:
+`min`/`max`/`sort`, `list.sum()` and submodules (see CHANGELOG): 32 of 35
+(the `demo/` scripts run from the repo root). The other three:
 `reporte_cli` (see "`exit()` does not exist"), and dynamic calls through a
 variable, which the JIT does not compile yet: `s = "greet"` then `s(2)` in
 `spec_examples`, and `x |> f` (emitted as `__call__`) in `test_sintaxis_nueva`. Still pending:
