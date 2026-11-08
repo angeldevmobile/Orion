@@ -76,6 +76,19 @@ fn escape_for(name: &str) -> AutoEscape {
     }
 }
 
+/// A template name may only point inside the templates folder: no absolute
+/// paths (they replace `base` in `join`) and no `..`.
+fn confined(name: &str) -> Result<&Path, minijinja::Error> {
+    use std::path::Component;
+    let p = Path::new(name);
+    if p.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir)) {
+        Ok(p)
+    } else {
+        Err(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation,
+            format!("template '{}' is outside the templates folder", name)))
+    }
+}
+
 fn render(name: &str, source: String, vars: &EvalValue, base: PathBuf, opts: Opts)
     -> Result<EvalValue, String>
 {
@@ -88,7 +101,7 @@ fn render(name: &str, source: String, vars: &EvalValue, base: PathBuf, opts: Opt
     });
     if opts.strict { env.set_undefined_behavior(UndefinedBehavior::Strict); }
     // extends / include / import resolve relative to `base`.
-    env.set_loader(move |n| match std::fs::read_to_string(base.join(n)) {
+    env.set_loader(move |n| match std::fs::read_to_string(base.join(confined(n)?)) {
         Ok(s) => Ok(Some(s)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(minijinja::Error::new(minijinja::ErrorKind::InvalidOperation,

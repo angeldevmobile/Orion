@@ -1432,6 +1432,18 @@ impl<M: Module> CodeGen<M> {
                     let call = builder.ins().call(set_attr_ref, &[obj, name_ptr, val]);
                     stack.push(builder.inst_results(call)[0]);
                     check_pending!();
+                    // In an act, `alias.field = v` may have changed `me`: reload the
+                    // local copy of that field (field writes are synced at once).
+                    if let Some(fields) = field_names {
+                        if fields.contains(attr) {
+                            if let Some(&var) = var_table.get(attr) {
+                                let name_ptr = self.cstr_ptr(&mut builder, attr);
+                                let call = builder.ins().call(get_self_field_ref, &[name_ptr]);
+                                let fresh = builder.inst_results(call)[0];
+                                builder.def_var(var, fresh);
+                            }
+                        }
+                    }
                 }
                 Instruction::IsInstance(shape_name) => {
                     let obj = stack.pop().ok_or("IsInstance: pila vacía")?;

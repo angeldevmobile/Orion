@@ -163,6 +163,11 @@ pub(crate) fn val_to_display(v: &OrionVal) -> String {
         },
         TAG_CLOSURE => "<closure>".to_string(),
         TAG_TASK    => "<task>".to_string(),
+        // Same text as the VM's Display.
+        super::runtime_oop::TAG_INSTANCE => unsafe {
+            let inst = &*(v.data_i as *const super::runtime_oop::OrionInstance);
+            format!("<{} instance>", inst.shape_name)
+        },
         _           => "<value>".to_string(),
     }
 }
@@ -388,26 +393,35 @@ pub extern "C" fn rt_neg(a: i64) -> i64 {
 
 //     Comparación                                                              
 
+/// `==` as in the VM's `compare_eq`: numbers of different types compare by
+/// value at the top level only (`1 == 1.0`, but `[1] != [1.0]`).
 unsafe fn jit_vals_equal(a: i64, b: i64) -> bool {
+    let (ta, tb) = (decode_val(a).tag, decode_val(b).tag);
+    let num = |t: u8| t == TAG_INT || t == TAG_FLOAT || t == TAG_DECIMAL;
+    if ta != tb && num(ta) && num(tb) {
+        use crate::jit::bridge::orion_to_value;
+        return orion_to_value(a).compare_eq(&orion_to_value(b));
+    }
+    jit_vals_strict_eq(a, b)
+}
+
+/// The VM's `Value` equality: same type only, instances by identity. Used
+/// inside collections and by `assert_eq`/`assert_ne`.
+pub(crate) unsafe fn jit_vals_strict_eq(a: i64, b: i64) -> bool {
     let av = decode_val(a);
     let bv = decode_val(b);
     match (av.tag, bv.tag) {
         (TAG_NULL,  TAG_NULL)  => true,
         (TAG_INT,   TAG_INT)   => av.data_i == bv.data_i,
         (TAG_FLOAT, TAG_FLOAT) => av.data_f == bv.data_f,
-        (TAG_INT,   TAG_FLOAT) => (av.data_i as f64) == bv.data_f,
-        (TAG_FLOAT, TAG_INT)   => av.data_f == (bv.data_i as f64),
-        (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => {
-            use crate::jit::bridge::orion_to_value;
-            orion_to_value(a).compare_eq(&orion_to_value(b))
-        }
+        (TAG_DECIMAL, TAG_DECIMAL) => decimal_of(&av) == decimal_of(&bv),
         (TAG_BOOL,  TAG_BOOL)  => av.data_i == bv.data_i,
         (TAG_STR,   TAG_STR)   => cstr_to_str(av.data_i) == cstr_to_str(bv.data_i),
         (TAG_LIST,  TAG_LIST)  => {
             let la = &*(av.data_i as *const Vec<i64>);
             let lb = &*(bv.data_i as *const Vec<i64>);
             la.len() == lb.len()
-                && la.iter().zip(lb.iter()).all(|(&x, &y)| jit_vals_equal(x, y))
+                && la.iter().zip(lb.iter()).all(|(&x, &y)| jit_vals_strict_eq(x, y))
         }
         (TAG_DICT,  TAG_DICT)  => {
             // Como IndexMap en la VM: igualdad independiente del orden.
@@ -415,9 +429,10 @@ unsafe fn jit_vals_equal(a: i64, b: i64) -> bool {
             let db = &*(bv.data_i as *const Vec<(String, i64)>);
             da.len() == db.len()
                 && da.iter().all(|(k, v)| {
-                    db.iter().any(|(k2, v2)| k == k2 && jit_vals_equal(*v, *v2))
+                    db.iter().any(|(k2, v2)| k == k2 && jit_vals_strict_eq(*v, *v2))
                 })
         }
+        (super::runtime_oop::TAG_INSTANCE, super::runtime_oop::TAG_INSTANCE) => av.data_i == bv.data_i,
         _ => false,
     }
 }
@@ -452,7 +467,11 @@ fn numeric_cmp(av: &OrionVal, bv: &OrionVal, pred: fn(std::cmp::Ordering) -> boo
                 TAG_FLOAT => Value::Float(v.data_f),
                 _ => Value::Decimal(decimal_of(v)),
             };
-            num(av).order(&num(bv)).unwrap_or(Equal)
+            // A decimal against NaN has no order: an error, as in the VM.
+            match num(av).order(&num(bv)) {
+                Some(o) => o,
+                None => return fallar(format!("Cannot compare {} < {}", nombre_tipo(av), nombre_tipo(bv))),
+            }
         }
         _ => return fallar(format!("Cannot compare {} < {}", nombre_tipo(av), nombre_tipo(bv))),
     };

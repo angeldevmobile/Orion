@@ -512,7 +512,10 @@ pub fn decimal_pow(d: Decimal, n: i64) -> Result<Decimal, String> {
         if e > 0 { base = base.checked_mul(base).ok_or_else(overflow)?; }
     }
     if n < 0 {
-        if acc.is_zero() { return Err("División por cero".to_string()); }
+        // acc is also zero when d ** -n underflowed: the true result is too big.
+        if acc.is_zero() {
+            return Err(if d.is_zero() { "División por cero".to_string() } else { overflow() });
+        }
         acc = Decimal::ONE.checked_div(acc).ok_or_else(overflow)?;
     }
     Ok(acc)

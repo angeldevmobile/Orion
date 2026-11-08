@@ -217,6 +217,33 @@ Not covered yet: closures and dynamic calls (the JIT doesn't compile them),
 string methods, module calls, nested collections, errors raised inside
 functions, NaN and infinities.
 
+## A method that calls another method of `me` loses or misses field writes
+
+```orion
+shape C {
+    x
+    act poner(n) { x = n }
+    act via_metodo(n) { me.poner(n)  return x }
+}
+c = C(1)
+show c.via_metodo(7)   -- 1 in both engines; should be 7
+show c.x               -- interpreter 1 (the write is lost), JIT 7
+```
+
+Both engines copy the fields of `me` into locals when an act starts. The
+interpreter writes its copy back when the outer act returns, overwriting what
+the inner act stored; the JIT keeps reading its stale copy. Found while
+checking the PR #10 review. Path: one source of truth for fields (read and
+write the instance, or reload the copies after every call on `me`), the same
+in both engines, with a differential test; measure acts in `bench/jit`.
+
+## PDF: thousands separators go through `f64`
+
+`pdf_layout.rs` rounds a decimal exactly but then formats it from an `f64`
+(`con_separadores`), so amounts with more than ~15 significant digits lose
+their last digits in money and number columns. Path: group the digits of the
+decimal's own text, like `format_number` in `formato_mod.rs`.
+
 ## `exit()` does not exist as a global function
 
 `demo/reporte_cli.orx` calls `exit(1)`, but Orion only has `process.exit`, so

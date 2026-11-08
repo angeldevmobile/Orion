@@ -477,10 +477,11 @@ fn formatear(v: &EvalValue, formato: &str, sep: &Separadores) -> String {
     };
     let decimales = |por_defecto: usize| arg.as_deref().and_then(|a| a.parse().ok()).unwrap_or(por_defecto);
     // A decimal is rounded exactly first, so 2.675 gives 2.68 and not 2.67.
+    // checked_mul: `*` panics when a huge decimal times 100 doesn't fit.
     let exacto = |escala: i64, dec: usize| match v {
-        EvalValue::Decimal(d) => rust_decimal::prelude::ToPrimitive::to_f64(
-            &(*d * rust_decimal::Decimal::from(escala)).round_dp_with_strategy(
-                dec.min(28) as u32, rust_decimal::RoundingStrategy::MidpointAwayFromZero))
+        EvalValue::Decimal(d) => d.checked_mul(rust_decimal::Decimal::from(escala))
+            .and_then(|x| rust_decimal::prelude::ToPrimitive::to_f64(&x.round_dp_with_strategy(
+                dec.min(28) as u32, rust_decimal::RoundingStrategy::MidpointAwayFromZero)))
             .unwrap_or(n * escala as f64),
         _ => n * escala as f64,
     };

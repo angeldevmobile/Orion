@@ -196,6 +196,26 @@ pub fn is_jit_builtin(name: &str) -> bool {
     )
 }
 
+/// assert_eq / assert_ne on the JIT's own values: converting them to `Value`
+/// turned instances into null, so two different instances compared equal.
+/// Same strict equality and messages as the VM.
+fn assert_jit(name: &str, args: &[i64]) -> i64 {
+    use super::runtime::{fallar, jit_vals_strict_eq, val_to_display};
+    if args.len() < 2 {
+        return fallar(format!("{name}() expects 2 arguments"));
+    }
+    let show = |p: i64| val_to_display(&unsafe { decode_val(p) });
+    let eq = unsafe { jit_vals_strict_eq(args[0], args[1]) };
+    if name == "assert_eq" && !eq {
+        let header = args.get(2).map(|&m| format!("{} — ", show(m))).unwrap_or_default();
+        return fallar(format!("assert_eq: {}esperado: {}\n  obtenido: {}", header, show(args[1]), show(args[0])));
+    }
+    if name == "assert_ne" && eq {
+        return fallar(format!("assert_ne: expected different values, both are: {}", show(args[0])));
+    }
+    alloc_val(TAG_NULL, 0, 0.0)
+}
+
 /// True si el builtin muta in-place su primer argumento (una lista).
 fn mutates_first_arg(name: &str) -> bool {
     matches!(name, "push" | "append" | "pop" | "reverse" | "sort")
@@ -241,6 +261,7 @@ pub extern "C" fn rt_call_builtin(name_ptr: i64, argc: i64) -> i64 {
     let name = unsafe { cstr_to_str(name_ptr) };
     let argc = argc as usize;
     let arg_ptrs = super::runtime::drain_arg_buf(argc);
+    if name == "assert_eq" || name == "assert_ne" { return assert_jit(name, &arg_ptrs); }
     if let Some(r) = builtin_directo(name, &arg_ptrs) { return r; }
     let name = name.to_string();
     let vm_args: Vec<Value> = arg_ptrs.iter().map(|&p| orion_to_value(p)).collect();

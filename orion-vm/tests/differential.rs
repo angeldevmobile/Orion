@@ -1275,3 +1275,55 @@ show excel.f.pct("sales", 5)"#;
     assert_vm_jit_match(src);
     assert_jit_nativo(src);
 }
+
+#[test]
+fn equality_asserts_and_decimal_errors_match() {
+    // From the PR review: assert_eq passed for two different instances in the
+    // JIT, nested `==` mixed int and float, an instance showed as `<value>`,
+    // `1d < NaN` gave `no`, and an underflowed `d ** -n` said "División por cero".
+    let src = r#"shape P {
+    x
+}
+a = P(1)
+b = P(2)
+show a
+attempt { assert_eq(a, b, "inst") } handle err { show err }
+assert_eq(a, a)
+show a == a
+show a == b
+show [[1]] == [[1.0]]
+show {"k": 1d} == {"k": 1}
+show [1d, 2] == [1, 2.0]
+show 1 == 1.0
+show 1d == 1
+attempt { show 1d < float("nan") } handle err { show err }
+attempt { show 0.0001d ** -10 } handle err { show err }
+attempt { show 0d ** -1 } handle err { show err }"#;
+    assert_vm_jit_agree(src);
+    assert_jit_nativo(src);
+    assert_output(src, "<P instance>\n\
+assert_eq: inst — esperado: <P instance>\n  obtenido: <P instance>\n\
+yes\nno\nno\nno\nno\nyes\nyes\n\
+Cannot compare decimal < float\n\
+Decimal overflow in 0.0001 ** -10\n\
+División por cero\n");
+}
+
+#[test]
+fn field_set_through_alias_in_act() {
+    // `o = me; o.x = n` left the JIT's local copy of `x` stale.
+    let src = r#"shape C {
+    x
+    act set_via_alias(n) {
+        o = me
+        o.x = n
+        return x
+    }
+}
+c = C(1)
+show c.set_via_alias(5)
+show c.x"#;
+    assert_vm_jit_match(src);
+    assert_jit_nativo(src);
+    assert_output(src, "5\n5\n");
+}

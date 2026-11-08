@@ -17,6 +17,12 @@ formato AAAA-MM-DD.
 - **`excel.f` (a module inside a module) failed in the JIT** with "key not
   found in dict/module", and a module returned by a module function came back
   as `null`. Both now work as in the interpreter.
+- **`==` in the JIT matched the interpreter only at the top level.** Inside
+  lists and dicts it mixed types (`[[1]] == [[1.0]]` gave `yes`, `no` in the
+  interpreter), and two references to the same instance were never equal.
+  `show` of an instance printed `<value>` instead of `<P instance>`.
+- **A field set through an alias inside an act** (`o = me` then `o.x = n`)
+  left the JIT reading the old value of `x`.
 - **`list + list` failed in the JIT** with "Cannot add list + list" while the
   interpreter concatenates. It now returns a new list, as in the VM.
 - **`sum()` lost precision with large integers.** It added in `f64`, so
@@ -63,7 +69,9 @@ formato AAAA-MM-DD.
 - **`template.escape(text)`**, for HTML built by hand (the same escaping as
   the templates).
 - **`extends`, `include` and `import` in templates.** `from_file` looks them
-  up in the template's folder; `render` in `{ "dir": ... }`.
+  up in the template's folder; `render` in `{ "dir": ... }`. A name with `..`
+  or an absolute path is an error, so a template can't read files outside
+  that folder.
 - **Template options** as a third argument: `escape` (`"html"`, `"json"`,
   `"none"` or a bool), `dir` and `strict` (an undefined variable is an error
   instead of an empty string).
