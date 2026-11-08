@@ -125,7 +125,7 @@ fn module_signatures() -> &'static HashMap<String, Vec<crate::cli::builtins::Par
 fn tipo_comprobable(t: &str) -> bool {
     matches!(
         normalize(t).as_str(),
-        "int" | "float" | "number" | "string" | "bool" | "list" | "dict"
+        "int" | "float" | "decimal" | "number" | "string" | "bool" | "list" | "dict"
     )
 }
 
@@ -238,6 +238,7 @@ impl TypeChecker {
         match expr {
             Expr::Int(_)        => Some("int".into()),
             Expr::Float(_)      => Some("float".into()),
+            Expr::Decimal(_)    => Some("decimal".into()),
             Expr::Str(_)        => Some("string".into()),
             Expr::Bool(_)       => Some("bool".into()),
             Expr::List(_)       => Some("list".into()),
@@ -255,6 +256,9 @@ impl TypeChecker {
                 let rt = self.infer_pure(right);
                 match op.as_str() {
                     "+" | "-" | "*" | "/" | "%" | "**" => match (lt.as_deref(), rt.as_deref()) {
+                        (Some("decimal"), Some("float")) | (Some("float"), Some("decimal")) => None,
+                        (Some("decimal"), Some("decimal" | "int")) | (Some("int"), Some("decimal")) =>
+                            Some("decimal".into()),
                         (Some("float"), _) | (_, Some("float")) => Some("float".into()),
                         (Some("int"), Some("int"))              => Some("int".into()),
                         (Some("string"), Some("string")) if op == "+" => Some("string".into()),
@@ -967,6 +971,7 @@ impl TypeChecker {
         match expr {
             Expr::Int(_)       => Some("int".into()),
             Expr::Float(_)     => Some("float".into()),
+            Expr::Decimal(_)   => Some("decimal".into()),
             Expr::Str(s)       => {
                 self.mark_interpolated_reads(s);
                 Some("string".into())
@@ -1002,6 +1007,14 @@ impl TypeChecker {
                 match op.as_str() {
                     "+" | "-" | "*" | "/" | "%" | "**" => {
                         match (lt.as_deref(), rt.as_deref()) {
+                            // Caught before running: the runtime would fail the same way.
+                            (Some("decimal"), Some("float")) | (Some("float"), Some("decimal")) => {
+                                let (line, col) = (self.current_line, self.current_col);
+                                self.report(crate::value::mixed_float(op), line, col);
+                                None
+                            }
+                            (Some("decimal"), Some("decimal" | "int")) | (Some("int"), Some("decimal")) =>
+                                Some("decimal".into()),
                             (Some("float"), _) | (_, Some("float")) => Some("float".into()),
                             (Some("int"), Some("int"))              => Some("int".into()),
                             (Some("string"), _) if op == "+"        => Some("string".into()),
@@ -1103,7 +1116,7 @@ impl TypeChecker {
 fn is_builtin(name: &str) -> bool {
     matches!(
         name,
-        "show" | "print" | "len" | "type" | "int" | "float" | "str" | "bool"
+        "show" | "print" | "len" | "type" | "int" | "float" | "decimal" | "str" | "bool"
         | "list" | "dict" | "range" | "input" | "read" | "write" | "append"
         | "push" | "pop" | "keys" | "values" | "items" | "contains" | "remove"
         | "sort" | "reverse" | "map" | "filter" | "reduce" | "zip" | "enumerate"
@@ -1166,7 +1179,8 @@ fn types_compatible(declared: &str, actual: &str) -> bool {
     if d == "any" || d == "void" { return true; }
     if a == "any"                { return true; }
     if d == a                    { return true; }
-    if d == "number" && (a == "int" || a == "float" || a == "number") { return true; }
+    if d == "number" && (a == "int" || a == "float" || a == "decimal" || a == "number") { return true; }
+    if d == "decimal" && a == "int" { return true; }
     if d == "float"  && a == "int" { return true; }
     false
 }

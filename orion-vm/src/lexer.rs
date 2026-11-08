@@ -259,6 +259,17 @@ impl<'a> Lexer<'a> {
         }
 
         let s = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
+        // `19.99d`: decimal literal, as long as the `d` doesn't start a name.
+        if self.peek() == Some(b'd')
+            && !self.peek_at(1).map_or(false, |c| c.is_ascii_alphanumeric() || c == b'_')
+        {
+            let text = s.to_string();
+            self.advance();
+            crate::value::parse_decimal(&text).map_err(|_| LexError {
+                message: format!("Invalid decimal literal: {text}d (up to 28 significant digits)"), line, col,
+            })?;
+            return Ok(TokenKind::Decimal(text));
+        }
         if has_dot || has_sci {
             s.parse().map(TokenKind::Float).map_err(|_| LexError {
                 message: format!("Invalid decimal literal: {s}"), line, col,
@@ -542,6 +553,16 @@ mod tests {
 
     fn kinds(src: &str) -> Vec<TokenKind> {
         lex(src).unwrap().into_iter().map(|t| t.kind).collect()
+    }
+
+    #[test]
+    fn test_decimal_literals() {
+        assert_eq!(kinds("19.99d"), vec![TokenKind::Decimal("19.99".into()), TokenKind::Eof]);
+        assert_eq!(kinds("3d"), vec![TokenKind::Decimal("3".into()), TokenKind::Eof]);
+        assert_eq!(kinds("1.5e3d"), vec![TokenKind::Decimal("1.5e3".into()), TokenKind::Eof]);
+        // A `d` that starts a name is not a suffix.
+        assert!(matches!(kinds("3 do")[0], TokenKind::Int(3)));
+        assert!(lex("1234567890123456789012345678901234567890d").is_err());
     }
 
     #[test]

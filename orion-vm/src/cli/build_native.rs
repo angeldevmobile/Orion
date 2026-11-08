@@ -44,7 +44,8 @@ pub fn run_build(src_path: &str, output: Option<&str>) {
             b
         }
         Ok(None) => {
-            banner::info("The program uses constructs with no native support; embedding the bytecode instead.");
+            let why = crate::jit::first_unsupported(&bc).unwrap_or_else(|| "unsupported instructions".into());
+            banner::info(&format!("No native support for {why}; embedding the bytecode instead."));
             build_bundle_object(&bc)
         }
         Err(e) => {

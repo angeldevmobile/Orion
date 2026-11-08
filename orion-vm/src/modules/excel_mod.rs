@@ -785,6 +785,7 @@ fn write_cell(
     let result = match v {
         EvalValue::Int(n)   => ws.write(row, col, *n),
         EvalValue::Float(f) => ws.write(row, col, *f),
+        EvalValue::Decimal(_) => ws.write(row, col, v.to_f64().unwrap_or(f64::NAN)),
         EvalValue::Bool(b)  => ws.write(row, col, *b),
         EvalValue::Null     => ws.write(row, col, ""),
         other               => ws.write(row, col, other.to_string().as_str()),
@@ -1048,8 +1049,8 @@ fn write_styled_impl(
         //   Anchos de columna
         for (ci, key) in headers.iter().enumerate() {
             let w = match anchos.get(key) {
-                Some(EvalValue::Int(n))   => *n as f64,
-                Some(EvalValue::Float(f)) => *f,
+                Some(n @ (EvalValue::Int(_) | EvalValue::Float(_) | EvalValue::Decimal(_))) =>
+                    n.to_f64().unwrap_or(18.0),
                 _ => 18.0,
             };
             ws.set_column_width(ci as u16, w)
@@ -1445,6 +1446,7 @@ fn write_cell_fmt(
     let r = match v {
         EvalValue::Int(n)   => ws.write_with_format(row, col, *n, fmt),
         EvalValue::Float(f) => ws.write_with_format(row, col, *f, fmt),
+        EvalValue::Decimal(_) => ws.write_with_format(row, col, v.to_f64().unwrap_or(f64::NAN), fmt),
         EvalValue::Bool(b)  => ws.write_with_format(row, col, *b, fmt),
         EvalValue::Null     => ws.write_with_format(row, col, "", fmt),
         other               => ws.write_with_format(row, col, other.to_string().as_str(), fmt),
@@ -1551,6 +1553,7 @@ fn to_f64_val(v: &EvalValue) -> Option<f64> {
     match v {
         EvalValue::Int(n)   => Some(*n as f64),
         EvalValue::Float(f) => Some(*f),
+        EvalValue::Decimal(_) => v.to_f64().ok(),
         EvalValue::Str(s)   => s.parse::<f64>().ok(),
         _                   => None,
     }
@@ -1744,13 +1747,13 @@ fn parse_goal(cfg: &HashMap<String, EvalValue>) -> Option<(f64, String)> {
         Some(EvalValue::Dict(m)) => {
             let lbl = cfg_str(m, "label").unwrap_or_else(|| "Meta".to_string());
             match m.get("value") {
-                Some(EvalValue::Float(f)) => Some((*f, lbl)),
-                Some(EvalValue::Int(i))   => Some((*i as f64, lbl)),
+                Some(n @ (EvalValue::Int(_) | EvalValue::Float(_) | EvalValue::Decimal(_))) =>
+                    n.to_f64().ok().map(|f| (f, lbl)),
                 _ => None,
             }
         }
-        Some(EvalValue::Float(f)) => Some((*f, "Meta".to_string())),
-        Some(EvalValue::Int(i))   => Some((*i as f64, "Meta".to_string())),
+        Some(n @ (EvalValue::Int(_) | EvalValue::Float(_) | EvalValue::Decimal(_))) =>
+            n.to_f64().ok().map(|f| (f, "Meta".to_string())),
         _ => None,
     }
 }
@@ -1810,8 +1813,7 @@ fn generate_formula_str(
 
     let get_num = |key: &str| -> Option<f64> {
         match desc.get(key) {
-            Some(EvalValue::Float(f)) => Some(*f),
-            Some(EvalValue::Int(i))   => Some(*i as f64),
+            Some(n @ (EvalValue::Int(_) | EvalValue::Float(_) | EvalValue::Decimal(_))) => n.to_f64().ok(),
             _ => None,
         }
     };
@@ -1822,6 +1824,7 @@ fn generate_formula_str(
             EvalValue::Str(s)        => format!("\"{}\"", s.replace('"', "\"\"")),
             EvalValue::Int(i)        => i.to_string(),
             EvalValue::Float(f)      => format!("{}", f),
+            EvalValue::Decimal(d)    => d.to_string(),
             EvalValue::Bool(true)    => "TRUE".into(),
             EvalValue::Bool(false)   => "FALSE".into(),
             _                        => "\"\"".into(),

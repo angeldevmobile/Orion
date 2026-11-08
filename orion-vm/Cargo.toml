@@ -83,7 +83,7 @@ lettre = { version = "0.11", features = ["smtp-transport", "rustls-tls", "builde
 tungstenite = "0.24"
 
 # ── Templates ─────────────────────────────────────────────────────────────────
-minijinja = "2"
+minijinja = { version = "2", features = ["json"] }
 
 # ── Tablas formateadas ────────────────────────────────────────────────────────
 comfy-table = "7"

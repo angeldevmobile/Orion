@@ -805,6 +805,7 @@ impl Parser {
         match self.peek().clone() {
             TokenKind::Int(n)   => { self.pos += 1; Ok(Expr::Int(n)) }
             TokenKind::Float(f) => { self.pos += 1; Ok(Expr::Float(f)) }
+            TokenKind::Decimal(d) => { self.pos += 1; Ok(Expr::Decimal(d)) }
             TokenKind::Str(s)   => { self.pos += 1; Ok(Expr::Str(s)) }
             TokenKind::Bool(b)  => { self.pos += 1; Ok(Expr::Bool(b)) }
             TokenKind::Null      => { self.pos += 1; Ok(Expr::Null) }

@@ -1,6 +1,8 @@
 use std::fmt;
 use std::rc::Rc;
 use indexmap::IndexMap;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex, Condvar};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -133,6 +135,7 @@ pub enum SendValue {
     Bool(bool),
     Int(i64),
     Float(f64),
+    Decimal(Decimal),
     Str(String),
     List(Vec<SendValue>),
     Dict(IndexMap<String, SendValue>),
@@ -146,6 +149,7 @@ pub fn from_send(sv: SendValue) -> Value {
         SendValue::Bool(b)     => Value::Bool(b),
         SendValue::Int(n)      => Value::Int(n),
         SendValue::Float(f)    => Value::Float(f),
+        SendValue::Decimal(d)  => Value::Decimal(d),
         SendValue::Str(s)      => Value::Str(s),
         SendValue::List(items) => Value::list(items.into_iter().map(from_send).collect()),
         SendValue::Dict(map)   => Value::Dict(map.into_iter().map(|(k, v)| (k, from_send(v))).collect()),
@@ -158,6 +162,8 @@ pub fn from_send(sv: SendValue) -> Value {
 pub enum Value {
     Int(i64),
     Float(f64),
+    /// Exact base-10 number (`19.99d`): 96-bit mantissa, scale up to 28.
+    Decimal(Decimal),
     Str(String),
     Bool(bool),
     List(Rc<RefCell<ListData>>),
@@ -178,6 +184,7 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::Int(a), Value::Int(b))       => a == b,
             (Value::Float(a), Value::Float(b))   => a == b,
+            (Value::Decimal(a), Value::Decimal(b)) => a == b,
             (Value::Str(a), Value::Str(b))       => a == b,
             (Value::Bool(a), Value::Bool(b))     => a == b,
             (Value::Null, Value::Null)           => true,
@@ -197,6 +204,7 @@ impl fmt::Display for Value {
         match self {
             Value::Int(n)    => write!(f, "{}", n),
             Value::Float(n)  => write!(f, "{}", n),
+            Value::Decimal(d) => write!(f, "{}", d),
             Value::Str(s)    => write!(f, "{}", s),
             Value::Bool(b)   => write!(f, "{}", if *b { "yes" } else { "no" }),
             Value::Null      => write!(f, "null"),
@@ -230,6 +238,7 @@ impl Value {
         match self {
             Value::Int(_)      => "int".to_string(),
             Value::Float(_)    => "float".to_string(),
+            Value::Decimal(_)  => "decimal".to_string(),
             Value::Str(_)      => "string".to_string(),
             Value::Bool(_)     => "bool".to_string(),
             Value::List(_)     => "list".to_string(),
@@ -248,6 +257,7 @@ impl Value {
             Value::Bool(b)   => *b,
             Value::Int(n)    => *n != 0,
             Value::Float(n)  => *n != 0.0,
+            Value::Decimal(d) => !d.is_zero(),
             Value::Str(s)    => !s.is_empty(),
             Value::List(v)   => !v.borrow().is_empty(),
             Value::Dict(m)   => !m.is_empty(),
@@ -268,6 +278,7 @@ impl Value {
             Value::Bool(b)     => Ok(SendValue::Bool(*b)),
             Value::Int(n)      => Ok(SendValue::Int(*n)),
             Value::Float(f)    => Ok(SendValue::Float(*f)),
+            Value::Decimal(d)  => Ok(SendValue::Decimal(*d)),
             Value::Str(s)      => Ok(SendValue::Str(s.clone())),
             Value::List(items) => {
                 let sv: Result<Vec<_>, _> = items.borrow().iter().map(|v| v.to_send()).collect();
@@ -299,6 +310,10 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 + b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a + *b as f64)),
+            (Value::Decimal(_), Value::Decimal(_) | Value::Int(_)) | (Value::Int(_), Value::Decimal(_)) =>
+                decimal_op(self, other, "+", Decimal::checked_add),
+            (Value::Decimal(_), Value::Float(_)) | (Value::Float(_), Value::Decimal(_)) =>
+                Err(mixed_float("+")),
             (Value::Str(a), Value::Str(b))         => Ok(Value::Str(format!("{}{}", a, b))),
             (Value::Str(a), b)                     => Ok(Value::Str(format!("{}{}", a, b))),
             (a, Value::Str(b))                     => Ok(Value::Str(format!("{}{}", a, b))),
@@ -320,6 +335,10 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 - b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a - *b as f64)),
+            (Value::Decimal(_), Value::Decimal(_) | Value::Int(_)) | (Value::Int(_), Value::Decimal(_)) =>
+                decimal_op(self, other, "-", Decimal::checked_sub),
+            (Value::Decimal(_), Value::Float(_)) | (Value::Float(_), Value::Decimal(_)) =>
+                Err(mixed_float("-")),
             _ => Err(format!("Cannot subtract {} - {}", self.type_name(), other.type_name())),
         }
     }
@@ -331,6 +350,10 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 * b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a * *b as f64)),
+            (Value::Decimal(_), Value::Decimal(_) | Value::Int(_)) | (Value::Int(_), Value::Decimal(_)) =>
+                decimal_op(self, other, "*", Decimal::checked_mul),
+            (Value::Decimal(_), Value::Float(_)) | (Value::Float(_), Value::Decimal(_)) =>
+                Err(mixed_float("*")),
             _ => Err(format!("Cannot multiply {} * {}", self.type_name(), other.type_name())),
         }
     }
@@ -339,10 +362,15 @@ impl Value {
         match (self, other) {
             (_, Value::Int(0))   => Err("División por cero".to_string()),
             (_, Value::Float(f)) if *f == 0.0 => Err("División por cero".to_string()),
+            (_, Value::Decimal(d)) if d.is_zero() => Err("División por cero".to_string()),
             (Value::Int(a), Value::Int(b))     => Ok(Value::Float(*a as f64 / *b as f64)),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
             (Value::Int(a), Value::Float(b))   => Ok(Value::Float(*a as f64 / b)),
             (Value::Float(a), Value::Int(b))   => Ok(Value::Float(a / *b as f64)),
+            (Value::Decimal(_), Value::Decimal(_) | Value::Int(_)) | (Value::Int(_), Value::Decimal(_)) =>
+                decimal_op(self, other, "/", decimal_div),
+            (Value::Decimal(_), Value::Float(_)) | (Value::Float(_), Value::Decimal(_)) =>
+                Err(mixed_float("/")),
             _ => Err(format!("Cannot divide {} / {}", self.type_name(), other.type_name())),
         }
     }
@@ -351,6 +379,9 @@ impl Value {
         match (self, other) {
             (Value::Int(a), Value::Float(b)) => (*a as f64) == *b,
             (Value::Float(a), Value::Int(b)) => *a == (*b as f64),
+            (Value::Decimal(_), Value::Int(_) | Value::Float(_))
+            | (Value::Int(_) | Value::Float(_), Value::Decimal(_)) =>
+                self.order(other) == Some(std::cmp::Ordering::Equal),
             _ => self == other,
         }
     }
@@ -363,6 +394,11 @@ impl Value {
             (Value::Int(a), Value::Float(b))   => (*a as f64).partial_cmp(b),
             (Value::Float(a), Value::Int(b))   => a.partial_cmp(&(*b as f64)),
             (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
+            (Value::Decimal(a), Value::Decimal(b)) => Some(a.cmp(b)),
+            (Value::Decimal(a), Value::Int(b))     => Some(a.cmp(&Decimal::from(*b))),
+            (Value::Int(a), Value::Decimal(b))     => Some(Decimal::from(*a).cmp(b)),
+            (Value::Decimal(a), Value::Float(b))   => a.to_f64()?.partial_cmp(b),
+            (Value::Float(a), Value::Decimal(b))   => a.partial_cmp(&b.to_f64()?),
             (Value::Str(a), Value::Str(b))     => Some(a.cmp(b)),
             _ => None,
         }
@@ -374,6 +410,8 @@ impl Value {
             (Value::Float(a), Value::Float(b)) => Ok(a < b),
             (Value::Int(a), Value::Float(b))   => Ok((*a as f64) < *b),
             (Value::Float(a), Value::Int(b))   => Ok(*a < (*b as f64)),
+            (Value::Decimal(_), _) | (_, Value::Decimal(_)) => self.order(other).map(|o| o.is_lt())
+                .ok_or_else(|| format!("Cannot compare {} < {}", self.type_name(), other.type_name())),
             _ => Err(format!("Cannot compare {} < {}", self.type_name(), other.type_name())),
         }
     }
@@ -404,7 +442,8 @@ pub fn ordenar(items: &mut [Value]) -> Result<(), String> {
     for w in items.windows(2) {
         let comparable = matches!(
             (&w[0], &w[1]),
-            (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) | (Value::Str(_), Value::Str(_))
+            (Value::Int(_) | Value::Float(_) | Value::Decimal(_), Value::Int(_) | Value::Float(_) | Value::Decimal(_))
+            | (Value::Str(_), Value::Str(_))
         );
         if !comparable {
             return Err(format!("sort(): cannot compare {} and {}", w[0].type_name(), w[1].type_name()));
@@ -412,4 +451,82 @@ pub fn ordenar(items: &mut [Value]) -> Result<(), String> {
     }
     items.sort_by(|a, b| a.order(b).unwrap_or(std::cmp::Ordering::Equal));
     Ok(())
+}
+
+/// Applies a checked decimal operation; an `int` operand is promoted exactly.
+fn decimal_op(a: &Value, b: &Value, op: &str, f: fn(Decimal, Decimal) -> Option<Decimal>)
+    -> Result<Value, String>
+{
+    let (x, y) = (as_decimal(a).unwrap_or_default(), as_decimal(b).unwrap_or_default());
+    f(x, y).map(Value::Decimal)
+        .ok_or_else(|| format!("Decimal overflow in {} {} {}", x, op, y))
+}
+
+/// Division without spurious trailing zeros (`10d / 4` gave `2.50`): an exact
+/// result keeps scale(a) - scale(b), like Python's Decimal (`20.00d / 4` = `5.00`).
+fn decimal_div(x: Decimal, y: Decimal) -> Option<Decimal> {
+    let mut q = x.checked_div(y)?.normalize();
+    let ideal = x.scale().saturating_sub(y.scale());
+    if q.scale() < ideal { q.rescale(ideal); }
+    Some(q)
+}
+
+/// `int` and `decimal` as an exact decimal; anything else is `None`.
+pub fn as_decimal(v: &Value) -> Option<Decimal> {
+    match v {
+        Value::Decimal(d) => Some(*d),
+        Value::Int(n)     => Some(Decimal::from(*n)),
+        _ => None,
+    }
+}
+
+/// Decimal from a float through its shortest text form, so 0.1 gives 0.1.
+pub fn decimal_from_f64(f: f64) -> Result<Decimal, String> {
+    if !f.is_finite() {
+        return Err(format!("decimal(): {} has no decimal value", f));
+    }
+    parse_decimal(&format!("{}", f))
+        .or_else(|_| Decimal::from_f64(f).ok_or(()))
+        .map_err(|_| format!("decimal(): {} is out of range", f))
+}
+
+/// Parses `"19.99"`, `"-3"` or `"1.5e3"`.
+pub fn parse_decimal(s: &str) -> Result<Decimal, String> {
+    let t = s.trim();
+    t.parse::<Decimal>()
+        .or_else(|_| Decimal::from_scientific(t))
+        .map_err(|_| format!("decimal(): '{}' is not a valid decimal number", s))
+}
+
+pub fn mixed_float(op: &str) -> String {
+    format!("Cannot mix decimal and float in '{}': convert one side with decimal(x) or float(x)", op)
+}
+
+/// `d ** n` by squaring; a negative `n` gives `1 / d ** -n`.
+pub fn decimal_pow(d: Decimal, n: i64) -> Result<Decimal, String> {
+    let overflow = || format!("Decimal overflow in {} ** {}", d, n);
+    let (mut base, mut e, mut acc) = (d, n.unsigned_abs(), Decimal::ONE);
+    while e > 0 {
+        if e & 1 == 1 { acc = acc.checked_mul(base).ok_or_else(overflow)?; }
+        e >>= 1;
+        if e > 0 { base = base.checked_mul(base).ok_or_else(overflow)?; }
+    }
+    if n < 0 {
+        if acc.is_zero() { return Err("División por cero".to_string()); }
+        acc = Decimal::ONE.checked_div(acc).ok_or_else(overflow)?;
+    }
+    Ok(acc)
+}
+
+/// `%` with a decimal operand (the other one decimal or int).
+pub fn decimal_rem(a: &Value, b: &Value) -> Result<Value, String> {
+    match (a, b) {
+        (Value::Decimal(_) | Value::Int(_), Value::Decimal(_) | Value::Int(_)) => {
+            let (x, y) = (as_decimal(a).unwrap_or_default(), as_decimal(b).unwrap_or_default());
+            if y.is_zero() { return Err("Modulo by zero".to_string()); }
+            x.checked_rem(y).map(Value::Decimal).ok_or_else(|| "Decimal overflow in %".to_string())
+        }
+        (Value::Decimal(_), Value::Float(_)) | (Value::Float(_), Value::Decimal(_)) => Err(mixed_float("%")),
+        _ => Err("Modulo only supports integers and decimals".to_string()),
+    }
 }

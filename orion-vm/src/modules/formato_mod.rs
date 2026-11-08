@@ -41,19 +41,19 @@ pub fn call(function: &str, args: Vec<EvalValue>) -> Result<EvalValue, String> {
         // number(n, decimales=0, miles=",", decimal=".") → "1,487,000.50"
         // Estilo español: numero(n, 2, ".", ",") → "1.487.000,50"
         "number" | "numero" => {
-            let n = to_f64(args.first().ok_or("formato.numero requires (n)")?)?;
+            let n = args.first().ok_or("formato.numero requires (n)")?;
             let dec  = args.get(1).and_then(|v| to_i64(v).ok()).unwrap_or(0).max(0) as usize;
             let thou = args.get(2).map(to_str_val).unwrap_or_else(|| ",".to_string());
             let dsep = args.get(3).map(to_str_val).unwrap_or_else(|| ".".to_string());
-            Ok(EvalValue::Str(format_number(n, dec, &thou, &dsep)))
+            Ok(EvalValue::Str(format_number(&fixed(n, dec)?, &thou, &dsep)))
         }
         // currency(n, simbolo="$", decimales=2) → "$1,487,000.00"
         // Símbolo alfabético va con espacio: moneda(n, "USD") → "USD 1,487,000.00"
         "currency" | "moneda" => {
-            let n = to_f64(args.first().ok_or("formato.moneda requires (n)")?)?;
+            let n = args.first().ok_or("formato.moneda requires (n)")?;
             let sym = args.get(1).map(to_str_val).unwrap_or_else(|| "$".to_string());
             let dec = args.get(2).and_then(|v| to_i64(v).ok()).unwrap_or(2).max(0) as usize;
-            let num = format_number(n, dec, ",", ".");
+            let num = format_number(&fixed(n, dec)?, ",", ".");
             let sep = if sym.chars().all(|c| c.is_alphabetic()) { " " } else { "" };
             Ok(EvalValue::Str(format!("{}{}{}", sym, sep, num)))
         }
@@ -150,10 +150,21 @@ fn to_f64(v: &EvalValue) -> Result<f64, String> {
     v.to_f64().map_err(|e| format!("formato: {}", e))
 }
 
+/// `n` with `dec` digits as plain text ("-1234.50"). A decimal is rounded
+/// exactly, half away from zero; a float uses its binary value.
+fn fixed(n: &EvalValue, dec: usize) -> Result<String, String> {
+    if let EvalValue::Decimal(d) = n {
+        let r = d.round_dp_with_strategy(dec.min(28) as u32,
+            rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+        return Ok(format!("{:.*}", dec, r));
+    }
+    Ok(format!("{:.*}", dec, to_f64(n)?))
+}
+
 // Agrupa la parte entera en miles y aplica los separadores pedidos.
-fn format_number(n: f64, dec: usize, thou: &str, dsep: &str) -> String {
-    let neg = n < 0.0;
-    let s = format!("{:.*}", dec, n.abs());
+fn format_number(fixed: &str, thou: &str, dsep: &str) -> String {
+    let neg = fixed.starts_with('-') && fixed.bytes().any(|b| (b'1'..=b'9').contains(&b));
+    let s = fixed.trim_start_matches('-').to_string();
     let (int_part, frac_part) = match s.split_once('.') {
         Some((a, b)) => (a.to_string(), Some(b.to_string())),
         None => (s, None),

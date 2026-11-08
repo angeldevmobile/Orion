@@ -933,10 +933,11 @@ pub fn generated_modules(v: &mut Vec<BuiltinDoc>) {
     v.push(f("ws", "connections", "ws.connections() -> list", "<Int> de ids activos"));
     v.push(f("ws", "conexiones", "ws.conexiones() -> list", "Alias de ws.connections."));
     // template (template_mod.rs)
-    v.push(f("template", "render", "template.render(template_str, vars_dict) -> string", "Devuelve string."));
-    v.push(f("template", "renderizar", "template.renderizar(template_str, vars_dict) -> string", "Alias de template.render."));
-    v.push(f("template", "from_file", "template.from_file(path, vars_dict) -> string", "Devuelve string."));
-    v.push(f("template", "desde_archivo", "template.desde_archivo(path, vars_dict) -> string", "Alias de template.from_file."));
+    v.push(f("template", "render", "template.render(template_str, vars_dict, opts?) -> string", "Escapes HTML unless { escape: \"none\" }"));
+    v.push(f("template", "renderizar", "template.renderizar(template_str, vars_dict, opts?) -> string", "Alias de template.render."));
+    v.push(f("template", "from_file", "template.from_file(path, vars_dict, opts?) -> string", "Escapes by file extension; extends/include from its folder"));
+    v.push(f("template", "desde_archivo", "template.desde_archivo(path, vars_dict, opts?) -> string", "Alias de template.from_file."));
+    v.push(f("template", "escape", "template.escape(text) -> string", "Escapes & < > \" ' / like template autoescape"));
     // format (formato_mod.rs)
     v.push(f("format", "table", "format.table(encabezados, filas) -> string", "Tabla ASCII formateada filas puede ser List<List> o List<Dict>"));
     v.push(f("format", "tabla", "format.tabla(encabezados, filas) -> string", "Alias de format.table."));

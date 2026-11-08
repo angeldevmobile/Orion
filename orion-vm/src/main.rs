@@ -526,7 +526,10 @@ fn main() {
                 other => {
                     match other {
                         Err(e) => eprintln!("[JIT] {e} → falling back to the interpreter"),
-                        _      => eprintln!("[JIT] Unsupported instructions → falling back to the interpreter"),
+                        _ => {
+                            let why = jit::first_unsupported(&bc).unwrap_or_else(|| "unsupported instructions".into());
+                            eprintln!("[JIT] Not compiled: {why} → falling back to the interpreter");
+                        }
                     }
                     let mut machine = vm::VM::new(bc.main, bc.lines, bc.functions, bc.shapes, bc.extern_fns);
                     match machine.run() {

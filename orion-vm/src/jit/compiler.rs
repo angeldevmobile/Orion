@@ -22,6 +22,7 @@ struct RuntimeIds {
     // Constructores escalares
     make_null:       FuncId,
     make_int:        FuncId,
+    make_decimal:    FuncId,
     make_str:        FuncId,
     // Colecciones — JIT-2
     push_arg:        FuncId,
@@ -69,6 +70,7 @@ struct RuntimeIds {
     // Aritmética
     add: FuncId, sub: FuncId, mul: FuncId,
     div: FuncId, rt_mod: FuncId, pow: FuncId, neg: FuncId,
+    bitand: FuncId, bitor: FuncId, bitxor: FuncId, shl: FuncId, shr: FuncId,
     // Comparación
     eq: FuncId, neq: FuncId,
     lt: FuncId, lteq: FuncId, gt: FuncId, gteq: FuncId,
@@ -137,6 +139,7 @@ fn is_eligible(instr: &Instruction) -> bool {
         instr,
         Instruction::LoadInt(_)
             | Instruction::LoadFloat(_)
+            | Instruction::LoadDecimal(_)
             | Instruction::LoadBool(_)
             | Instruction::LoadNull
             | Instruction::LoadStr(_)
@@ -150,6 +153,11 @@ fn is_eligible(instr: &Instruction) -> bool {
             | Instruction::Mod
             | Instruction::Pow
             | Instruction::Neg
+            | Instruction::BitAnd
+            | Instruction::BitOr
+            | Instruction::BitXor
+            | Instruction::Shl
+            | Instruction::Shr
             | Instruction::Eq
             | Instruction::NotEq
             | Instruction::Lt
@@ -199,6 +207,52 @@ fn is_eligible(instr: &Instruction) -> bool {
             | Instruction::CallAsync(_, _)
             | Instruction::Await
     )
+}
+
+/// First instruction the JIT can't compile and where it is, or `None` if the
+/// whole program compiles. Same rule `compile_program` and `--build` use.
+pub fn first_unsupported(bc: &OrionBytecode) -> Option<String> {
+    let unsupported = |instr: &Instruction| -> Option<String> {
+        match instr {
+            // A Call resolves to a user function, a shape or a bridged builtin.
+            Instruction::Call(name, argc) => {
+                let ok = match bc.functions.get(name.as_str()) {
+                    Some(f) => *argc as usize == f.params.len(),
+                    None => bc.shapes.contains_key(name.as_str())
+                        || super::bridge::is_jit_builtin(name.as_str()),
+                };
+                (!ok).then(|| format!("call to `{name}` with {argc} argument(s)"))
+            }
+            // Async only over user functions and shapes, not builtins.
+            Instruction::CallAsync(name, _) => {
+                let ok = bc.functions.contains_key(name.as_str())
+                    || bc.shapes.contains_key(name.as_str());
+                (!ok).then(|| format!("async call to `{name}`"))
+            }
+            other if is_eligible(other) => None,
+            other => {
+                let dbg = format!("{other:?}");
+                let end = dbg.find(|c: char| c == '(' || c == ' ' || c == '{').unwrap_or(dbg.len());
+                Some(format!("instruction `{}`", &dbg[..end]))
+            }
+        }
+    };
+    let scan = |body: &[Instruction], place: &str| {
+        body.iter().find_map(&unsupported).map(|what| format!("{what} in {place}"))
+    };
+    if let Some(r) = scan(&bc.main, "the main program") { return Some(r); }
+    for (name, f) in &bc.functions {
+        if let Some(r) = scan(&f.body, &format!("function `{name}`")) { return Some(r); }
+    }
+    for (sname, shape) in &bc.shapes {
+        if let Some(oc) = &shape.on_create {
+            if let Some(r) = scan(&oc.body, &format!("`{sname}` on_create")) { return Some(r); }
+        }
+        for (aname, act) in &shape.acts {
+            if let Some(r) = scan(&act.body, &format!("act `{sname}.{aname}`")) { return Some(r); }
+        }
+    }
+    None
 }
 
 //     Compilador JIT                                                           
@@ -268,6 +322,7 @@ impl CodeGen<JITModule> {
         }
         sym!("rt_make_null",       super::runtime::rt_make_null);
         sym!("rt_make_int",        super::runtime::rt_make_int);
+        sym!("rt_make_decimal",    super::runtime::rt_make_decimal);
         sym!("rt_make_str",        super::runtime::rt_make_str);
         sym!("rt_push_arg",        super::runtime::rt_push_arg);
         sym!("rt_make_list_n",     super::runtime::rt_make_list_n);
@@ -310,6 +365,11 @@ impl CodeGen<JITModule> {
         sym!("rt_mod",             super::runtime::rt_mod);
         sym!("rt_pow",             super::runtime::rt_pow);
         sym!("rt_neg",             super::runtime::rt_neg);
+        sym!("rt_bitand",          super::runtime::rt_bitand);
+        sym!("rt_bitor",           super::runtime::rt_bitor);
+        sym!("rt_bitxor",          super::runtime::rt_bitxor);
+        sym!("rt_shl",             super::runtime::rt_shl);
+        sym!("rt_shr",             super::runtime::rt_shr);
         sym!("rt_eq",              super::runtime::rt_eq);
         sym!("rt_neq",             super::runtime::rt_neq);
         sym!("rt_lt",              super::runtime::rt_lt);
@@ -447,6 +507,7 @@ impl<M: Module> CodeGen<M> {
 
         let make_null       = decl!("rt_make_null",       [],          [i]);
         let make_int        = decl!("rt_make_int",        [i],         [i]);
+        let make_decimal    = decl!("rt_make_decimal",    [i, i],      [i]);
         let make_str        = decl!("rt_make_str",        [i],         [i]);
         let push_arg        = decl!("rt_push_arg",        [i],         []);
         let make_list_n     = decl!("rt_make_list_n",     [i],         [i]);
@@ -469,7 +530,7 @@ impl<M: Module> CodeGen<M> {
         let load_global        = decl!("rt_load_global",             [i],       [i]);
         let create_instance    = decl!("rt_create_instance_and_init",[i, i],    [i]);
         let get_attr           = decl!("rt_get_attr",                [i, i],    [i]);
-        let set_attr           = decl!("rt_set_attr",                [i, i, i], []);
+        let set_attr           = decl!("rt_set_attr",                [i, i, i], [i]);
         let is_instance        = decl!("rt_is_instance",             [i, i],    [i]);
         let get_self           = decl!("rt_get_current_self",        [],        [i]);
         let push_self          = decl!("rt_push_self",               [i],       []);
@@ -491,6 +552,11 @@ impl<M: Module> CodeGen<M> {
         let rt_mod          = decl!("rt_mod",             [i, i],      [i]);
         let pow             = decl!("rt_pow",             [i, i],      [i]);
         let neg             = decl!("rt_neg",             [i],         [i]);
+        let bitand          = decl!("rt_bitand",          [i, i],      [i]);
+        let bitor           = decl!("rt_bitor",           [i, i],      [i]);
+        let bitxor          = decl!("rt_bitxor",          [i, i],      [i]);
+        let shl             = decl!("rt_shl",             [i, i],      [i]);
+        let shr             = decl!("rt_shr",             [i, i],      [i]);
         let eq              = decl!("rt_eq",              [i, i],      [i]);
         let neq             = decl!("rt_neq",             [i, i],      [i]);
         let lt              = decl!("rt_lt",              [i, i],      [i]);
@@ -502,7 +568,7 @@ impl<M: Module> CodeGen<M> {
         let not             = decl!("rt_not",             [i],         [i]);
 
         self.rt = Some(RuntimeIds {
-            make_null, make_int, make_str,
+            make_null, make_int, make_decimal, make_str,
             push_arg, make_list_n, make_dict_n, get_index, set_index,
             set_error, take_error, raise_exit, error_pending,
             read_input, read_input_choices, read_file, write_file, read_env, use_module,
@@ -513,6 +579,7 @@ impl<M: Module> CodeGen<M> {
             make_closure, call_async, spawn, rt_await,
             show, is_truthy,
             add, sub, mul, div, rt_mod, pow, neg,
+            bitand, bitor, bitxor, shl, shr,
             eq, neq, lt, lteq, gt, gteq,
             and, or, not,
         });
@@ -521,46 +588,7 @@ impl<M: Module> CodeGen<M> {
 
     //     API pública
     pub fn compile_program(&mut self, bc: &OrionBytecode) -> Result<Option<CompiledProgram>, String> {
-        let callable: HashSet<&str> = bc.functions.keys()
-            .chain(bc.shapes.keys())
-            .map(|s| s.as_str())
-            .collect();
-        let eligible = |instr: &Instruction| -> bool {
-            match instr {
-                // Un Call resuelve a: función de usuario, shape, o builtin puenteable.
-                Instruction::Call(name, argc) => {
-                    if let Some(f) = bc.functions.get(name.as_str()) {
-                        *argc as usize == f.params.len()
-                    } else if bc.shapes.contains_key(name.as_str()) {
-                        true
-                    } else {
-                        super::bridge::is_jit_builtin(name.as_str())
-                    }
-                }
-                // Async solo sobre funciones de usuario (no builtins).
-                Instruction::CallAsync(name, _) => callable.contains(name.as_str()),
-                other => is_eligible(other),
-            }
-        };
-
-        // Elegibilidad
-        for instr in &bc.main {
-            if !eligible(instr) { return Ok(None); }
-        }
-        for fdef in bc.functions.values() {
-            for instr in fdef.body.iter() {
-                if !eligible(instr) { return Ok(None); }
-            }
-        }
-        for shape in bc.shapes.values() {
-            let check_act = |body: &[Instruction]| body.iter().all(&eligible);
-            if let Some(oc) = &shape.on_create {
-                if !check_act(&oc.body) { return Ok(None); }
-            }
-            for act in shape.acts.values() {
-                if !check_act(&act.body) { return Ok(None); }
-            }
-        }
+        if first_unsupported(bc).is_some() { return Ok(None); }
         if bc.main.is_empty() { return Ok(Some(CompiledProgram::empty())); }
 
         self.ensure_runtime()?;
@@ -726,6 +754,7 @@ impl<M: Module> CodeGen<M> {
         // Declarar todas las func-refs ANTES de crear el builder
         let make_null_ref   = self.module.declare_func_in_func(rt.make_null,       &mut ctx.func);
         let make_int_ref    = self.module.declare_func_in_func(rt.make_int,        &mut ctx.func);
+        let make_decimal_ref = self.module.declare_func_in_func(rt.make_decimal,   &mut ctx.func);
         let make_str_ref    = self.module.declare_func_in_func(rt.make_str,        &mut ctx.func);
         let push_arg_ref    = self.module.declare_func_in_func(rt.push_arg,        &mut ctx.func);
         let make_list_n_ref = self.module.declare_func_in_func(rt.make_list_n,     &mut ctx.func);
@@ -768,6 +797,11 @@ impl<M: Module> CodeGen<M> {
         let mod_ref         = self.module.declare_func_in_func(rt.rt_mod,          &mut ctx.func);
         let pow_ref         = self.module.declare_func_in_func(rt.pow,             &mut ctx.func);
         let neg_ref         = self.module.declare_func_in_func(rt.neg,             &mut ctx.func);
+        let bitand_ref      = self.module.declare_func_in_func(rt.bitand,          &mut ctx.func);
+        let bitor_ref       = self.module.declare_func_in_func(rt.bitor,           &mut ctx.func);
+        let bitxor_ref      = self.module.declare_func_in_func(rt.bitxor,          &mut ctx.func);
+        let shl_ref         = self.module.declare_func_in_func(rt.shl,             &mut ctx.func);
+        let shr_ref         = self.module.declare_func_in_func(rt.shr,             &mut ctx.func);
         let eq_ref          = self.module.declare_func_in_func(rt.eq,              &mut ctx.func);
         let neq_ref         = self.module.declare_func_in_func(rt.neq,             &mut ctx.func);
         let lt_ref          = self.module.declare_func_in_func(rt.lt,              &mut ctx.func);
@@ -1074,6 +1108,14 @@ impl<M: Module> CodeGen<M> {
                 Instruction::LoadFloat(f) => {
                     stack.push(builder.ins().iconst(types::I64, super::runtime::encode_f64(*f)));
                 }
+                Instruction::LoadDecimal(b) => {
+                    let lo = i64::from_le_bytes(b[..8].try_into().unwrap());
+                    let hi = i64::from_le_bytes(b[8..].try_into().unwrap());
+                    let lo = builder.ins().iconst(types::I64, lo);
+                    let hi = builder.ins().iconst(types::I64, hi);
+                    let call = builder.ins().call(make_decimal_ref, &[lo, hi]);
+                    stack.push(builder.inst_results(call)[0]);
+                }
                 Instruction::LoadBool(b) => {
                     let v = if *b { super::runtime::VAL_TRUE } else { super::runtime::VAL_FALSE };
                     stack.push(builder.ins().iconst(types::I64, v));
@@ -1122,6 +1164,11 @@ impl<M: Module> CodeGen<M> {
                 Instruction::Div => { fast_binop!(div_ref, inline::int_div, inline::flt_div); }
                 Instruction::Mod => { fast_binop!(mod_ref, inline::int_mod, inline::flt_none); }
                 Instruction::Pow => { binop_check!(pow_ref); }
+                Instruction::BitAnd => { binop_check!(bitand_ref); }
+                Instruction::BitOr  => { binop_check!(bitor_ref); }
+                Instruction::BitXor => { binop_check!(bitxor_ref); }
+                Instruction::Shl    => { binop_check!(shl_ref); }
+                Instruction::Shr    => { binop_check!(shr_ref); }
                 Instruction::Neg => {
                     unop!(neg_ref);
                     let r = *stack.last().unwrap();
@@ -1380,7 +1427,10 @@ impl<M: Module> CodeGen<M> {
                     let val = stack.pop().ok_or("SetAttr: pila vacía (val)")?;
                     let obj = stack.pop().ok_or("SetAttr: pila vacía (obj)")?;
                     let name_ptr = self.cstr_ptr(&mut builder, attr);
-                    builder.ins().call(set_attr_ref, &[obj, name_ptr, val]);
+                    // Leaves the object on the stack, like the VM: the codegen
+                    // follows with StoreVar (write-back) or Pop.
+                    let call = builder.ins().call(set_attr_ref, &[obj, name_ptr, val]);
+                    stack.push(builder.inst_results(call)[0]);
                     check_pending!();
                 }
                 Instruction::IsInstance(shape_name) => {

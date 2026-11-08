@@ -126,7 +126,7 @@ fn walk_pattern(p: &mut Pattern, sigs: &Sigs) -> Result<(), CodegenError> {
 
 fn walk_expr(e: &mut Expr, sigs: &Sigs) -> Result<(), CodegenError> {
     match e {
-        Expr::Int(_) | Expr::Float(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null
+        Expr::Int(_) | Expr::Float(_) | Expr::Decimal(_) | Expr::Str(_) | Expr::Bool(_) | Expr::Null
         | Expr::Undefined | Expr::Ident(_) => {}
         Expr::BinaryOp { left, right, .. } => {
             walk_expr(left, sigs)?;

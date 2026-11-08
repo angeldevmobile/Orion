@@ -7,8 +7,9 @@ use indexmap::IndexMap as HashMap;
 use super::runtime::{
     fallar, nombre_tipo,
     alloc_val, cstr_to_str, string_to_cptr, val_to_display, decode_val,
-    ARG_BUF, TAG_BOOL, TAG_DICT, TAG_FLOAT, TAG_INT, TAG_LIST, TAG_NULL, TAG_STR,
+    ARG_BUF, TAG_BOOL, TAG_DECIMAL, TAG_DICT, TAG_FLOAT, TAG_INT, TAG_LIST, TAG_NULL, TAG_STR,
 };
+use crate::value::Value;
 
 pub const TAG_INSTANCE: u8 = 7;
 
@@ -196,6 +197,14 @@ pub extern "C" fn rt_get_attr(obj: i64, name_ptr: i64) -> i64 {
                 for (k, v) in entries {
                     if k == name { return *v; }
                 }
+                // On a native module, ask the module, like the VM (`excel.f`).
+                if let Some((_, marker)) = entries.iter().find(|(k, _)| k == "__native_module__") {
+                    let mod_name = val_to_display(&decode_val(*marker));
+                    return match crate::modules::call(&mod_name, name, vec![]) {
+                        Ok(ev) => super::bridge::value_to_orion(&crate::vm::eval_to_value(ev)),
+                        Err(e) => fallar(e),
+                    };
+                }
                 return fallar(format!("GetAttr '{}': key not found in dict/module", name))
             }
             _ => {
@@ -207,19 +216,31 @@ pub extern "C" fn rt_get_attr(obj: i64, name_ptr: i64) -> i64 {
 
 /// `obj.attr = val` — muta la instancia en-lugar. Retorna el puntero al objeto (mismo).
 #[no_mangle]
-pub extern "C" fn rt_set_attr(obj: i64, name_ptr: i64, val: i64) {
+pub extern "C" fn rt_set_attr(obj: i64, name_ptr: i64, val: i64) -> i64 {
     unsafe {
         let oval = decode_val(obj);
-        if oval.tag != TAG_INSTANCE {
-            fallar(format!("SetAttr: cannot set an attribute on a value of type {}", nombre_tipo(&oval)));
-            return;
+        let name = cstr_to_str(name_ptr);
+        match oval.tag {
+            // Instances are shared: set in place and return the same object.
+            TAG_INSTANCE => {
+                let inst = get_inst_mut(obj);
+                match inst.fields.iter_mut().find(|(k, _)| k == name) {
+                    Some((_, v)) => *v = val,
+                    None => inst.fields.push((name.to_string(), val)),
+                }
+                obj
+            }
+            // Dicts are values: return a new dict, like SetIndex and the VM.
+            TAG_DICT => {
+                let mut entries = (*(oval.data_i as *const Vec<(String, i64)>)).clone();
+                match entries.iter_mut().find(|(k, _)| k == name) {
+                    Some((_, v)) => *v = val,
+                    None => entries.push((name.to_string(), val)),
+                }
+                alloc_val(TAG_DICT, Box::into_raw(Box::new(entries)) as i64, 0.0)
+            }
+            _ => fallar(format!("SetAttr: cannot set an attribute on a value of type {}", nombre_tipo(&oval))),
         }
-        let inst = get_inst_mut(obj);
-        let name = cstr_to_str(name_ptr).to_string();
-        for (k, v) in &mut inst.fields {
-            if *k == name { *v = val; return; }
-        }
-        inst.fields.push((name, val));
     }
 }
 
@@ -383,12 +404,17 @@ unsafe fn orden(a: i64, b: i64) -> Option<std::cmp::Ordering> {
         (TAG_FLOAT, TAG_INT)   => x.data_f.partial_cmp(&(y.data_i as f64)),
         (TAG_FLOAT, TAG_FLOAT) => x.data_f.partial_cmp(&y.data_f),
         (TAG_STR, TAG_STR)     => Some(cstr_to_str(x.data_i).cmp(cstr_to_str(y.data_i))),
+        // Decimals (alone or mixed) use the VM's order, so both engines agree.
+        (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => {
+            use super::bridge::orion_to_value;
+            orion_to_value(a).order(&orion_to_value(b))
+        }
         _ => None,
     }
 }
 
 unsafe fn comparables(a: i64, b: i64) -> bool {
-    let num = |t: u8| t == TAG_INT || t == TAG_FLOAT;
+    let num = |t: u8| t == TAG_INT || t == TAG_FLOAT || t == TAG_DECIMAL;
     let (x, y) = (decode_val(a).tag, decode_val(b).tag);
     (num(x) && num(y)) || (x == TAG_STR && y == TAG_STR)
 }
@@ -439,18 +465,19 @@ unsafe fn call_method_list(data_i: i64, name_ptr: i64, args: &[i64]) -> i64 {
             alloc_val(TAG_STR, string_to_cptr(joined), 0.0)
         }
         "sum" => {
-            let mut total = 0.0f64;
-            let mut is_int = true;
+            // Same as the VM's list.sum(): exact for int and decimal (it summed
+            // in f64 and skipped decimals), non-numbers skipped.
+            use super::bridge::{orion_to_value, value_to_orion};
+            let mut total = Value::Int(0);
             for &p in items.iter() {
-                let v = decode_val(p);
-                match v.tag {
-                    TAG_INT   => total += v.data_i as f64,
-                    TAG_FLOAT => { total += v.data_f; is_int = false; }
-                    _         => {}
+                if matches!(decode_val(p).tag, TAG_INT | TAG_FLOAT | TAG_DECIMAL) {
+                    match total.add(&orion_to_value(p)) {
+                        Ok(t) => total = t,
+                        Err(e) => return fallar(format!("sum(): {}", e)),
+                    }
                 }
             }
-            if is_int { alloc_val(TAG_INT, total as i64, 0.0) }
-            else      { alloc_val(TAG_FLOAT, 0, total) }
+            value_to_orion(&total)
         }
         "sort" => {
             for w in items.windows(2) {

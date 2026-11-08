@@ -1105,3 +1105,173 @@ c.sort() } handle e { show e }"#;
     assert_vm_jit_match(src);
     assert_jit_nativo(src);
 }
+
+/// Runs `src` in the interpreter and checks the exact stdout.
+fn assert_output(src: &str, expected: &str) {
+    let path = write_temp(src);
+    let (out, ok) = run(&[path.to_str().unwrap()]);
+    let _ = fs::remove_file(&path);
+    assert!(ok, "failed:\n{src}\n--- stdout ---\n{out}");
+    assert_eq!(out.replace("\r\n", "\n"), expected, "--- program ---\n{src}");
+}
+
+const DECIMAL_PROGRAM: &str = r#"a = 0.1d + 0.2d
+show a
+show a == 0.3d
+show 19.99d * 3
+show 10d / 4
+show 1d / 3
+show 7.50d % 2
+show -2.5d
+show 1.5d ** 2
+show 2d ** -2
+show type(19.99d)
+show 0.1d < 0.2
+show 3 == 3.00d
+show decimal("19.99") + decimal(0.1)
+show int(19.99d)
+show float(2.5d)
+show round(2.675d, 2)
+show round(2.5d)
+show abs(-3.10d)
+show sum([19.99d, 0.01d, 1])
+show [3.5d, 1, 2.25d].max()
+x = 0.00d
+if x { show "truthy" } else { show "falsy" }
+show "total: " + 19.99d"#;
+
+#[test]
+fn decimal_arithmetic_is_exact() {
+    assert_output(DECIMAL_PROGRAM, "0.3\nyes\n59.97\n2.5\n0.3333333333333333333333333333\n1.50\n-2.5\n\
+2.25\n0.25\ndecimal\nyes\nyes\n20.09\n19\n2.5\n2.68\n3\n3.10\n21.00\n3.5\nfalsy\ntotal: 19.99\n");
+}
+
+#[test]
+fn decimal_matches_in_vm_and_jit() {
+    assert_vm_jit_match(DECIMAL_PROGRAM);
+    assert_jit_nativo(DECIMAL_PROGRAM);
+}
+
+#[test]
+fn decimal_errors_match_in_vm_and_jit() {
+    // Untyped parameters hide the types from the checker: the runtime decides.
+    let src = r#"fn add(a, b) { return a + b }
+fn power(a, b) { return a ** b }
+attempt { show add(1.5d, 0.5) } handle e { show e }
+attempt { show power(2.5d, 0.5) } handle e { show e }
+attempt { show 1d / 0 } handle e { show e }
+attempt { show decimal("abc") } handle e { show e }
+attempt { show 79228162514264337593543950335d + 1 } handle e { show e }"#;
+    assert_vm_jit_agree(src);
+    assert_output(src, "Cannot mix decimal and float in '+': convert one side with decimal(x) or float(x)\n\
+A decimal can only be raised to an int power\n\
+División por cero\n\
+decimal(): 'abc' is not a valid decimal number\n\
+Decimal overflow in 79228162514264337593543950335 + 1\n");
+}
+
+#[test]
+fn sum_of_large_ints_is_exact() {
+    // sum() added ints in f64: 2^53 + 1 came back as 2^53.
+    assert_output("show sum([9007199254740993, 0])\nshow [9007199254740993, 0].sum()",
+                  "9007199254740993\n9007199254740993\n");
+}
+
+#[test]
+fn decimal_in_json_and_format() {
+    let src = r#"use "json"
+use "format"
+show json.forge({"total": 19.99d})
+show format.number(1234.5d, 2)
+show format.number(2.675d, 2)
+show format.currency(19.999d)"#;
+    assert_vm_jit_match(src);
+    assert_output(src, "{\"total\":19.99}\n1,234.50\n2.68\n$20.00\n");
+}
+
+#[test]
+fn list_concatenation_in_jit() {
+    // The JIT failed with "Cannot add list + list"; the VM concatenates.
+    let src = r#"a = [1, 2]
+b = [3]
+c = a + b
+push(c, 4)
+show c
+show a
+show b"#;
+    assert_vm_jit_match(src);
+    assert_jit_nativo(src);
+}
+
+#[test]
+fn set_attr_on_dict_and_instance_in_jit() {
+    // `x.field = v` broke JIT compilation ("StoreVar: pila vacía"): SetAttr
+    // left nothing on the stack and only accepted instances.
+    let src = r#"d = {"a": 1}
+e = d
+d.b = 2
+show d
+show e
+for v in [{"n": 1}, {"n": 2}] {
+    v.doble = v.n * 2
+    show v
+}
+shape P {
+    x
+}
+p = P(1)
+q = p
+p.x = 5
+show q.x"#;
+    assert_vm_jit_match(src);
+    assert_jit_nativo(src);
+}
+
+#[test]
+fn bitwise_operators_in_jit() {
+    let src = r#"show 6 & 3
+show 6 | 3
+show 6 ^ 3
+show 1 << 4
+show 256 >> 2
+attempt { show 1 << -1 } handle e { show e }
+attempt { show 1.5 & 1 } handle e { show e }"#;
+    assert_vm_jit_agree(src);
+    assert_jit_nativo(src);
+}
+
+#[test]
+fn asserts_compile_in_jit() {
+    let src = r#"assert(1 < 2)
+assert_eq(1 + 1, 2, "sum")
+assert_ne(1, 2)
+show "ok"
+attempt { assert_eq(1, 2, "x") } handle e { show e }"#;
+    assert_vm_jit_agree(src);
+    assert_jit_nativo(src);
+}
+
+#[test]
+fn list_sum_method_is_exact_in_jit() {
+    // The JIT's list.sum() added in f64 and skipped decimals.
+    let src = r#"show [19.99d, 0.01d, 1].sum()
+show [9007199254740993, 0].sum()
+show [1, "x", 2.5].sum()
+show [3.5d, 1, 2.25d].min()
+show 20.00d / 4
+show 10d / 4"#;
+    assert_vm_jit_match(src);
+    assert_output(src, "21.00\n9007199254740993\n3.5\n1\n5.00\n2.5\n");
+}
+
+#[test]
+fn submodule_attribute_in_jit() {
+    // `excel.f` failed in the JIT ("key not found in dict/module"), and a
+    // module returned by a module came back as null.
+    let src = r#"use "excel"
+f = excel.f
+show f.ratio("sales", "target")
+show excel.f.pct("sales", 5)"#;
+    assert_vm_jit_match(src);
+    assert_jit_nativo(src);
+}

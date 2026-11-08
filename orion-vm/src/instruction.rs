@@ -120,4 +120,5 @@ pub enum Instruction {
     JumpIfFalseOrPop(usize),
     JumpIfTrueOrPop(usize),
     ToBool,              // pop x → push Bool(truthy(x))
+    LoadDecimal([u8; 16]), // push decimal literal (`Decimal::serialize`)
 }

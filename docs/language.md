@@ -42,13 +42,33 @@ pattern = "\\d{4}-\\d{2}-\\d{2}"       -- regex: \d{4}-\d{2}-\d{2}
 | Type | Example | Description |
 |---|---|---|
 | `int` | `42`, `0xFF`, `0b1010` | 64-bit integer, hex and binary literals |
-| `float` | `3.14`, `1.5e-3` | Decimal, scientific notation |
+| `float` | `3.14`, `1.5e-3` | Binary floating point, scientific notation |
+| `decimal` | `19.99d`, `decimal("19.99")` | Exact base-10 number, for money (see below) |
 | `string` | `"hi"`, `r"raw"`, `"""multi"""` | Text with `${var}` interpolation |
 | `bool` | `yes` / `no` | Boolean |
 | `list` | `[1, 2, 3]` | Dynamic array |
 | `dict` | `{"k": "v"}` | Hash map |
 | `null` | `null` | Explicit null |
 | shape | `Person("Ana", 30)` | Shape instance (object) |
+
+### Money: `decimal`
+
+A `float` can't hold `0.1` exactly, so sums of prices drift
+(`0.1 + 0.2` is `0.30000000000000004`). A `decimal` is exact:
+
+```orion
+price = 19.99d
+total = price * 3          -- 59.97
+show 0.1d + 0.2d == 0.3d   -- yes
+show round(2.675d, 2)      -- 2.68 (half away from zero)
+show decimal("19.99")      -- from text, e.g. a form field
+```
+
+`decimal` mixes with `int`. Mixing it with a `float` in arithmetic is an
+error, so precision is never lost by accident: convert one side with
+`decimal(x)` or `float(x)`. `db` reads Postgres and MySQL `NUMERIC`/`DECIMAL`
+columns as `decimal` and writes a `decimal` back exactly; `json`, `format`,
+`excel` and `pdf` accept it like any number.
 
 ## Control flow
 

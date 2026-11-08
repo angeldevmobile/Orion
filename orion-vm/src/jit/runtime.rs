@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use indexmap::IndexMap as HashMap;
 use std::io::{self, BufRead, Write as IoWrite};
 use std::sync::{Arc, Mutex, Condvar, OnceLock};
+use crate::value::Value;
 
 //     Tags                                                                     
 
@@ -19,6 +20,7 @@ pub const TAG_DICT:    u8 = 6;  // data_i = Box::into_raw(Box<Vec<(String, i64)>
 // TAG_INSTANCE = 7 definido en runtime_oop
 pub const TAG_CLOSURE: u8 = 9;  // data_i = fn_ptr (i64) de la función capturada
 pub const TAG_TASK:    u8 = 10; // data_i = Box<Arc<JitTask>>
+pub const TAG_DECIMAL: u8 = 13; // 16 bytes of `Decimal::serialize`: data_i (low) + data_f bits (high)
 
 // Buffer thread-local para pasar N argumentos variádicos a MakeList/MakeDict.
 thread_local! {
@@ -110,9 +112,39 @@ pub(crate) fn string_to_cptr(s: String) -> i64 {
     Box::into_raw(boxed) as *mut u8 as i64
 }
 
+pub(crate) fn alloc_decimal(d: rust_decimal::Decimal) -> i64 {
+    let b = d.serialize();
+    let lo = i64::from_le_bytes(b[..8].try_into().unwrap());
+    let hi = u64::from_le_bytes(b[8..].try_into().unwrap());
+    alloc_val(TAG_DECIMAL, lo, f64::from_bits(hi))
+}
+
+pub(crate) fn decimal_of(v: &OrionVal) -> rust_decimal::Decimal {
+    let mut b = [0u8; 16];
+    b[..8].copy_from_slice(&v.data_i.to_le_bytes());
+    b[8..].copy_from_slice(&v.data_f.to_bits().to_le_bytes());
+    rust_decimal::Decimal::deserialize(b)
+}
+
+/// Decimal literal: the two halves of `Decimal::serialize`.
+#[no_mangle]
+pub extern "C" fn rt_make_decimal(lo: i64, hi: i64) -> i64 {
+    alloc_val(TAG_DECIMAL, lo, f64::from_bits(hi as u64))
+}
+
+/// An operation with a decimal operand: same code as the interpreter.
+unsafe fn via_value(a: i64, b: i64, op: fn(&Value, &Value) -> Result<Value, String>) -> i64 {
+    use crate::jit::bridge::{orion_to_value, value_to_orion};
+    match op(&orion_to_value(a), &orion_to_value(b)) {
+        Ok(v) => value_to_orion(&v),
+        Err(e) => fallar(e),
+    }
+}
+
 pub(crate) fn val_to_display(v: &OrionVal) -> String {
     match v.tag {
         TAG_INT   => v.data_i.to_string(),
+        TAG_DECIMAL => decimal_of(v).to_string(),
         TAG_FLOAT => format!("{}", v.data_f),
         TAG_BOOL  => if v.data_i != 0 { "yes".to_string() } else { "no".to_string() },
         TAG_STR   => unsafe { cstr_to_str(v.data_i).to_string() },
@@ -140,6 +172,7 @@ pub(crate) fn is_truthy_val(v: &OrionVal) -> bool {
         TAG_NULL  => false,
         TAG_INT   => v.data_i != 0,
         TAG_FLOAT => v.data_f != 0.0,
+        TAG_DECIMAL => !decimal_of(v).is_zero(),
         TAG_BOOL  => v.data_i != 0,
         TAG_STR   => unsafe { !cstr_to_str(v.data_i).is_empty() },
         TAG_LIST  => unsafe { !(*(v.data_i as *const Vec<i64>)).is_empty() },
@@ -199,11 +232,20 @@ pub extern "C" fn rt_add(a: i64, b: i64) -> i64 {
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f + bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 + bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f + bv.data_i as f64),
+            (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => via_value(a, b, Value::add),
             // Concatenación: solo si al menos un operando es Str (igual que la VM).
             // bool/null/etc. en aritmética → error de tipo, NO coerción silenciosa.
             (TAG_STR, _) | (_, TAG_STR) => {
                 let result = format!("{}{}", val_to_display(&av), val_to_display(&bv));
                 alloc_val(TAG_STR, string_to_cptr(result), 0.0)
+            }
+            // Concatenation: a NEW list, neither operand changes (same as the VM).
+            (TAG_LIST, TAG_LIST) => {
+                let (xs, ys) = (&*(av.data_i as *const Vec<i64>), &*(bv.data_i as *const Vec<i64>));
+                let mut items = Vec::with_capacity(xs.len() + ys.len());
+                items.extend_from_slice(xs);
+                items.extend_from_slice(ys);
+                alloc_val(TAG_LIST, Box::into_raw(Box::new(items)) as i64, 0.0)
             }
             _ => fallar(format!("Cannot add {} + {}", nombre_tipo(&av), nombre_tipo(&bv))),
         }
@@ -223,6 +265,7 @@ pub extern "C" fn rt_sub(a: i64, b: i64) -> i64 {
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f - bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 - bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f - bv.data_i as f64),
+            (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => via_value(a, b, Value::sub),
             _ => fallar(format!("Cannot subtract {} - {}", nombre_tipo(&av), nombre_tipo(&bv))),
         }
     }
@@ -241,6 +284,7 @@ pub extern "C" fn rt_mul(a: i64, b: i64) -> i64 {
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f * bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 * bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f * bv.data_i as f64),
+            (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => via_value(a, b, Value::mul),
             _ => fallar(format!("Cannot multiply {} * {}", nombre_tipo(&av), nombre_tipo(&bv))),
         }
     }
@@ -260,6 +304,7 @@ pub extern "C" fn rt_div(a: i64, b: i64) -> i64 {
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f / bv.data_f),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, av.data_i as f64 / bv.data_f),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f / bv.data_i as f64),
+            (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => via_value(a, b, Value::div),
             _ => fallar(format!("Cannot divide {} / {}", nombre_tipo(&av), nombre_tipo(&bv))),
         }
     }
@@ -278,10 +323,26 @@ pub extern "C" fn rt_mod(a: i64, b: i64) -> i64 {
                     None => fallar("Desbordamiento aritmético en módulo"),
                 }
             }
-            _ => fallar("Modulo only supports integers"),
+            (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => via_value(a, b, crate::value::decimal_rem),
+            _ => fallar("Modulo only supports integers and decimals"),
         }
     }
 }
+
+/// Bitwise operators: the VM's own `bit_op`, so both engines agree on
+/// results and errors (ints only, no negative shifts).
+unsafe fn bit_op(a: i64, b: i64, op: &str) -> i64 {
+    use crate::jit::bridge::{orion_to_value, value_to_orion};
+    match crate::vm::bit_op(orion_to_value(a), orion_to_value(b), op) {
+        Ok(v) => value_to_orion(&v),
+        Err(e) => fallar(e),
+    }
+}
+#[no_mangle] pub extern "C" fn rt_bitand(a: i64, b: i64) -> i64 { unsafe { bit_op(a, b, "&") } }
+#[no_mangle] pub extern "C" fn rt_bitor(a: i64, b: i64) -> i64 { unsafe { bit_op(a, b, "|") } }
+#[no_mangle] pub extern "C" fn rt_bitxor(a: i64, b: i64) -> i64 { unsafe { bit_op(a, b, "^") } }
+#[no_mangle] pub extern "C" fn rt_shl(a: i64, b: i64) -> i64 { unsafe { bit_op(a, b, "<<") } }
+#[no_mangle] pub extern "C" fn rt_shr(a: i64, b: i64) -> i64 { unsafe { bit_op(a, b, ">>") } }
 
 #[no_mangle]
 pub extern "C" fn rt_pow(a: i64, b: i64) -> i64 {
@@ -299,6 +360,11 @@ pub extern "C" fn rt_pow(a: i64, b: i64) -> i64 {
             (TAG_FLOAT, TAG_FLOAT) => alloc_val(TAG_FLOAT, 0, av.data_f.powf(bv.data_f)),
             (TAG_INT, TAG_FLOAT)   => alloc_val(TAG_FLOAT, 0, (av.data_i as f64).powf(bv.data_f)),
             (TAG_FLOAT, TAG_INT)   => alloc_val(TAG_FLOAT, 0, av.data_f.powi(bv.data_i as i32)),
+            (TAG_DECIMAL, TAG_INT) => match crate::value::decimal_pow(decimal_of(&av), bv.data_i) {
+                Ok(d) => alloc_decimal(d),
+                Err(e) => fallar(e),
+            },
+            (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => fallar("A decimal can only be raised to an int power"),
             _ => fallar("Power expects numbers"),
         }
     }
@@ -314,6 +380,7 @@ pub extern "C" fn rt_neg(a: i64) -> i64 {
                 None => fallar("Desbordamiento aritmético en negación"),
             },
             TAG_FLOAT => alloc_val(TAG_FLOAT, 0, -av.data_f),
+            TAG_DECIMAL => alloc_decimal(-decimal_of(&av)),
             _ => fallar("Negation only applies to numbers"),
         }
     }
@@ -330,6 +397,10 @@ unsafe fn jit_vals_equal(a: i64, b: i64) -> bool {
         (TAG_FLOAT, TAG_FLOAT) => av.data_f == bv.data_f,
         (TAG_INT,   TAG_FLOAT) => (av.data_i as f64) == bv.data_f,
         (TAG_FLOAT, TAG_INT)   => av.data_f == (bv.data_i as f64),
+        (TAG_DECIMAL, _) | (_, TAG_DECIMAL) => {
+            use crate::jit::bridge::orion_to_value;
+            orion_to_value(a).compare_eq(&orion_to_value(b))
+        }
         (TAG_BOOL,  TAG_BOOL)  => av.data_i == bv.data_i,
         (TAG_STR,   TAG_STR)   => cstr_to_str(av.data_i) == cstr_to_str(bv.data_i),
         (TAG_LIST,  TAG_LIST)  => {
@@ -375,6 +446,14 @@ fn numeric_cmp(av: &OrionVal, bv: &OrionVal, pred: fn(std::cmp::Ordering) -> boo
         (TAG_FLOAT, TAG_FLOAT) => av.data_f.partial_cmp(&bv.data_f).unwrap_or(Equal),
         (TAG_INT,   TAG_FLOAT) => (av.data_i as f64).partial_cmp(&bv.data_f).unwrap_or(Equal),
         (TAG_FLOAT, TAG_INT)   => av.data_f.partial_cmp(&(bv.data_i as f64)).unwrap_or(Equal),
+        (TAG_DECIMAL, TAG_INT | TAG_FLOAT | TAG_DECIMAL) | (TAG_INT | TAG_FLOAT, TAG_DECIMAL) => {
+            let num = |v: &OrionVal| match v.tag {
+                TAG_INT => Value::Int(v.data_i),
+                TAG_FLOAT => Value::Float(v.data_f),
+                _ => Value::Decimal(decimal_of(v)),
+            };
+            num(av).order(&num(bv)).unwrap_or(Equal)
+        }
         _ => return fallar(format!("Cannot compare {} < {}", nombre_tipo(av), nombre_tipo(bv))),
     };
     alloc_val(TAG_BOOL, if pred(ord) { 1 } else { 0 }, 0.0)
@@ -418,7 +497,7 @@ pub extern "C" fn rt_error_pending() -> i64 {
 
 pub(crate) fn nombre_tipo(v: &OrionVal) -> &'static str {
     match v.tag {
-        TAG_INT => "int", TAG_FLOAT => "float", TAG_STR => "string", TAG_BOOL => "bool",
+        TAG_INT => "int", TAG_FLOAT => "float", TAG_DECIMAL => "decimal", TAG_STR => "string", TAG_BOOL => "bool",
         TAG_LIST => "list", TAG_DICT => "dict", TAG_NULL => "null", TAG_CLOSURE => "fn",
         TAG_TASK => "task", _ => "instance",
     }
@@ -704,6 +783,16 @@ pub extern "C" fn rt_read_env(key: i64, cast_ptr: i64) -> i64 {
 }
 
 /// Carga un módulo por nombre/path y devuelve un dict con su namespace.
+/// A native module in the JIT: a dict marked with its name, which
+/// `bridge::orion_to_value` turns back into `Value::Module`.
+pub(crate) fn native_module_val(name: &str) -> i64 {
+    let entries: Vec<(String, i64)> = vec![(
+        "__native_module__".to_string(),
+        alloc_val(TAG_STR, string_to_cptr(name.to_string()), 0.0),
+    )];
+    alloc_val(TAG_DICT, Box::into_raw(Box::new(entries)) as i64, 0.0)
+}
+
 #[no_mangle]
 pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
     unsafe {
@@ -735,14 +824,7 @@ pub extern "C" fn rt_use_module(path_ptr: i64) -> i64 {
                 alloc_val(TAG_DICT, raw, 0.0)
             }
             // Módulos nativos Rust (fs, json, random, datetime, ...) → marcador Module.
-            name if crate::modules::is_known_module(name) => {
-                let entries: Vec<(String, i64)> = vec![(
-                    "__native_module__".to_string(),
-                    alloc_val(TAG_STR, string_to_cptr(name.to_string()), 0.0),
-                )];
-                let raw = Box::into_raw(Box::new(entries)) as i64;
-                alloc_val(TAG_DICT, raw, 0.0)
-            }
+            name if crate::modules::is_known_module(name) => native_module_val(name),
             _ => {
                 match &resolved {
                     Some(file) => super::bridge::load_orx_module_jit(file),

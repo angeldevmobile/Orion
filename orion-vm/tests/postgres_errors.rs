@@ -117,3 +117,22 @@ fn texto_hacia_columnas_tipadas() {
         }}
     "##));
 }
+
+#[test]
+fn numeric_round_trips_as_an_exact_decimal() {
+    let Some(url) = url() else { return };
+    let tabla = format!("orion_test_num_{}", std::process::id());
+    run_ok(&format!(r##"
+        use "db" as db
+        BD = "{url}"
+        db.exec(BD, "DROP TABLE IF EXISTS {tabla}")
+        db.exec(BD, "CREATE TABLE {tabla} (precio NUMERIC(10,2), n FLOAT8, txt TEXT)")
+        db.exec(BD, "INSERT INTO {tabla} VALUES (?, ?, ?)", [19.99d, 2.5d, 0.10d])
+        r = db.first(BD, "SELECT precio, precio * 3 AS triple, n, txt FROM {tabla}")
+        db.exec(BD, "DROP TABLE {tabla}")
+        if type(r["precio"]) != "decimal" {{ error("NUMERIC came back as " + type(r["precio"])) }}
+        if r["triple"] != 59.97d {{ error("19.99 * 3 = " + str(r["triple"])) }}
+        if r["n"] != 2.5 {{ error("FLOAT8 from a decimal: " + str(r["n"])) }}
+        if r["txt"] != "0.10" {{ error("TEXT from a decimal: " + r["txt"]) }}
+    "##));
+}

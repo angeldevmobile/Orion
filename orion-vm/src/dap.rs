@@ -438,6 +438,7 @@ fn dap_val(v: &crate::value::Value) -> String {
         Value::Bool(b)            => b.to_string(),
         Value::Int(n)             => n.to_string(),
         Value::Float(f)           => format!("{}", f),
+        Value::Decimal(d)         => format!("{}d", d),
         Value::Str(s)             => format!("\"{}\"", s),
         Value::List(items)        => format!("[{} items]", items.borrow().len()),
         Value::Dict(map)          => format!("{{{} keys}}", map.len()),

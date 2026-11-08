@@ -257,6 +257,7 @@ fn eval_to_sql(v: &EvalValue) -> SqlValue {
     match v {
         EvalValue::Int(n)   => SqlValue::Integer(*n),
         EvalValue::Float(f) => SqlValue::Real(*f),
+        EvalValue::Decimal(d) => SqlValue::Text(d.to_string()),
         EvalValue::Bool(b)  => SqlValue::Integer(*b as i64),
         EvalValue::Null     => SqlValue::Null,
         other               => SqlValue::Text(format!("{}", other)),
@@ -636,6 +637,7 @@ mod pg {
             EvalValue::Bool(b) => if *b { "t".into() } else { "f".into() },
             EvalValue::Int(n)  => n.to_string(),
             EvalValue::Float(f) => f.to_string(),
+            EvalValue::Decimal(d) => d.to_string(),
             EvalValue::Str(s)  => copy_escape(s),
             other => copy_escape(&crate::modules::json_mod::eval_to_json(other.clone()).to_string()),
         }
@@ -711,13 +713,19 @@ mod pg {
                     _             => n.to_sql(ty, out),
                 },
                 EvalValue::Float(f) => match *ty {
-                    Type::NUMERIC => Decimal::from_f64(*f).unwrap_or_default().to_sql(ty, out),
+                    // Same conversion as decimal(x): 19.99 stays 19.99.
+                    Type::NUMERIC => crate::value::decimal_from_f64(*f)?.to_sql(ty, out),
                     Type::FLOAT4  => (*f as f32).to_sql(ty, out),
                     Type::INT2    => (*f as i16).to_sql(ty, out),
                     Type::INT4    => (*f as i32).to_sql(ty, out),
                     Type::INT8    => (*f as i64).to_sql(ty, out),
                     Type::TEXT | Type::VARCHAR => f.to_string().to_sql(ty, out),
                     _             => f.to_sql(ty, out),
+                },
+                // NUMERIC directly; any other column type parses it from its text.
+                EvalValue::Decimal(d) => match *ty {
+                    Type::NUMERIC => d.to_sql(ty, out),
+                    _             => texto_a_sql(&d.to_string(), ty, out),
                 },
                 EvalValue::Bool(b) => match *ty {
                     Type::TEXT | Type::VARCHAR => b.to_string().to_sql(ty, out),
@@ -796,11 +804,8 @@ mod pg {
             Type::OID  => opt(row.try_get::<_, Option<u32>>(i)).map(|n| EvalValue::Int(n as i64)),
             Type::FLOAT4 => opt(row.try_get::<_, Option<f32>>(i)).map(|f| EvalValue::Float(f as f64)),
             Type::FLOAT8 => opt(row.try_get::<_, Option<f64>>(i)).map(EvalValue::Float),
-            Type::NUMERIC => {
-                use rust_decimal::prelude::ToPrimitive;
-                opt(row.try_get::<_, Option<rust_decimal::Decimal>>(i))
-                    .and_then(|d| d.to_f64().map(EvalValue::Float))
-            }
+            Type::NUMERIC => opt(row.try_get::<_, Option<rust_decimal::Decimal>>(i))
+                .map(EvalValue::Decimal),
             Type::TEXT | Type::VARCHAR | Type::NAME | Type::BPCHAR | Type::CHAR =>
                 opt(row.try_get::<_, Option<String>>(i)).map(EvalValue::Str),
             Type::JSON | Type::JSONB =>
@@ -1034,7 +1039,7 @@ mod my {
         let mut m = IndexMap::new();
         for (i, col) in cols.iter().enumerate() {
             let v = row.take::<MyValue, usize>(i).unwrap_or(MyValue::NULL);
-            m.insert(col.name_str().to_string(), my_cell(v));
+            m.insert(col.name_str().to_string(), my_decimal(col, v));
         }
         EvalValue::Dict(m)
     }
@@ -1045,6 +1050,7 @@ mod my {
         Params::Positional(params.iter().map(|v| match v {
             EvalValue::Int(n)   => MyValue::Int(*n),
             EvalValue::Float(f) => MyValue::Double(*f),
+            EvalValue::Decimal(d) => MyValue::Bytes(d.to_string().into_bytes()),
             EvalValue::Bool(b)  => MyValue::Int(*b as i64),
             EvalValue::Null     => MyValue::NULL,
             EvalValue::Str(s)   => MyValue::Bytes(s.clone().into_bytes()),
@@ -1052,6 +1058,19 @@ mod my {
                 crate::modules::json_mod::eval_to_json(other.clone()).to_string().into_bytes()
             ),
         }).collect())
+    }
+
+    /// DECIMAL columns arrive as text: read them as an exact decimal.
+    fn my_decimal(col: &mysql::Column, v: MyValue) -> EvalValue {
+        use mysql::consts::ColumnType::{MYSQL_TYPE_DECIMAL, MYSQL_TYPE_NEWDECIMAL};
+        if matches!(col.column_type(), MYSQL_TYPE_DECIMAL | MYSQL_TYPE_NEWDECIMAL) {
+            if let MyValue::Bytes(b) = &v {
+                if let Some(d) = std::str::from_utf8(b).ok().and_then(|s| s.parse().ok()) {
+                    return EvalValue::Decimal(d);
+                }
+            }
+        }
+        my_cell(v)
     }
 
     /// mysql::Value → EvalValue. El texto llega como Bytes (UTF-8 → Str, si no base64).

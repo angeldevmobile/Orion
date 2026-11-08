@@ -3,6 +3,71 @@
 Los cambios notables del lenguaje, la stdlib y las herramientas. Fechas en
 formato AAAA-MM-DD.
 
+## Unreleased
+
+### Fixed
+- **`x.field = v` broke the JIT.** Any attribute assignment on a variable
+  (`d.total = 0`, `p.x = 5`, or `v.state = ...` inside a `for`) made the
+  whole program fail to compile ("StoreVar: pila vacía") and fall back to the
+  interpreter. On a dict it now returns a new dict (dicts are values, as in
+  the VM); on an instance it changes it in place.
+- **`list.sum()` in the JIT added in `f64`**, so large integers lost digits,
+  and it skipped decimals (`[19.99d, 1].sum()` gave `1`). It now uses the
+  same addition as the interpreter.
+- **`excel.f` (a module inside a module) failed in the JIT** with "key not
+  found in dict/module", and a module returned by a module function came back
+  as `null`. Both now work as in the interpreter.
+- **`list + list` failed in the JIT** with "Cannot add list + list" while the
+  interpreter concatenates. It now returns a new list, as in the VM.
+- **`sum()` lost precision with large integers.** It added in `f64`, so
+  `sum([9007199254740993, 0])` gave `9007199254740992`. It now uses the same
+  addition as `+`: exact for `int` and `decimal`, and an error on overflow.
+  Same for `list.sum()`.
+- **A `float` written to a Postgres `NUMERIC` column** is converted through
+  its shortest text (`19.99` → `19.99`), the same as `decimal(x)`.
+
+### Security
+- **`template` escapes HTML by default.** Every template was registered as
+  `"t"`, with no extension, so minijinja escaped nothing: a customer name
+  with `<script>` ended up as-is in the HTML of an email or a page. Now
+  `template.render` escapes HTML, `template.from_file` picks by extension
+  (`.html`/`.xml` and unknown → HTML, `.json`/`.js` → JSON, `.txt`/`.md`/
+  `.csv` → none), and `{{ x|safe }}` marks trusted HTML. Code that rendered
+  HTML on purpose from a variable needs `|safe`, and plain-text templates
+  passed to `render` need `{ "escape": "none" }`.
+
+### Added
+- **The JIT compiles bitwise operators and `assert`, `assert_eq`,
+  `assert_ne`.** Programs using `&`, `|`, `^`, `<<`, `>>`, and test files,
+  fell back to the interpreter. Results and errors are the VM's.
+- **`--jit` and `--build` say why a program is not compiled to native code**:
+  ``[JIT] Not compiled: call to `foo` with 2 argument(s) in function `bar` ``
+  instead of "Unsupported instructions".
+- **`decimal`: exact base-10 numbers, for money.** Literal `19.99d`, or
+  `decimal("19.99")` / `decimal(x)` from text, int or float. `0.1d + 0.2d ==
+  0.3d`. It mixes with `int`; mixing it with `float` in arithmetic is an error
+  that says how to convert, and the type checker reports it before running
+  when it knows both types. `round(d, n)` rounds half away from zero and stays
+  decimal; `int`, `float`, `abs`, `floor`, `ceil`, `sum`, `min`/`max` and
+  `sort` accept it. Works the same in the interpreter and the JIT, and in
+  `orion fmt`, the debugger and the type annotations (`x: decimal`).
+- **`db` reads `NUMERIC`/`DECIMAL` as `decimal`** (Postgres and MySQL) and
+  writes a `decimal` back exactly. Before, `NUMERIC` became a `float`, so
+  `19.99` came back as `19.990000000000002` once operated on. **Breaking:**
+  code that did `type(x) == "float"` on a `NUMERIC` column now sees
+  `"decimal"`, and mixing that value with a `float` is an error; use
+  `float(x)` or `decimal(y)`.
+- **`json`, `format`, `excel` and `pdf` accept `decimal`.** `format.number`
+  and `format.currency`, and the `pdf` column formats, round a decimal
+  exactly (`2.675d` → `2.68`; a float gives `2.67`, its binary value).
+- **`template.escape(text)`**, for HTML built by hand (the same escaping as
+  the templates).
+- **`extends`, `include` and `import` in templates.** `from_file` looks them
+  up in the template's folder; `render` in `{ "dir": ... }`.
+- **Template options** as a third argument: `escape` (`"html"`, `"json"`,
+  `"none"` or a bool), `dir` and `strict` (an undefined variable is an error
+  instead of an empty string).
+
 ## v0.1.11 - 2026-10-04
 
 ### Corregido
