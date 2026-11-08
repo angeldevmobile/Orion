@@ -170,29 +170,15 @@ variable, which the JIT does not compile yet: `s = "greet"` then `s(2)` in
 - ~~Confirm the native path end to end~~ (done, 2026-11-07): `hola.orx` and
   `bench/jit/fib.orx` build with `Code: native (Cranelift)`. Median of 10
   runs, wall time: `hola` 83 ms interpreter, 83 ms JIT, 12.5 ms AOT; `fib`
-  2050 / 97 / 25 ms. JIT and AOT compute at the same speed; the gap is
-  start-up (see "`orion` takes ~80 ms to start").
+  2050 / 97 / 25 ms. JIT and AOT compute at the same speed; the gap was
+  start-up, ~68 ms of it the unload of `opengl32.dll` at exit, now
+  delay-loaded (see CHANGELOG): `hola` is 22 ms interpreter, 25 ms JIT.
 - **Unsupported instructions**: `CallSuper`, `AiAsk`/`AiLearn`/`AiSense`,
   `ServeHTTP`, `Breakpoint`. Only `CallSuper` matters for backend scripts.
 - **Builtins outside the JIT list** (`bridge::is_jit_builtin`) still force the
   fallback; check new ones with the survey.
 - **Memory**: needs "JIT: los objetos del heap no se liberan" (above) so the
   three modes compare fairly.
-
-## `orion` takes ~80 ms to start, the AOT executable 12.5 ms
-
-Running a one-line program costs about 83 ms with `orion file.orx` and with
-`--jit`, while `--jit` itself reports 1.5 ms from the start of its handler to
-the end (compile + run). The AOT executable links the same runtime and starts
-in 12.5 ms. So ~70 ms go before the handler or at process exit, not into
-running the program: loading the 65 MB binary, global initialization, the
-CLI dispatch, process teardown, or the antivirus scanning the binary.
-
-It matters because automation scripts are short: for them this cost is most
-of the run, and the thesis would measure it as part of the interpreter and
-JIT start-up. Path: time a `fn main` that returns at once, then each step up
-to the handler (`ORION_TRACE`-style timestamps or `samply`), and fix what
-shows up before comparing modes.
 
 ## `>` and `>=` say yes when one side is NaN
 
